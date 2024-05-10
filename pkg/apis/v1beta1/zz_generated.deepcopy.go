@@ -21,10 +21,10 @@ limitations under the License.
 package v1beta1
 
 import (
+	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"knative.dev/pkg/apis"
 	timex "time"
 )
 
@@ -332,7 +332,7 @@ func (in *NodeClaimStatus) DeepCopyInto(out *NodeClaimStatus) {
 	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make(apis.Conditions, len(*in))
+		*out = make([]status.Condition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

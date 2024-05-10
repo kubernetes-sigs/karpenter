@@ -217,7 +217,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.Set[string]{}
 	for _, nodePool := range nodePoolList.Items {
-		// Get instance type options
+		// GetCondition instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, lo.ToPtr(nodePool))
 		if err != nil {
 			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
@@ -296,12 +296,12 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
 	nodes := p.cluster.Nodes()
 
-	// Get pods, exit if nothing to do
+	// GetCondition pods, exit if nothing to do
 	pendingPods, err := p.GetPendingPods(ctx)
 	if err != nil {
 		return scheduler.Results{}, err
 	}
-	// Get pods from nodes that are preparing for deletion
+	// GetCondition pods from nodes that are preparing for deletion
 	// We do this after getting the pending pods so that we undershoot if pods are
 	// actively migrating from a node that is being deleted
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them

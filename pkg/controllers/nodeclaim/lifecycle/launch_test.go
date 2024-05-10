@@ -19,7 +19,6 @@ package lifecycle_test
 import (
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -68,7 +67,7 @@ var _ = Describe("Launch", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Launched).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Launched).Status).To(Equal(metav1.ConditionTrue))
 	})
 	It("should delete the nodeclaim if InsufficientCapacity is returned from the cloudprovider", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))
@@ -86,6 +85,6 @@ var _ = Describe("Launch", func() {
 		Expect(res.Requeue).To(BeTrue())
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Launched).Status).To(Equal(v1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Launched).Status).To(Equal(metav1.ConditionFalse))
 	})
 })

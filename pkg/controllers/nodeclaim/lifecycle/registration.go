@@ -40,11 +40,11 @@ type Registration struct {
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue() {
+	if nodeClaim.StatusConditions().Get(v1beta1.Registered).IsTrue() {
 		return reconcile.Result{}, nil
 	}
-	if !nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() {
-		nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "NotLaunched", "Node not launched")
+	if !nodeClaim.StatusConditions().Get(v1beta1.Launched).IsTrue() {
+		nodeClaim.StatusConditions().SetFalse(v1beta1.Registered, "NotLaunched", "Node not launched")
 		return reconcile.Result{}, nil
 	}
 
@@ -52,11 +52,11 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	node, err := nodeclaimutil.NodeForNodeClaim(ctx, r.kubeClient, nodeClaim)
 	if err != nil {
 		if nodeclaimutil.IsNodeNotFoundError(err) {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "NodeNotFound", "Node not registered with cluster")
+			nodeClaim.StatusConditions().SetFalse(v1beta1.Registered, "NodeNotFound", "Node not registered with cluster")
 			return reconcile.Result{}, nil
 		}
 		if nodeclaimutil.IsDuplicateNodeError(err) {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
+			nodeClaim.StatusConditions().SetFalse(v1beta1.Registered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for nodeclaim, %w", err)
@@ -66,7 +66,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
 	logging.FromContext(ctx).Infof("registered nodeclaim")
-	nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
+	nodeClaim.StatusConditions().SetTrue(v1beta1.Registered)
 	nodeClaim.Status.NodeName = node.Name
 
 	metrics.NodeClaimsRegisteredCounter.With(prometheus.Labels{

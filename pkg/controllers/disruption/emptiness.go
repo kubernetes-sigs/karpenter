@@ -60,8 +60,8 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	if len(c.reschedulablePods) != 0 {
 		return false
 	}
-	return c.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue() &&
-		!e.clock.Now().Before(c.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty).LastTransitionTime.Inner.Add(*c.nodePool.Spec.Disruption.ConsolidateAfter.Duration))
+	return c.NodeClaim.StatusConditions().Get(v1beta1.Empty).IsTrue() &&
+		!e.clock.Now().Before(c.NodeClaim.StatusConditions().Get(v1beta1.Empty).LastTransitionTime.Add(*c.nodePool.Spec.Disruption.ConsolidateAfter.Duration))
 }
 
 // ComputeCommand generates a disruption command given candidates

@@ -102,7 +102,7 @@ func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1beta1.NodePo
 
 			// Any NodeClaim that is already drifted will remain drifted if the karpenter.sh/nodepool-hash-version doesn't match
 			// Since the hashing mechanism has changed we will not be able to determine if the drifted status of the NodeClaim has changed
-			if nc.StatusConditions().GetCondition(v1beta1.Drifted) == nil {
+			if nc.StatusConditions().Get(v1beta1.Drifted) == nil {
 				nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
 					v1beta1.NodePoolHashAnnotationKey: np.Hash(),
 				})

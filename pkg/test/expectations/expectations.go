@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
 	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
 	"github.com/prometheus/client_golang/prometheus"
@@ -42,7 +43,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -312,7 +312,7 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudPr
 
 	// Make the nodeclaim ready in the status conditions
 	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
-	nc.StatusConditions().MarkTrue(v1beta1.Launched)
+	nc.StatusConditions().SetTrue(v1beta1.Launched)
 	ExpectApplied(ctx, c, nc)
 	return nc, nil
 }
@@ -324,7 +324,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 	if err != nil {
 		return nc, nil, err
 	}
-	nc.StatusConditions().MarkTrue(v1beta1.Registered)
+	nc.StatusConditions().SetTrue(v1beta1.Registered)
 
 	// Mock the nodeclaim launch and node joining at the apiserver
 	node := test.NodeClaimLinkedNode(nc)
@@ -367,9 +367,9 @@ func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeC
 	GinkgoHelper()
 	for i := range nodeClaims {
 		nodeClaims[i] = ExpectExists(ctx, c, nodeClaims[i])
-		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Launched)
-		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Registered)
-		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Initialized)
+		nodeClaims[i].StatusConditions().SetTrue(v1beta1.Launched)
+		nodeClaims[i].StatusConditions().SetTrue(v1beta1.Registered)
+		nodeClaims[i].StatusConditions().SetTrue(v1beta1.Initialized)
 		ExpectApplied(ctx, c, nodeClaims[i])
 	}
 }
@@ -445,10 +445,10 @@ func ExpectReconcileFailed(ctx context.Context, reconciler reconcile.Reconciler,
 	Expect(err).To(HaveOccurred())
 }
 
-func ExpectStatusConditionExists(obj apis.ConditionsAccessor, t apis.ConditionType) apis.Condition {
+func ExpectStatusConditionExists(obj status.Object, t string) status.Condition {
 	GinkgoHelper()
 	conds := obj.GetConditions()
-	cond, ok := lo.Find(conds, func(c apis.Condition) bool {
+	cond, ok := lo.Find(conds, func(c status.Condition) bool {
 		return c.Type == t
 	})
 	Expect(ok).To(BeTrue())

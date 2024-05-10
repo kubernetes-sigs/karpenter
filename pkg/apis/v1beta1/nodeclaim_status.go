@@ -17,8 +17,17 @@ limitations under the License.
 package v1beta1
 
 import (
+	"github.com/awslabs/operatorpkg/status"
 	v1 "k8s.io/api/core/v1"
-	"knative.dev/pkg/apis"
+)
+
+const (
+	Launched    = "Launched"
+	Registered  = "Registered"
+	Initialized = "Initialized"
+	Empty       = "Empty"
+	Drifted     = "Drifted"
+	Expired     = "Expired"
 )
 
 // NodeClaimStatus defines the observed state of NodeClaim
@@ -40,36 +49,21 @@ type NodeClaimStatus struct {
 	Allocatable v1.ResourceList `json:"allocatable,omitempty"`
 	// Conditions contains signals for health and readiness
 	// +optional
-	Conditions apis.Conditions `json:"conditions,omitempty"`
+	Conditions []status.Condition `json:"conditions,omitempty"`
 }
 
-func (in *NodeClaim) StatusConditions() apis.ConditionManager {
-	return apis.NewLivingConditionSet(
+func (in *NodeClaim) StatusConditions() status.ConditionSet {
+	return status.NewReadyConditions(
 		Launched,
 		Registered,
 		Initialized,
-	).Manage(in)
+	).For(in)
 }
 
-var LivingConditions = []apis.ConditionType{
-	Launched,
-	Registered,
-	Initialized,
-}
-
-var (
-	Launched    apis.ConditionType = "Launched"
-	Registered  apis.ConditionType = "Registered"
-	Initialized apis.ConditionType = "Initialized"
-	Empty       apis.ConditionType = "Empty"
-	Drifted     apis.ConditionType = "Drifted"
-	Expired     apis.ConditionType = "Expired"
-)
-
-func (in *NodeClaim) GetConditions() apis.Conditions {
+func (in *NodeClaim) GetConditions() []status.Condition {
 	return in.Status.Conditions
 }
 
-func (in *NodeClaim) SetConditions(conditions apis.Conditions) {
+func (in *NodeClaim) SetConditions(conditions []status.Condition) {
 	in.Status.Conditions = conditions
 }

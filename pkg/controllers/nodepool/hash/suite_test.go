@@ -229,7 +229,7 @@ var _ = Describe("Static Drift Hash", func() {
 				},
 			},
 		})
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.Drifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))

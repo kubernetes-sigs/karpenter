@@ -229,9 +229,9 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 	deleting := map[string]int{}
 	disruptionBudgetMapping := map[string]int{}
 	// We need to get all the nodes in the cluster
-	// Get each current active number of nodes per nodePool
-	// Get the max disruptions for each nodePool
-	// Get the number of deleting nodes for each of those nodePools
+	// GetCondition each current active number of nodes per nodePool
+	// GetCondition the max disruptions for each nodePool
+	// GetCondition the number of deleting nodes for each of those nodePools
 	// Find the difference to know how much left we can disrupt
 	nodes := cluster.Nodes()
 	for _, node := range nodes {
