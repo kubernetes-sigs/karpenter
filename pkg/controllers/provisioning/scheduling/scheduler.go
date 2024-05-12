@@ -170,34 +170,23 @@ func (r Results) NonPendingPodSchedulingErrors() string {
 }
 
 // TruncateInstanceTypes filters the result based on the maximum number of instanceTypes that needs
-// to be considered. This could potentially impact if minValues is specified for a requirement key. So,
-// this method re-evaluates the NodeClaims in the result returned by the scheduler after truncation
-// and removes invalid NodeClaims, shifts the pods to errorPods so that the scheduler can re-consider those in the next iteration. This is a
-// corner case where even 100 instanceTypes in the NodeClaim are failing to meet the a particular minimum requirement.
+// to be considered. This filters all instance types generated in NewNodeClaims in the Results
 func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 	var validNewNodeClaims []*NodeClaim
 	for _, newNodeClaim := range r.NewNodeClaims {
-		// The InstanceTypeOptions are truncated due to limitations in sending the number of instances to launch API which is capped to 100 today.
-		newNodeClaim.InstanceTypeOptions = lo.Slice(newNodeClaim.InstanceTypeOptions.OrderByPrice(newNodeClaim.NodeClaimTemplate.Requirements), 0, maxInstanceTypes)
-		// Only check for a validity of NodeClaim if its requirement has minValues in it.
-		if newNodeClaim.NodeClaimTemplate.Requirements.HasMinValues() {
+		// The InstanceTypeOptions are truncated due to limitations in sending the number of instances to launch API.
+		var err error
+		newNodeClaim.InstanceTypeOptions, err = newNodeClaim.InstanceTypeOptions.Truncate(newNodeClaim.Requirements, maxInstanceTypes)
+		if err != nil {
 			// Check if the truncated InstanceTypeOptions in each NewNodeClaim from the results still satisfy the minimum requirements
-			incompatibleKey, _ := IncompatibleReqAcrossInstanceTypes(newNodeClaim.NodeClaimTemplate.Requirements, newNodeClaim.InstanceTypeOptions)
-			// If number of instancetypes in the nodeclaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
-			if len(incompatibleKey) > 0 {
-				for _, pod := range newNodeClaim.Pods {
-					r.PodErrors[pod] = fmt.Errorf("pod didn’t schedule because NodePool %q couldn’t meet minValues requirements after truncating to 100 instance types", newNodeClaim.NodeClaimTemplate.NodePoolName)
-				}
-			} else {
-				// Add to valid nodeclaims since it meets minimum requirement.
-				validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
+			// If number of InstanceTypes in the NodeClaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
+			for _, pod := range newNodeClaim.Pods {
+				r.PodErrors[pod] = fmt.Errorf("pod didn’t schedule because NodePool %q couldn’t meet minValues requirements, %w", newNodeClaim.NodeClaimTemplate.NodePoolName, err)
 			}
 		} else {
-			// NodeClaims which do not have minValues in requirement are already valid.
 			validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
 		}
 	}
-	// Assign the new valid NodeClaims to result.
 	r.NewNodeClaims = validNewNodeClaims
 	return r
 }

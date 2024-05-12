@@ -107,7 +107,7 @@ var _ = BeforeEach(func() {
 	newCP := fake.CloudProvider{}
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
-	scheduling.MaxInstanceTypes = 100
+	scheduling.MaxInstanceTypes = 60
 })
 
 var _ = AfterEach(func() {

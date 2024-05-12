@@ -167,28 +167,25 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return clamp(-10.0, cost, 10.0)
 }
 
-// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and iterates over the cumulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements.
-// The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim
-func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, string, int) {
-	var result []*cloudprovider.InstanceType
-
+// filterByPrice returns the instanceTypes that are lower priced than the current candidate.
+// The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim.
+// If the result of the filtering means that minValues can't be satisfied, we return an error.
+func filterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, error) {
+	var res cloudprovider.InstanceTypes
 	for _, it := range options {
 		launchPrice := worstLaunchPrice(it.Offerings.Available(), reqs)
 		if launchPrice < price {
-			result = append(result, it)
+			res = append(res, it)
 		}
 	}
-	var incompatibleReqKey string
-	var numInstanceTypes int
-	// Only try to find the incompatible minValue requirement key if requirements have minValues.
 	if reqs.HasMinValues() {
-		// We would have already filtered the invalid nodeclaim not meeting the minimum requirements in simulated scheduling results.
+		// We would have already filtered the invalid NodeClaim not meeting the minimum requirements in simulated scheduling results.
 		// Here the instanceTypeOptions changed again based on the price and requires re-validation.
-		incompatibleReqKey, numInstanceTypes = pscheduling.IncompatibleReqAcrossInstanceTypes(reqs, lo.Slice(result, 0, pscheduling.MaxInstanceTypes))
+		if _, err := res.SatisfiesMinValues(reqs); err != nil {
+			return nil, fmt.Errorf("validating minValues, %w", err)
+		}
 	}
-	// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.
-	result = lo.Ternary(len(incompatibleReqKey) > 0, []*cloudprovider.InstanceType{}, result)
-	return result, incompatibleReqKey, numInstanceTypes
+	return res, nil
 }
 
 func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
