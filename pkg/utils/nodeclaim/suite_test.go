@@ -127,9 +127,9 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaim.Status.ProviderID).To(Equal(node.Spec.ProviderID))
 		Expect(nodeClaim.Status.Capacity).To(Equal(node.Status.Capacity))
 		Expect(nodeClaim.Status.Allocatable).To(Equal(node.Status.Allocatable))
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Launched).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Registered).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Initialized).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
 	})
 	It("should update the owner for a Node to a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{

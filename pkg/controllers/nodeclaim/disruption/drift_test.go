@@ -58,7 +58,7 @@ var _ = Describe("Drift", func() {
 			},
 		})
 		// NodeClaims are required to be launched before they can be evaluated for drift
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Launched)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_drifted metric when drifted", func() {
@@ -67,7 +67,7 @@ var _ = Describe("Drift", func() {
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_drifted", map[string]string{
 				"type":     "CloudProviderDrifted",
 				"nodepool": nodePool.Name,
@@ -89,8 +89,8 @@ var _ = Describe("Drift", func() {
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_drifted", map[string]string{
 				"type":     "RequirementsDrifted",
@@ -105,7 +105,7 @@ var _ = Describe("Drift", func() {
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted", map[string]string{
 				"type":     "drift",
@@ -121,7 +121,7 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 	})
 	It("should detect static drift before cloud provider drift", func() {
 		cp.Drifted = "drifted"
@@ -137,8 +137,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).Reason).To(Equal(string(disruption.NodePoolDrifted)))
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).Reason).To(Equal(string(disruption.NodePoolDrifted)))
 	})
 	It("should detect node requirement drift before cloud provider drift", func() {
 		cp.Drifted = "drifted"
@@ -154,8 +154,8 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
 	})
 	It("should not detect drift if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"
@@ -164,42 +164,42 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when the nodeClaim launch condition is unknown", func() {
 		cp.Drifted = "drifted"
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		nodeClaim.StatusConditions().SetUnknown(v1beta1.Launched)
+		nodeClaim.StatusConditions().SetUnknown(v1beta1.ConditionTypeLaunched)
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when the nodeClaim launch condition is false", func() {
 		cp.Drifted = "drifted"
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		nodeClaim.StatusConditions().SetFalse(v1beta1.Launched, "LaunchFailed", "LaunchFailed")
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeLaunched, "LaunchFailed", "LaunchFailed")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should not detect drift if the nodePool does not exist", func() {
 		cp.Drifted = "drifted"
@@ -207,17 +207,17 @@ var _ = Describe("Drift", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim if the nodeClaim is no longer drifted", func() {
 		cp.Drifted = ""
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 	})
 	Context("NodeRequirement Drift", func() {
 		DescribeTable("",
@@ -229,16 +229,16 @@ var _ = Describe("Drift", func() {
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 				ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-				Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+				Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 
 				nodePool.Spec.Template.Spec.Requirements = newNodePoolReq
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				if drifted {
-					Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
+					Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 				} else {
-					Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+					Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 				}
 			},
 			Entry(
@@ -397,15 +397,15 @@ var _ = Describe("Drift", func() {
 					ProviderID: test.RandomProviderID(),
 				},
 			})
-			nodeClaimTwo.StatusConditions().SetTrue(v1beta1.Launched)
+			nodeClaimTwo.StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimTwo)
 
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaimTwo))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			nodeClaimTwo = ExpectExists(ctx, env.Client, nodeClaimTwo)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
-			Expect(nodeClaimTwo.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
+			Expect(nodeClaimTwo.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 
 			// Removed Windows OS
 			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
@@ -416,11 +416,11 @@ var _ = Describe("Drift", func() {
 
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaimTwo))
 			nodeClaimTwo = ExpectExists(ctx, env.Client, nodeClaimTwo)
-			Expect(nodeClaimTwo.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
+			Expect(nodeClaimTwo.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		})
 
 	})
@@ -500,7 +500,7 @@ var _ = Describe("Drift", func() {
 				ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 				ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-				Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+				Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 
 				nodePool = ExpectExists(ctx, env.Client, nodePool)
 				Expect(mergo.Merge(nodePool, changes, mergo.WithOverride)).To(Succeed())
@@ -509,7 +509,7 @@ var _ = Describe("Drift", func() {
 				ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 				ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-				Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
+				Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 			},
 			Entry("Annoations", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: v1beta1.ObjectMeta{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}}}}),
 			Entry("Labels", v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Template: v1beta1.NodeClaimTemplate{ObjectMeta: v1beta1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
@@ -536,7 +536,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 		})
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodeClaim", func() {
 			nodeClaim.ObjectMeta.Annotations = map[string]string{
@@ -545,7 +545,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 		})
 		It("should not return drifted if the NodeClaim's karpenter.sh/nodepool-hash-version annotation does not match the NodePool's", func() {
 			nodePool.ObjectMeta.Annotations = map[string]string{
@@ -559,7 +559,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 		})
 		It("should not return drifted if karpenter.sh/nodepool-hash-version annotation is not present on the NodeClaim", func() {
 			nodeClaim.ObjectMeta.Annotations = map[string]string{
@@ -568,7 +568,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 		})
 	})
 })

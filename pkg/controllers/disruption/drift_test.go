@@ -77,7 +77,7 @@ var _ = Describe("Drift", func() {
 				},
 			},
 		})
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 	})
 	Context("Metrics", func() {
 		var eligibleNodesLabels = map[string]string{
@@ -155,7 +155,7 @@ var _ = Describe("Drift", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1beta1.Drifted)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
@@ -198,7 +198,7 @@ var _ = Describe("Drift", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1beta1.Drifted)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
@@ -241,7 +241,7 @@ var _ = Describe("Drift", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1beta1.Drifted)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
@@ -285,7 +285,7 @@ var _ = Describe("Drift", func() {
 
 			// Mark the first five as drifted
 			for i := range lo.Range(5) {
-				nodeClaims[i].StatusConditions().SetTrue(v1beta1.Drifted)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 			}
 
 			for i := 0; i < numNodes; i++ {
@@ -380,7 +380,7 @@ var _ = Describe("Drift", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1beta1.Drifted)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -446,7 +446,7 @@ var _ = Describe("Drift", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1beta1.Drifted)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -529,7 +529,7 @@ var _ = Describe("Drift", func() {
 					},
 				},
 			})
-			nodeClaim2.StatusConditions().SetTrue(v1beta1.Drifted)
+			nodeClaim2.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, nodeClaim2, node2, podToExpire)
 			ExpectManualBinding(ctx, env.Client, podToExpire, node2)
 
@@ -553,7 +553,7 @@ var _ = Describe("Drift", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim2)
 		})
 		It("should ignore nodes without the drifted status condition", func() {
-			_ = nodeClaim.StatusConditions().Clear(v1beta1.Drifted)
+			_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
@@ -624,7 +624,7 @@ var _ = Describe("Drift", func() {
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
 		It("should ignore nodes with the drifted status condition set to false", func() {
-			nodeClaim.StatusConditions().SetFalse(v1beta1.Drifted, "NotDrifted", "NotDrifted")
+			nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeDrifted, "NotDrifted", "NotDrifted")
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
@@ -679,7 +679,7 @@ var _ = Describe("Drift", func() {
 				},
 			})
 			for _, m := range nodeClaims {
-				m.StatusConditions().SetTrue(v1beta1.Drifted)
+				m.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, m)
 			}
 			for _, n := range nodes {
@@ -942,10 +942,10 @@ var _ = Describe("Drift", func() {
 				},
 			})
 			nodeClaim2.Status.Conditions = append(nodeClaim2.Status.Conditions, status.Condition{
-				Type:               v1beta1.Drifted,
+				Type:               v1beta1.ConditionTypeDrifted,
 				Status:             metav1.ConditionTrue,
-				Reason:             v1beta1.Drifted,
-				Message:            v1beta1.Drifted,
+				Reason:             v1beta1.ConditionTypeDrifted,
+				Message:            v1beta1.ConditionTypeDrifted,
 				LastTransitionTime: metav1.Time{Time: time.Now().Add(-time.Hour)},
 			})
 

@@ -22,12 +22,12 @@ import (
 )
 
 const (
-	Launched    = "Launched"
-	Registered  = "Registered"
-	Initialized = "Initialized"
-	Empty       = "Empty"
-	Drifted     = "Drifted"
-	Expired     = "Expired"
+	ConditionTypeLaunched    = "Launched"
+	ConditionTypeRegistered  = "Registered"
+	ConditionTypeInitialized = "Initialized"
+	ConditionTypeEmpty       = "Empty"
+	ConditionTypeDrifted     = "Drifted"
+	ConditionTypeExpired     = "Expired"
 )
 
 // NodeClaimStatus defines the observed state of NodeClaim
@@ -54,9 +54,9 @@ type NodeClaimStatus struct {
 
 func (in *NodeClaim) StatusConditions() status.ConditionSet {
 	return status.NewReadyConditions(
-		Launched,
-		Registered,
-		Initialized,
+		ConditionTypeLaunched,
+		ConditionTypeRegistered,
+		ConditionTypeInitialized,
 	).For(in)
 }
 

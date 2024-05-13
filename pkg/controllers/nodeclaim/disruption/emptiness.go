@@ -43,7 +43,7 @@ type Emptiness struct {
 
 //nolint:gocyclo
 func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	hasEmptyCondition := nodeClaim.StatusConditions().Get(v1beta1.Empty) != nil
+	hasEmptyCondition := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty) != nil
 
 	// From here there are a few scenarios to handle:
 	// 1. If ConsolidationPolicyWhenEmpty is not configured or ConsolidateAfter isn't configured, remove the emptiness status condition
@@ -51,25 +51,25 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 		nodePool.Spec.Disruption.ConsolidateAfter == nil ||
 		nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
 		if hasEmptyCondition {
-			_ = nodeClaim.StatusConditions().Clear(v1beta1.Empty)
+			_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
 			logging.FromContext(ctx).Debugf("removing emptiness status condition, emptiness is disabled")
 		}
 		return reconcile.Result{}, nil
 	}
 	// 2. If NodeClaim is not initialized, remove the emptiness status condition
-	if !nodeClaim.StatusConditions().Get(v1beta1.Initialized).IsTrue() {
+	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsTrue() {
 		if hasEmptyCondition {
-			_ = nodeClaim.StatusConditions().Clear(v1beta1.Empty)
+			_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
 			logging.FromContext(ctx).Debugf("removing emptiness status condition, isn't initialized")
 		}
 		return reconcile.Result{}, nil
 	}
-	// GetCondition the node to check for pods scheduled to it
+	// Get the node to check for pods scheduled to it
 	n, err := nodeclaimutil.NodeForNodeClaim(ctx, e.kubeClient, nodeClaim)
 	if err != nil {
 		// 3. If Node mapping doesn't exist, remove the emptiness status condition
 		if nodeclaimutil.IsDuplicateNodeError(err) || nodeclaimutil.IsNodeNotFoundError(err) {
-			_ = nodeClaim.StatusConditions().Clear(v1beta1.Empty)
+			_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
 			if hasEmptyCondition {
 				logging.FromContext(ctx).Debugf("removing emptiness status condition, doesn't have a single node mapping")
 			}
@@ -82,7 +82,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 	// nomination time ends since we don't watch node nomination events
 	// 4. If the Node is nominated for pods to schedule to it, remove the emptiness status condition
 	if e.cluster.IsNodeNominated(n.Spec.ProviderID) {
-		_ = nodeClaim.StatusConditions().Clear(v1beta1.Empty)
+		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
 		if hasEmptyCondition {
 			logging.FromContext(ctx).Debugf("removing emptiness status condition, is nominated for pods")
 		}
@@ -94,14 +94,14 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 	}
 	// 5. If there are pods that are actively scheduled to the Node, remove the emptiness status condition
 	if len(pods) > 0 {
-		_ = nodeClaim.StatusConditions().Clear(v1beta1.Empty)
+		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
 		if hasEmptyCondition {
 			logging.FromContext(ctx).Debugf("removing emptiness status condition, not empty")
 		}
 		return reconcile.Result{}, nil
 	}
 	// 6. Otherwise, add the emptiness status condition
-	nodeClaim.StatusConditions().SetTrue(v1beta1.Empty)
+	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 	if !hasEmptyCondition {
 		logging.FromContext(ctx).Debugf("marking empty")
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{

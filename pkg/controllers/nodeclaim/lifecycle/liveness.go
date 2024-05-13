@@ -40,7 +40,7 @@ type Liveness struct {
 const registrationTTL = time.Minute * 15
 
 func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	registered := nodeClaim.StatusConditions().Get(v1beta1.Registered)
+	registered := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered)
 	if registered.IsTrue() {
 		return reconcile.Result{}, nil
 	}

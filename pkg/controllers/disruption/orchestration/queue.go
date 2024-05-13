@@ -243,7 +243,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		// We emitted this event when disruption was blocked on launching/termination.
 		// This does not block other forms of deprovisioning, but we should still emit this.
 		q.recorder.Publish(disruptionevents.Launching(nodeClaim, cmd.Reason()))
-		initializedStatus := nodeClaim.StatusConditions().Get(v1beta1.Initialized)
+		initializedStatus := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
 			waitErrs[i] = fmt.Errorf("nodeclaim %s not initialized", nodeClaim.Name)

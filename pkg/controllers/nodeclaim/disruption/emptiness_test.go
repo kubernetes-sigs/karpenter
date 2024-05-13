@@ -59,7 +59,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted", map[string]string{
 				"type":     "emptiness",
@@ -76,7 +76,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
 	})
 	It("should mark NodeClaims as empty that have only pods in terminating state", func() {
 		rs := test.ReplicaSet()
@@ -113,7 +113,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
 	})
 	It("should mark NodeClaims as empty that have only DaemonSet pods", func() {
 		ds := test.DaemonSet()
@@ -144,55 +144,55 @@ var _ = Describe("Emptiness", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from the nodeClaim when emptiness is disabled", func() {
 		nodePool.Spec.Disruption.ConsolidateAfter.Duration = nil
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when the nodeClaim initialization condition is unknown", func() {
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-		nodeClaim.StatusConditions().SetUnknown(v1beta1.Initialized)
+		nodeClaim.StatusConditions().SetUnknown(v1beta1.ConditionTypeInitialized)
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when the nodeClaim initialization condition is false", func() {
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-		nodeClaim.StatusConditions().SetFalse(v1beta1.Initialized, "NotInitialized", "NotInitialized")
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "NotInitialized", "NotInitialized")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when the node doesn't exist", func() {
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 	})
 	It("should remove the status condition from non-empty NodeClaims", func() {
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
@@ -204,13 +204,13 @@ var _ = Describe("Emptiness", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 	})
 	It("should remove the status condition from NodeClaims that have a StatefulSet pod in terminating state", func() {
 		ss := test.StatefulSet()
 		ExpectApplied(ctx, env.Client, ss)
 
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
@@ -240,10 +240,10 @@ var _ = Describe("Emptiness", func() {
 		// The node isn't empty even though it only has terminating pods
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 	})
 	It("should remove the status condition when the cluster state node is nominated", func() {
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
@@ -255,6 +255,6 @@ var _ = Describe("Emptiness", func() {
 		Expect(result.RequeueAfter).To(Equal(time.Second * 30))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 	})
 })

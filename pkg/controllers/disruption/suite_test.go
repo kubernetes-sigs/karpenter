@@ -281,7 +281,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// Mark all nodeclaims as expired
 		for _, nc := range nodeClaims {
-			nc.StatusConditions().SetTrue(v1beta1.Expired)
+			nc.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 			ExpectApplied(ctx, env.Client, nc)
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
 		}
@@ -1523,7 +1523,7 @@ var _ = Describe("Metrics", func() {
 				},
 			},
 		})
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 		// inform cluster state about nodes and nodeclaims
@@ -1570,7 +1570,7 @@ var _ = Describe("Metrics", func() {
 		})
 		pods := test.Pods(4, test.PodOptions{})
 
-		nodeClaims[0].StatusConditions().SetTrue(v1beta1.Drifted)
+		nodeClaims[0].StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 
 		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
 
@@ -1624,7 +1624,7 @@ var _ = Describe("Metrics", func() {
 			},
 		})
 		pods := test.Pods(4, test.PodOptions{})
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 
 		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3], nodeClaim, node, nodePool)
 

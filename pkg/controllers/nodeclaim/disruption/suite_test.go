@@ -111,17 +111,17 @@ var _ = Describe("Disruption", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Expired).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).IsTrue()).To(BeTrue())
 	})
 	It("should remove multiple disruption conditions simultaneously", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
 
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Drifted)
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Empty)
-		nodeClaim.StatusConditions().SetTrue(v1beta1.Expired)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
@@ -131,8 +131,8 @@ var _ = Describe("Disruption", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Drifted)).To(BeNil())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Empty)).To(BeNil())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.Expired)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired)).To(BeNil())
 	})
 })

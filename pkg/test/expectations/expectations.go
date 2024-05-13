@@ -312,7 +312,7 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudPr
 
 	// Make the nodeclaim ready in the status conditions
 	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
-	nc.StatusConditions().SetTrue(v1beta1.Launched)
+	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
 	ExpectApplied(ctx, c, nc)
 	return nc, nil
 }
@@ -324,7 +324,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 	if err != nil {
 		return nc, nil, err
 	}
-	nc.StatusConditions().SetTrue(v1beta1.Registered)
+	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
 
 	// Mock the nodeclaim launch and node joining at the apiserver
 	node := test.NodeClaimLinkedNode(nc)
@@ -367,9 +367,9 @@ func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeC
 	GinkgoHelper()
 	for i := range nodeClaims {
 		nodeClaims[i] = ExpectExists(ctx, c, nodeClaims[i])
-		nodeClaims[i].StatusConditions().SetTrue(v1beta1.Launched)
-		nodeClaims[i].StatusConditions().SetTrue(v1beta1.Registered)
-		nodeClaims[i].StatusConditions().SetTrue(v1beta1.Initialized)
+		nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
+		nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
+		nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 		ExpectApplied(ctx, c, nodeClaims[i])
 	}
 }
