@@ -73,7 +73,7 @@ var _ = Describe("Emptiness", func() {
 				},
 			},
 		})
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Empty)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 	})
 	Context("Events", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenUnderutilized", func() {
@@ -164,7 +164,7 @@ var _ = Describe("Emptiness", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Empty)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -210,7 +210,7 @@ var _ = Describe("Emptiness", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Empty)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -256,7 +256,7 @@ var _ = Describe("Emptiness", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Empty)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -325,7 +325,7 @@ var _ = Describe("Emptiness", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
-				nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Empty)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -395,7 +395,7 @@ var _ = Describe("Emptiness", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
-				nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Empty)
+				nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -446,7 +446,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("should ignore nodes without the empty status condition", func() {
-			_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Empty)
+			_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
@@ -516,7 +516,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
 		It("should ignore nodes with the empty status condition set to false", func() {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.Empty, "", "")
+			nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeEmpty, "NotEmpty", "NotEmpty")
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims

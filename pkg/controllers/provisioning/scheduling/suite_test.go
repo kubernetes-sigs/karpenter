@@ -2027,7 +2027,7 @@ var _ = Context("Scheduling", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().MarkTrue(v1beta1.Initialized)
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
 
 				// delete the pod so that the node is empty
@@ -2095,7 +2095,7 @@ var _ = Context("Scheduling", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().MarkTrue(v1beta1.Initialized)
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
 
 				node1.Spec.Taints = []v1.Taint{startupTaint}

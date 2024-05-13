@@ -69,8 +69,8 @@ var _ = Describe("Initialization", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
 		node.Status.Capacity = v1.ResourceList{
@@ -87,8 +87,8 @@ var _ = Describe("Initialization", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
 	It("should add the initialization label to the node when the nodeClaim is initialized", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
@@ -171,8 +171,8 @@ var _ = Describe("Initialization", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 	})
 	It("should not consider the Node to be initialized when all requested resources aren't registered", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
@@ -221,8 +221,8 @@ var _ = Describe("Initialization", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 	})
 	It("should consider the node to be initialized once all the resources are registered", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
@@ -271,8 +271,8 @@ var _ = Describe("Initialization", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 
 		// Node now registers the resource
 		node = ExpectExists(ctx, env.Client, node)
@@ -283,8 +283,8 @@ var _ = Describe("Initialization", func() {
 		// Reconcile the nodeClaim and the nodeClaim/Node should now be initilized
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
 	It("should not consider the Node to be initialized when all startupTaints aren't removed", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
@@ -354,8 +354,8 @@ var _ = Describe("Initialization", func() {
 		// Shouldn't consider the node ready since the startup taints still exist
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 	})
 	It("should consider the Node to be initialized once the startupTaints are removed", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
@@ -409,8 +409,8 @@ var _ = Describe("Initialization", func() {
 		// Shouldn't consider the node ready since the startup taints still exist
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
 		node.Spec.Taints = []v1.Taint{}
@@ -419,8 +419,8 @@ var _ = Describe("Initialization", func() {
 		// nodeClaim should now be ready since all startup taints are removed
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
 	It("should not consider the Node to be initialized when all ephemeralTaints aren't removed", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
@@ -488,8 +488,8 @@ var _ = Describe("Initialization", func() {
 		// Shouldn't consider the node ready since the ephemeral taints still exist
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 	})
 	It("should consider the Node to be initialized once the ephemeralTaints are removed", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
@@ -557,8 +557,8 @@ var _ = Describe("Initialization", func() {
 		// Shouldn't consider the node ready since the ephemeral taints still exist
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
 		node.Spec.Taints = []v1.Taint{}
@@ -567,7 +567,7 @@ var _ = Describe("Initialization", func() {
 		// nodeClaim should now be ready since all startup taints are removed
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Registered).Status).To(Equal(v1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.Initialized).Status).To(Equal(v1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
 })

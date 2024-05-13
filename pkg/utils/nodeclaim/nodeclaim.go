@@ -215,10 +215,10 @@ func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
 		},
 	}
 	if _, ok := node.Labels[v1beta1.NodeInitializedLabelKey]; ok {
-		nc.StatusConditions().MarkTrue(v1beta1.Initialized)
+		nc.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 	}
-	nc.StatusConditions().MarkTrue(v1beta1.Launched)
-	nc.StatusConditions().MarkTrue(v1beta1.Registered)
+	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
+	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
 	return nc
 }
 
