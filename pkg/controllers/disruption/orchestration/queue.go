@@ -152,12 +152,10 @@ func NewCommand(replacements []string, candidates []*state.StateNode, id types.U
 	}
 }
 
-func (q *Queue) Name() string {
-	return "disruption.queue"
-}
-
-func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(m)
+func (q *Queue) Register(_ context.Context, m manager.Manager) error {
+	return controller.NewSingletonManagedBy(m).
+		Named("disruption.queue").
+		Complete(q)
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {

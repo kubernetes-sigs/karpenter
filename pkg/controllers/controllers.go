@@ -17,8 +17,11 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
+
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -40,7 +43,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 func NewControllers(
@@ -49,13 +51,17 @@ func NewControllers(
 	cluster *state.Cluster,
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
-) []controller.Controller {
+) []interface {
+	Register(context.Context, manager.Manager) error
+} {
 
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
 
-	return []controller.Controller{
+	return []interface {
+		Register(context.Context, manager.Manager) error
+	}{
 		p, evictionQueue, disruptionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewPodController(kubeClient, p, recorder),

@@ -29,12 +29,12 @@ import (
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -58,11 +58,11 @@ var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
-var nodeClaimController controller.Controller
-var nodeController controller.Controller
-var podController controller.Controller
-var nodePoolController controller.Controller
-var daemonsetController controller.Controller
+var nodeClaimController *informer.NodeClaimController
+var nodeController *informer.NodeController
+var podController *informer.PodController
+var nodePoolController *informer.NodePoolController
+var daemonsetController *informer.DaemonSetController
 var cloudProvider *fake.CloudProvider
 var nodePool *v1beta1.NodePool
 
@@ -1459,7 +1459,7 @@ var _ = Describe("Consolidated State", func() {
 		fakeClock.Step(time.Minute)
 		ExpectApplied(ctx, env.Client, nodePool)
 		state := cluster.ConsolidationState()
-		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })

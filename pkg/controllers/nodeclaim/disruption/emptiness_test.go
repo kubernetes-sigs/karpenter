@@ -24,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -56,7 +57,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
-			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
@@ -73,7 +74,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
@@ -110,7 +111,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectExists(ctx, env.Client, p)
 		}
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
@@ -141,7 +142,7 @@ var _ = Describe("Emptiness", func() {
 		})
 		ExpectApplied(ctx, env.Client, pod)
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
@@ -152,7 +153,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
@@ -164,7 +165,7 @@ var _ = Describe("Emptiness", func() {
 		nodeClaim.StatusConditions().SetUnknown(v1beta1.ConditionTypeInitialized)
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
@@ -176,7 +177,7 @@ var _ = Describe("Emptiness", func() {
 		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "NotInitialized", "NotInitialized")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
@@ -186,7 +187,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
@@ -201,7 +202,7 @@ var _ = Describe("Emptiness", func() {
 			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
 		}))
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
@@ -238,7 +239,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectExists(ctx, env.Client, pod)
 
 		// The node isn't empty even though it only has terminating pods
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 	})
@@ -251,7 +252,7 @@ var _ = Describe("Emptiness", func() {
 		Expect(cluster.UpdateNode(ctx, node)).To(Succeed())
 		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
 
-		result := ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		result := ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 		Expect(result.RequeueAfter).To(Equal(time.Second * 30))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)

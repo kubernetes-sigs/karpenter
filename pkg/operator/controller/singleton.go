@@ -39,7 +39,8 @@ const (
 )
 
 type SingletonBuilder struct {
-	mgr manager.Manager
+	mgr  manager.Manager
+	name string
 }
 
 func NewSingletonManagedBy(m manager.Manager) SingletonBuilder {
@@ -48,18 +49,25 @@ func NewSingletonManagedBy(m manager.Manager) SingletonBuilder {
 	}
 }
 
-func (b SingletonBuilder) Complete(r Reconciler) error {
-	return b.mgr.Add(newSingleton(r))
+func (b SingletonBuilder) Named(name string) SingletonBuilder {
+	b.name = name
+	return b
+}
+
+func (b SingletonBuilder) Complete(r reconcile.Reconciler) error {
+	return b.mgr.Add(newSingleton(r, b.name))
 }
 
 type Singleton struct {
-	Reconciler
+	reconcile.Reconciler
+	name        string
 	rateLimiter ratelimiter.RateLimiter
 }
 
-func newSingleton(r Reconciler) *Singleton {
+func newSingleton(r reconcile.Reconciler, name string) *Singleton {
 	s := &Singleton{
 		Reconciler:  r,
+		name:        name,
 		rateLimiter: workqueue.DefaultItemBasedRateLimiter(),
 	}
 	s.initMetrics()
@@ -69,20 +77,20 @@ func newSingleton(r Reconciler) *Singleton {
 // initMetrics is effectively the same metrics initialization function used by controller-runtime
 // https://github.com/kubernetes-sigs/controller-runtime/blob/main/pkg/internal/controller/controller.go
 func (s *Singleton) initMetrics() {
-	activeWorkers.WithLabelValues(s.Name()).Set(0)
-	reconcileErrors.WithLabelValues(s.Name()).Add(0)
-	reconcileTotal.WithLabelValues(s.Name(), labelError).Add(0)
-	reconcileTotal.WithLabelValues(s.Name(), labelRequeueAfter).Add(0)
-	reconcileTotal.WithLabelValues(s.Name(), labelRequeue).Add(0)
-	reconcileTotal.WithLabelValues(s.Name(), labelSuccess).Add(0)
-	workerCount.WithLabelValues(s.Name()).Set(float64(1))
+	activeWorkers.WithLabelValues(s.name).Set(0)
+	reconcileErrors.WithLabelValues(s.name).Add(0)
+	reconcileTotal.WithLabelValues(s.name, labelError).Add(0)
+	reconcileTotal.WithLabelValues(s.name, labelRequeueAfter).Add(0)
+	reconcileTotal.WithLabelValues(s.name, labelRequeue).Add(0)
+	reconcileTotal.WithLabelValues(s.name, labelSuccess).Add(0)
+	workerCount.WithLabelValues(s.name).Set(float64(1))
 }
 
 var singletonRequest = reconcile.Request{}
 
 func (s *Singleton) Start(ctx context.Context) error {
-	ctx = injection.WithControllerName(ctx, s.Name())
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.Name()))
+	ctx = injection.WithControllerName(ctx, s.name)
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(s.name))
 	logging.FromContext(ctx).Infof("starting controller")
 	defer logging.FromContext(ctx).Infof("stopping controller")
 
@@ -96,30 +104,30 @@ func (s *Singleton) Start(ctx context.Context) error {
 }
 
 func (s *Singleton) reconcile(ctx context.Context) time.Duration {
-	activeWorkers.WithLabelValues(s.Name()).Inc()
-	defer activeWorkers.WithLabelValues(s.Name()).Dec()
+	activeWorkers.WithLabelValues(s.name).Inc()
+	defer activeWorkers.WithLabelValues(s.name).Dec()
 
-	measureDuration := metrics.Measure(reconcileDuration.WithLabelValues(s.Name()))
+	measureDuration := metrics.Measure(reconcileDuration.WithLabelValues(s.name))
 	res, err := s.Reconcile(ctx, singletonRequest)
 	measureDuration() // Observe the length of time between the function creation and now
 
 	switch {
 	case err != nil:
-		reconcileErrors.WithLabelValues(s.Name()).Inc()
-		reconcileTotal.WithLabelValues(s.Name(), labelError).Inc()
+		reconcileErrors.WithLabelValues(s.name).Inc()
+		reconcileTotal.WithLabelValues(s.name, labelError).Inc()
 		logging.FromContext(ctx).Error(err)
 		return s.rateLimiter.When(singletonRequest)
 	case res.Requeue:
-		reconcileTotal.WithLabelValues(s.Name(), labelRequeue).Inc()
+		reconcileTotal.WithLabelValues(s.name, labelRequeue).Inc()
 		return s.rateLimiter.When(singletonRequest)
 	default:
 		s.rateLimiter.Forget(singletonRequest)
 		switch {
 		case res.RequeueAfter > 0:
-			reconcileTotal.WithLabelValues(s.Name(), labelRequeueAfter).Inc()
+			reconcileTotal.WithLabelValues(s.name, labelRequeueAfter).Inc()
 			return res.RequeueAfter
 		default:
-			reconcileTotal.WithLabelValues(s.Name(), labelSuccess).Inc()
+			reconcileTotal.WithLabelValues(s.name, labelSuccess).Inc()
 			return time.Duration(0)
 		}
 	}

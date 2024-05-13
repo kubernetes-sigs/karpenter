@@ -47,16 +47,12 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
+func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		clock:         c,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 	}
-}
-
-func (c *Controller) Name() string {
-	return "nodeclaim.garbagecollection"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -119,6 +115,8 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.NewSingletonManagedBy(m)
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return operatorcontroller.NewSingletonManagedBy(m).
+		Named("nodeclaim.garbagecollection").
+		Complete(c)
 }

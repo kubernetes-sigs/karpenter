@@ -30,13 +30,13 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -45,7 +45,7 @@ import (
 )
 
 var ctx context.Context
-var nodeClaimDisruptionController controller.Controller
+var nodeClaimDisruptionController *nodeclaimdisruption.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
@@ -108,7 +108,7 @@ var _ = Describe("Disruption", func() {
 
 		// step forward to make the node expired and empty
 		fakeClock.Step(60 * time.Second)
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -128,7 +128,7 @@ var _ = Describe("Disruption", func() {
 
 		// Drift, Expiration, and Emptiness are disabled through configuration
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())

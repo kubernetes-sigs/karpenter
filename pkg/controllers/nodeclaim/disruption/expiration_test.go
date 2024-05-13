@@ -23,6 +23,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -52,7 +53,7 @@ var _ = Describe("Expiration", func() {
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)
-			ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).IsTrue()).To(BeTrue())
@@ -70,7 +71,7 @@ var _ = Describe("Expiration", func() {
 		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired)).To(BeNil())
@@ -81,7 +82,7 @@ var _ = Describe("Expiration", func() {
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).IsTrue()).To(BeTrue())
@@ -91,7 +92,7 @@ var _ = Describe("Expiration", func() {
 		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired)).To(BeNil())
@@ -103,7 +104,7 @@ var _ = Describe("Expiration", func() {
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
 		ExpectApplied(ctx, env.Client, node) // node shouldn't be expired, but nodeClaim will be
-		ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).IsTrue()).To(BeTrue())
@@ -114,7 +115,7 @@ var _ = Describe("Expiration", func() {
 
 		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))
 
-		result := ExpectReconcileSucceeded(ctx, nodeClaimDisruptionController, client.ObjectKeyFromObject(nodeClaim))
+		result := ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
 		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
 	})
 })

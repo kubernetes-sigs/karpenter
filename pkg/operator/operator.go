@@ -55,7 +55,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -214,9 +213,11 @@ func NewOperator() (context.Context, *Operator) {
 	}
 }
 
-func (o *Operator) WithControllers(ctx context.Context, controllers ...controller.Controller) *Operator {
+func (o *Operator) WithControllers(ctx context.Context, controllers ...interface {
+	Register(context.Context, manager.Manager) error
+}) *Operator {
 	for _, c := range controllers {
-		lo.Must0(c.Builder(ctx, o.Manager).Complete(c))
+		lo.Must0(c.Register(ctx, o.Manager))
 	}
 	return o
 }

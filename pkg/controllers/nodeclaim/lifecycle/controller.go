@@ -27,10 +27,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,12 +44,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
-
-var _ operatorcontroller.TypedController[*v1beta1.NodeClaim] = (*Controller)(nil)
 
 type nodeClaimReconciler interface {
 	Reconcile(context.Context, *v1beta1.NodeClaim) (reconcile.Result, error)
@@ -65,18 +65,21 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
+	return &Controller{
 		kubeClient: kubeClient,
 
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10), recorder: recorder},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
-	})
+	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodeclaim.lifecycle").With("nodeclaim", nodeClaim.Name))
+	ctx = injection.WithControllerName(ctx, "nodeclaim.lifecycle")
+
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
@@ -124,13 +127,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	return result.Min(results...), nil
 }
 
-func (*Controller) Name() string {
-	return "nodeclaim.lifecycle"
-}
-
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("nodeclaim.lifecycle").
 		For(&v1beta1.NodeClaim{}, builder.WithPredicates(
 			predicate.Funcs{
 				CreateFunc: func(e event.CreateEvent) bool { return true },
@@ -149,5 +148,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
 			MaxConcurrentReconciles: 1000, // higher concurrency limit since we want fast reaction to node syncing and launch
-		}))
+		}).
+		Complete(reconcile.AsReconciler[*v1beta1.NodeClaim](m.GetClient(), c))
 }

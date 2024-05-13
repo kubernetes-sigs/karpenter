@@ -23,11 +23,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 
 	v1 "k8s.io/api/core/v1"
@@ -40,8 +42,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-var _ operatorcontroller.TypedController[*v1beta1.NodePool] = (*Controller)(nil)
-
 // Controller for the resource
 type Controller struct {
 	kubeClient client.Client
@@ -49,15 +49,18 @@ type Controller struct {
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &Controller{
+func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
+	return &Controller{
 		kubeClient: kubeClient,
 		cluster:    cluster,
-	})
+	}
 }
 
 // Reconcile a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodepool.counter").With("nodepool", nodePool.Name))
+	ctx = injection.WithControllerName(ctx, "nodepool.counter")
+
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// Otherwise, we have the potential to patch over the status with a lower value for the nodepool resource
 	// counts on startup
@@ -94,13 +97,9 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.R
 	return functional.FilterMap(res, func(_ v1.ResourceName, v resource.Quantity) bool { return !v.IsZero() })
 }
 
-func (c *Controller) Name() string {
-	return "nodepool.counter"
-}
-
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("nodepool.counter").
 		For(&v1beta1.NodePool{}).
 		Watches(
 			&v1beta1.NodeClaim{},
@@ -120,5 +119,7 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 				return nil
 			}),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(reconcile.AsReconciler[*v1beta1.NodePool](m.GetClient(), c))
+
 }

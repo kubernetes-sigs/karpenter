@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -58,14 +59,14 @@ var _ = Describe("Liveness", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
 
 		// Node and nodeClaim should still exist
 		fakeClock.Step(time.Minute * 20)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
 	})
@@ -88,12 +89,12 @@ var _ = Describe("Liveness", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the NodeClaim
 		fakeClock.Step(time.Minute * 20)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -117,12 +118,12 @@ var _ = Describe("Liveness", func() {
 		})
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileFailed(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileFailed(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
 		fakeClock.Step(time.Minute * 20)
-		ExpectReconcileFailed(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileFailed(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})

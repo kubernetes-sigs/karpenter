@@ -51,7 +51,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
@@ -71,9 +70,9 @@ var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
-var nodeStateController controller.Controller
-var nodeClaimStateController controller.Controller
-var podStateController controller.Controller
+var nodeStateController *informer.NodeController
+var nodeClaimStateController *informer.NodeClaimController
+var podStateController *informer.PodController
 
 const csiProvider = "fake.csi.provider"
 const isDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"

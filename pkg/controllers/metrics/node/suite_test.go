@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 
@@ -50,8 +49,8 @@ var ctx context.Context
 var fakeClock *clock.FakeClock
 var env *test.Environment
 var cluster *state.Cluster
-var nodeController controller.Controller
-var metricsStateController controller.Controller
+var nodeController *informer.NodeController
+var metricsStateController *node.Controller
 var cloudProvider *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -57,7 +58,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -66,7 +67,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -84,7 +85,7 @@ var _ = Describe("Initialization", func() {
 			v1.ResourcePods:   resource.MustParse("110"),
 		}
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -108,7 +109,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -127,7 +128,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeInitializedLabelKey, "true"))
@@ -150,7 +151,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -168,7 +169,7 @@ var _ = Describe("Initialization", func() {
 			ReadyStatus: v1.ConditionFalse,
 		})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -193,7 +194,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// Update the nodeClaim to add mock the instance type having an extended resource
@@ -218,7 +219,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -243,7 +244,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// Update the nodeClaim to add mock the instance type having an extended resource
@@ -268,7 +269,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -281,7 +282,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Reconcile the nodeClaim and the nodeClaim/Node should now be initilized
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
@@ -316,7 +317,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -336,7 +337,7 @@ var _ = Describe("Initialization", func() {
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Should add the startup taints to the node
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).To(ContainElements(
 			v1.Taint{
@@ -352,7 +353,7 @@ var _ = Describe("Initialization", func() {
 		))
 
 		// Shouldn't consider the node ready since the startup taints still exist
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
@@ -387,7 +388,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -407,7 +408,7 @@ var _ = Describe("Initialization", func() {
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Shouldn't consider the node ready since the startup taints still exist
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
@@ -417,7 +418,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// nodeClaim should now be ready since all startup taints are removed
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
@@ -452,7 +453,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -486,7 +487,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Shouldn't consider the node ready since the ephemeral taints still exist
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
@@ -521,7 +522,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -555,7 +556,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Shouldn't consider the node ready since the ephemeral taints still exist
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
@@ -565,7 +566,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// nodeClaim should now be ready since all startup taints are removed
-		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
