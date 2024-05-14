@@ -1,19 +1,9 @@
 # See https://github.com/golangci/golangci-lint/blob/master/.golangci.example.yml
 run:
   tests: true
-
   timeout: 5m
-
   build-tags:
     - test_performance
-
-  skip-dirs:
-    - tools
-    - website
-    - hack
-    - charts
-    - designs
-
 linters:
   enable:
     - asciicheck
@@ -34,12 +24,13 @@ linters:
     - nilerr
   disable:
     - prealloc
-
 linters-settings:
   gocyclo:
     min-complexity: 11
   govet:
-    check-shadowing: true
+    enable-all: true
+    disable:
+      - fieldalignment
   revive:
     rules:
       - name: dot-imports
@@ -71,6 +62,12 @@ linters-settings:
 issues:
   fix: true
   exclude: ['declaration of "(err|ctx)" shadows declaration at']
+  exclude-dirs:
+    - tools
+    - website
+    - hack
+    - charts
+    - designs
   exclude-rules:
   - linters:
     - goheader
