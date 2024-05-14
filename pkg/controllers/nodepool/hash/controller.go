@@ -76,7 +76,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Named("nodepool.hash").
 		For(&v1beta1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Complete(reconcile.AsReconciler[*v1beta1.NodePool](m.GetClient(), c))
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
 // Updating `nodepool-hash-version` annotation inside the karpenter controller means a breaking change has been made to the hash calculation.

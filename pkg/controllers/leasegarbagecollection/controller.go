@@ -66,5 +66,5 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		For(&v1.Lease{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Complete(reconcile.AsReconciler[*v1.Lease](m.GetClient(), c))
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

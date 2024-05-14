@@ -73,7 +73,7 @@ func (c *PodController) Register(_ context.Context, m manager.Manager) error {
 		Named("provisioner.trigger.pod").
 		For(&v1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Complete(reconcile.AsReconciler[*v1.Pod](m.GetClient(), c))
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
 // NodeController for the resource
@@ -117,5 +117,5 @@ func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
 		Named("provisioner.trigger.node").
 		For(&v1.Node{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Complete(reconcile.AsReconciler[*v1.Node](m.GetClient(), c))
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

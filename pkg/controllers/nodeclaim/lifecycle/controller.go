@@ -149,5 +149,5 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			),
 			MaxConcurrentReconciles: 1000, // higher concurrency limit since we want fast reaction to node syncing and launch
 		}).
-		Complete(reconcile.AsReconciler[*v1beta1.NodeClaim](m.GetClient(), c))
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

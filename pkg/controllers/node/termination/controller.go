@@ -166,5 +166,5 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				MaxConcurrentReconciles: 100,
 			},
 		).
-		Complete(reconcile.AsReconciler[*v1.Node](m.GetClient(), c))
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

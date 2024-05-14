@@ -99,7 +99,7 @@ var _ = Describe("Static Drift Hash", func() {
 	})
 	It("should update the drift hash when NodePool static field is updated", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		expectedHash := nodePool.Hash()
@@ -107,7 +107,7 @@ var _ = Describe("Static Drift Hash", func() {
 
 		nodePool.Spec.Template.Labels = map[string]string{"keyLabeltest": "valueLabeltest"}
 		nodePool.Spec.Template.Annotations = map[string]string{"keyAnnotation2": "valueAnnotation2", "keyAnnotation": "valueAnnotation"}
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		expectedHashTwo := nodePool.Hash()
@@ -115,7 +115,7 @@ var _ = Describe("Static Drift Hash", func() {
 	})
 	It("should not update the drift hash when NodePool behavior field is updated", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		expectedHash := nodePool.Hash()
@@ -131,7 +131,7 @@ var _ = Describe("Static Drift Hash", func() {
 			{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}},
 		}
 		nodePool.Spec.Weight = lo.ToPtr(int32(80))
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, expectedHash))
@@ -143,7 +143,7 @@ var _ = Describe("Static Drift Hash", func() {
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		expectedHash := nodePool.Hash()
@@ -176,7 +176,7 @@ var _ = Describe("Static Drift Hash", func() {
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaimOne, nodeClaimTwo)
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		nodeClaimOne = ExpectExists(ctx, env.Client, nodeClaimOne)
 		nodeClaimTwo = ExpectExists(ctx, env.Client, nodeClaimTwo)
@@ -203,7 +203,7 @@ var _ = Describe("Static Drift Hash", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -232,7 +232,7 @@ var _ = Describe("Static Drift Hash", func() {
 		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// Expect NodeClaims hash to not have been updated

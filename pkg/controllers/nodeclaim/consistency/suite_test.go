@@ -119,7 +119,7 @@ var _ = Describe("NodeClaimController", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, p, pdb)
 			ExpectManualBinding(ctx, env.Client, p, node)
 			_ = env.Client.Delete(ctx, nodeClaim)
-			ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimConsistencyController), client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimConsistencyController), client.ObjectKeyFromObject(nodeClaim))
 			Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %q is blocking evictions", client.ObjectKeyFromObject(pdb)))).To(BeTrue())
 		})
 	})
@@ -159,7 +159,7 @@ var _ = Describe("NodeClaimController", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimConsistencyController), client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimConsistencyController), client.ObjectKeyFromObject(nodeClaim))
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 		})
 	})

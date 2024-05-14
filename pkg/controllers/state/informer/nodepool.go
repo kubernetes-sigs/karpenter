@@ -64,5 +64,5 @@ func (c *NodePoolController) Register(_ context.Context, m manager.Manager) erro
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}).
-		Complete(reconcile.AsReconciler[*v1beta1.NodePool](m.GetClient(), c))
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

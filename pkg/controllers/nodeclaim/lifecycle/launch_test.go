@@ -47,7 +47,7 @@ var _ = Describe("Launch", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -65,7 +65,7 @@ var _ = Describe("Launch", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeLaunched).Status).To(Equal(metav1.ConditionTrue))
@@ -74,7 +74,7 @@ var _ = Describe("Launch", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))
 		nodeClaim := test.NodeClaim()
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -82,7 +82,7 @@ var _ = Describe("Launch", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("nodeClass isn't ready"))
 		nodeClaim := test.NodeClaim()
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		res := ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodeClaim](env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
+		res := ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimController), client.ObjectKeyFromObject(nodeClaim))
 		Expect(res.Requeue).To(BeTrue())
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)

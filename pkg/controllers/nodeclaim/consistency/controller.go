@@ -119,5 +119,5 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			nodeclaimutil.NodeEventHandler(c.kubeClient),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Complete(reconcile.AsReconciler[*v1beta1.NodeClaim](m.GetClient(), c))
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

@@ -1459,7 +1459,7 @@ var _ = Describe("Consolidated State", func() {
 		fakeClock.Step(time.Minute)
 		ExpectApplied(ctx, env.Client, nodePool)
 		state := cluster.ConsolidationState()
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler[*v1beta1.NodePool](env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })
