@@ -32,7 +32,6 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
@@ -119,7 +118,7 @@ var _ = Describe("NodeClaimController", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, p, pdb)
 			ExpectManualBinding(ctx, env.Client, p, node)
 			_ = env.Client.Delete(ctx, nodeClaim)
-			ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimConsistencyController), client.ObjectKeyFromObject(nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %q is blocking evictions", client.ObjectKeyFromObject(pdb)))).To(BeTrue())
 		})
 	})
@@ -159,7 +158,7 @@ var _ = Describe("NodeClaimController", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimConsistencyController), client.ObjectKeyFromObject(nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 		})
 	})

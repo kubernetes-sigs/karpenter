@@ -29,7 +29,6 @@ import (
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
 	"knative.dev/pkg/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -1459,7 +1458,7 @@ var _ = Describe("Consolidated State", func() {
 		fakeClock.Step(time.Minute)
 		ExpectApplied(ctx, env.Client, nodePool)
 		state := cluster.ConsolidationState()
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })

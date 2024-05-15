@@ -32,7 +32,6 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nodeclaimtermination "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/termination"
 
@@ -114,7 +113,7 @@ var _ = Describe("Termination", func() {
 	})
 	It("should delete the node and the CloudProvider NodeClaim when NodeClaim deletion is triggered", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimLifecycleController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -125,11 +124,11 @@ var _ = Describe("Termination", func() {
 
 		// Expect the node and the nodeClaim to both be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimTerminationController), client.ObjectKeyFromObject(nodeClaim)) // triggers the node deletion
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
 		ExpectFinalizersRemoved(ctx, env.Client, node)
 		ExpectNotFound(ctx, env.Client, node)
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimTerminationController), client.ObjectKeyFromObject(nodeClaim)) // now all nodes are gone so nodeClaim deletion continues
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // now all nodes are gone so nodeClaim deletion continues
 		ExpectNotFound(ctx, env.Client, nodeClaim, node)
 
 		// Expect the nodeClaim to be gone from the cloudprovider
@@ -138,7 +137,7 @@ var _ = Describe("Termination", func() {
 	})
 	It("should delete multiple Nodes if multiple Nodes map to the NodeClaim", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimLifecycleController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -151,11 +150,11 @@ var _ = Describe("Termination", func() {
 
 		// Expect the node and the nodeClaim to both be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimTerminationController), client.ObjectKeyFromObject(nodeClaim)) // triggers the node deletion
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
 		ExpectFinalizersRemoved(ctx, env.Client, node1, node2, node3)
 		ExpectNotFound(ctx, env.Client, node1, node2, node3)
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimTerminationController), client.ObjectKeyFromObject(nodeClaim)) // now all nodes are gone so nodeClaim deletion continues
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // now all nodes are gone so nodeClaim deletion continues
 		ExpectNotFound(ctx, env.Client, nodeClaim, node1, node2, node3)
 
 		// Expect the nodeClaim to be gone from the cloudprovider
@@ -164,7 +163,7 @@ var _ = Describe("Termination", func() {
 	})
 	It("should not delete the NodeClaim until all the Nodes are removed", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimLifecycleController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -174,15 +173,15 @@ var _ = Describe("Termination", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimTerminationController), client.ObjectKeyFromObject(nodeClaim)) // triggers the node deletion
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimTerminationController), client.ObjectKeyFromObject(nodeClaim)) // the node still hasn't been deleted, so the nodeClaim should remain
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // the node still hasn't been deleted, so the nodeClaim should remain
 
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
 
 		ExpectFinalizersRemoved(ctx, env.Client, node)
 		ExpectNotFound(ctx, env.Client, node)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimTerminationController), client.ObjectKeyFromObject(nodeClaim)) // now the nodeClaim should be gone
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // now the nodeClaim should be gone
 
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -192,7 +191,7 @@ var _ = Describe("Termination", func() {
 
 		// Expect the nodeClaim to be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimTerminationController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim)
 
 		Expect(cloudProvider.DeleteCalls).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, nodeClaim)
@@ -209,7 +208,7 @@ var _ = Describe("Termination", func() {
 
 		// Expect the nodeClaim to be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimTerminationController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim)
 
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 		for _, node := range nodes {

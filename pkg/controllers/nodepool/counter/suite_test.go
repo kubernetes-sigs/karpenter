@@ -29,7 +29,6 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
@@ -112,8 +111,8 @@ var _ = Describe("Counter", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolInformerController), client.ObjectKeyFromObject(nodePool))
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 	})
 	It("should set the counter from the nodeClaim and then to the node when it initializes", func() {
@@ -124,7 +123,7 @@ var _ = Describe("Counter", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(nodeClaim.Status.Capacity))
@@ -142,7 +141,7 @@ var _ = Describe("Counter", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		Expect(nodePool.Status.Resources).To(BeEquivalentTo(node.Status.Capacity))
@@ -151,7 +150,7 @@ var _ = Describe("Counter", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
@@ -162,7 +161,7 @@ var _ = Describe("Counter", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal the sums of the nodeClaims and nodes
@@ -177,7 +176,7 @@ var _ = Describe("Counter", func() {
 		ExpectDeleted(ctx, env.Client, node, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
@@ -188,7 +187,7 @@ var _ = Describe("Counter", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
@@ -199,7 +198,7 @@ var _ = Describe("Counter", func() {
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodePoolController), client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.Status.Resources).To(BeNil())
 	})

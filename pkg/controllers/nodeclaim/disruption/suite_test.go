@@ -30,7 +30,6 @@ import (
 	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -108,7 +107,7 @@ var _ = Describe("Disruption", func() {
 
 		// step forward to make the node expired and empty
 		fakeClock.Step(60 * time.Second)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -128,7 +127,7 @@ var _ = Describe("Disruption", func() {
 
 		// Drift, Expiration, and Emptiness are disabled through configuration
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, nodeClaimDisruptionController), client.ObjectKeyFromObject(nodeClaim))
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())

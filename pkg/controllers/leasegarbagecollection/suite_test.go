@@ -24,8 +24,6 @@ import (
 	"github.com/samber/lo"
 	coordinationsv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/controllers/leasegarbagecollection"
@@ -104,7 +102,7 @@ var _ = Describe("GarbageCollection", func() {
 	Context("Metrics", func() {
 		It("should fire the leaseDeletedCounter metric when deleting leases", func() {
 			ExpectApplied(ctx, env.Client, badLease)
-			ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, garbageCollectionController), client.ObjectKeyFromObject(badLease))
+			ExpectObjectReconciled(ctx, env.Client, garbageCollectionController, badLease)
 			ExpectNotFound(ctx, env.Client, badLease)
 
 			m, ok := FindMetricWithLabelValues("karpenter_nodes_leases_deleted", map[string]string{})
@@ -115,18 +113,18 @@ var _ = Describe("GarbageCollection", func() {
 	})
 	It("should not delete node lease that contains an OwnerReference", func() {
 		ExpectApplied(ctx, env.Client, goodLease)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, garbageCollectionController), client.ObjectKeyFromObject(goodLease))
+		ExpectObjectReconciled(ctx, env.Client, garbageCollectionController, goodLease)
 		ExpectExists(ctx, env.Client, goodLease)
 	})
 	It("should delete node lease that does not contain an OwnerReference", func() {
 		ExpectApplied(ctx, env.Client, badLease)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, garbageCollectionController), client.ObjectKeyFromObject(badLease))
+		ExpectObjectReconciled(ctx, env.Client, garbageCollectionController, badLease)
 		ExpectNotFound(ctx, env.Client, badLease)
 	})
 	It("should not delete node lease that does not contain OwnerReference in a outside of kube-node-lease namespace", func() {
 		badLease.Namespace = "kube-system"
 		ExpectApplied(ctx, env.Client, badLease)
-		ExpectReconcileSucceeded(ctx, reconcile.AsReconciler(env.Client, garbageCollectionController), client.ObjectKeyFromObject(badLease))
+		ExpectObjectReconciled(ctx, env.Client, garbageCollectionController, badLease)
 		ExpectExists(ctx, env.Client, badLease)
 	})
 })

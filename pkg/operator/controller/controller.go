@@ -38,6 +38,10 @@ const (
 	Immediately = 1 * time.Nanosecond
 )
 
+type Controller interface {
+	Register(context.Context, manager.Manager) error
+}
+
 type SingletonBuilder struct {
 	mgr  manager.Manager
 	name string

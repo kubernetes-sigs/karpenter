@@ -169,6 +169,22 @@ func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Objec
 	}
 }
 
+// TODO: Consider removing converting this into a standard reconciler; however, objects have to be properly updated if we don't rely on the Rconcile() method to get the object for us
+func ExpectObjectReconciled[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) reconcile.Result {
+	GinkgoHelper()
+	result, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
+	Expect(err).ToNot(HaveOccurred())
+	return result
+}
+
+// TODO: Consider removing converting this into a standard reconciler; however, objects have to be properly updated if we don't rely on the Rconcile() method to get the object for us
+func ExpectObjectReconcileFailed[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) error {
+	GinkgoHelper()
+	_, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
+	Expect(err).To(HaveOccurred())
+	return err
+}
+
 // ExpectDeletionTimestampSetWithOffset ensures that the deletion timestamp is set on the objects by adding a finalizer
 // and then deleting the object immediately after. This holds the object until the finalizer is patched out in the DeferCleanup
 func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ...client.Object) {

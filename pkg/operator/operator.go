@@ -31,6 +31,8 @@ import (
 	"knative.dev/pkg/changeset"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"sigs.k8s.io/karpenter/pkg/operator/controller"
+
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"github.com/go-logr/zapr"
@@ -213,9 +215,7 @@ func NewOperator() (context.Context, *Operator) {
 	}
 }
 
-func (o *Operator) WithControllers(ctx context.Context, controllers ...interface {
-	Register(context.Context, manager.Manager) error
-}) *Operator {
+func (o *Operator) WithControllers(ctx context.Context, controllers ...controller.Controller) *Operator {
 	for _, c := range controllers {
 		lo.Must0(c.Register(ctx, o.Manager))
 	}
