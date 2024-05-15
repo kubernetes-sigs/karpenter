@@ -44,7 +44,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -55,8 +54,8 @@ var (
 	ctx                 context.Context
 	fakeClock           *clock.FakeClock
 	cluster             *state.Cluster
-	nodeController      controller.Controller
-	daemonsetController controller.Controller
+	nodeController      *informer.NodeController
+	daemonsetController *informer.DaemonSetController
 	cloudProvider       *fake.CloudProvider
 	prov                *provisioning.Provisioner
 	env                 *test.Environment

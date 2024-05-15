@@ -97,16 +97,14 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	return p
 }
 
-func (p *Provisioner) Name() string {
-	return "provisioner"
-}
-
 func (p *Provisioner) Trigger() {
 	p.batcher.Trigger()
 }
 
-func (p *Provisioner) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(mgr)
+func (p *Provisioner) Register(_ context.Context, mgr manager.Manager) error {
+	return controller.NewSingletonManagedBy(mgr).
+		Named("provisioner").
+		Complete(p)
 }
 
 func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (result reconcile.Result, err error) {

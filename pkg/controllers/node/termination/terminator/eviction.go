@@ -95,12 +95,10 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	return queue
 }
 
-func (q *Queue) Name() string {
-	return "eviction-queue"
-}
-
-func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(m)
+func (q *Queue) Register(_ context.Context, m manager.Manager) error {
+	return controller.NewSingletonManagedBy(m).
+		Named("eviction-queue").
+		Complete(q)
 }
 
 // Add adds pods to the Queue

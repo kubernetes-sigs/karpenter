@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -58,11 +57,11 @@ var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
-var nodeClaimController controller.Controller
-var nodeController controller.Controller
-var podController controller.Controller
-var nodePoolController controller.Controller
-var daemonsetController controller.Controller
+var nodeClaimController *informer.NodeClaimController
+var nodeController *informer.NodeController
+var podController *informer.PodController
+var nodePoolController *informer.NodePoolController
+var daemonsetController *informer.DaemonSetController
 var cloudProvider *fake.CloudProvider
 var nodePool *v1beta1.NodePool
 
@@ -1459,7 +1458,7 @@ var _ = Describe("Consolidated State", func() {
 		fakeClock.Step(time.Minute)
 		ExpectApplied(ctx, env.Client, nodePool)
 		state := cluster.ConsolidationState()
-		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })

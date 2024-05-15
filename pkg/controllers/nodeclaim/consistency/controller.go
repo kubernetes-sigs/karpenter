@@ -33,13 +33,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/events"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
-
-var _ operatorcontroller.TypedController[*v1beta1.NodeClaim] = (*Controller)(nil)
 
 type Controller struct {
 	clock       clock.Clock
@@ -60,9 +59,8 @@ type Check interface {
 // scanPeriod is how often we inspect and report issues that are found.
 const scanPeriod = 10 * time.Minute
 
-func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder) operatorcontroller.Controller {
-
-	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder) *Controller {
+	return &Controller{
 		clock:       clk,
 		kubeClient:  kubeClient,
 		recorder:    recorder,
@@ -71,10 +69,13 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 			NewTermination(clk, kubeClient),
 			NewNodeShape(),
 		},
-	})
+	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodeclaim.consistency").With("nodeclaim", nodeClaim.Name))
+	ctx = injection.WithControllerName(ctx, "nodeclaim.consistency")
+
 	if nodeClaim.Status.ProviderID == "" {
 		return reconcile.Result{}, nil
 	}
@@ -109,18 +110,14 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }
 
-func (c *Controller) Name() string {
-	return "nodeclaim.consistency"
-}
-
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("nodeclaim.consistency").
 		For(&v1beta1.NodeClaim{}).
 		Watches(
 			&v1.Node{},
 			nodeclaimutil.NodeEventHandler(c.kubeClient),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
-	)
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

@@ -27,9 +27,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 // NodeClaimController reconciles nodeclaim for the purpose of maintaining state.
@@ -39,19 +40,17 @@ type NodeClaimController struct {
 }
 
 // NewNodeClaimController constructs a controller instance
-func NewNodeClaimController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
+func NewNodeClaimController(kubeClient client.Client, cluster *state.Cluster) *NodeClaimController {
 	return &NodeClaimController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
 	}
 }
 
-func (c *NodeClaimController) Name() string {
-	return "state.nodeclaim"
-}
-
 func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("nodeclaim", req.NamespacedName.Name))
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("state.nodeclaim").With("nodeclaim", req.Name))
+	ctx = injection.WithControllerName(ctx, "state.nodeclaim")
+
 	nodeClaim := &v1beta1.NodeClaim{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodeClaim); err != nil {
 		if errors.IsNotFound(err) {
@@ -65,9 +64,10 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *NodeClaimController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *NodeClaimController) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("state.nodeclaim").
 		For(&v1beta1.NodeClaim{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(c)
 }

@@ -22,17 +22,17 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
-)
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-var _ operatorcontroller.TypedController[*v1beta1.NodePool] = (*Controller)(nil)
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+)
 
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
 // The hash is placed in the metadata for increased observability and should be found on each object.
@@ -40,14 +40,17 @@ type Controller struct {
 	kubeClient client.Client
 }
 
-func NewController(kubeClient client.Client) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &Controller{
+func NewController(kubeClient client.Client) *Controller {
+	return &Controller{
 		kubeClient: kubeClient,
-	})
+	}
 }
 
 // Reconcile the resource
 func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodepool.hash").With("nodepool", np.Name))
+	ctx = injection.WithControllerName(ctx, "nodepool.hash")
+
 	stored := np.DeepCopy()
 
 	if np.Annotations[v1beta1.NodePoolHashVersionAnnotationKey] != v1beta1.NodePoolHashVersion {
@@ -68,16 +71,12 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Name() string {
-	return "nodepool.hash"
-}
-
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("nodepool.hash").
 		For(&v1beta1.NodePool{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
-	)
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
 // Updating `nodepool-hash-version` annotation inside the karpenter controller means a breaking change has been made to the hash calculation.

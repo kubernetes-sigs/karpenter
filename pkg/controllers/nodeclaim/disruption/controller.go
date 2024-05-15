@@ -26,21 +26,21 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
-
-var _ operatorcontroller.TypedController[*v1beta1.NodeClaim] = (*Controller)(nil)
 
 type nodeClaimReconciler interface {
 	Reconcile(context.Context, *v1beta1.NodePool, *v1beta1.NodeClaim) (reconcile.Result, error)
@@ -58,18 +58,21 @@ type Controller struct {
 }
 
 // NewController constructs a nodeclaim disruption controller
-func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
+func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) *Controller {
+	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		drift:         &Drift{cloudProvider: cloudProvider},
 		expiration:    &Expiration{kubeClient: kubeClient, clock: clk},
 		emptiness:     &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
-	})
+	}
 }
 
 // Reconcile executes a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodeclaim.disruption").With("nodeclaim", nodeClaim.Name))
+	ctx = injection.WithControllerName(ctx, "nodeclaim.disruption")
+
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
@@ -112,13 +115,18 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	return result.Min(results...), nil
 }
 
-func (c *Controller) Name() string {
-	return "nodeclaim.disruption"
-}
-
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	builder := controllerruntime.
-		NewControllerManagedBy(m).
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	builder := controllerruntime.NewControllerManagedBy(m)
+	for _, ncGVK := range c.cloudProvider.GetSupportedNodeClasses() {
+		nodeclass := &unstructured.Unstructured{}
+		nodeclass.SetGroupVersionKind(ncGVK)
+		builder = builder.Watches(
+			nodeclass,
+			nodeclaimutil.NodeClassEventHandler(c.kubeClient),
+		)
+	}
+	return builder.
+		Named("nodeclaim.disruption").
 		For(&v1beta1.NodeClaim{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
@@ -128,15 +136,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 		Watches(
 			&v1.Pod{},
 			nodeclaimutil.PodEventHandler(c.kubeClient),
-		)
-	for _, ncGVK := range c.cloudProvider.GetSupportedNodeClasses() {
-		nodeclass := &unstructured.Unstructured{}
-		nodeclass.SetGroupVersionKind(ncGVK)
-		builder = builder.Watches(
-			nodeclass,
-			nodeclaimutil.NodeClassEventHandler(c.kubeClient),
-		)
-	}
-
-	return operatorcontroller.Adapt(builder)
+		).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

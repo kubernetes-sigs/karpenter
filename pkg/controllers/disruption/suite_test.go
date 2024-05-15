@@ -47,7 +47,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -61,8 +60,8 @@ var cluster *state.Cluster
 var disruptionController *disruption.Controller
 var prov *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
-var nodeStateController controller.Controller
-var nodeClaimStateController controller.Controller
+var nodeStateController *informer.NodeController
+var nodeClaimStateController *informer.NodeClaimController
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
 var queue *orchestration.Queue
