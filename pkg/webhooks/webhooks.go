@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
@@ -99,10 +99,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 	// webhooks, so that things are properly initialized.
 	logger.Info("Starting configuration manager...")
 	if err := cmw.Start(ctx.Done()); err != nil {
-		// The controller-runtime log package lacks native support for fatal level logging,
-		// hence we utilize os.Exit() to signify encountering a fatal error.
-		logger.Error(err, "Failed to start configuration manager")
-		os.Exit(1)
+		logger.Fatalw("Failed to start configuration manager", zap.Error(err))
 	}
 
 	// If we have one or more admission controllers, then start the webhook
@@ -123,10 +120,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 
 		wh, err = webhook.New(ctx, webhooks)
 		if err != nil {
-			// The controller-runtime log package lacks native support for fatal level logging,
-			// hence we utilize os.Exit() to signify encountering a fatal error.
-			logger.Error(err, "Failed to create webhook")
-			os.Exit(1)
+			logger.Fatalw("Failed to create webhook", zap.Error(err))
 		}
 		eg.Go(func() error {
 			return wh.Run(ctx.Done())
@@ -150,7 +144,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 
 	// Don't forward ErrServerClosed as that indicates we're already shutting down.
 	if err := eg.Wait(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Error(err, "Error while running server")
+		logger.Errorw("Error while running server", zap.Error(err))
 	}
 }
 
