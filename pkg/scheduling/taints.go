@@ -17,10 +17,10 @@ limitations under the License.
 package scheduling
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 )
@@ -38,7 +38,8 @@ var KnownEphemeralTaints = []v1.Taint{
 type Taints []v1.Taint
 
 // Tolerates returns true if the pod tolerates all taints.
-func (ts Taints) Tolerates(pod *v1.Pod) (errs error) {
+func (ts Taints) Tolerates(pod *v1.Pod) error {
+	errs := []error{}
 	for i := range ts {
 		taint := ts[i]
 		tolerates := false
@@ -46,10 +47,10 @@ func (ts Taints) Tolerates(pod *v1.Pod) (errs error) {
 			tolerates = tolerates || t.ToleratesTaint(&taint)
 		}
 		if !tolerates {
-			errs = multierr.Append(errs, fmt.Errorf("did not tolerate %s=%s:%s", taint.Key, taint.Value, taint.Effect))
+			errs = append(errs, fmt.Errorf("did not tolerate %s=%s:%s", taint.Key, taint.Value, taint.Effect))
 		}
 	}
-	return errs
+	return errors.Join(errs...)
 }
 
 // Merge merges in taints with the passed in taints.

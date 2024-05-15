@@ -18,6 +18,7 @@ package v1beta1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -26,7 +27,6 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -244,15 +244,15 @@ func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock
 // This will return an error if there is a configuration error with any budget's node or schedule values.
 func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) (int, error) {
 	minVal := math.MaxInt32
-	var multiErr error
+	errs := []error{}
 	for i := range in.Spec.Disruption.Budgets {
 		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
 		if err != nil {
-			multiErr = multierr.Append(multiErr, err)
+			errs = append(errs, err)
 		}
 		minVal = lo.Ternary(val < minVal, val, minVal)
 	}
-	return minVal, multiErr
+	return minVal, errors.Join(errs...)
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison

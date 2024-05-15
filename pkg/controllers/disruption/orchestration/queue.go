@@ -26,7 +26,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -201,11 +200,11 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 			methodLabel:            cmd.method,
 			consolidationTypeLabel: cmd.consolidationType,
 		}).Add(float64(len(failedLaunches)))
-		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
+		errs := errors.Join(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		// Log the error
 		logging.FromContext(ctx).With("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
 			return s.Name()
-		}), ",")).Errorf("failed to disrupt nodes, %s", multiErr)
+		}), ",")).Errorf("failed to disrupt nodes, %s", errs)
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
@@ -255,19 +254,19 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		disruptionReplacementNodeClaimInitializedHistogram.Observe(initLength)
 	}
 	// If we have any errors, don't continue
-	if err := multierr.Combine(waitErrs...); err != nil {
+	if err := errors.Join(waitErrs...); err != nil {
 		return fmt.Errorf("waiting for replacement initialization, %w", err)
 	}
 
 	// All replacements have been provisioned.
 	// All we need to do now is get a successful delete call for each node claim,
 	// then the termination controller will handle the eventual deletion of the nodes.
-	var multiErr error
+	multiErr := []error{}
 	for i := range cmd.candidates {
 		candidate := cmd.candidates[i]
 		q.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason())...)
 		if err := q.kubeClient.Delete(ctx, candidate.NodeClaim); err != nil {
-			multiErr = multierr.Append(multiErr, client.IgnoreNotFound(err))
+			multiErr = append(multiErr, client.IgnoreNotFound(err))
 		} else {
 			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:       cmd.method,
@@ -279,7 +278,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
 	if multiErr != nil {
-		return fmt.Errorf("terminating nodeclaims, %w", multiErr)
+		return fmt.Errorf("terminating nodeclaims, %w", errors.Join(multiErr...))
 	}
 	return nil
 }

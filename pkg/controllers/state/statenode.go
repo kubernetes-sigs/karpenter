@@ -18,11 +18,11 @@ package state
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -375,7 +375,7 @@ func nominationWindow(ctx context.Context) time.Duration {
 // to add/remove taints while executing a disruption action.
 // nolint:gocyclo
 func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTaint bool, nodes ...*StateNode) error {
-	var multiErr error
+	errs := []error{}
 	for _, n := range nodes {
 		// If the StateNode is Karpenter owned and only has a nodeclaim, or is not owned by
 		// Karpenter, thus having no nodeclaim, don't touch the node.
@@ -384,7 +384,7 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		}
 		node := &v1.Node{}
 		if err := kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
+			errs = append(errs, fmt.Errorf("getting node, %w", err))
 		}
 		// If the node already has the taint, continue to the next
 		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
@@ -412,9 +412,9 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		}
 		if !equality.Semantic.DeepEqual(stored, node) {
 			if err := kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
-				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+				errs = append(errs, fmt.Errorf("patching node %s, %w", node.Name, err))
 			}
 		}
 	}
-	return multiErr
+	return errors.Join(errs...)
 }

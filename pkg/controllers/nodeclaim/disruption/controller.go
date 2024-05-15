@@ -18,11 +18,11 @@ package disruption
 
 import (
 	"context"
+	"errors"
 
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -84,7 +84,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	var results []reconcile.Result
-	var errs error
+	errs := []error{}
 	reconcilers := []nodeClaimReconciler{
 		c.expiration,
 		c.drift,
@@ -92,7 +92,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	}
 	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, nodePool, nodeClaim)
-		errs = multierr.Append(errs, err)
+		errs = append(errs, err)
 		results = append(results, res)
 	}
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
@@ -100,14 +100,14 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		// can cause races due to the fact that it fully replaces the list on a change
 		// Here, we are updating the status condition list
 		if err := c.kubeClient.Status().Update(ctx, nodeClaim); err != nil {
-			if errors.IsConflict(err) {
+			if apierrors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
 	if errs != nil {
-		return reconcile.Result{}, errs
+		return reconcile.Result{}, errors.Join(errs...)
 	}
 	return result.Min(results...), nil
 }

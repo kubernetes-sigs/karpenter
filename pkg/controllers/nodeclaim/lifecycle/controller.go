@@ -18,10 +18,10 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/patrickmn/go-cache"
-	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -101,17 +101,17 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		c.liveness,
 	} {
 		res, err := reconciler.Reconcile(ctx, nodeClaim)
-		errs = multierr.Append(errs, err)
+		errs = errors.Join(errs, err)
 		results = append(results, res)
 	}
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 		statusCopy := nodeClaim.DeepCopy()
 		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
+			return reconcile.Result{}, client.IgnoreNotFound(errors.Join(errs, err))
 		}
 
 		if err := c.kubeClient.Status().Patch(ctx, statusCopy, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(multierr.Append(errs, err))
+			return reconcile.Result{}, client.IgnoreNotFound(errors.Join(errs, err))
 		}
 		// We sleep here after a patch operation since we want to ensure that we are able to read our own writes
 		// so that we avoid duplicating metrics and log lines due to quick re-queues from our node watcher

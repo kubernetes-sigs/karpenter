@@ -25,7 +25,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
+
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -148,7 +148,7 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 			nodeClaimNames[i] = name
 		}
 	})
-	return nodeClaimNames, multierr.Combine(errs...)
+	return nodeClaimNames, errors.Join(errs...)
 }
 
 func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
@@ -413,7 +413,7 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*v1.Pod, error) {
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *v1.Pod) error {
-	return multierr.Combine(
+	return errors.Join(
 		validateKarpenterManagedLabelCanExist(pod),
 		validateNodeSelector(pod),
 		validateAffinity(pod),
@@ -458,7 +458,7 @@ func validateNodeSelector(p *v1.Pod) (errs error) {
 		}
 	})
 	for _, term := range terms {
-		errs = multierr.Append(errs, validateNodeSelectorTerm(term))
+		errs = errors.Join(errs, validateNodeSelectorTerm(term))
 	}
 	return errs
 }
@@ -469,11 +469,11 @@ func validateAffinity(p *v1.Pod) (errs error) {
 	}
 	if p.Spec.Affinity.NodeAffinity != nil {
 		for _, term := range p.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
-			errs = multierr.Append(errs, validateNodeSelectorTerm(term.Preference))
+			errs = errors.Join(errs, validateNodeSelectorTerm(term.Preference))
 		}
 		if p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
 			for _, term := range p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-				errs = multierr.Append(errs, validateNodeSelectorTerm(term))
+				errs = errors.Join(errs, validateNodeSelectorTerm(term))
 			}
 		}
 	}
@@ -482,11 +482,11 @@ func validateAffinity(p *v1.Pod) (errs error) {
 
 func validateNodeSelectorTerm(term v1.NodeSelectorTerm) (errs error) {
 	if term.MatchFields != nil {
-		errs = multierr.Append(errs, fmt.Errorf("node selector term with matchFields is not supported"))
+		errs = errors.Join(errs, fmt.Errorf("node selector term with matchFields is not supported"))
 	}
 	if term.MatchExpressions != nil {
 		for _, requirement := range term.MatchExpressions {
-			errs = multierr.Append(errs, v1beta1.ValidateRequirement(v1beta1.NodeSelectorRequirementWithMinValues{
+			errs = errors.Join(errs, v1beta1.ValidateRequirement(v1beta1.NodeSelectorRequirementWithMinValues{
 				NodeSelectorRequirement: requirement,
 			}))
 		}

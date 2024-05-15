@@ -18,9 +18,9 @@ package hash
 
 import (
 	"context"
+	"errors"
 
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -116,5 +116,5 @@ func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1beta1.NodePo
 		}
 	}
 
-	return multierr.Combine(errs...)
+	return errors.Join(errs...)
 }

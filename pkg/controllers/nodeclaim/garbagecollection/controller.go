@@ -18,11 +18,11 @@ package garbagecollection
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
@@ -113,7 +113,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			metrics.CapacityTypeLabel: nodeClaims[i].Labels[v1beta1.CapacityTypeLabelKey],
 		}).Inc()
 	})
-	if err = multierr.Combine(errs...); err != nil {
+	if err = errors.Join(errs...); err != nil {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil

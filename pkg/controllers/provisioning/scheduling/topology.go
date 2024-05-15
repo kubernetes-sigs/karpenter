@@ -18,17 +18,17 @@ package scheduling
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -77,7 +77,8 @@ func NewTopology(ctx context.Context, kubeClient client.Client, cluster *state.C
 
 	errs := t.updateInverseAffinities(ctx)
 	for i := range pods {
-		errs = multierr.Append(errs, t.Update(ctx, pods[i]))
+		errs = errors.Join(errs, t.Update(ctx, pods[i]))
+
 	}
 	if errs != nil {
 		return nil, errs
@@ -213,7 +214,7 @@ func (t *Topology) updateInverseAffinities(ctx context.Context) error {
 			return true
 		}
 		if err := t.updateInverseAntiAffinity(ctx, pod, node.Labels); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("tracking existing pod anti-affinity, %w", err))
+			errs = errors.Join(errs, fmt.Errorf("tracking existing pod anti-affinity, %w", err))
 		}
 		return true
 	})
@@ -281,7 +282,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 			// cannot be recovered, and will be deleted by the pod lifecycle
 			// garbage collector. These pods are not running, and should not
 			// impact future topology calculations.
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				continue
 			}
 			return fmt.Errorf("getting node %s, %w", p.Spec.NodeName, err)

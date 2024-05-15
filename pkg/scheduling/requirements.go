@@ -17,13 +17,14 @@ limitations under the License.
 package scheduling
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -169,17 +170,19 @@ var AllowUndefinedWellKnownLabels = func(options CompatibilityOptions) Compatibi
 }
 
 // Compatible ensures the provided requirements can loosely be met.
-func (r Requirements) Compatible(requirements Requirements, options ...functional.Option[CompatibilityOptions]) (errs error) {
+func (r Requirements) Compatible(requirements Requirements, options ...functional.Option[CompatibilityOptions]) error {
+	errs := []error{}
 	opts := functional.ResolveOptions(options...)
 	// Custom Labels must intersect, but if not defined are denied.
 	for key := range requirements.Keys().Difference(opts.AllowUndefined) {
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == v1.NodeSelectorOpNotIn || operator == v1.NodeSelectorOpDoesNotExist {
 			continue
 		}
-		errs = multierr.Append(errs, fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined)))
+		errs = append(errs, fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined)))
 	}
 	// Well Known Labels must intersect, but if not defined, are allowed.
-	return multierr.Append(errs, r.Intersects(requirements))
+	errs = append(errs, r.Intersects(requirements))
+	return errors.Join(errs...)
 }
 
 // editDistance is an implementation of edit distance from Algorithms/DPV
@@ -276,7 +279,8 @@ func (r Requirements) intersectKeys(rhs Requirements) sets.Set[string] {
 }
 
 // Intersects returns errors if the requirements don't have overlapping values, undefined keys are allowed
-func (r Requirements) Intersects(requirements Requirements) (errs error) {
+func (r Requirements) Intersects(requirements Requirements) error {
+	errs := []error{}
 	for key := range r.intersectKeys(requirements) {
 		existing := r.Get(key)
 		incoming := requirements.Get(key)
@@ -289,14 +293,14 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 					continue
 				}
 			}
-			errs = multierr.Append(errs, badKeyError{
+			errs = append(errs, badKeyError{
 				key:      key,
 				incoming: incoming,
 				existing: existing,
 			})
 		}
 	}
-	return errs
+	return errors.Join(errs...)
 }
 
 func (r Requirements) Labels() map[string]string {
