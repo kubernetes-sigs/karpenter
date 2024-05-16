@@ -140,8 +140,12 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, osNames...),
-		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
-		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
+		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+			return o.Requirements.Get(v1.LabelTopologyZone).Any()
+		})...),
+		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+			return o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
+		})...),
 		scheduling.NewRequirement(InstanceSizeLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[InstanceSizeLabelKey]),
 		scheduling.NewRequirement(InstanceFamilyLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[InstanceFamilyLabelKey]),
 		scheduling.NewRequirement(InstanceCPULabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[InstanceCPULabelKey]),

@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -63,8 +64,8 @@ var _ = Describe("Expiration", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -138,8 +139,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -185,8 +186,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -232,8 +233,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -276,8 +277,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -371,8 +372,8 @@ var _ = Describe("Expiration", func() {
 						Labels: map[string]string{
 							v1beta1.NodePoolLabelKey:     np.Name,
 							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 						},
 					},
 					Status: v1beta1.NodeClaimStatus{
@@ -436,8 +437,8 @@ var _ = Describe("Expiration", func() {
 						Labels: map[string]string{
 							v1beta1.NodePoolLabelKey:     np.Name,
 							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 						},
 					},
 					Status: v1beta1.NodeClaimStatus{
@@ -575,8 +576,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -652,8 +653,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -720,8 +721,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -865,8 +866,7 @@ var _ = Describe("Expiration", func() {
 				Name: "current-on-demand",
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: v1beta1.CapacityTypeOnDemand,
-						Zone:         "test-zone-1a",
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.5,
 						Available:    false,
 					},
@@ -876,8 +876,7 @@ var _ = Describe("Expiration", func() {
 				Name: "replacement-on-demand",
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: v1beta1.CapacityTypeOnDemand,
-						Zone:         "test-zone-1a",
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.3,
 						Available:    true,
 					},
@@ -916,14 +915,14 @@ var _ = Describe("Expiration", func() {
 			})
 			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
 				v1.LabelInstanceTypeStable:   currentInstance.Name,
-				v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-				v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+				v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				v1.LabelTopologyZone:         currentInstance.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
 			})
 			nodeClaim.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
 			node.Labels = lo.Assign(node.Labels, map[string]string{
 				v1.LabelInstanceTypeStable:   currentInstance.Name,
-				v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-				v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+				v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				v1.LabelTopologyZone:         currentInstance.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
 			})
 			node.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
 

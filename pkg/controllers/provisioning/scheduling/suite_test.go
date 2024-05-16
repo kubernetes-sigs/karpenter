@@ -1745,10 +1745,12 @@ var _ = Context("Scheduling", func() {
 					},
 					Offerings: []cloudprovider.Offering{
 						{
-							CapacityType: v1beta1.CapacityTypeOnDemand,
-							Zone:         "test-zone-1a",
-							Price:        3.00,
-							Available:    true,
+							Requirements: pscheduling.NewLabelRequirements(map[string]string{
+								v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
+								v1.LabelTopologyZone:         "test-zone-1a",
+							}),
+							Price:     3.00,
+							Available: true,
 						},
 					},
 				}),
@@ -1760,10 +1762,12 @@ var _ = Context("Scheduling", func() {
 					},
 					Offerings: []cloudprovider.Offering{
 						{
-							CapacityType: v1beta1.CapacityTypeOnDemand,
-							Zone:         "test-zone-1a",
-							Price:        2.00,
-							Available:    true,
+							Requirements: pscheduling.NewLabelRequirements(map[string]string{
+								v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
+								v1.LabelTopologyZone:         "test-zone-1a",
+							}),
+							Price:     2.00,
+							Available: true,
 						},
 					},
 				}),
@@ -1775,10 +1779,12 @@ var _ = Context("Scheduling", func() {
 					},
 					Offerings: []cloudprovider.Offering{
 						{
-							CapacityType: v1beta1.CapacityTypeOnDemand,
-							Zone:         "test-zone-1a",
-							Price:        1.00,
-							Available:    true,
+							Requirements: pscheduling.NewLabelRequirements(map[string]string{
+								v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
+								v1.LabelTopologyZone:         "test-zone-1a",
+							}),
+							Price:     1.00,
+							Available: true,
 						},
 					},
 				}),
@@ -3795,7 +3801,7 @@ func ExpectInstancesWithOffering(instanceTypes []*cloudprovider.InstanceType, ca
 	for _, it := range instanceTypes {
 		matched := false
 		for _, offering := range it.Offerings {
-			if offering.CapacityType == capacityType && offering.Zone == zone {
+			if offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == capacityType && offering.Requirements.Get(v1.LabelTopologyZone).Any() == zone {
 				matched = true
 			}
 		}
@@ -3814,7 +3820,7 @@ func ExpectInstancesWithLabel(instanceTypes []*cloudprovider.InstanceType, label
 			{
 				matched := false
 				for _, offering := range it.Offerings {
-					if offering.Zone == value {
+					if offering.Requirements.Get(v1.LabelTopologyZone).Any() == value {
 						matched = true
 						break
 					}
@@ -3825,12 +3831,12 @@ func ExpectInstancesWithLabel(instanceTypes []*cloudprovider.InstanceType, label
 			{
 				matched := false
 				for _, offering := range it.Offerings {
-					if offering.CapacityType == value {
+					if offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == value {
 						matched = true
 						break
 					}
 				}
-				Expect(matched).To(BeTrue(), fmt.Sprintf("expected to find caapacity type %s in an offering", value))
+				Expect(matched).To(BeTrue(), fmt.Sprintf("expected to find capacity type %s in an offering", value))
 			}
 		default:
 			Fail(fmt.Sprintf("unsupported label %s in test", label))

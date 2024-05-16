@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -1959,10 +1960,12 @@ func AddInstanceResources(instanceTypes []*cloudprovider.InstanceType, resources
 	price := fake.PriceFromResources(opts.Resources)
 	opts.Offerings = []cloudprovider.Offering{
 		{
-			CapacityType: v1beta1.CapacityTypeSpot,
-			Zone:         "test-zone-1",
-			Price:        price,
-			Available:    true,
+			Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot,
+				v1.LabelTopologyZone:         "test-zone-1",
+			}),
+			Price:     price,
+			Available: true,
 		},
 	}
 
