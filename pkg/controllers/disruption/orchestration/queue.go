@@ -152,12 +152,10 @@ func NewCommand(replacements []string, candidates []*state.StateNode, id types.U
 	}
 }
 
-func (q *Queue) Name() string {
-	return "disruption.queue"
-}
-
-func (q *Queue) Builder(_ context.Context, m manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(m)
+func (q *Queue) Register(_ context.Context, m manager.Manager) error {
+	return controller.NewSingletonManagedBy(m).
+		Named("disruption.queue").
+		Complete(q)
 }
 
 func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -243,7 +241,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		// We emitted this event when disruption was blocked on launching/termination.
 		// This does not block other forms of deprovisioning, but we should still emit this.
 		q.recorder.Publish(disruptionevents.Launching(nodeClaim, cmd.Reason()))
-		initializedStatus := nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized)
+		initializedStatus := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
 			waitErrs[i] = fmt.Errorf("nodeclaim %s not initialized", nodeClaim.Name)
@@ -251,7 +249,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		}
 		cmd.Replacements[i].Initialized = true
 		// Subtract the last initialization time from the time the command was added to get initialization duration.
-		initLength := initializedStatus.LastTransitionTime.Inner.Time.Sub(nodeClaim.CreationTimestamp.Time).Seconds()
+		initLength := initializedStatus.LastTransitionTime.Time.Sub(nodeClaim.CreationTimestamp.Time).Seconds()
 		disruptionReplacementNodeClaimInitializedHistogram.Observe(initLength)
 	}
 	// If we have any errors, don't continue

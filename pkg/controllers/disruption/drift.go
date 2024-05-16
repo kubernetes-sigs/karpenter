@@ -53,19 +53,15 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 // ShouldDisrupt is a predicate used to filter candidates
 func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	return options.FromContext(ctx).FeatureGates.Drift &&
-		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).IsTrue()
+		c.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()
 }
 
 // ComputeCommand generates a disruption command given candidates
 func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time.Before(
-			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Drifted).LastTransitionTime.Inner.Time)
+		return candidates[i].NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).LastTransitionTime.Time.Before(
+			candidates[j].NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).LastTransitionTime.Time)
 	})
-	EligibleNodesGauge.With(map[string]string{
-		methodLabel:            d.Type(),
-		consolidationTypeLabel: d.ConsolidationType(),
-	}).Set(float64(len(candidates)))
 
 	// Do a quick check through the candidates to see if they're empty.
 	// For each candidate that is empty with a nodePool allowing its disruption
@@ -107,7 +103,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
-			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
+			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, results.NonPendingPodSchedulingErrors())...)
 			continue
 		}
 

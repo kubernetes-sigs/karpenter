@@ -22,12 +22,15 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"regexp"
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
 	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
-	prometheus "github.com/prometheus/client_model/go"
+	"github.com/prometheus/client_golang/prometheus"
+	prometheusmodel "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -40,13 +43,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/apis"
 	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -55,7 +59,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -164,6 +167,22 @@ func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Objec
 		}
 		ExpectNotFound(ctx, c, object)
 	}
+}
+
+// TODO: Consider removing converting this into a standard reconciler; however, objects have to be properly updated if we don't rely on the Rconcile() method to get the object for us
+func ExpectObjectReconciled[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) reconcile.Result {
+	GinkgoHelper()
+	result, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
+	Expect(err).ToNot(HaveOccurred())
+	return result
+}
+
+// TODO: Consider removing converting this into a standard reconciler; however, objects have to be properly updated if we don't rely on the Rconcile() method to get the object for us
+func ExpectObjectReconcileFailed[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) error {
+	GinkgoHelper()
+	_, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
+	Expect(err).To(HaveOccurred())
+	return err
 }
 
 // ExpectDeletionTimestampSetWithOffset ensures that the deletion timestamp is set on the objects by adding a finalizer
@@ -310,7 +329,7 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudPr
 
 	// Make the nodeclaim ready in the status conditions
 	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
-	nc.StatusConditions().MarkTrue(v1beta1.Launched)
+	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
 	ExpectApplied(ctx, c, nc)
 	return nc, nil
 }
@@ -322,7 +341,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 	if err != nil {
 		return nc, nil, err
 	}
-	nc.StatusConditions().MarkTrue(v1beta1.Registered)
+	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
 
 	// Mock the nodeclaim launch and node joining at the apiserver
 	node := test.NodeClaimLinkedNode(nc)
@@ -365,9 +384,9 @@ func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeC
 	GinkgoHelper()
 	for i := range nodeClaims {
 		nodeClaims[i] = ExpectExists(ctx, c, nodeClaims[i])
-		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Launched)
-		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Registered)
-		nodeClaims[i].StatusConditions().MarkTrue(v1beta1.Initialized)
+		nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
+		nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
+		nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 		ExpectApplied(ctx, c, nodeClaims[i])
 	}
 }
@@ -443,10 +462,10 @@ func ExpectReconcileFailed(ctx context.Context, reconciler reconcile.Reconciler,
 	Expect(err).To(HaveOccurred())
 }
 
-func ExpectStatusConditionExists(obj apis.ConditionsAccessor, t apis.ConditionType) apis.Condition {
+func ExpectStatusConditionExists(obj status.Object, t string) status.Condition {
 	GinkgoHelper()
 	conds := obj.GetConditions()
-	cond, ok := lo.Find(conds, func(c apis.Condition) bool {
+	cond, ok := lo.Find(conds, func(c status.Condition) bool {
 		return c.Type == t
 	})
 	Expect(ok).To(BeTrue())
@@ -461,14 +480,41 @@ func ExpectOwnerReferenceExists(obj, owner client.Object) metav1.OwnerReference 
 	return or
 }
 
+// ExpectMetricName attempts to resolve a metric name from a collector. This function will work so long as the fully
+// qualified name is a single metric name. This holds true for the built in types, but may not for custom collectors.
+func ExpectMetricName(collector prometheus.Collector) string {
+	GinkgoHelper()
+
+	// Prometheus defines an async method to resolve the description for a collector. This is simpler than it looks,
+	// Describe just returns a string through the provided channel.
+	result := make(chan *prometheus.Desc)
+	var desc *prometheus.Desc
+	go func() {
+		collector.Describe(result)
+	}()
+	select {
+	case desc = <-result:
+	// Add a timeout so a failure doesn't result in stalling the entire test suite. This should never occur.
+	case <-time.After(time.Second):
+	}
+	Expect(desc).ToNot(BeNil())
+
+	// Extract the fully qualified name from the description string. This is just different enough from json that we
+	// need to parse with regex.
+	rgx := regexp.MustCompile(`^.*fqName:\s*"([^"]*).*$`)
+	matches := rgx.FindStringSubmatch(desc.String())
+	Expect(len(matches)).To(Equal(2))
+	return matches[1]
+}
+
 // FindMetricWithLabelValues attempts to find a metric with a name with a set of label values
-// If no metric is found, the *prometheus.Metric will be nil
-func FindMetricWithLabelValues(name string, labelValues map[string]string) (*prometheus.Metric, bool) {
+// If no metric is found, the *prometheusmodel.Metric will be nil
+func FindMetricWithLabelValues(name string, labelValues map[string]string) (*prometheusmodel.Metric, bool) {
 	GinkgoHelper()
 	metrics, err := crmetrics.Registry.Gather()
 	Expect(err).To(BeNil())
 
-	mf, found := lo.Find(metrics, func(mf *prometheus.MetricFamily) bool {
+	mf, found := lo.Find(metrics, func(mf *prometheusmodel.MetricFamily) bool {
 		return mf.GetName() == name
 	})
 	if !found {
@@ -488,15 +534,17 @@ func FindMetricWithLabelValues(name string, labelValues map[string]string) (*pro
 	return nil, false
 }
 
-func ExpectMetricGaugeValue(metricName string, expectedValue float64, labels map[string]string) {
+func ExpectMetricGaugeValue(collector prometheus.Collector, expectedValue float64, labels map[string]string) {
 	GinkgoHelper()
+	metricName := ExpectMetricName(collector)
 	metric, ok := FindMetricWithLabelValues(metricName, labels)
 	Expect(ok).To(BeTrue(), "Metric "+metricName+" should be available")
 	Expect(lo.FromPtr(metric.Gauge.Value)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")
 }
 
-func ExpectMetricCounterValue(metricName string, expectedValue float64, labels map[string]string) {
+func ExpectMetricCounterValue(collector prometheus.Collector, expectedValue float64, labels map[string]string) {
 	GinkgoHelper()
+	metricName := ExpectMetricName(collector)
 	metric, ok := FindMetricWithLabelValues(metricName, labels)
 	Expect(ok).To(BeTrue(), "Metric "+metricName+" should be available")
 	Expect(lo.FromPtr(metric.Counter.Value)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")
@@ -599,7 +647,7 @@ func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1beta
 	return ret
 }
 
-func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController, nodeClaimStateController controller.Controller, nodes []*v1.Node, nodeClaims []*v1beta1.NodeClaim) {
+func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController *informer.NodeController, nodeClaimStateController *informer.NodeClaimController, nodes []*v1.Node, nodeClaims []*v1beta1.NodeClaim) {
 	GinkgoHelper()
 
 	ExpectMakeNodesInitialized(ctx, c, nodes...)

@@ -51,7 +51,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
@@ -71,9 +70,9 @@ var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
-var nodeStateController controller.Controller
-var nodeClaimStateController controller.Controller
-var podStateController controller.Controller
+var nodeStateController *informer.NodeController
+var nodeClaimStateController *informer.NodeClaimController
+var podStateController *informer.PodController
 
 const csiProvider = "fake.csi.provider"
 const isDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"
@@ -108,7 +107,7 @@ var _ = BeforeEach(func() {
 	newCP := fake.CloudProvider{}
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
-	scheduling.MaxInstanceTypes = 100
+	scheduling.MaxInstanceTypes = 60
 })
 
 var _ = AfterEach(func() {
@@ -2027,7 +2026,7 @@ var _ = Context("Scheduling", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().MarkTrue(v1beta1.Initialized)
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
 
 				// delete the pod so that the node is empty
@@ -2095,7 +2094,7 @@ var _ = Context("Scheduling", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().MarkTrue(v1beta1.Initialized)
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
 
 				node1.Spec.Taints = []v1.Taint{startupTaint}
@@ -2370,7 +2369,7 @@ var _ = Context("Scheduling", func() {
 			// shouldn't create a second node
 			Expect(nodes.Items).To(HaveLen(1))
 		})
-		It("should order initialized nodes for scheduling un-initialized nodes when all other nodes are inflight", func() {
+		It("should order initialized nodes for scheduling uninitialized nodes when all other nodes are inflight", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			var nodeClaims []*v1beta1.NodeClaim
@@ -2468,7 +2467,7 @@ var _ = Context("Scheduling", func() {
 				Expect(node.Name).To(Equal(scheduledNode.Name))
 			}
 		})
-		It("should order initialized nodes for scheduling un-initialized nodes", func() {
+		It("should order initialized nodes for scheduling uninitialized nodes", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			var nodeClaims []*v1beta1.NodeClaim

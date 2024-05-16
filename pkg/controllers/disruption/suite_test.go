@@ -47,7 +47,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -61,8 +60,8 @@ var cluster *state.Cluster
 var disruptionController *disruption.Controller
 var prov *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
-var nodeStateController controller.Controller
-var nodeClaimStateController controller.Controller
+var nodeStateController *informer.NodeController
+var nodeClaimStateController *informer.NodeClaimController
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
 var queue *orchestration.Queue
@@ -281,7 +280,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// Mark all nodeclaims as expired
 		for _, nc := range nodeClaims {
-			nc.StatusConditions().MarkTrue(v1beta1.Expired)
+			nc.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 			ExpectApplied(ctx, env.Client, nc)
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
 		}
@@ -1523,7 +1522,7 @@ var _ = Describe("Metrics", func() {
 				},
 			},
 		})
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 		// inform cluster state about nodes and nodeclaims
@@ -1536,16 +1535,16 @@ var _ = Describe("Metrics", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
 			"action": "delete",
 			"method": "drift",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 1, map[string]string{
+		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 1, map[string]string{
 			"nodepool": nodePool.Name,
 			"action":   "delete",
 			"method":   "drift",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 0, map[string]string{
+		ExpectMetricCounterValue(disruption.PodsDisruptedCounter, 0, map[string]string{
 			"nodepool": nodePool.Name,
 			"action":   "delete",
 			"method":   "drift",
@@ -1570,7 +1569,7 @@ var _ = Describe("Metrics", func() {
 		})
 		pods := test.Pods(4, test.PodOptions{})
 
-		nodeClaims[0].StatusConditions().MarkTrue(v1beta1.Drifted)
+		nodeClaims[0].StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 
 		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
 
@@ -1590,16 +1589,16 @@ var _ = Describe("Metrics", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
 			"action": "delete",
 			"method": "drift",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 1, map[string]string{
+		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 1, map[string]string{
 			"nodepool": nodePool.Name,
 			"action":   "delete",
 			"method":   "drift",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 2, map[string]string{
+		ExpectMetricCounterValue(disruption.PodsDisruptedCounter, 2, map[string]string{
 			"nodepool": nodePool.Name,
 			"action":   "delete",
 			"method":   "drift",
@@ -1624,7 +1623,7 @@ var _ = Describe("Metrics", func() {
 			},
 		})
 		pods := test.Pods(4, test.PodOptions{})
-		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 
 		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3], nodeClaim, node, nodePool)
 
@@ -1644,16 +1643,16 @@ var _ = Describe("Metrics", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
 		wg.Wait()
 
-		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
 			"action": "replace",
 			"method": "drift",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 1, map[string]string{
+		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 1, map[string]string{
 			"nodepool": nodePool.Name,
 			"action":   "replace",
 			"method":   "drift",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 4, map[string]string{
+		ExpectMetricCounterValue(disruption.PodsDisruptedCounter, 4, map[string]string{
 			"nodepool": nodePool.Name,
 			"action":   "replace",
 			"method":   "drift",
@@ -1688,18 +1687,18 @@ var _ = Describe("Metrics", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
-		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
 			"action":             "delete",
 			"method":             "consolidation",
 			"consolidation_type": "empty",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 3, map[string]string{
+		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 3, map[string]string{
 			"nodepool":           nodePool.Name,
 			"action":             "delete",
 			"method":             "consolidation",
 			"consolidation_type": "empty",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 0, map[string]string{
+		ExpectMetricCounterValue(disruption.PodsDisruptedCounter, 0, map[string]string{
 			"nodepool":           nodePool.Name,
 			"action":             "delete",
 			"method":             "consolidation",
@@ -1759,18 +1758,18 @@ var _ = Describe("Metrics", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
-		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
 			"action":             "delete",
 			"method":             "consolidation",
 			"consolidation_type": "multi",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 2, map[string]string{
+		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 2, map[string]string{
 			"nodepool":           nodePool.Name,
 			"action":             "delete",
 			"method":             "consolidation",
 			"consolidation_type": "multi",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 2, map[string]string{
+		ExpectMetricCounterValue(disruption.PodsDisruptedCounter, 2, map[string]string{
 			"nodepool":           nodePool.Name,
 			"action":             "delete",
 			"method":             "consolidation",
@@ -1831,18 +1830,18 @@ var _ = Describe("Metrics", func() {
 		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
 		wg.Wait()
 
-		ExpectMetricCounterValue("karpenter_disruption_actions_performed_total", 1, map[string]string{
+		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
 			"action":             "replace",
 			"method":             "consolidation",
 			"consolidation_type": "multi",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_nodes_disrupted_total", 3, map[string]string{
+		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 3, map[string]string{
 			"nodepool":           nodePool.Name,
 			"action":             "replace",
 			"method":             "consolidation",
 			"consolidation_type": "multi",
 		})
-		ExpectMetricCounterValue("karpenter_disruption_pods_disrupted_total", 4, map[string]string{
+		ExpectMetricCounterValue(disruption.PodsDisruptedCounter, 4, map[string]string{
 			"nodepool":           nodePool.Name,
 			"action":             "replace",
 			"method":             "consolidation",

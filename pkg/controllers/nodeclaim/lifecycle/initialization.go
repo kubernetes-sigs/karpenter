@@ -46,34 +46,34 @@ type Initialization struct {
 // c) all extended resources have been registered
 // This method handles both nil nodepools and nodes without extended resources gracefully.
 func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue() {
+	if nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsTrue() {
 		return reconcile.Result{}, nil
 	}
-	if !nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() {
-		nodeClaim.StatusConditions().MarkFalse(v1beta1.Initialized, "NotLaunched", "Node not launched")
+	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue() {
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "NotLaunched", "Node not launched")
 		return reconcile.Result{}, nil
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", nodeClaim.Status.ProviderID))
 	node, err := nodeclaimutil.NodeForNodeClaim(ctx, i.kubeClient, nodeClaim)
 	if err != nil {
-		nodeClaim.StatusConditions().MarkFalse(v1beta1.Initialized, "NodeNotFound", "Node not registered with cluster")
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "NodeNotFound", "Node not registered with cluster")
 		return reconcile.Result{}, nil //nolint:nilerr
 	}
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
 	if nodeutil.GetCondition(node, v1.NodeReady).Status != v1.ConditionTrue {
-		nodeClaim.StatusConditions().MarkFalse(v1beta1.Initialized, "NodeNotReady", "Node status is NotReady")
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "NodeNotReady", "Node status is NotReady")
 		return reconcile.Result{}, nil
 	}
 	if taint, ok := StartupTaintsRemoved(node, nodeClaim); !ok {
-		nodeClaim.StatusConditions().MarkFalse(v1beta1.Initialized, "StartupTaintsExist", "StartupTaint %q still exists", formatTaint(taint))
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "StartupTaintsExist", fmt.Sprintf("StartupTaint %q still exists", formatTaint(taint)))
 		return reconcile.Result{}, nil
 	}
 	if taint, ok := KnownEphemeralTaintsRemoved(node); !ok {
-		nodeClaim.StatusConditions().MarkFalse(v1beta1.Initialized, "KnownEphemeralTaintsExist", "KnownEphemeralTaint %q still exists", formatTaint(taint))
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "KnownEphemeralTaintsExist", fmt.Sprintf("KnownEphemeralTaint %q still exists", formatTaint(taint)))
 		return reconcile.Result{}, nil
 	}
 	if name, ok := RequestedResourcesRegistered(node, nodeClaim); !ok {
-		nodeClaim.StatusConditions().MarkFalse(v1beta1.Initialized, "ResourceNotRegistered", "Resource %q was requested but not registered", name)
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "ResourceNotRegistered", fmt.Sprintf("Resource %q was requested but not registered", name))
 		return reconcile.Result{}, nil
 	}
 	stored := node.DeepCopy()
@@ -84,7 +84,7 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeC
 		}
 	}
 	logging.FromContext(ctx).With("allocatable", node.Status.Allocatable).Infof("initialized nodeclaim")
-	nodeClaim.StatusConditions().MarkTrue(v1beta1.Initialized)
+	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 	metrics.NodeClaimsInitializedCounter.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 	}).Inc()

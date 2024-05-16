@@ -89,7 +89,7 @@ func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudPro
 func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// Set the metric to whatever the result of the Synced() call is
 	defer func() {
-		clusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
+		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
 	}()
 	nodeClaimList := &v1beta1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
@@ -239,7 +239,7 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1beta1.NodeClaim) {
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
 	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
-	clusterStateNodesCount.Set(float64(len(c.nodes)))
+	ClusterStateNodesCount.Set(float64(len(c.nodes)))
 }
 
 func (c *Cluster) DeleteNodeClaim(name string) {
@@ -247,7 +247,7 @@ func (c *Cluster) DeleteNodeClaim(name string) {
 	defer c.mu.Unlock()
 
 	c.cleanupNodeClaim(name)
-	clusterStateNodesCount.Set(float64(len(c.nodes)))
+	ClusterStateNodesCount.Set(float64(len(c.nodes)))
 }
 
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
@@ -274,7 +274,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {
 	}
 	c.nodes[node.Spec.ProviderID] = n
 	c.nodeNameToProviderID[node.Name] = node.Spec.ProviderID
-	clusterStateNodesCount.Set(float64(len(c.nodes)))
+	ClusterStateNodesCount.Set(float64(len(c.nodes)))
 	return nil
 }
 
@@ -282,7 +282,7 @@ func (c *Cluster) DeleteNode(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cleanupNode(name)
-	clusterStateNodesCount.Set(float64(len(c.nodes)))
+	ClusterStateNodesCount.Set(float64(len(c.nodes)))
 }
 
 func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {

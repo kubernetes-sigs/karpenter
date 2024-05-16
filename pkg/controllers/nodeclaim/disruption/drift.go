@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
-	"knative.dev/pkg/apis"
 	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -47,20 +45,20 @@ type Drift struct {
 }
 
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	hasDriftedCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.Drifted) != nil
+	hasDriftedCondition := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted) != nil
 
 	// From here there are three scenarios to handle:
 	// 1. If drift is not enabled but the NodeClaim is drifted, remove the status condition
 	if !options.FromContext(ctx).FeatureGates.Drift {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
+		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drift status condition, drift has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
 	// 2. If NodeClaim is not launched, remove the drift status condition
-	if launchCond := nodeClaim.StatusConditions().GetCondition(v1beta1.Launched); launchCond == nil || launchCond.IsFalse() {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
+	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue() {
+		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drift status condition, isn't launched")
 		}
@@ -72,19 +70,14 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	}
 	// 3. Otherwise, if the NodeClaim isn't drifted, but has the status condition, remove it.
 	if driftedReason == "" {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Drifted)
+		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
 		if hasDriftedCondition {
 			logging.FromContext(ctx).Debugf("removing drifted status condition, not drifted")
 		}
 		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 	// 4. Finally, if the NodeClaim is drifted, but doesn't have status condition, add it.
-	nodeClaim.StatusConditions().SetCondition(apis.Condition{
-		Type:     v1beta1.Drifted,
-		Status:   v1.ConditionTrue,
-		Severity: apis.ConditionSeverityWarning,
-		Reason:   string(driftedReason),
-	})
+	nodeClaim.StatusConditions().SetTrueWithReason(v1beta1.ConditionTypeDrifted, string(driftedReason), string(driftedReason))
 	if !hasDriftedCondition {
 		logging.FromContext(ctx).With("reason", string(driftedReason)).Debugf("marking drifted")
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{

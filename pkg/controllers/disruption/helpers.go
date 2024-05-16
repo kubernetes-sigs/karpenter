@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/samber/lo"
 
@@ -44,6 +45,8 @@ import (
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
+
+var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 //nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
@@ -104,13 +107,33 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 				//    for this command, and we assume it will be successful. If it is not successful, the node will become
 				//    not terminating, and we will no longer need to consider these pods.
 				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; !ok {
-					results.PodErrors[p] = fmt.Errorf("would schedule against a non-initialized node %s", n.Name())
+					results.PodErrors[p] = NewUninitializedNodeError(n)
 				}
 			}
 		}
 	}
-
 	return results, nil
+}
+
+// UninitializedNodeError tracks a special pod error for disruption where pods schedule to a node
+// that hasn't been initialized yet, meaning that we can't be confident to make a disruption decision based off of it
+type UninitializedNodeError struct {
+	*pscheduling.ExistingNode
+}
+
+func NewUninitializedNodeError(node *pscheduling.ExistingNode) *UninitializedNodeError {
+	return &UninitializedNodeError{ExistingNode: node}
+}
+
+func (u *UninitializedNodeError) Error() string {
+	var info []string
+	if u.NodeClaim != nil {
+		info = append(info, fmt.Sprintf("nodeclaim/%s", u.NodeClaim.Name))
+	}
+	if u.Node != nil {
+		info = append(info, fmt.Sprintf("node/%s", u.Node.Name))
+	}
+	return fmt.Sprintf("would schedule against uninitialized %s", strings.Join(info, ", "))
 }
 
 // instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
@@ -144,28 +167,25 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return clamp(-10.0, cost, 10.0)
 }
 
-// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and iterates over the cumulative minimum requirement of the InstanceTypeOptions to see if it meets the minValues of requirements.
-// The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim
-func filterByPriceWithMinValues(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, string, int) {
-	var result []*cloudprovider.InstanceType
-
+// filterByPrice returns the instanceTypes that are lower priced than the current candidate.
+// The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim.
+// If the result of the filtering means that minValues can't be satisfied, we return an error.
+func filterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, error) {
+	var res cloudprovider.InstanceTypes
 	for _, it := range options {
 		launchPrice := worstLaunchPrice(it.Offerings.Available(), reqs)
 		if launchPrice < price {
-			result = append(result, it)
+			res = append(res, it)
 		}
 	}
-	var incompatibleReqKey string
-	var numInstanceTypes int
-	// Only try to find the incompatible minValue requirement key if requirements have minValues.
 	if reqs.HasMinValues() {
-		// We would have already filtered the invalid nodeclaim not meeting the minimum requirements in simulated scheduling results.
+		// We would have already filtered the invalid NodeClaim not meeting the minimum requirements in simulated scheduling results.
 		// Here the instanceTypeOptions changed again based on the price and requires re-validation.
-		incompatibleReqKey, numInstanceTypes = pscheduling.IncompatibleReqAcrossInstanceTypes(reqs, lo.Slice(result, 0, pscheduling.MaxInstanceTypes))
+		if _, err := res.SatisfiesMinValues(reqs); err != nil {
+			return nil, fmt.Errorf("validating minValues, %w", err)
+		}
 	}
-	// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.
-	result = lo.Ternary(len(incompatibleReqKey) > 0, []*cloudprovider.InstanceType{}, result)
-	return result, incompatibleReqKey, numInstanceTypes
+	return res, nil
 }
 
 func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {

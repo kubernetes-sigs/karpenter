@@ -22,36 +22,34 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
-// Controller for the resource
-type Controller struct {
+type DaemonSetController struct {
 	kubeClient client.Client
 	cluster    *state.Cluster
 }
 
-// NewController constructs a controller instance
-func NewDaemonSetController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
-	return &Controller{
+func NewDaemonSetController(kubeClient client.Client, cluster *state.Cluster) *DaemonSetController {
+	return &DaemonSetController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
 	}
 }
 
-func (c *Controller) Name() string {
-	return "state.daemonset"
-}
+func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("state.daemonset").With("daemonset", req.String()))
+	ctx = injection.WithControllerName(ctx, "state.daemonset")
 
-// Reconcile the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	daemonSet := appsv1.DaemonSet{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
 		if errors.IsNotFound(err) {
@@ -66,10 +64,10 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *DaemonSetController) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("state.daemonset").
 		For(&appsv1.DaemonSet{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
-	)
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(c)
 }

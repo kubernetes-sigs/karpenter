@@ -37,13 +37,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
-
-var _ operatorcontroller.FinalizingTypedController[*v1beta1.NodeClaim] = (*Controller)(nil)
 
 // Controller is a NodeClaim Termination controller that triggers deletion of the Node and the
 // CloudProvider NodeClaim through its graceful termination mechanism
@@ -53,19 +52,25 @@ type Controller struct {
 }
 
 // NewController is a constructor for the NodeClaim Controller
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1beta1.NodeClaim](kubeClient, &Controller{
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
-	})
+	}
 }
 
-func (c *Controller) Reconcile(_ context.Context, _ *v1beta1.NodeClaim) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, n *v1beta1.NodeClaim) (reconcile.Result, error) {
+	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodeclaim.termination").With("nodeclaim", n.Name))
+	ctx = injection.WithControllerName(ctx, "nodeclaim.termination")
+
+	if !n.GetDeletionTimestamp().IsZero() {
+		return c.finalize(ctx, n)
+	}
 	return reconcile.Result{}, nil
 }
 
 //nolint:gocyclo
-func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+func (c *Controller) finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", nodeClaim.Status.NodeName, "provider-id", nodeClaim.Status.ProviderID))
 	stored := nodeClaim.DeepCopy()
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1beta1.TerminationFinalizer) {
@@ -90,12 +95,6 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	}
 	if nodeClaim.Status.ProviderID != "" {
 		if err = c.cloudProvider.Delete(ctx, nodeClaim); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
-			// We expect cloudProvider to emit a Retryable Error when the underlying instance is not terminated and if that
-			// happens, we want to re-enqueue reconciliation until we terminate the underlying instance before removing
-			// finalizer from the nodeClaim.
-			if cloudprovider.IsRetryableError(err) {
-				return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
-			}
 			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 		}
 	}
@@ -116,12 +115,12 @@ func (c *Controller) Finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 }
 
 func (*Controller) Name() string {
-	return "nodeclaim.termination"
+	return ""
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("nodeclaim.termination").
 		For(&v1beta1.NodeClaim{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Watches(
@@ -141,5 +140,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
 			MaxConcurrentReconciles: 100, // higher concurrency limit since we want fast reaction to termination
-		}))
+		}).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

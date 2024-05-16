@@ -134,6 +134,53 @@ var _ = Describe("Consolidation", func() {
 			Expect(recorder.Calls("Unconsolidatable")).To(Equal(6))
 		})
 	})
+	Context("Metrics", func() {
+		var consolidationTypes = []string{"empty", "single", "multi"}
+		It("should correctly report eligible nodes", func() {
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1beta1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
+
+			for _, ct := range consolidationTypes {
+				ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, map[string]string{
+					"method":             "consolidation",
+					"consolidation_type": ct,
+				})
+			}
+
+			// remove the do-not-disrupt annotation to make the node eligible for consolidation and update cluster state
+			pod.SetAnnotations(map[string]string{})
+			ExpectApplied(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			ExpectTriggerVerifyAction(&wg)
+			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			wg.Wait()
+
+			for _, ct := range consolidationTypes {
+				ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, map[string]string{
+					"method":             "consolidation",
+					"consolidation_type": ct,
+				})
+			}
+		})
+	})
 	Context("Budgets", func() {
 		var numNodes = 10
 		var nodeClaims []*v1beta1.NodeClaim
@@ -3161,7 +3208,7 @@ var _ = Describe("Consolidation", func() {
 			// and will not be recreated
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
-		It("won't delete node if it would require pods to schedule on an un-initialized node", func() {
+		It("won't delete node if it would require pods to schedule on an uninitialized node", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -3205,11 +3252,11 @@ var _ = Describe("Consolidation", func() {
 			})
 			Expect(ok).To(BeTrue())
 			_, ok = lo.Find(evts, func(e events.Event) bool {
-				return strings.Contains(e.Message, "would schedule against a non-initialized node")
+				return strings.Contains(e.Message, "would schedule against uninitialized nodeclaim")
 			})
 			Expect(ok).To(BeTrue())
 		})
-		It("should consider initialized nodes before un-initialized nodes", func() {
+		It("should consider initialized nodes before uninitialized nodes", func() {
 			defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "default-instance-type",
 				Resources: v1.ResourceList{
@@ -3343,10 +3390,10 @@ var _ = Describe("Consolidation", func() {
 			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
 
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, consolidatableNodeClaim)
-			// Expect no events that state that the pods would schedule against a non-initialized node
+			// Expect no events that state that the pods would schedule against a uninitialized node
 			evts := recorder.Events()
 			_, ok := lo.Find(evts, func(e events.Event) bool {
-				return strings.Contains(e.Message, "would schedule against a non-initialized node")
+				return strings.Contains(e.Message, "would schedule against uninitialized nodeclaim")
 			})
 			Expect(ok).To(BeFalse())
 

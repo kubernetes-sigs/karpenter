@@ -58,19 +58,15 @@ func NewExpiration(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 // ShouldDisrupt is a predicate used to filter candidates
 func (e *Expiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	return c.nodePool.Spec.Disruption.ExpireAfter.Duration != nil &&
-		c.NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()
+		c.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).IsTrue()
 }
 
 // ComputeCommand generates a disruption command given candidates
 func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time.Before(
-			candidates[j].NodeClaim.StatusConditions().GetCondition(v1beta1.Expired).LastTransitionTime.Inner.Time)
+		return candidates[i].NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).LastTransitionTime.Time.Before(
+			candidates[j].NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).LastTransitionTime.Time)
 	})
-	EligibleNodesGauge.With(map[string]string{
-		methodLabel:            e.Type(),
-		consolidationTypeLabel: e.ConsolidationType(),
-	}).Set(float64(len(candidates)))
 
 	// Do a quick check through the candidates to see if they're empty.
 	// For each candidate that is empty with a nodePool allowing its disruption
@@ -113,7 +109,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
-			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, "Scheduling simulation failed to schedule all pods")...)
+			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, results.NonPendingPodSchedulingErrors())...)
 			continue
 		}
 		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Disruption.ExpireAfter.String()).Infof("triggering termination for expired node after TTL")
