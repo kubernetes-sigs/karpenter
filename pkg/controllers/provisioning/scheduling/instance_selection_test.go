@@ -895,7 +895,7 @@ var _ = Describe("Instance Type Selection", func() {
 			ExpectApplied(ctx, env.Client, pod2)
 			results, _ := prov.Schedule(ctx)
 			for _, v := range results.PodErrors {
-				Expect(v.Error()).To(ContainSubstring("minValues requirement is not met for karpenter/numerical-value"))
+				Expect(v.Error()).To(ContainSubstring(`minValues requirement is not met for "karpenter/numerical-value"`))
 			}
 			ExpectNotScheduled(ctx, env.Client, pod1)
 			ExpectNotScheduled(ctx, env.Client, pod2)
