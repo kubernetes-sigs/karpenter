@@ -294,6 +294,16 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 // on an instance type. If the instance type has a spot offering available, then it uses the spot offering
 // to get the launch price; else, it uses the on-demand launch price
 func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements) float64 {
+	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has("capacity-reservation") {
+		capacityReservationsOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
+			return of.CapacityType == "capacity-reservation" && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
+		})
+		if len(capacityReservationsOfferings) > 0 {
+			return lo.MaxBy(capacityReservationsOfferings, func(of1, of2 cloudprovider.Offering) bool {
+				return of1.Price > of2.Price
+			}).Price
+		}
+	}
 	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
 	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
 		spotOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
