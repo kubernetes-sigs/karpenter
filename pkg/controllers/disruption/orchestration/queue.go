@@ -205,7 +205,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		// Log the error
 		log.FromContext(ctx).WithValues("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
 			return s.Name()
-		}), ",")).Error(multiErr, "Disruption error")
+		}), ",")).Error(multiErr, "failed terminating nodes while executing a disruption command")
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)

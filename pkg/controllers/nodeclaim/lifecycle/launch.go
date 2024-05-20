@@ -83,7 +83,7 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		switch {
 		case cloudprovider.IsInsufficientCapacityError(err):
 			l.recorder.Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
-			log.FromContext(ctx).Error(fmt.Errorf("launching nodeclaim, %w", err), "nodeClaim lifecycle error")
+			log.FromContext(ctx).Error(err, "failed launching nodeclaim")
 
 			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)

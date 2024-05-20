@@ -95,8 +95,8 @@ var singletonRequest = reconcile.Request{}
 func (s *Singleton) Start(ctx context.Context) error {
 	ctx = injection.WithControllerName(ctx, s.name)
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName(s.name))
-	log.FromContext(ctx).Info("starting controller")
-	defer log.FromContext(ctx).Info("stopping controller")
+	log.FromContext(ctx).Info("Starting controller")
+	defer log.FromContext(ctx).Info("Stopping controller")
 
 	for {
 		select {
@@ -119,7 +119,7 @@ func (s *Singleton) reconcile(ctx context.Context) time.Duration {
 	case err != nil:
 		reconcileErrors.WithLabelValues(s.name).Inc()
 		reconcileTotal.WithLabelValues(s.name, labelError).Inc()
-		log.FromContext(ctx).Error(err, "reconciler error")
+		log.FromContext(ctx).Error(err, "Reconciler error")
 		return s.rateLimiter.When(singletonRequest)
 	case res.Requeue:
 		reconcileTotal.WithLabelValues(s.name, labelRequeue).Inc()

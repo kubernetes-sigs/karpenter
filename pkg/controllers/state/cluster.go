@@ -94,12 +94,12 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	}()
 	nodeClaimList := &v1beta1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
-		log.FromContext(ctx).Error(fmt.Errorf("checking cluster state sync, %w", err), "cluster state error")
+		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
 	nodeList := &v1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList); err != nil {
-		log.FromContext(ctx).Error(fmt.Errorf("checking cluster state sync, %w", err), "cluster state error")
+		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
 	c.mu.RLock()

@@ -88,7 +88,7 @@ func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Vol
 		// computing limits, otherwise Karpenter may never be able to update its cluster state.
 		if err != nil {
 			if errors.IsNotFound(err) {
-				log.FromContext(ctx).WithValues("pod", pod.Name, "volume", volume.Name).Error(fmt.Errorf("failed tracking CSI volume limits for volume, %w", err), "volume usage tracking error")
+				log.FromContext(ctx).WithValues("pod", pod.Name, "volume", volume.Name).Error(err, "failed tracking CSI volume limits for volume")
 				continue
 			}
 			return nil, fmt.Errorf("failed updating volume limits, %w", err)

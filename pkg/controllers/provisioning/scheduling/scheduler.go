@@ -104,7 +104,7 @@ type Results struct {
 func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
 	// Report failures and nominations
 	for p, err := range r.PodErrors {
-		log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(p)).Error(fmt.Errorf("could not schedule pod, %w", err), "scheduler error")
+		log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(p)).Error(err, "could not schedule pod")
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
 	for _, existing := range r.ExistingNodes {
@@ -223,7 +223,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 		q.Push(pod, relaxed)
 		if relaxed {
 			if err := s.topology.Update(ctx, pod); err != nil {
-				log.FromContext(ctx).Error(fmt.Errorf("updating topology, %w", err), "scheduler error")
+				log.FromContext(ctx).Error(err, "failed updating topology")
 			}
 		}
 	}
