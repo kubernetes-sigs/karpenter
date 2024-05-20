@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1
 
 import (
 	"context"
@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/clock"
+	"knative.dev/pkg/ptr"
 )
 
 // NodePoolSpec is the top level nodepool specification. Nodepools
@@ -176,7 +177,6 @@ type ObjectMeta struct {
 
 // NodePool is the Schema for the NodePools API
 // +kubebuilder:object:root=true
-// +kubebuilder:storageversion
 // +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter
 // +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClassRef.name",description=""
 // +kubebuilder:printcolumn:name="Weight",type="string",JSONPath=".spec.weight",priority=1,description=""
@@ -218,8 +218,8 @@ type NodePoolList struct {
 //  2. If two NodePools have the same weight, then the NodePool with the name later in the alphabet will come first
 func (nl *NodePoolList) OrderByWeight() {
 	sort.Slice(nl.Items, func(a, b int) bool {
-		weightA := lo.FromPtr(nl.Items[a].Spec.Weight)
-		weightB := lo.FromPtr(nl.Items[b].Spec.Weight)
+		weightA := ptr.Int32Value(nl.Items[a].Spec.Weight)
+		weightB := ptr.Int32Value(nl.Items[b].Spec.Weight)
 
 		if weightA == weightB {
 			// Order NodePools by name for a consistent ordering when sorting equal weight
