@@ -151,7 +151,7 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 		podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
 		if err != nil {
 			log.FromContext(ctx).Error(fmt.Errorf("parsing %s=%s from pod %s, %w",
-				v1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p), err), "Disruption error")
+				v1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p), err), "disruption error")
 		} else {
 			// the pod deletion disruptionCost is in [-2147483647, 2147483647]
 			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
@@ -288,7 +288,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		if err != nil {
 			// don't error out on building the node pool, we just won't be able to handle any nodes that
 			// were created by it
-			log.FromContext(ctx).Error(fmt.Errorf("listing instance types for %s, %w", np.Name, err), "Disruption error")
+			log.FromContext(ctx).Error(fmt.Errorf("listing instance types for %s, %w", np.Name, err), "disruption error")
 			continue
 		}
 		if len(nodePoolInstanceTypes) == 0 {

@@ -73,7 +73,6 @@ const (
 
 var (
 	BuildInfo = prometheus.NewGaugeVec(
-
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Name:      "build_info",

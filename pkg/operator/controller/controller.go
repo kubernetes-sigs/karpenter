@@ -119,7 +119,7 @@ func (s *Singleton) reconcile(ctx context.Context) time.Duration {
 	case err != nil:
 		reconcileErrors.WithLabelValues(s.name).Inc()
 		reconcileTotal.WithLabelValues(s.name, labelError).Inc()
-		log.FromContext(ctx).Error(err, "Reconciler error")
+		log.FromContext(ctx).Error(err, "reconciler error")
 		return s.rateLimiter.When(singletonRequest)
 	case res.Requeue:
 		reconcileTotal.WithLabelValues(s.name, labelRequeue).Inc()

@@ -199,7 +199,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
 		if err := n.RuntimeValidate(); err != nil {
-			log.FromContext(ctx).WithValues("nodepool", n.Name).Error(fmt.Errorf("nodepool failed validation, %w", err), "Provisioner error")
+			log.FromContext(ctx).WithValues("nodepool", n.Name).Error(fmt.Errorf("nodepool failed validation, %w", err), "provisioner error")
 			return false
 		}
 		return n.DeletionTimestamp.IsZero()
@@ -221,7 +221,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		if err != nil {
 			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
 			// all scheduling
-			log.FromContext(ctx).WithValues("nodepool", nodePool.Name).Error(fmt.Errorf("skipping, unable to resolve instance types %w", err), "Provisioner error")
+			log.FromContext(ctx).WithValues("nodepool", nodePool.Name).Error(fmt.Errorf("skipping, unable to resolve instance types %w", err), "provisioner error")
 			continue
 		}
 		if len(instanceTypeOptions) == 0 {
@@ -317,7 +317,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	s, err := p.NewScheduler(ctx, pods, nodes.Active())
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
-			log.FromContext(ctx).Info(ErrNodePoolsNotFound.Error())
+			log.FromContext(ctx).Error(ErrNodePoolsNotFound, "nodepool not found")
 			return scheduler.Results{}, nil
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
@@ -437,7 +437,7 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 	var schedulablePods []*v1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
-			log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(pod)).Error(fmt.Errorf("getting volume topology requirements, %w", err), "Provisioner error")
+			log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(pod)).Error(fmt.Errorf("getting volume topology requirements, %w", err), "provisioner error")
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}

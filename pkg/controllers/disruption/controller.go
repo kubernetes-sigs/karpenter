@@ -284,7 +284,7 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	nodePoolList := &v1beta1.NodePoolList{}
 	if err := c.kubeClient.List(ctx, nodePoolList); err != nil {
-		log.FromContext(ctx).Error(fmt.Errorf("listing nodepools, %w", err), "Disruption error")
+		log.FromContext(ctx).Error(fmt.Errorf("listing nodepools, %w", err), "disruption error")
 		return
 	}
 	var buf bytes.Buffer
@@ -295,6 +295,6 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 		}
 	}
 	if buf.Len() > 0 {
-		log.FromContext(ctx).Error(fmt.Errorf("detected disruption budget errors, %w", errors.New(buf.String())), "Disruption error")
+		log.FromContext(ctx).Error(fmt.Errorf("detected disruption budget errors, %w", errors.New(buf.String())), "disruption error")
 	}
 }
