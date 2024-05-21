@@ -20,10 +20,10 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/ptr"
 )
 
 type DeploymentOptions struct {
@@ -55,7 +55,7 @@ func Deployment(overrides ...DeploymentOptions) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: objectMeta,
 		Spec: appsv1.DeploymentSpec{
-			Replicas: ptr.Int32(options.Replicas),
+			Replicas: lo.ToPtr(int32(options.Replicas)),
 			Selector: &metav1.LabelSelector{MatchLabels: options.PodOptions.Labels},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: ObjectMeta(options.PodOptions.ObjectMeta),

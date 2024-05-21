@@ -27,7 +27,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/ptr"
 
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
@@ -89,7 +88,7 @@ var _ = Describe("Static Drift Hash", func() {
 							},
 						},
 						Kubelet: &v1beta1.KubeletConfiguration{
-							MaxPods: ptr.Int32(10),
+							MaxPods: lo.ToPtr(int32(10)),
 						},
 					},
 				},

@@ -34,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -484,7 +483,7 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error 
 		if driver.Allocatable == nil {
 			continue
 		}
-		n.volumeUsage.AddLimit(driver.Name, int(ptr.Int32Value(driver.Allocatable.Count)))
+		n.volumeUsage.AddLimit(driver.Name, int(lo.FromPtr(driver.Allocatable.Count)))
 	}
 	return nil
 }
