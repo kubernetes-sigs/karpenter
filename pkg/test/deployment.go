@@ -55,7 +55,7 @@ func Deployment(overrides ...DeploymentOptions) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: objectMeta,
 		Spec: appsv1.DeploymentSpec{
-			Replicas: lo.ToPtr(int32(options.Replicas)),
+			Replicas: lo.ToPtr(options.Replicas),
 			Selector: &metav1.LabelSelector{MatchLabels: options.PodOptions.Labels},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: ObjectMeta(options.PodOptions.ObjectMeta),

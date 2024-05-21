@@ -425,14 +425,14 @@ var _ = Describe("CEL/Validation", func() {
 			Context("ImageGCHighThresholdPercent", func() {
 				It("should succeed on a imageGCHighThresholdPercent", func() {
 					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: lo.ToPtr(int32((10)),
+						ImageGCHighThresholdPercent: lo.ToPtr(int32(10)),
 					}
 					Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 				})
 				It("should fail when imageGCHighThresholdPercent is less than imageGCLowThresholdPercent", func() {
 					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: lo.ToPtr(int32((50)),
-						ImageGCLowThresholdPercent:  lo.ToPtr(int32((60)),
+						ImageGCHighThresholdPercent: lo.ToPtr(int32(50)),
+						ImageGCLowThresholdPercent:  lo.ToPtr(int32(60)),
 					}
 					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				})
@@ -440,14 +440,14 @@ var _ = Describe("CEL/Validation", func() {
 			Context("ImageGCLowThresholdPercent", func() {
 				It("should succeed on a imageGCLowThresholdPercent", func() {
 					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCLowThresholdPercent: lo.ToPtr(int32((10)),
+						ImageGCLowThresholdPercent: lo.ToPtr(int32(10)),
 					}
 					Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 				})
 				It("should fail when imageGCLowThresholdPercent is greather than imageGCHighThresheldPercent", func() {
 					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: lo.ToPtr(int32((50)),
-						ImageGCLowThresholdPercent:  lo.ToPtr(int32((60)),
+						ImageGCHighThresholdPercent: lo.ToPtr(int32(50)),
+						ImageGCLowThresholdPercent:  lo.ToPtr(int32(60)),
 					}
 					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				})
