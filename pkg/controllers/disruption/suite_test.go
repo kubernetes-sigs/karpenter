@@ -34,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -417,8 +416,8 @@ var _ = Describe("Simulate Scheduling", func() {
 						Kind:               "StatefulSet",
 						Name:               ss.Name,
 						UID:                ss.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
 					},
 				},
 			},
@@ -781,13 +780,13 @@ var _ = Describe("Pod Eviction Cost", func() {
 	})
 	It("should have a higher disruptionCost for a pod with a higher priority", func() {
 		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
-			Spec: v1.PodSpec{Priority: ptr.Int32(1)},
+			Spec: v1.PodSpec{Priority: lo.ToPtr(int32(1))},
 		})
 		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 	It("should have a lower disruptionCost for a pod with a lower priority", func() {
 		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
-			Spec: v1.PodSpec{Priority: ptr.Int32(-1)},
+			Spec: v1.PodSpec{Priority: lo.ToPtr(int32(-1))},
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
@@ -1735,8 +1734,8 @@ var _ = Describe("Metrics", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
 					},
 				},
 			},
@@ -1806,8 +1805,8 @@ var _ = Describe("Metrics", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
 					},
 				},
 			},

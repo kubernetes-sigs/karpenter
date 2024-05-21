@@ -40,7 +40,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"knative.dev/pkg/ptr"
 
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
@@ -346,8 +345,8 @@ var _ = Describe("Termination", func() {
 				Kind:               "DaemonSet",
 				Name:               daemonEvict.Name,
 				UID:                daemonEvict.UID,
-				Controller:         ptr.Bool(true),
-				BlockOwnerDeletion: ptr.Bool(true),
+				Controller:         lo.ToPtr(true),
+				BlockOwnerDeletion: lo.ToPtr(true),
 			}}}})
 			podNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -356,16 +355,16 @@ var _ = Describe("Termination", func() {
 				Kind:               "DaemonSet",
 				Name:               daemonNodeCritical.Name,
 				UID:                daemonNodeCritical.UID,
-				Controller:         ptr.Bool(true),
-				BlockOwnerDeletion: ptr.Bool(true),
+				Controller:         lo.ToPtr(true),
+				BlockOwnerDeletion: lo.ToPtr(true),
 			}}}})
 			podDaemonClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
 				APIVersion:         "apps/v1",
 				Kind:               "DaemonSet",
 				Name:               daemonClusterCritical.Name,
 				UID:                daemonClusterCritical.UID,
-				Controller:         ptr.Bool(true),
-				BlockOwnerDeletion: ptr.Bool(true),
+				Controller:         lo.ToPtr(true),
+				BlockOwnerDeletion: lo.ToPtr(true),
 			}}}})
 
 			ExpectApplied(ctx, env.Client, node, podEvict, podNodeCritical, podClusterCritical, podDaemonEvict, podDaemonNodeCritical, podDaemonClusterCritical)
