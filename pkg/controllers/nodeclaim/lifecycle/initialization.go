@@ -24,8 +24,8 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -53,13 +53,13 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeC
 		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "NotLaunched", "Node not launched")
 		return reconcile.Result{}, nil
 	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", nodeClaim.Status.ProviderID))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
 	node, err := nodeclaimutil.NodeForNodeClaim(ctx, i.kubeClient, nodeClaim)
 	if err != nil {
 		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "NodeNotFound", "Node not registered with cluster")
 		return reconcile.Result{}, nil //nolint:nilerr
 	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("node", node.Name))
 	if nodeutil.GetCondition(node, v1.NodeReady).Status != v1.ConditionTrue {
 		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeInitialized, "NodeNotReady", "Node status is NotReady")
 		return reconcile.Result{}, nil
@@ -83,7 +83,7 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeC
 			return reconcile.Result{}, err
 		}
 	}
-	logging.FromContext(ctx).With("allocatable", node.Status.Allocatable).Infof("initialized nodeclaim")
+	log.FromContext(ctx).WithValues("allocatable", node.Status.Allocatable).Info("initialized nodeclaim")
 	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 	metrics.NodeClaimsInitializedCounter.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],

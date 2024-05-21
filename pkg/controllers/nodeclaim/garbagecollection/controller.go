@@ -27,8 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -96,13 +96,11 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-		logging.FromContext(ctx).
-			With(
-				"nodeclaim", nodeClaims[i].Name,
-				"provider-id", nodeClaims[i].Status.ProviderID,
-				"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
-			).
-			Debugf("garbage collecting nodeclaim with no cloudprovider representation")
+		log.FromContext(ctx).WithValues(
+			"nodeclaim", nodeClaims[i].Name,
+			"provider-id", nodeClaims[i].Status.ProviderID,
+			"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
+		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
 		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 			metrics.ReasonLabel:       "garbage_collected",
 			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],

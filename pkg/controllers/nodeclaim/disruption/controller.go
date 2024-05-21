@@ -26,10 +26,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -70,7 +70,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 
 // Reconcile executes a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodeclaim.disruption").With("nodeclaim", nodeClaim.Name))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("nodeclaim.disruption").WithValues("nodeclaim", nodeClaim.Name))
 	ctx = injection.WithControllerName(ctx, "nodeclaim.disruption")
 
 	if !nodeClaim.DeletionTimestamp.IsZero() {

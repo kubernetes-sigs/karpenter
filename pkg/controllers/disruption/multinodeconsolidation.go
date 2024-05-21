@@ -24,7 +24,8 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/logging"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -89,7 +90,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 
 	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue).IsValid(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
-			logging.FromContext(ctx).Debugf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
 			return Command{}, scheduling.Results{}, nil
 		}
 		return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)
@@ -118,9 +119,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		if m.clock.Now().After(timeout) {
 			ConsolidationTimeoutTotalCounter.WithLabelValues(m.ConsolidationType()).Inc()
 			if lastSavedCommand.candidates == nil {
-				logging.FromContext(ctx).Debugf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2)
+				log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
 			} else {
-				logging.FromContext(ctx).Debugf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand)
+				log.FromContext(ctx).V(1).Info(fmt.Sprintf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand))
 			}
 			return lastSavedCommand, lastSavedResults, nil
 		}

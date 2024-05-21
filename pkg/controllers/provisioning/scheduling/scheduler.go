@@ -28,8 +28,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
@@ -104,7 +104,7 @@ type Results struct {
 func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
 	// Report failures and nominations
 	for p, err := range r.PodErrors {
-		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(p)).Errorf("Could not schedule pod, %s", err)
+		log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(p)).Error(err, "could not schedule pod")
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
 	for _, existing := range r.ExistingNodes {
@@ -123,7 +123,7 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 	if newCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).With("nodeclaims", len(r.NewNodeClaims), "pods", newCount).Infof("computed new nodeclaim(s) to fit pod(s)")
+	log.FromContext(ctx).WithValues("nodeclaims", len(r.NewNodeClaims), "pods", newCount).Info("computed new nodeclaim(s) to fit pod(s)")
 	// Report in flight newNodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0
@@ -134,7 +134,7 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 	if existingCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).Infof("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
+	log.FromContext(ctx).Info(fmt.Sprintf("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount))
 }
 
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
@@ -223,7 +223,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 		q.Push(pod, relaxed)
 		if relaxed {
 			if err := s.topology.Update(ctx, pod); err != nil {
-				logging.FromContext(ctx).Errorf("updating topology, %s", err)
+				log.FromContext(ctx).Error(err, "failed updating topology")
 			}
 		}
 	}
@@ -273,8 +273,9 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool: %q", nodeClaimTemplate.NodePoolName))
 				continue
 			} else if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) != len(instanceTypes) {
-				logging.FromContext(ctx).With("nodepool", nodeClaimTemplate.NodePoolName).Debugf("%d out of %d instance types were excluded because they would breach limits",
-					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName]))
+
+				log.FromContext(ctx).V(1).WithValues("nodepool", nodeClaimTemplate.NodePoolName).Info(fmt.Sprintf("%d out of %d instance types were excluded because they would breach limits",
+					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName])))
 			}
 		}
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)

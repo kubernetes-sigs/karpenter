@@ -31,8 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -152,7 +152,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 
 // Evict returns true if successful eviction call, and false if not an eviction-related error
 func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", key.NamespacedName))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("pod", key.NamespacedName))
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		&v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}},
 		&policyv1.Eviction{
@@ -178,7 +178,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", key.Namespace, key.Name)))
 			return false
 		}
-		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
+		log.FromContext(ctx).Error(err, "failed evicting pod")
 		return false
 	}
 	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
