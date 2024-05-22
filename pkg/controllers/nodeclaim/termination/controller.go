@@ -60,7 +60,6 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 func (c *Controller) Reconcile(ctx context.Context, n *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("nodeclaim.termination").WithValues("nodeclaim", n.Name))
 	ctx = injection.WithControllerName(ctx, "nodeclaim.termination")
 
 	if !n.GetDeletionTimestamp().IsZero() {

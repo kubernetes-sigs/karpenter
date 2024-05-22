@@ -46,7 +46,6 @@ func NewController(kubeClient client.Client) *Controller {
 
 // Reconcile the resource
 func (c *Controller) Reconcile(ctx context.Context, l *v1.Lease) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("lease.garbagecollection").WithValues("lease", client.ObjectKeyFromObject(l)))
 	ctx = injection.WithControllerName(ctx, "lease.garbagecollection")
 
 	if l.OwnerReferences != nil || l.Namespace != "kube-node-lease" {

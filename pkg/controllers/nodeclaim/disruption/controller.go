@@ -29,7 +29,6 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -70,7 +69,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 
 // Reconcile executes a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("nodeclaim.disruption").WithValues("nodeclaim", nodeClaim.Name))
 	ctx = injection.WithControllerName(ctx, "nodeclaim.disruption")
 
 	if !nodeClaim.DeletionTimestamp.IsZero() {

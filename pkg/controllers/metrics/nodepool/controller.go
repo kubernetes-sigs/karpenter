@@ -21,11 +21,9 @@ import (
 	"strings"
 	"time"
 
-	controllerruntime "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
@@ -92,7 +90,6 @@ func NewController(kubeClient client.Client) *Controller {
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("metrics.nodepool").WithValues("nodepool", req.Name))
 	ctx = injection.WithControllerName(ctx, "metrics.nodepool")
 
 	nodePool := &v1beta1.NodePool{}

@@ -73,7 +73,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("nodeclaim.consistency").WithValues("nodeclaim", nodeClaim.Name))
 	ctx = injection.WithControllerName(ctx, "nodeclaim.consistency")
 
 	if nodeClaim.Status.ProviderID == "" {

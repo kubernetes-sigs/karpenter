@@ -25,8 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -58,7 +56,6 @@ func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller
 
 // Reconcile a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("nodepool.counter").WithValues("nodepool", nodePool.Name))
 	ctx = injection.WithControllerName(ctx, "nodepool.counter")
 
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
