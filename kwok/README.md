@@ -38,7 +38,7 @@ spec:
           operator: In
           values: ["spot"]
       nodeClassRef:
-        name: nil
+        name: default
   limits:
     cpu: 1000
   disruption:
