@@ -84,8 +84,24 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
+
 	// evictablePods are pods that aren't yet terminating are eligible to have the eviction API called against them
 	evictablePods := lo.Filter(pods, func(p *v1.Pod, _ int) bool { return podutil.IsEvictable(p) })
+
+	// check if there are any pods that are still terminating and haven't exceeded their termination grace period
+	// if there are any, only queue pods from the same eviction group or lower
+	terminatingPods := lo.Filter(pods, func(p *v1.Pod, _ int) bool {
+		return podutil.IsTerminating(p) && !podutil.IsStuckTerminating(p, t.clock)
+	})
+	if len(terminatingPods) > 0 {
+		highestOrderPod := lo.MaxBy(terminatingPods, func(p *v1.Pod, max *v1.Pod) bool {
+			return podutil.GetPodEvictionGroup(p) > podutil.GetPodEvictionGroup(max)
+		})
+		evictablePods = lo.Filter(evictablePods, func(p *v1.Pod, _ int) bool {
+			return podutil.GetPodEvictionGroup(p) <= podutil.GetPodEvictionGroup(highestOrderPod)
+		})
+	}
+
 	t.Evict(evictablePods)
 
 	// podsWaitingEvictionCount are  the number of pods that either haven't had eviction called against them yet
@@ -98,28 +114,26 @@ func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
 }
 
 func (t *Terminator) Evict(pods []*v1.Pod) {
-	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
+	// 1. Group pods based on criticality and daemonset ownership
 	var criticalNonDaemon, criticalDaemon, nonCriticalNonDaemon, nonCriticalDaemon []*v1.Pod
 	for _, pod := range pods {
-		if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
-			if podutil.IsOwnedByDaemonSet(pod) {
-				criticalDaemon = append(criticalDaemon, pod)
-			} else {
-				criticalNonDaemon = append(criticalNonDaemon, pod)
-			}
-		} else {
-			if podutil.IsOwnedByDaemonSet(pod) {
-				nonCriticalDaemon = append(nonCriticalDaemon, pod)
-			} else {
-				nonCriticalNonDaemon = append(nonCriticalNonDaemon, pod)
-			}
+		switch podutil.GetPodEvictionGroup(pod) {
+		case podutil.NonCriticalNonDaemonsets:
+			nonCriticalNonDaemon = append(nonCriticalNonDaemon, pod)
+		case podutil.NonCriticalDaemonsets:
+			nonCriticalDaemon = append(nonCriticalDaemon, pod)
+		case podutil.CriticalNonDaemonsets:
+			criticalNonDaemon = append(criticalNonDaemon, pod)
+		case podutil.CriticalDaemonsets:
+			criticalDaemon = append(criticalDaemon, pod)
 		}
 	}
-	// 2. Evict in order:
-	// a. non-critical non-daemonsets
-	// b. non-critical daemonsets
-	// c. critical non-daemonsets
-	// d. critical daemonsets
+
+	// 2. Evict in order: https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/
+	//   a. non-critical non-daemonsets
+	//   b. non-critical daemonsets
+	//   c. critical non-daemonsets
+	//   d. critical daemonsets
 	if len(nonCriticalNonDaemon) != 0 {
 		t.evictionQueue.Add(nonCriticalNonDaemon...)
 	} else if len(nonCriticalDaemon) != 0 {

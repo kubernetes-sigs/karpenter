@@ -28,6 +28,15 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
+type PodEvictionGroup int
+
+const (
+	NonCriticalNonDaemonsets PodEvictionGroup = 1
+	NonCriticalDaemonsets    PodEvictionGroup = 2
+	CriticalNonDaemonsets    PodEvictionGroup = 3
+	CriticalDaemonsets       PodEvictionGroup = 4
+)
+
 // IsActive checks if Karpenter should consider this pod as running by ensuring that the pod:
 // - Isn't a terminal pod (Failed or Succeeded)
 // - Isn't actively terminating
@@ -191,4 +200,21 @@ func HasPodAntiAffinity(pod *v1.Pod) bool {
 	return pod.Spec.Affinity != nil && pod.Spec.Affinity.PodAntiAffinity != nil &&
 		(len(pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 0 ||
 			len(pod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0)
+}
+
+// GetPodEvictionGroup returns the pod eviction order based on whether the pod is critical or not and whether it is owned by a DaemonSet
+func GetPodEvictionGroup(pod *v1.Pod) PodEvictionGroup {
+	if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
+		if IsOwnedByDaemonSet(pod) {
+			return CriticalDaemonsets
+		} else {
+			return CriticalNonDaemonsets
+		}
+	} else {
+		if IsOwnedByDaemonSet(pod) {
+			return NonCriticalDaemonsets
+		} else {
+			return NonCriticalNonDaemonsets
+		}
+	}
 }
