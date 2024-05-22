@@ -23,7 +23,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -49,8 +48,7 @@ func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) *No
 
 func (c *NodePoolController) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
 	//nolint:ineffassign
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("state.nodepool").WithValues("nodepool", np.Name)) //nolint:ineffassign,staticcheck
-	ctx = injection.WithControllerName(ctx, "state.nodepool")                                                   //nolint:ineffassign,staticcheck
+	ctx = injection.WithControllerName(ctx, "state.nodepool") //nolint:ineffassign,staticcheck
 
 	// Something changed in the NodePool so we should re-consider consolidation
 	c.cluster.MarkUnconsolidated()

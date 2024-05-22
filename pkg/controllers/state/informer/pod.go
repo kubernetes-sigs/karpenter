@@ -25,7 +25,6 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -50,7 +49,6 @@ func NewPodController(kubeClient client.Client, cluster *state.Cluster) *PodCont
 }
 
 func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("state.pod").WithValues("pod", req.String()))
 	ctx = injection.WithControllerName(ctx, "state.pod")
 
 	pod := &v1.Pod{}

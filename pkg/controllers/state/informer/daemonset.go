@@ -25,7 +25,6 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -47,7 +46,6 @@ func NewDaemonSetController(kubeClient client.Client, cluster *state.Cluster) *D
 }
 
 func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithName("state.daemonset").WithValues("daemonset", req.String()))
 	ctx = injection.WithControllerName(ctx, "state.daemonset")
 
 	daemonSet := appsv1.DaemonSet{}
