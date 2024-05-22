@@ -57,12 +57,6 @@ spec:
             description: KwokNodeClassStatus contains the resolved state of the KwokNodeClass
             properties:
               conditions:
-                default:
-                - lastTransitionTime: "2024-01-01T01:01:01Z"
-                  message: ""
-                  reason: NodeClassReady
-                  status: "True"
-                  type: Ready
                 description: Conditions contains signals for health and readiness
                 items:
                   description: Condition aliases the upstream type and adds additional
