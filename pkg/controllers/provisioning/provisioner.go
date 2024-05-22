@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -159,7 +160,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 	}
 	return lo.Reject(pods, func(po *v1.Pod, _ int) bool {
 		if err := p.Validate(ctx, po); err != nil {
-			log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
+			log.FromContext(ctx).WithValues("Pod", klog.KRef(po.Namespace, po.Name)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
 		p.consolidationWarnings(ctx, po)
@@ -199,7 +200,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
 		if err := n.RuntimeValidate(); err != nil {
-			log.FromContext(ctx).WithValues("nodepool", n.Name).Error(err, "nodepool failed validation")
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.Name)).Error(err, "nodepool failed validation")
 			return false
 		}
 		return n.DeletionTimestamp.IsZero()
@@ -221,11 +222,11 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		if err != nil {
 			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
 			// all scheduling
-			log.FromContext(ctx).WithValues("nodepool", nodePool.Name).Error(err, "skipping, unable to resolve instance types")
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", nodePool.Name)).Error(err, "skipping, unable to resolve instance types")
 			continue
 		}
 		if len(instanceTypeOptions) == 0 {
-			log.FromContext(ctx).WithValues("nodepool", nodePool.Name).Info("skipping, no resolved instance types found")
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", nodePool.Name)).Info("skipping, no resolved instance types found")
 
 			continue
 		}
@@ -324,14 +325,14 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	}
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	if len(results.NewNodeClaims) > 0 {
-		log.FromContext(ctx).WithValues("pods", pretty.Slice(lo.Map(pods, func(p *v1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
+		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *v1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
 	}
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (string, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("nodepool", n.NodePoolName))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.NodePoolName)))
 	options := functional.ResolveOptions(opts...)
 	latest := &v1beta1.NodePool{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {
@@ -349,7 +350,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 		return req.Key == v1.LabelInstanceTypeStable
 	})
 
-	log.FromContext(ctx).WithValues("nodeclaim", nodeClaim.Name, "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
+	log.FromContext(ctx).WithValues("NodeClaim", klog.KRef("", nodeClaim.Name), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
 		Info("created nodeclaim")
 	metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:       options.Reason,
@@ -437,7 +438,7 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 	var schedulablePods []*v1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
-			log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(pod)).Error(err, "failed getting volume topology requirements")
+			log.FromContext(ctx).WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)).Error(err, "failed getting volume topology requirements")
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}

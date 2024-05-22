@@ -23,8 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -37,7 +36,7 @@ type Preferences struct {
 }
 
 func (p *Preferences) Relax(ctx context.Context, pod *v1.Pod) bool {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("pod", client.ObjectKeyFromObject(pod)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)))
 	relaxations := []func(*v1.Pod) *string{
 		p.removeRequiredNodeAffinityTerm,
 		p.removePreferredPodAffinityTerm,
