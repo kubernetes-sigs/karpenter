@@ -1,0 +1,38 @@
+name: InstallGrafana
+description: 'Installs grafana'
+inputs:
+  git_ref:
+    description: "The git commit, tag, or branch to check out. Requires a corresponding Karpenter snapshot release"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+      with:
+        ref: ${{ inputs.git_ref }}
+    - uses: ./.github/actions/e2e/install-helm
+      with:
+        version: v3.12.3 # Pinned to this version since v3.13.0 has issues with anonymous pulls: https://github.com/helm/helm/issues/12423
+    - name: add grafana repo
+      shell: bash
+      run: |
+        helm repo add grafana https://grafana.github.io/helm-charts
+    - name: create monitoring namespace
+      shell: bash
+      run: |
+        kubectl create ns monitoring || true
+        kubectl label ns monitoring scrape=enabled --overwrite=true
+    - name: install grafana
+      shell: bash
+      run: |
+        helm upgrade --install grafana grafana/grafana -n monitoring
+    - name: enable profiling
+      shell: bash
+      run: |
+        kubectl annotate -n kube-system pods profiles.grafana.com/memory.scrape="true" -l app.kubernetes.io/name="karpenter"
+        kubectl annotate -n kube-system pods profiles.grafana.com/memory.port="8000" -l app.kubernetes.io/name="karpenter"
+
+        kubectl annotate -n kube-system pods profiles.grafana.com/cpu.scrape="true" -l app.kubernetes.io/name="karpenter"
+        kubectl annotate -n kube-system pods profiles.grafana.com/cpu.port="8000" -l app.kubernetes.io/name="karpenter"
+
+        kubectl annotate -n kube-system pods profiles.grafana.com/goroutine.scrape="true" -l app.kubernetes.io/name="karpenter"
+        kubectl annotate -n kube-system pods profiles.grafana.com/goroutine.port="8000" -l app.kubernetes.io/name="karpenter"

@@ -20,11 +20,12 @@ jobs:
           k8sVersion: ${{ matrix.k8sVersion }}
     - name: Kind Cluster
       uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
-    - name: check kind cluster
+    - name: check kind cluster and taint nodes
       shell: bash
       run: |
         kubectl config current-context
         kubectl get nodes
+        kubectl taint nodes chart-testing-control-plane CriticalAddonsOnly:NoSchedule
     - name: Enable the actionlint matcher
       shell: bash
       run: echo "::add-matcher::.github/actionlint-matcher.json"
@@ -40,32 +41,10 @@ jobs:
         make toolchain
         make install-kwok
         KWOK_REPO=kind.local KIND_CLUSTER_NAME=chart-testing make apply-with-kind
-    - name: install prometheus and grafana
-      shell: bash
-      run: |
-        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-        helm repo add grafana https://grafana.github.io/helm-charts
-        helm repo update
-        kubectl create namespace prometheus
-        helm upgrade --install prometheus prometheus-community/kube-prometheus-stack -n prometheus \
-          --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].targetLabel=metrics_path" \
-          --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].action=replace" \
-          --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].sourceLabels[0]=__metrics_path__" \
-          --wait
-        echo "Installed prometheus"
-        kubectl --namespace prometheus get pods -l "release=prometheus"
-    - name: enable profiling
-      shell: bash
-      run: |
-        kubectl annotate -n kube-system pods profiles.grafana.com/memory.scrape="true" -l app.kubernetes.io/name="karpenter"
-        kubectl annotate -n kube-system pods profiles.grafana.com/memory.port="8000" -l app.kubernetes.io/name="karpenter"
-
-        kubectl annotate -n kube-system pods profiles.grafana.com/cpu.scrape="true" -l app.kubernetes.io/name="karpenter"
-        kubectl annotate -n kube-system pods profiles.grafana.com/cpu.port="8000" -l app.kubernetes.io/name="karpenter"
-
-        kubectl annotate -n kube-system pods profiles.grafana.com/goroutine.scrape="true" -l app.kubernetes.io/name="karpenter"
-        kubectl annotate -n kube-system pods profiles.grafana.com/goroutine.port="8000" -l app.kubernetes.io/name="karpenter"
-        # Testing out pyroscope for profiling
+    - name: install prometheus 
+      uses: ./.github/actions/install-prometheus
+    - name: install grafana 
+      uses: ./.github/actions/install-grafana
     - name: apply pyroscope 
       shell: bash
       run: |
