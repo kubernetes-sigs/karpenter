@@ -135,10 +135,6 @@ func NewController(cluster *state.Cluster) *Controller {
 	}
 }
 
-func (c *Controller) Name() string {
-	return "metrics.node"
-}
-
 func (c *Controller) Reconcile(_ context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	nodes := lo.Reject(c.cluster.Nodes(), func(n *state.StateNode, _ int) bool {
 		return n.Node == nil
@@ -149,8 +145,10 @@ func (c *Controller) Reconcile(_ context.Context, _ reconcile.Request) (reconcil
 	return reconcile.Result{RequeueAfter: time.Second * 5}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, mgr manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(mgr)
+func (c *Controller) Register(_ context.Context, mgr manager.Manager) error {
+	return controller.NewSingletonManagedBy(mgr).
+		Named("metrics.node").
+		Complete(c)
 }
 
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {

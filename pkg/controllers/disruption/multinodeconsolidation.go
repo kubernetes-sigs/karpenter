@@ -24,7 +24,8 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/logging"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -46,10 +47,6 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = m.sortCandidates(candidates)
-	EligibleNodesGauge.With(map[string]string{
-		methodLabel:            m.Type(),
-		consolidationTypeLabel: m.ConsolidationType(),
-	}).Set(float64(len(candidates)))
 
 	// In order, filter out all candidates that would violate the budget.
 	// Since multi-node consolidation relies on the ordering of
@@ -93,7 +90,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 
 	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue).IsValid(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
-			logging.FromContext(ctx).Debugf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
 			return Command{}, scheduling.Results{}, nil
 		}
 		return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)
@@ -122,9 +119,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		if m.clock.Now().After(timeout) {
 			ConsolidationTimeoutTotalCounter.WithLabelValues(m.ConsolidationType()).Inc()
 			if lastSavedCommand.candidates == nil {
-				logging.FromContext(ctx).Debugf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2)
+				log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
 			} else {
-				logging.FromContext(ctx).Debugf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand)
+				log.FromContext(ctx).V(1).Info(fmt.Sprintf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand))
 			}
 			return lastSavedCommand, lastSavedResults, nil
 		}
@@ -140,8 +137,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// required
 		replacementHasValidInstanceTypes := false
 		if cmd.Action() == ReplaceAction {
-			cmd.replacements[0].InstanceTypeOptions = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
-			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0
+			cmd.replacements[0].InstanceTypeOptions, err = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
+			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0 && err == nil
 		}
 
 		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
@@ -173,7 +170,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candidate) []*cloudprovider.InstanceType {
+func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candidate) ([]*cloudprovider.InstanceType, error) {
 	existingInstanceTypes := sets.New[string]()
 	pricesByInstanceType := map[string]float64{}
 
@@ -204,12 +201,7 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 			}
 		}
 	}
-	// computeConsolidation would have thrown error related to `incompatibleRequirementKey` if minValues from requirements is not satisfied by the InstanceTypeOptions before we get to `filterOutSameType`.
-	// And we re-run the check here. The instanceTypeOptions we pass here should already have been sorted by price during computeConsolidation and if the minValues is not satisfied after `filterOutSameType`, we return empty InstanceTypeOptions thereby preventing consolidation.
-	// We do not use the incompatiblekey, numInstanceTypes from here as part of the messaging since this runs multiple times depending on the number of nodes in the cluster and we
-	// already have one messaging from the computeConsolidation if minValues is not met from the requirements.
-	filterByPrice, _, _ := filterByPriceWithMinValues(newNodeClaim.InstanceTypeOptions, newNodeClaim.Requirements, maxPrice)
-	return filterByPrice
+	return filterByPrice(newNodeClaim.InstanceTypeOptions, newNodeClaim.Requirements, maxPrice)
 }
 
 func (m *MultiNodeConsolidation) Type() string {

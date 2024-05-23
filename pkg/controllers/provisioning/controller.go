@@ -28,13 +28,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/events"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
-
-var _ operatorcontroller.TypedController[*v1.Pod] = (*PodController)(nil)
 
 // PodController for the resource
 type PodController struct {
@@ -44,20 +43,18 @@ type PodController struct {
 }
 
 // NewPodController constructs a controller instance
-func NewPodController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1.Pod](kubeClient, &PodController{
+func NewPodController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) *PodController {
+	return &PodController{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
 		recorder:    recorder,
-	})
-}
-
-func (*PodController) Name() string {
-	return "provisioner.trigger.pod"
+	}
 }
 
 // Reconcile the resource
-func (c *PodController) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Result, error) {
+func (c *PodController) Reconcile(ctx context.Context, p *v1.Pod) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "provisioner.trigger.pod") //nolint:ineffassign,staticcheck
+
 	if !pod.IsProvisionable(p) {
 		return reconcile.Result{}, nil
 	}
@@ -69,15 +66,13 @@ func (c *PodController) Reconcile(_ context.Context, p *v1.Pod) (reconcile.Resul
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (*PodController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *PodController) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("provisioner.trigger.pod").
 		For(&v1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
-	)
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
-
-var _ operatorcontroller.TypedController[*v1.Node] = (*NodeController)(nil)
 
 // NodeController for the resource
 type NodeController struct {
@@ -87,20 +82,19 @@ type NodeController struct {
 }
 
 // NewNodeController constructs a controller instance
-func NewNodeController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1.Node](kubeClient, &NodeController{
+func NewNodeController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) *NodeController {
+	return &NodeController{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
 		recorder:    recorder,
-	})
-}
-
-func (*NodeController) Name() string {
-	return "provisioner.trigger.node"
+	}
 }
 
 // Reconcile the resource
-func (c *NodeController) Reconcile(_ context.Context, n *v1.Node) (reconcile.Result, error) {
+func (c *NodeController) Reconcile(ctx context.Context, n *v1.Node) (reconcile.Result, error) {
+	//nolint:ineffassign
+	ctx = injection.WithControllerName(ctx, "provisioner.trigger.node") //nolint:ineffassign,staticcheck
+
 	// If the disruption taint doesn't exist or the deletion timestamp isn't set, it's not being disrupted.
 	// We don't check the deletion timestamp here, as we expect the termination controller to eventually set
 	// the taint when it picks up the node from being deleted.
@@ -115,10 +109,10 @@ func (c *NodeController) Reconcile(_ context.Context, n *v1.Node) (reconcile.Res
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (*NodeController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("provisioner.trigger.node").
 		For(&v1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
-	)
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

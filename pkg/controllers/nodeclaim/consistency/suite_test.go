@@ -29,9 +29,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	clock "k8s.io/utils/clock/testing"
-	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
@@ -39,14 +40,13 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 var ctx context.Context
-var nodeClaimConsistencyController controller.Controller
+var nodeClaimConsistencyController *consistency.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
@@ -119,7 +119,7 @@ var _ = Describe("NodeClaimController", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, p, pdb)
 			ExpectManualBinding(ctx, env.Client, p, node)
 			_ = env.Client.Delete(ctx, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimConsistencyController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %q is blocking evictions", client.ObjectKeyFromObject(pdb)))).To(BeTrue())
 		})
 	})
@@ -159,7 +159,7 @@ var _ = Describe("NodeClaimController", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimConsistencyController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 		})
 	})

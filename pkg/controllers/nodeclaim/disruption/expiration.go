@@ -20,11 +20,9 @@ import (
 	"context"
 
 	"github.com/prometheus/client_golang/prometheus"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/apis"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -38,36 +36,32 @@ type Expiration struct {
 }
 
 func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	hasExpiredCondition := nodeClaim.StatusConditions().GetCondition(v1beta1.Expired) != nil
+	hasExpiredCondition := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired) != nil
 
 	// From here there are three scenarios to handle:
 	// 1. If ExpireAfter is not configured, remove the expired status condition
 	if nodePool.Spec.Disruption.ExpireAfter.Duration == nil {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Expired)
+		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeExpired)
 		if hasExpiredCondition {
-			logging.FromContext(ctx).Debugf("removing expiration status condition, expiration has been disabled")
+			log.FromContext(ctx).V(1).Info("removing expiration status condition, expiration has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
 	expirationTime := nodeClaim.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
 	// 2. If the NodeClaim isn't expired, remove the status condition.
 	if e.clock.Now().Before(expirationTime) {
-		_ = nodeClaim.StatusConditions().ClearCondition(v1beta1.Expired)
+		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeExpired)
 		if hasExpiredCondition {
-			logging.FromContext(ctx).Debugf("removing expired status condition, not expired")
+			log.FromContext(ctx).V(1).Info("removing expired status condition, not expired")
 		}
 		// If the NodeClaim isn't expired and doesn't have the status condition, return.
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
 		return reconcile.Result{RequeueAfter: expirationTime.Sub(e.clock.Now())}, nil
 	}
 	// 3. Otherwise, if the NodeClaim is expired, but doesn't have the status condition, add it.
-	nodeClaim.StatusConditions().SetCondition(apis.Condition{
-		Type:     v1beta1.Expired,
-		Status:   v1.ConditionTrue,
-		Severity: apis.ConditionSeverityWarning,
-	})
+	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 	if !hasExpiredCondition {
-		logging.FromContext(ctx).Debugf("marking expired")
+		log.FromContext(ctx).V(1).Info("marking expired")
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 			metrics.TypeLabel:     metrics.ExpirationReason,
 			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],

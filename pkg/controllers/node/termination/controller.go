@@ -26,13 +26,15 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -40,12 +42,9 @@ import (
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
-
-var _ operatorcontroller.FinalizingTypedController[*v1.Node] = (*Controller)(nil)
 
 // Controller for the resource
 type Controller struct {
@@ -56,25 +55,26 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1.Node](kubeClient, &Controller{
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) *Controller {
+	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		terminator:    terminator,
 		recorder:      recorder,
-	})
+	}
 }
 
-func (c *Controller) Name() string {
-	return "node.termination"
-}
+func (c *Controller) Reconcile(ctx context.Context, n *v1.Node) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "node.termination")
 
-func (c *Controller) Reconcile(_ context.Context, _ *v1.Node) (reconcile.Result, error) {
+	if !n.GetDeletionTimestamp().IsZero() {
+		return c.finalize(ctx, n)
+	}
 	return reconcile.Result{}, nil
 }
 
 //nolint:gocyclo
-func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
+func (c *Controller) finalize(ctx context.Context, node *v1.Node) (reconcile.Result, error) {
 	if !controllerutil.ContainsFinalizer(node, v1beta1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
@@ -108,12 +108,6 @@ func (c *Controller) Finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 	// This delete call is needed so that we ensure that we don't remove the node from the cluster
 	// until the full instance shutdown has taken place
 	if err := c.cloudProvider.Delete(ctx, nodeclaimutil.NewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
-		// We expect cloudProvider to emit a Retryable Error when the underlying instance is not terminated and if that
-		// happens, we want to re-enqueue reconciliation until we terminate the underlying instance before removing
-		// finalizer from the node.
-		if cloudprovider.IsRetryableError(err) {
-			return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
-		}
 		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
 	}
 	if err := c.removeFinalizer(ctx, node); err != nil {
@@ -152,14 +146,14 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *v1.Node) error {
 		TerminationSummary.With(prometheus.Labels{
 			metrics.NodePoolLabel: n.Labels[v1beta1.NodePoolLabelKey],
 		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
-		logging.FromContext(ctx).Infof("deleted node")
+		log.FromContext(ctx).Info("deleted node")
 	}
 	return nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("node.termination").
 		For(&v1.Node{}).
 		WithOptions(
 			controller.Options{
@@ -170,5 +164,6 @@ func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontr
 				),
 				MaxConcurrentReconciles: 100,
 			},
-		))
+		).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

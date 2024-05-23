@@ -28,11 +28,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
-)
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-var _ operatorcontroller.TypedController[*v1beta1.NodePool] = (*Controller)(nil)
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+)
 
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
 // The hash is placed in the metadata for increased observability and should be found on each object.
@@ -40,14 +39,16 @@ type Controller struct {
 	kubeClient client.Client
 }
 
-func NewController(kubeClient client.Client) operatorcontroller.Controller {
-	return operatorcontroller.Typed[*v1beta1.NodePool](kubeClient, &Controller{
+func NewController(kubeClient client.Client) *Controller {
+	return &Controller{
 		kubeClient: kubeClient,
-	})
+	}
 }
 
 // Reconcile the resource
 func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "nodepool.hash")
+
 	stored := np.DeepCopy()
 
 	if np.Annotations[v1beta1.NodePoolHashVersionAnnotationKey] != v1beta1.NodePoolHashVersion {
@@ -68,16 +69,12 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Name() string {
-	return "nodepool.hash"
-}
-
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("nodepool.hash").
 		For(&v1beta1.NodePool{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}),
-	)
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
 // Updating `nodepool-hash-version` annotation inside the karpenter controller means a breaking change has been made to the hash calculation.
@@ -102,7 +99,7 @@ func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1beta1.NodePo
 
 			// Any NodeClaim that is already drifted will remain drifted if the karpenter.sh/nodepool-hash-version doesn't match
 			// Since the hashing mechanism has changed we will not be able to determine if the drifted status of the NodeClaim has changed
-			if nc.StatusConditions().GetCondition(v1beta1.Drifted) == nil {
+			if nc.StatusConditions().Get(v1beta1.ConditionTypeDrifted) == nil {
 				nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
 					v1beta1.NodePoolHashAnnotationKey: np.Hash(),
 				})

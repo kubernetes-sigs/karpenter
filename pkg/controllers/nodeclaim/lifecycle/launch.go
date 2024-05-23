@@ -24,8 +24,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -43,7 +43,7 @@ type Launch struct {
 }
 
 func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() {
+	if nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue() {
 		return reconcile.Result{}, nil
 	}
 
@@ -69,7 +69,7 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (r
 	}
 	l.cache.SetDefault(string(nodeClaim.UID), created)
 	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
-	nodeClaim.StatusConditions().MarkTrue(v1beta1.Launched)
+	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
 	metrics.NodeClaimsLaunchedCounter.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 	}).Inc()
@@ -83,7 +83,8 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		switch {
 		case cloudprovider.IsInsufficientCapacityError(err):
 			l.recorder.Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
-			logging.FromContext(ctx).Error(err)
+			log.FromContext(ctx).Error(err, "failed launching nodeclaim")
+
 			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
 			}
@@ -95,19 +96,19 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
 			l.recorder.Publish(NodeClassNotReadyEvent(nodeClaim, err))
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
+			nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("launching nodeclaim, %w", err)
 		default:
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.Launched, "LaunchFailed", truncateMessage(err.Error()))
+			nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("launching nodeclaim, %w", err)
 		}
 	}
-	logging.FromContext(ctx).With(
+	log.FromContext(ctx).WithValues(
 		"provider-id", created.Status.ProviderID,
 		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
 		"zone", created.Labels[v1.LabelTopologyZone],
 		"capacity-type", created.Labels[v1beta1.CapacityTypeLabelKey],
-		"allocatable", created.Status.Allocatable).Infof("launched nodeclaim")
+		"allocatable", created.Status.Allocatable).Info("launched nodeclaim")
 	return created, nil
 }
 

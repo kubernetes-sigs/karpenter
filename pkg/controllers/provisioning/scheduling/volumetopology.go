@@ -24,8 +24,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"knative.dev/pkg/logging"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
@@ -70,9 +71,9 @@ func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
 			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[i].MatchExpressions, requirements...)
 	}
 
-	logging.FromContext(ctx).
-		With("pod", client.ObjectKeyFromObject(pod)).
-		Debugf("adding requirements derived from pod volumes, %s", requirements)
+	log.FromContext(ctx).
+		WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)).
+		V(1).Info(fmt.Sprintf("adding requirements derived from pod volumes, %s", requirements))
 	return nil
 }
 

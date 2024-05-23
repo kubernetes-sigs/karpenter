@@ -13,7 +13,7 @@ jobs:
       id-token: write # Needed for cosigning build attestation files with tejolote
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+      - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
         with:
           fetch-depth: 0
 
@@ -32,7 +32,7 @@ jobs:
           prerelease: false
 
       - name: Install tejolote
-        uses: kubernetes-sigs/release-actions/setup-tejolote@841d76a188a7c121231a863572e27012805715a2 # v0.1.4
+        uses: kubernetes-sigs/release-actions/setup-tejolote@2f8b9ec22aedc9ce15039b6c7716aa6c2907df1c # v0.2.0
       - name: Run tejolote
         run: |
           tejolote attest "github://kubernetes-sigs/karpenter/${{ github.run_id }}" --artifacts "github://kubernetes-sigs/karpenter/$TAG" --output karpenter.intoto.json --sign

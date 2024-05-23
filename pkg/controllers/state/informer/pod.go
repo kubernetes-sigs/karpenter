@@ -22,15 +22,15 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 var stateRetryPeriod = 1 * time.Minute
@@ -41,19 +41,16 @@ type PodController struct {
 	cluster    *state.Cluster
 }
 
-func NewPodController(kubeClient client.Client, cluster *state.Cluster) operatorcontroller.Controller {
+func NewPodController(kubeClient client.Client, cluster *state.Cluster) *PodController {
 	return &PodController{
 		kubeClient: kubeClient,
 		cluster:    cluster,
 	}
 }
 
-func (c *PodController) Name() string {
-	return "state.pod"
-}
-
 func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("pod", req.NamespacedName))
+	ctx = injection.WithControllerName(ctx, "state.pod")
+
 	pod := &v1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
@@ -72,9 +69,10 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *PodController) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(controllerruntime.
-		NewControllerManagedBy(m).
+func (c *PodController) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("state.pod").
 		For(&v1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}))
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(c)
 }

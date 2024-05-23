@@ -24,9 +24,10 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"knative.dev/pkg/logging"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -40,33 +41,32 @@ type Registration struct {
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue() {
+	if nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsTrue() {
 		return reconcile.Result{}, nil
 	}
-	if !nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue() {
-		nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "NotLaunched", "Node not launched")
+	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue() {
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeRegistered, "NotLaunched", "Node not launched")
 		return reconcile.Result{}, nil
 	}
-
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("provider-id", nodeClaim.Status.ProviderID))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
 	node, err := nodeclaimutil.NodeForNodeClaim(ctx, r.kubeClient, nodeClaim)
 	if err != nil {
 		if nodeclaimutil.IsNodeNotFoundError(err) {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "NodeNotFound", "Node not registered with cluster")
+			nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeRegistered, "NodeNotFound", "Node not registered with cluster")
 			return reconcile.Result{}, nil
 		}
 		if nodeclaimutil.IsDuplicateNodeError(err) {
-			nodeClaim.StatusConditions().MarkFalse(v1beta1.Registered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
+			nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeRegistered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for nodeclaim, %w", err)
 	}
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", node.Name))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
-	logging.FromContext(ctx).Infof("registered nodeclaim")
-	nodeClaim.StatusConditions().MarkTrue(v1beta1.Registered)
+	log.FromContext(ctx).Info("registered nodeclaim")
+	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
 	nodeClaim.Status.NodeName = node.Name
 
 	metrics.NodeClaimsRegisteredCounter.With(prometheus.Labels{

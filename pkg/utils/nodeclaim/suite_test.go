@@ -26,12 +26,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -127,9 +127,9 @@ var _ = Describe("NodeClaimUtils", func() {
 		Expect(nodeClaim.Status.ProviderID).To(Equal(node.Spec.ProviderID))
 		Expect(nodeClaim.Status.Capacity).To(Equal(node.Status.Capacity))
 		Expect(nodeClaim.Status.Allocatable).To(Equal(node.Status.Allocatable))
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Launched).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Registered).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Initialized).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
 	})
 	It("should update the owner for a Node to a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{

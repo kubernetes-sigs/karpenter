@@ -27,16 +27,16 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 const (
@@ -104,7 +104,7 @@ func labelNames() []string {
 }
 
 // NewController constructs a podController instance
-func NewController(kubeClient client.Client) controller.Controller {
+func NewController(kubeClient client.Client) *Controller {
 	return &Controller{
 		kubeClient:  kubeClient,
 		metricStore: metrics.NewStore(),
@@ -118,7 +118,8 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("pod", req.Name))
+	ctx = injection.WithControllerName(ctx, "metrics.pod")
+
 	pod := &v1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
@@ -187,10 +188,9 @@ func (c *Controller) makeLabels(ctx context.Context, pod *v1.Pod) (prometheus.La
 	return metricLabels, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
-	return controller.Adapt(
-		controllerruntime.
-			NewControllerManagedBy(m).
-			For(&v1.Pod{}),
-	)
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("metrics.pod").
+		For(&v1.Pod{}).
+		Complete(c)
 }

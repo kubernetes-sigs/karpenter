@@ -28,13 +28,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
-	"knative.dev/pkg/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -49,7 +47,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	. "knative.dev/pkg/logging/testing"
+	"github.com/samber/lo"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -58,11 +58,11 @@ var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
-var nodeClaimController controller.Controller
-var nodeController controller.Controller
-var podController controller.Controller
-var nodePoolController controller.Controller
-var daemonsetController controller.Controller
+var nodeClaimController *informer.NodeClaimController
+var nodeController *informer.NodeController
+var podController *informer.PodController
+var nodePoolController *informer.NodePoolController
+var daemonsetController *informer.DaemonSetController
 var cloudProvider *fake.CloudProvider
 var nodePool *v1beta1.NodePool
 
@@ -121,7 +121,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		})
 		sc = test.StorageClass(test.StorageClassOptions{
 			ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
-			Provisioner: ptr.String(csiProvider),
+			Provisioner: lo.ToPtr(csiProvider),
 			Zones:       []string{"test-zone-1"},
 		})
 		csiNode = &storagev1.CSINode{
@@ -134,7 +134,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 						Name:   csiProvider,
 						NodeID: "fake-node-id",
 						Allocatable: &storagev1.VolumeNodeResources{
-							Count: ptr.Int32(10),
+							Count: lo.ToPtr(int32(10)),
 						},
 					},
 				},
@@ -145,7 +145,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		ExpectApplied(ctx, env.Client, sc, node, csiNode)
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
+				StorageClassName: lo.ToPtr(sc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
@@ -166,7 +166,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
+				StorageClassName: lo.ToPtr(sc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
@@ -197,7 +197,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		var pvcs []*v1.PersistentVolumeClaim
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
+				StorageClassName: lo.ToPtr(sc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
@@ -754,8 +754,8 @@ var _ = Describe("Node Resource Level", func() {
 			Kind:               "DaemonSet",
 			Name:               ds.Name,
 			UID:                ds.UID,
-			Controller:         ptr.Bool(true),
-			BlockOwnerDeletion: ptr.Bool(true),
+			Controller:         lo.ToPtr(true),
+			BlockOwnerDeletion: lo.ToPtr(true),
 		})
 
 		node := test.Node(test.NodeOptions{
@@ -1125,12 +1125,12 @@ var _ = Describe("Cluster State Sync", func() {
 			})
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectMetricGaugeValue("karpenter_cluster_state_node_count", float64(i+1), nil)
+			ExpectMetricGaugeValue(state.ClusterStateNodesCount, float64(i+1), nil)
 		}
 
 		Expect(cluster.Synced(ctx)).To(BeTrue())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 1.0, nil)
-		ExpectMetricGaugeValue("karpenter_cluster_state_node_count", 1000.0, nil)
+		ExpectMetricGaugeValue(state.ClusterStateSynced, 1.0, nil)
+		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
 	})
 	It("should consider the cluster state synced when nodes don't have provider id", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
@@ -1138,11 +1138,11 @@ var _ = Describe("Cluster State Sync", func() {
 			node := test.Node()
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectMetricGaugeValue("karpenter_cluster_state_node_count", float64(i+1), nil)
+			ExpectMetricGaugeValue(state.ClusterStateNodesCount, float64(i+1), nil)
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 1.0, nil)
-		ExpectMetricGaugeValue("karpenter_cluster_state_node_count", 1000.0, nil)
+		ExpectMetricGaugeValue(state.ClusterStateSynced, 1.0, nil)
+		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
 
 	})
 	It("should consider the cluster state synced when nodes register provider id", func() {
@@ -1152,7 +1152,7 @@ var _ = Describe("Cluster State Sync", func() {
 			nodes = append(nodes, test.Node())
 			ExpectApplied(ctx, env.Client, nodes[i])
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
-			ExpectMetricGaugeValue("karpenter_cluster_state_node_count", float64(i+1), make(map[string]string))
+			ExpectMetricGaugeValue(state.ClusterStateNodesCount, float64(i+1), make(map[string]string))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		for i := 0; i < 1000; i++ {
@@ -1161,8 +1161,8 @@ var _ = Describe("Cluster State Sync", func() {
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 1.0, nil)
-		ExpectMetricGaugeValue("karpenter_cluster_state_node_count", 1000.0, nil)
+		ExpectMetricGaugeValue(state.ClusterStateSynced, 1.0, nil)
+		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
 	})
 	It("should consider the cluster state synced when all nodeclaims are tracked", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
@@ -1278,7 +1278,7 @@ var _ = Describe("Cluster State Sync", func() {
 			}
 		}
 		Expect(cluster.Synced(ctx)).To(BeFalse())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 0, nil)
+		ExpectMetricGaugeValue(state.ClusterStateSynced, 0, nil)
 	})
 	It("shouldn't consider the cluster state synced if a nodeclaim is added manually with UpdateNodeClaim", func() {
 		nodeClaim := test.NodeClaim()
@@ -1293,17 +1293,17 @@ var _ = Describe("Cluster State Sync", func() {
 
 		cluster.UpdateNodeClaim(nodeClaim)
 		Expect(cluster.Synced(ctx)).To(BeFalse())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 0, nil)
+		ExpectMetricGaugeValue(state.ClusterStateSynced, 0, nil)
 
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(cluster.Synced(ctx)).To(BeFalse())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 0, nil)
+		ExpectMetricGaugeValue(state.ClusterStateSynced, 0, nil)
 
 		ExpectDeleted(ctx, env.Client, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(cluster.Synced(ctx)).To(BeTrue())
-		ExpectMetricGaugeValue("karpenter_cluster_state_synced", 1, nil)
+		ExpectMetricGaugeValue(state.ClusterStateSynced, 1, nil)
 	})
 })
 
@@ -1335,8 +1335,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -1363,8 +1363,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -1384,8 +1384,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -1412,8 +1412,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -1459,7 +1459,7 @@ var _ = Describe("Consolidated State", func() {
 		fakeClock.Step(time.Minute)
 		ExpectApplied(ctx, env.Client, nodePool)
 		state := cluster.ConsolidationState()
-		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })

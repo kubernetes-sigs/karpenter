@@ -51,7 +51,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
@@ -59,8 +58,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	. "knative.dev/pkg/logging/testing"
-	"knative.dev/pkg/ptr"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -71,9 +70,9 @@ var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
-var nodeStateController controller.Controller
-var nodeClaimStateController controller.Controller
-var podStateController controller.Controller
+var nodeStateController *informer.NodeController
+var nodeClaimStateController *informer.NodeClaimController
+var podStateController *informer.PodController
 
 const csiProvider = "fake.csi.provider"
 const isDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"
@@ -108,7 +107,7 @@ var _ = BeforeEach(func() {
 	newCP := fake.CloudProvider{}
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
-	scheduling.MaxInstanceTypes = 100
+	scheduling.MaxInstanceTypes = 60
 })
 
 var _ = AfterEach(func() {
@@ -2027,7 +2026,7 @@ var _ = Context("Scheduling", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().MarkTrue(v1beta1.Initialized)
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
 
 				// delete the pod so that the node is empty
@@ -2095,7 +2094,7 @@ var _ = Context("Scheduling", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().MarkTrue(v1beta1.Initialized)
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
 
 				node1.Spec.Taints = []v1.Taint{startupTaint}
@@ -2172,8 +2171,8 @@ var _ = Context("Scheduling", func() {
 					Kind:               "DaemonSet",
 					Name:               ds.Name,
 					UID:                ds.UID,
-					Controller:         ptr.Bool(true),
-					BlockOwnerDeletion: ptr.Bool(true),
+					Controller:         lo.ToPtr(true),
+					BlockOwnerDeletion: lo.ToPtr(true),
 				})
 
 				// delete the pod so that the node is empty
@@ -2260,8 +2259,8 @@ var _ = Context("Scheduling", func() {
 					Kind:               "DaemonSet",
 					Name:               ds1.Name,
 					UID:                ds1.UID,
-					Controller:         ptr.Bool(true),
-					BlockOwnerDeletion: ptr.Bool(true),
+					Controller:         lo.ToPtr(true),
+					BlockOwnerDeletion: lo.ToPtr(true),
 				})
 
 				// delete the pod so that the node is empty
@@ -2370,7 +2369,7 @@ var _ = Context("Scheduling", func() {
 			// shouldn't create a second node
 			Expect(nodes.Items).To(HaveLen(1))
 		})
-		It("should order initialized nodes for scheduling un-initialized nodes when all other nodes are inflight", func() {
+		It("should order initialized nodes for scheduling uninitialized nodes when all other nodes are inflight", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			var nodeClaims []*v1beta1.NodeClaim
@@ -2468,7 +2467,7 @@ var _ = Context("Scheduling", func() {
 				Expect(node.Name).To(Equal(scheduledNode.Name))
 			}
 		})
-		It("should order initialized nodes for scheduling un-initialized nodes", func() {
+		It("should order initialized nodes for scheduling uninitialized nodes", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			var nodeClaims []*v1beta1.NodeClaim
@@ -2726,7 +2725,7 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(10),
+								Count: lo.ToPtr(int32(10)),
 							},
 						},
 					},
@@ -2737,18 +2736,18 @@ var _ = Context("Scheduling", func() {
 
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 			ExpectApplied(ctx, env.Client, sc)
 
 			var pods []*v1.Pod
 			for i := 0; i < 6; i++ {
 				pvcA := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-					StorageClassName: ptr.String("my-storage-class"),
+					StorageClassName: lo.ToPtr("my-storage-class"),
 					ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-a-%d", i)},
 				})
 				pvcB := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-					StorageClassName: ptr.String("my-storage-class"),
+					StorageClassName: lo.ToPtr("my-storage-class"),
 					ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-b-%d", i)},
 				})
 				ExpectApplied(ctx, env.Client, pvcA, pvcB)
@@ -2777,7 +2776,7 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(10),
+								Count: lo.ToPtr(int32(10)),
 							},
 						},
 					},
@@ -2788,7 +2787,7 @@ var _ = Context("Scheduling", func() {
 
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 			ExpectApplied(ctx, env.Client, sc)
 
@@ -2798,7 +2797,7 @@ var _ = Context("Scheduling", func() {
 
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				ObjectMeta:       metav1.ObjectMeta{Name: "my-claim"},
-				StorageClassName: ptr.String("my-storage-class"),
+				StorageClassName: lo.ToPtr("my-storage-class"),
 				VolumeName:       pv.Name,
 			})
 			ExpectApplied(ctx, env.Client, pv, pvc)
@@ -2836,7 +2835,7 @@ var _ = Context("Scheduling", func() {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				ObjectMeta:       metav1.ObjectMeta{Name: "my-claim"},
 				VolumeName:       pv.Name,
-				StorageClassName: ptr.String(""),
+				StorageClassName: lo.ToPtr(""),
 			})
 			ExpectApplied(ctx, env.Client, pv, pvc)
 
@@ -2860,7 +2859,7 @@ var _ = Context("Scheduling", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "my-storage-class",
 				},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 			// Create another default storage class that shouldn't be used and has no associated limits
 			sc2 := test.StorageClass(test.StorageClassOptions{
@@ -2870,7 +2869,7 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: ptr.String("other-provider"),
+				Provisioner: lo.ToPtr("other-provider"),
 				Zones:       []string{"test-zone-1"}})
 
 			initialPod := test.UnschedulablePod(test.PodOptions{})
@@ -2916,14 +2915,14 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(1),
+								Count: lo.ToPtr(int32(1)),
 							},
 						},
 						{
 							Name:   "other-provider",
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(10),
+								Count: lo.ToPtr(int32(10)),
 							},
 						},
 					},
@@ -2975,7 +2974,7 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 
 			initialPod := test.UnschedulablePod(test.PodOptions{})
@@ -3019,7 +3018,7 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(1),
+								Count: lo.ToPtr(int32(1)),
 							},
 						},
 					},
@@ -3073,7 +3072,7 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: ptr.String("other-provider"),
+				Provisioner: lo.ToPtr("other-provider"),
 				Zones:       []string{"test-zone-1"}})
 			sc2 := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -3082,7 +3081,7 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 
 			ExpectApplied(ctx, env.Client, sc)
@@ -3131,14 +3130,14 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(1),
+								Count: lo.ToPtr(int32(1)),
 							},
 						},
 						{
 							Name:   "other-provider",
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(10),
+								Count: lo.ToPtr(int32(10)),
 							},
 						},
 					},
@@ -3278,10 +3277,10 @@ var _ = Context("Scheduling", func() {
 							isDefaultStorageClassAnnotation: "true",
 						},
 					},
-					Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
+					Provisioner: lo.ToPtr(plugins.AWSEBSInTreePluginName),
 					Zones:       []string{"test-zone-1"}})
 				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-					StorageClassName: ptr.String(sc.Name),
+					StorageClassName: lo.ToPtr(sc.Name),
 				})
 				ExpectApplied(ctx, env.Client, nodePool, sc, pvc)
 				initialPod := test.UnschedulablePod(test.PodOptions{
@@ -3299,7 +3298,7 @@ var _ = Context("Scheduling", func() {
 								Name:   plugins.AWSEBSDriverName,
 								NodeID: "fake-node-id",
 								Allocatable: &storagev1.VolumeNodeResources{
-									Count: ptr.Int32(1),
+									Count: lo.ToPtr(int32(1)),
 								},
 							},
 						},
@@ -3316,7 +3315,7 @@ var _ = Context("Scheduling", func() {
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
 				pvc2 := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-					StorageClassName: ptr.String(sc.Name),
+					StorageClassName: lo.ToPtr(sc.Name),
 				})
 				pod := test.UnschedulablePod(test.PodOptions{
 					PersistentVolumeClaims: []string{pvc2.Name},
@@ -3336,7 +3335,7 @@ var _ = Context("Scheduling", func() {
 							isDefaultStorageClassAnnotation: "true",
 						},
 					},
-					Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
+					Provisioner: lo.ToPtr(plugins.AWSEBSInTreePluginName),
 					Zones:       []string{"test-zone-1"}})
 
 				initialPod := test.UnschedulablePod(test.PodOptions{})
@@ -3356,7 +3355,7 @@ var _ = Context("Scheduling", func() {
 											v1.ResourceStorage: resource.MustParse("1Gi"),
 										},
 									},
-									StorageClassName: ptr.String(sc.Name),
+									StorageClassName: lo.ToPtr(sc.Name),
 								},
 							},
 						},
@@ -3381,7 +3380,7 @@ var _ = Context("Scheduling", func() {
 								Name:   plugins.AWSEBSDriverName,
 								NodeID: "fake-node-id",
 								Allocatable: &storagev1.VolumeNodeResources{
-									Count: ptr.Int32(1),
+									Count: lo.ToPtr(int32(1)),
 								},
 							},
 						},
@@ -3406,7 +3405,7 @@ var _ = Context("Scheduling", func() {
 											v1.ResourceStorage: resource.MustParse("1Gi"),
 										},
 									},
-									StorageClassName: ptr.String(sc.Name),
+									StorageClassName: lo.ToPtr(sc.Name),
 								},
 							},
 						},
@@ -3494,8 +3493,8 @@ var _ = Context("Scheduling", func() {
 								Kind:               "DaemonSet",
 								Name:               ds.Name,
 								UID:                ds.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
 							},
 						},
 					},
@@ -3551,8 +3550,8 @@ var _ = Context("Scheduling", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
 							},
 						},
 					},
@@ -3595,8 +3594,8 @@ var _ = Context("Scheduling", func() {
 								Kind:               "StatefulSet",
 								Name:               ss.Name,
 								UID:                ss.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
 							},
 						},
 					},

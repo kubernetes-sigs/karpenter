@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -45,10 +45,6 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = s.sortCandidates(candidates)
-	EligibleNodesGauge.With(map[string]string{
-		methodLabel:            s.Type(),
-		consolidationTypeLabel: s.ConsolidationType(),
-	}).Set(float64(len(candidates)))
 
 	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue)
 
@@ -66,13 +62,13 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		}
 		if s.clock.Now().After(timeout) {
 			ConsolidationTimeoutTotalCounter.WithLabelValues(s.ConsolidationType()).Inc()
-			logging.FromContext(ctx).Debugf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i)
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
 			return Command{}, scheduling.Results{}, nil
 		}
 		// compute a possible consolidation option
 		cmd, results, err := s.computeConsolidation(ctx, candidate)
 		if err != nil {
-			logging.FromContext(ctx).Errorf("computing consolidation %s", err)
+			log.FromContext(ctx).Error(err, "failed computing consolidation")
 			continue
 		}
 		if cmd.Action() == NoOpAction {
@@ -80,7 +76,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		}
 		if err := v.IsValid(ctx, cmd, consolidationTTL); err != nil {
 			if IsValidationError(err) {
-				logging.FromContext(ctx).Debugf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd)
+				log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
 				return Command{}, scheduling.Results{}, nil
 			}
 			return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)

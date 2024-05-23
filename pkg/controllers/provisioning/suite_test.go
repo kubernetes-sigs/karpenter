@@ -32,9 +32,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
-	. "knative.dev/pkg/logging/testing"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -44,7 +44,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -55,8 +54,8 @@ var (
 	ctx                 context.Context
 	fakeClock           *clock.FakeClock
 	cluster             *state.Cluster
-	nodeController      controller.Controller
-	daemonsetController controller.Controller
+	nodeController      *informer.NodeController
+	daemonsetController *informer.DaemonSetController
 	cloudProvider       *fake.CloudProvider
 	prov                *provisioning.Provisioner
 	env                 *test.Environment
@@ -223,7 +222,7 @@ var _ = Describe("Provisioning", func() {
 			Spec: v1beta1.NodePoolSpec{
 				Template: v1beta1.NodeClaimTemplate{
 					Spec: v1beta1.NodeClaimSpec{
-						Kubelet: &v1beta1.KubeletConfiguration{MaxPods: ptr.Int32(1)},
+						Kubelet: &v1beta1.KubeletConfiguration{MaxPods: lo.ToPtr(int32(1))},
 						Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
 							{
 								NodeSelectorRequirement: v1.NodeSelectorRequirement{
@@ -506,8 +505,8 @@ var _ = Describe("Provisioning", func() {
 								Kind:               "DaemonSet",
 								Name:               daemonset.Name,
 								UID:                daemonset.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
 							},
 						},
 					},
@@ -877,8 +876,8 @@ var _ = Describe("Provisioning", func() {
 								Kind:               "DaemonSet",
 								Name:               daemonset.Name,
 								UID:                daemonset.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
 							},
 						},
 					},
@@ -1897,8 +1896,8 @@ var _ = Describe("Provisioning", func() {
 			It("should schedule to the nodepool with the highest priority always", func() {
 				nodePools := []client.Object{
 					test.NodePool(),
-					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: ptr.Int32(20)}}),
-					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: ptr.Int32(100)}}),
+					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: lo.ToPtr(int32(20))}}),
+					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: lo.ToPtr(int32(100))}}),
 				}
 				ExpectApplied(ctx, env.Client, nodePools...)
 				pods := []*v1.Pod{
@@ -1914,8 +1913,8 @@ var _ = Describe("Provisioning", func() {
 				targetedNodePool := test.NodePool()
 				nodePools := []client.Object{
 					targetedNodePool,
-					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: ptr.Int32(20)}}),
-					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: ptr.Int32(100)}}),
+					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: lo.ToPtr(int32(20))}}),
+					test.NodePool(v1beta1.NodePool{Spec: v1beta1.NodePoolSpec{Weight: lo.ToPtr(int32(100))}}),
 				}
 				ExpectApplied(ctx, env.Client, nodePools...)
 				pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1beta1.NodePoolLabelKey: targetedNodePool.Name}})

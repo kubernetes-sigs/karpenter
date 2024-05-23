@@ -22,8 +22,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -40,7 +40,7 @@ type Liveness struct {
 const registrationTTL = time.Minute * 15
 
 func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	registered := nodeClaim.StatusConditions().GetCondition(v1beta1.Registered)
+	registered := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered)
 	if registered.IsTrue() {
 		return reconcile.Result{}, nil
 	}
@@ -48,14 +48,14 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) 
 		return reconcile.Result{Requeue: true}, nil
 	}
 	// If the Registered statusCondition hasn't gone True during the TTL since we first updated it, we should terminate the NodeClaim
-	if l.clock.Since(registered.LastTransitionTime.Inner.Time) < registrationTTL {
-		return reconcile.Result{RequeueAfter: registrationTTL - l.clock.Since(registered.LastTransitionTime.Inner.Time)}, nil
+	if l.clock.Since(registered.LastTransitionTime.Time) < registrationTTL {
+		return reconcile.Result{RequeueAfter: registrationTTL - l.clock.Since(registered.LastTransitionTime.Time)}, nil
 	}
 	// Delete the NodeClaim if we believe the NodeClaim won't register since we haven't seen the node
 	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	logging.FromContext(ctx).With("ttl", registrationTTL).Infof("terminating due to registration ttl")
+	log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("terminating due to registration ttl")
 	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:       "liveness",
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],

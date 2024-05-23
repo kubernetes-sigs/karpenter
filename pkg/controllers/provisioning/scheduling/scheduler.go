@@ -28,8 +28,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	"knative.dev/pkg/logging"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
@@ -106,7 +107,7 @@ type Results struct {
 func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
 	// Report failures and nominations
 	for p, err := range r.PodErrors {
-		logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(p)).Errorf("Could not schedule pod, %s", err)
+		log.FromContext(ctx).WithValues("Pod", klog.KRef(p.Namespace, p.Name)).Error(err, "could not schedule pod")
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
 	for _, existing := range r.ExistingNodes {
@@ -125,7 +126,7 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 	if newCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).With("nodeclaims", len(r.NewNodeClaims), "pods", newCount).Infof("computed new nodeclaim(s) to fit pod(s)")
+	log.FromContext(ctx).WithValues("nodeclaims", len(r.NewNodeClaims), "pods", newCount).Info("computed new nodeclaim(s) to fit pod(s)")
 	// Report in flight newNodes, or exit to avoid log spam
 	inflightCount := 0
 	existingCount := 0
@@ -136,7 +137,7 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 	if existingCount == 0 {
 		return
 	}
-	logging.FromContext(ctx).Infof("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount)
+	log.FromContext(ctx).Info(fmt.Sprintf("computed %d unready node(s) will fit %d pod(s)", inflightCount, existingCount))
 }
 
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
@@ -172,34 +173,23 @@ func (r Results) NonPendingPodSchedulingErrors() string {
 }
 
 // TruncateInstanceTypes filters the result based on the maximum number of instanceTypes that needs
-// to be considered. This could potentially impact if minValues is specified for a requirement key. So,
-// this method re-evaluates the NodeClaims in the result returned by the scheduler after truncation
-// and removes invalid NodeClaims, shifts the pods to errorPods so that the scheduler can re-consider those in the next iteration. This is a
-// corner case where even 100 instanceTypes in the NodeClaim are failing to meet the a particular minimum requirement.
+// to be considered. This filters all instance types generated in NewNodeClaims in the Results
 func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 	var validNewNodeClaims []*NodeClaim
 	for _, newNodeClaim := range r.NewNodeClaims {
-		// The InstanceTypeOptions are truncated due to limitations in sending the number of instances to launch API which is capped to 100 today.
-		newNodeClaim.InstanceTypeOptions = lo.Slice(newNodeClaim.InstanceTypeOptions.OrderByPrice(newNodeClaim.NodeClaimTemplate.Requirements), 0, maxInstanceTypes)
-		// Only check for a validity of NodeClaim if its requirement has minValues in it.
-		if newNodeClaim.NodeClaimTemplate.Requirements.HasMinValues() {
+		// The InstanceTypeOptions are truncated due to limitations in sending the number of instances to launch API.
+		var err error
+		newNodeClaim.InstanceTypeOptions, err = newNodeClaim.InstanceTypeOptions.Truncate(newNodeClaim.Requirements, maxInstanceTypes)
+		if err != nil {
 			// Check if the truncated InstanceTypeOptions in each NewNodeClaim from the results still satisfy the minimum requirements
-			incompatibleKey, _ := IncompatibleReqAcrossInstanceTypes(newNodeClaim.NodeClaimTemplate.Requirements, newNodeClaim.InstanceTypeOptions)
-			// If number of instancetypes in the nodeclaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
-			if len(incompatibleKey) > 0 {
-				for _, pod := range newNodeClaim.Pods {
-					r.PodErrors[pod] = fmt.Errorf("pod didn’t schedule because NodePool %q couldn’t meet minValues requirements after truncating to 100 instance types", newNodeClaim.NodeClaimTemplate.NodePoolName)
-				}
-			} else {
-				// Add to valid nodeclaims since it meets minimum requirement.
-				validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
+			// If number of InstanceTypes in the NodeClaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
+			for _, pod := range newNodeClaim.Pods {
+				r.PodErrors[pod] = fmt.Errorf("pod didn’t schedule because NodePool %q couldn’t meet minValues requirements, %w", newNodeClaim.NodeClaimTemplate.NodePoolName, err)
 			}
 		} else {
-			// NodeClaims which do not have minValues in requirement are already valid.
 			validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
 		}
 	}
-	// Assign the new valid NodeClaims to result.
 	r.NewNodeClaims = validNewNodeClaims
 	return r
 }
@@ -236,7 +226,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 		q.Push(pod, relaxed)
 		if relaxed {
 			if err := s.topology.Update(ctx, pod); err != nil {
-				logging.FromContext(ctx).Errorf("updating topology, %s", err)
+				log.FromContext(ctx).Error(err, "failed updating topology")
 			}
 		}
 	}
@@ -292,8 +282,9 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool: %q", nodeClaimTemplate.NodePoolName))
 				continue
 			} else if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) != len(instanceTypes) {
-				logging.FromContext(ctx).With("nodepool", nodeClaimTemplate.NodePoolName).Debugf("%d out of %d instance types were excluded because they would breach limits",
-					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName]))
+
+				log.FromContext(ctx).V(1).WithValues("NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName)).Info(fmt.Sprintf("%d out of %d instance types were excluded because they would breach limits",
+					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName])))
 			}
 		}
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
@@ -352,7 +343,7 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 	}
 	// Order the existing nodes for scheduling with initialized nodes first
 	// This is done specifically for consolidation where we want to make sure we schedule to initialized nodes
-	// before we attempt to schedule un-initialized ones
+	// before we attempt to schedule uninitialized ones
 	sort.SliceStable(s.existingNodes, func(i, j int) bool {
 		if s.existingNodes[i].Initialized() && !s.existingNodes[j].Initialized() {
 			return true

@@ -36,10 +36,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/logging"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -47,6 +46,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	v1 "k8s.io/api/core/v1"
@@ -141,7 +141,7 @@ func TestSchedulingProfile(t *testing.T) {
 
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
-	ctx = logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+	ctx = ctrl.IntoContext(context.Background(), operatorlogging.NopLogger)
 	nodePoolWithMinValues := test.NodePool(v1beta1.NodePool{
 		Spec: v1beta1.NodePoolSpec{
 			Template: v1beta1.NodeClaimTemplate{

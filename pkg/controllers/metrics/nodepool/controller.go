@@ -23,11 +23,12 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
+	controllerruntime "sigs.k8s.io/controller-runtime"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
-	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -35,7 +36,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 const (
@@ -81,20 +81,17 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client) operatorcontroller.Controller {
+func NewController(kubeClient client.Client) *Controller {
 	return &Controller{
 		kubeClient:  kubeClient,
 		metricStore: metrics.NewStore(),
 	}
 }
 
-func (c *Controller) Name() string {
-	return "metrics.nodepool"
-}
-
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("nodepool", req.Name))
+	ctx = injection.WithControllerName(ctx, "metrics.nodepool")
+
 	nodePool := &v1beta1.NodePool{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodePool); err != nil {
 		if errors.IsNotFound(err) {
@@ -137,10 +134,9 @@ func makeLabels(nodePool *v1beta1.NodePool, resourceTypeName string) prometheus.
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.Adapt(
-		controllerruntime.
-			NewControllerManagedBy(m).
-			For(&v1beta1.NodePool{}),
-	)
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("metrics.nodepool").
+		For(&v1beta1.NodePool{}).
+		Complete(c)
 }

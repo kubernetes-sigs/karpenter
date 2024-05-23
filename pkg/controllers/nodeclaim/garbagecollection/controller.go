@@ -26,9 +26,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -47,16 +48,12 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) operatorcontroller.Controller {
+func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		clock:         c,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 	}
-}
-
-func (c *Controller) Name() string {
-	return "nodeclaim.garbagecollection"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
@@ -77,7 +74,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	// Only consider NodeClaims that are Registered since we don't want to fully rely on the CloudProvider
 	// API to trigger deletion of the Node. Instead, we'll wait for our registration timeout to trigger
 	nodeClaims := lo.Filter(lo.ToSlicePtr(nodeClaimList.Items), func(n *v1beta1.NodeClaim, _ int) bool {
-		return n.StatusConditions().GetCondition(v1beta1.Registered).IsTrue() &&
+		return n.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsTrue() &&
 			n.DeletionTimestamp.IsZero() &&
 			!cloudProviderProviderIDs.Has(n.Status.ProviderID)
 	})
@@ -100,13 +97,11 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-		logging.FromContext(ctx).
-			With(
-				"nodeclaim", nodeClaims[i].Name,
-				"provider-id", nodeClaims[i].Status.ProviderID,
-				"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
-			).
-			Debugf("garbage collecting nodeclaim with no cloudprovider representation")
+		log.FromContext(ctx).WithValues(
+			"NodeClaim", klog.KRef("", nodeClaims[i].Name),
+			"provider-id", nodeClaims[i].Status.ProviderID,
+			"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
+		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
 		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 			metrics.ReasonLabel:       "garbage_collected",
 			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
@@ -119,6 +114,8 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) operatorcontroller.Builder {
-	return operatorcontroller.NewSingletonManagedBy(m)
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return operatorcontroller.NewSingletonManagedBy(m).
+		Named("nodeclaim.garbagecollection").
+		Complete(c)
 }
