@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -119,7 +120,13 @@ func (c CloudProvider) Name() string {
 }
 
 func (c CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
-	return []schema.GroupVersionKind{}
+	return []schema.GroupVersionKind{
+		{
+			Group:   v1alpha1.SchemeGroupVersion.Group,
+			Version: v1alpha1.SchemeGroupVersion.Version,
+			Kind:    "KWOKNodeClass",
+		},
+	}
 }
 
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {
