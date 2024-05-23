@@ -125,6 +125,10 @@ jobs:
         kubectl get pods -n kube-system | grep karpenter 
         kubectl get nodepools
         kubectl get pods -A
+    - name: run test
+      shell: bash
+      run: | 
+        make e2etests
     - name: cleanup 
       shell: bash
       run: | 
