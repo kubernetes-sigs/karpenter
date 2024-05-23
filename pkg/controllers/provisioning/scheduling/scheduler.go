@@ -301,10 +301,7 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 			existingMinPrice := existingCopiedNodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(existingCopiedNodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
 			newMinPrice := nodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(nodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
 
-			if existingMinPrice/float64(len(existingCopiedNodeClaim.Pods)) > newMinPrice {
-				logging.FromContext(ctx).With("nodeclaim", existingCopiedNodeClaim.NodePoolName).Infof("Creating a new node seems cheaper, existing node price per pod: %f is greater than new node price: %f", existingMinPrice/float64(len(existingCopiedNodeClaim.Pods)), newMinPrice)
-			} else {
-				logging.FromContext(ctx).With("nodeclaim", existingCopiedNodeClaim.NodePoolName).Infof("Adjusting within existing node makes more sense, existing node price per pod: %f is lesser than new node price: %f", existingMinPrice/float64(len(existingCopiedNodeClaim.Pods)), newMinPrice)
+			if existingMinPrice/float64(len(existingCopiedNodeClaim.Pods)) <= newMinPrice {
 				if err := existingOriginalNodeClaim.Add(pod); err == nil {
 					return nil
 				}
