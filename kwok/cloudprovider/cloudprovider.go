@@ -124,7 +124,7 @@ func (c CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
 		{
 			Group:   v1alpha1.SchemeGroupVersion.Group,
 			Version: v1alpha1.SchemeGroupVersion.Version,
-			Kind:    "KwokNodeClass",
+			Kind:    "KWOKNodeClass",
 		},
 	}
 }

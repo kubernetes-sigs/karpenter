@@ -23,16 +23,15 @@ import (
 )
 
 const (
-	Group              = "kwok.karpenter.sh"
-	CompatabilityGroup = "compatibility." + Group
+	Group = "kwok.karpenter.sh"
 )
 
 var (
 	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1alpha1"}
 	SchemeBuilder      = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
 		scheme.AddKnownTypes(SchemeGroupVersion,
-			&KwokNodeClass{},
-			&KwokNodeClassList{},
+			&KWOKNodeClass{},
+			&KWOKNodeClassList{},
 		)
 		metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 		return nil

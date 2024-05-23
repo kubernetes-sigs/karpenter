@@ -39,6 +39,8 @@ spec:
           values: ["spot"]
       nodeClassRef:
         name: default
+        kind: KWOKNodeClass
+        apiVersion: v1alpha1
   limits:
     cpu: 1000
   disruption:
@@ -46,7 +48,7 @@ spec:
     expireAfter: 720h # 30 * 24h = 720h
 ---
 apiVersion: kwok.karpenter.sh/v1alpha1
-kind: KwokNodeClass
+kind: KWOKNodeClass
 metadata:
   name: default
 EOF

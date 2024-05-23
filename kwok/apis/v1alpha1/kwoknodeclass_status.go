@@ -26,14 +26,14 @@ type KwokNodeClassStatus struct {
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }
 
-func (in *KwokNodeClass) StatusConditions() status.ConditionSet {
+func (in *KWOKNodeClass) StatusConditions() status.ConditionSet {
 	return status.NewReadyConditions().For(in)
 }
 
-func (in *KwokNodeClass) GetConditions() []status.Condition {
+func (in *KWOKNodeClass) GetConditions() []status.Condition {
 	return in.Status.Conditions
 }
 
-func (in *KwokNodeClass) SetConditions(conditions []status.Condition) {
+func (in *KWOKNodeClass) SetConditions(conditions []status.Condition) {
 	in.Status.Conditions = conditions
 }

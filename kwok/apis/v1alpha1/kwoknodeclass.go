@@ -20,28 +20,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// KwokNodeClassSpec is the top level specification for the Kwok Provider.
-// This is a dummy node class for Kwok Karpenter installations so that we can have a readiness condition on NodePools.
-type KwokNodeClassSpec struct {
-}
-
-// KwokNodeClass is the Schema for the KwokNodeClass API
+// KWOKNodeClass is the Schema for the KWOKNodeClass API
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=kwoknodeclasses,scope=Cluster,categories=karpenter,shortName={kwoknc,kwokncs}
 // +kubebuilder:subresource:status
-type KwokNodeClass struct {
+type KWOKNodeClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec KwokNodeClassSpec `json:"spec,omitempty"`
-	// +kubebuilder:default:={conditions: {{type: "Ready", status: "True", reason:"NodeClassReady", lastTransitionTime: "2024-01-01T01:01:01Z", message: ""}}}
+	// +kubebuilder:default:={conditions: {{type: "Ready", status: "True", reason:"Ready", lastTransitionTime: "2024-01-01T01:01:01Z", message: ""}}}
 	Status KwokNodeClassStatus `json:"status,omitempty"`
 }
 
-// KwokNodeClassList contains a list of KwokNodeClass
+// KWOKNodeClassList contains a list of KwokNodeClass
 // +kubebuilder:object:root=true
-type KwokNodeClassList struct {
+type KWOKNodeClassList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []KwokNodeClass `json:"items"`
+	Items           []KWOKNodeClass `json:"items"`
 }

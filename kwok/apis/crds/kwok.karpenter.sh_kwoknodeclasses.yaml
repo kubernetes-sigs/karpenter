@@ -10,8 +10,8 @@ spec:
   names:
     categories:
     - karpenter
-    kind: KwokNodeClass
-    listKind: KwokNodeClassList
+    kind: KWOKNodeClass
+    listKind: KWOKNodeClassList
     plural: kwoknodeclasses
     shortNames:
     - kwoknc
@@ -22,7 +22,7 @@ spec:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: KwokNodeClass is the Schema for the KwokNodeClass API
+        description: KWOKNodeClass is the Schema for the KWOKNodeClass API
         properties:
           apiVersion:
             description: |-
@@ -41,17 +41,12 @@ spec:
             type: string
           metadata:
             type: object
-          spec:
-            description: |-
-              KwokNodeClassSpec is the top level specification for the Kwok Provider.
-              This is a dummy node class for Kwok Karpenter installations so that we can have a readiness condition on NodePools.
-            type: object
           status:
             default:
               conditions:
               - lastTransitionTime: "2024-01-01T01:01:01Z"
                 message: ""
-                reason: NodeClassReady
+                reason: Ready
                 status: "True"
                 type: Ready
             description: KwokNodeClassStatus contains the resolved state of the KwokNodeClass
