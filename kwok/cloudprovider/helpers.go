@@ -26,6 +26,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -113,11 +114,11 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 	}
 
 	opts.instanceTypeLabels = map[string]string{
-		InstanceTypeLabelKey:   opts.Name,
-		InstanceSizeLabelKey:   parseSizeFromType(opts.Name, cpu),
-		InstanceFamilyLabelKey: parseFamilyFromType(opts.Name),
-		InstanceCPULabelKey:    cpu,
-		InstanceMemoryLabelKey: memory,
+		v1alpha1.InstanceTypeLabelKey:   opts.Name,
+		v1alpha1.InstanceSizeLabelKey:   parseSizeFromType(opts.Name, cpu),
+		v1alpha1.InstanceFamilyLabelKey: parseFamilyFromType(opts.Name),
+		v1alpha1.InstanceCPULabelKey:    cpu,
+		v1alpha1.InstanceMemoryLabelKey: memory,
 	}
 
 	// if the user specified a different pod limit, override the default
@@ -146,10 +147,10 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
 		})...),
-		scheduling.NewRequirement(InstanceSizeLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[InstanceSizeLabelKey]),
-		scheduling.NewRequirement(InstanceFamilyLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[InstanceFamilyLabelKey]),
-		scheduling.NewRequirement(InstanceCPULabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[InstanceCPULabelKey]),
-		scheduling.NewRequirement(InstanceMemoryLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[InstanceMemoryLabelKey]),
+		scheduling.NewRequirement(v1alpha1.InstanceSizeLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceSizeLabelKey]),
+		scheduling.NewRequirement(v1alpha1.InstanceFamilyLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceFamilyLabelKey]),
+		scheduling.NewRequirement(v1alpha1.InstanceCPULabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceCPULabelKey]),
+		scheduling.NewRequirement(v1alpha1.InstanceMemoryLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceMemoryLabelKey]),
 	)
 
 	return &cloudprovider.InstanceType{

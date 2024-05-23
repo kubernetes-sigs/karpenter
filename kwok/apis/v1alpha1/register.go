@@ -14,14 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kwok
+package v1alpha1
 
-const (
-	kwokProviderPrefix = "kwok://"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// Hard coded Kwok values
+const (
+	Group = "kwok.karpenter.sh"
+)
+
 var (
-	KwokPartitions = []string{"partition-a", "partition-b", "partition-c", "partition-d", "partition-e",
-		"partition-f", "partition-g", "partition-h", "partition-i", "partition-j"}
+	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1alpha1"}
+	SchemeBuilder      = runtime.NewSchemeBuilder(func(scheme *runtime.Scheme) error {
+		scheme.AddKnownTypes(SchemeGroupVersion,
+			&KWOKNodeClass{},
+			&KWOKNodeClassList{},
+		)
+		metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
+		return nil
+	})
 )

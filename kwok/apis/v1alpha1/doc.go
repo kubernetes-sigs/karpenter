@@ -14,14 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kwok
-
-const (
-	kwokProviderPrefix = "kwok://"
-)
-
-// Hard coded Kwok values
-var (
-	KwokPartitions = []string{"partition-a", "partition-b", "partition-c", "partition-d", "partition-e",
-		"partition-f", "partition-g", "partition-h", "partition-i", "partition-j"}
-)
+// +k8s:openapi-gen=true
+// +k8s:deepcopy-gen=package,register
+// +k8s:defaulter-gen=TypeMeta
+// +groupName=kwok.karpenter.sh
+package v1alpha1 // doc.go is discovered by codegen

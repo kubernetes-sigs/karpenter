@@ -14,14 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kwok
+package v1alpha1
 
 const (
-	kwokProviderPrefix = "kwok://"
-)
+	// Labels that can be selected on and are propagated to the node
+	InstanceTypeLabelKey   = Group + "/instance-type"
+	InstanceSizeLabelKey   = Group + "/instance-size"
+	InstanceFamilyLabelKey = Group + "/instance-family"
+	InstanceMemoryLabelKey = Group + "/instance-memory"
+	InstanceCPULabelKey    = Group + "/instance-cpu"
 
-// Hard coded Kwok values
-var (
-	KwokPartitions = []string{"partition-a", "partition-b", "partition-c", "partition-d", "partition-e",
-		"partition-f", "partition-g", "partition-h", "partition-i", "partition-j"}
+	// Internal labels that are propagated to the node
+	KwokLabelKey          = "kwok.x-k8s.io/node"
+	KwokLabelValue        = "fake"
+	NodeViewerLabelKey    = "eks-node-viewer/instance-price"
+	KwokPartitionLabelKey = "kwok-partition"
 )

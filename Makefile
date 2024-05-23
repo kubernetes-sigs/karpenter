@@ -45,6 +45,7 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 apply: verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	hack/validation/kwok-requirements.sh
 	kubectl apply -f pkg/apis/crds
+	kubectl apply -f kwok/apis/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
