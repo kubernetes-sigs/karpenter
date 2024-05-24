@@ -47,10 +47,10 @@ prometheus:
     resources:
       requests:
         cpu: 1
-        memory: 15Gi
+        memory: 7Gi
       limits:
         cpu: 1
-        memory: 15Gi
+        memory: 7Gi
     serviceMonitorSelector:
       matchLabels:
         scrape: enabled
