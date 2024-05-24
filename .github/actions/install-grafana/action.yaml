@@ -4,9 +4,6 @@ runs:
   using: "composite"
   steps:
     - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
-    - uses: ./.github/actions/e2e/install-helm
-      with:
-        version: v3.12.3 # Pinned to this version since v3.13.0 has issues with anonymous pulls: https://github.com/helm/helm/issues/12423
     - name: add grafana repo
       shell: bash
       run: |
