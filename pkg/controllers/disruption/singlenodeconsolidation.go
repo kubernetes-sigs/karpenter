@@ -54,6 +54,10 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	constrainedByBudgets := false
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
+		// If the candidate is empty, we don't want to consider it for single node consolidation
+		if hasEmptyCondition := candidate.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty) != nil; hasEmptyCondition {
+			continue
+		}
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.
