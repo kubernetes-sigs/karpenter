@@ -11,7 +11,7 @@ runs:
     - name: create monitoring namespace
       shell: bash
       run: |
-        kubectl create ns prometheus || true
+        kubectl create ns monitoring || true
         kubectl label ns monitoring scrape=enabled --overwrite=true
     - name: install prometheus
       shell: bash
