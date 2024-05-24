@@ -113,8 +113,8 @@ var _ = Describe("Queue", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[0].Name,
-						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().CapacityType,
-						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Zone,
+						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -129,8 +129,8 @@ var _ = Describe("Queue", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[0].Name,
-						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().CapacityType,
-						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Zone,
+						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -151,8 +151,8 @@ var _ = Describe("Queue", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[0].Name,
-						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().CapacityType,
-						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Zone,
+						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{

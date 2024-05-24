@@ -215,10 +215,11 @@ func (i InstanceTypeOverhead) Total() v1.ResourceList {
 }
 
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
-// may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type)
+// may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
+// these properties are captured with labels in Requirements.
+// Requirements are required to contain the keys v1beta1.CapacityTypeLabelKey and v1.LabelTopologyZone
 type Offering struct {
-	CapacityType string
-	Zone         string
+	Requirements scheduling.Requirements
 	Price        float64
 	// Available is added so that Offerings can return all offerings that have ever existed for an instance type,
 	// so we can get historical pricing data for calculating savings in consolidation
@@ -228,10 +229,10 @@ type Offering struct {
 type Offerings []Offering
 
 // Get gets the offering from an offering slice that matches the
-// passed zone and capacity type
-func (ofs Offerings) Get(ct, zone string) (Offering, bool) {
+// passed zone, capacityType, and other constraints
+func (ofs Offerings) Get(reqs scheduling.Requirements) (Offering, bool) {
 	return lo.Find(ofs, func(of Offering) bool {
-		return of.CapacityType == ct && of.Zone == zone
+		return reqs.Compatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
 	})
 }
 
@@ -245,8 +246,7 @@ func (ofs Offerings) Available() Offerings {
 // Compatible returns the offerings based on the passed requirements
 func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering Offering, _ int) bool {
-		return (!reqs.Has(v1.LabelTopologyZone) || reqs.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
-			(!reqs.Has(v1beta1.CapacityTypeLabelKey) || reqs.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType))
+		return reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
 	})
 }
 
@@ -254,6 +254,13 @@ func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 func (ofs Offerings) Cheapest() Offering {
 	return lo.MinBy(ofs, func(a, b Offering) bool {
 		return a.Price < b.Price
+	})
+}
+
+// MostExpensive returns the most expensive offering from the return offerings
+func (ofs Offerings) MostExpensive() Offering {
+	return lo.MaxBy(ofs, func(a, b Offering) bool {
+		return a.Price > b.Price
 	})
 }
 

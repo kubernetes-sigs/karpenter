@@ -24,7 +24,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -245,7 +244,8 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)
 		itFits := fits(it, requests)
-		itHasOffering := hasOffering(it, requirements)
+		// TODO: change Get() on offerings to be closer to the implementation of Any() on requirements
+		_, itHasOffering := it.Offerings.Available().Get(requirements)
 
 		// track if any single instance type met a single criteria
 		results.requirementsMet = results.requirementsMet || itCompat
@@ -280,14 +280,4 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 
 func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) bool {
 	return resources.Fits(requests, instanceType.Allocatable())
-}
-
-func hasOffering(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
-	for _, offering := range instanceType.Offerings.Available() {
-		if (!requirements.Has(v1.LabelTopologyZone) || requirements.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
-			(!requirements.Has(v1beta1.CapacityTypeLabelKey) || requirements.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType)) {
-			return true
-		}
-	}
-	return false
 }

@@ -28,6 +28,7 @@ import (
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 var (
@@ -93,10 +94,12 @@ func constructGenericInstanceTypes() []kwok.InstanceTypeOptions {
 					for _, zone := range KwokZones {
 						for _, ct := range []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand} {
 							opts.Offerings = append(opts.Offerings, cloudprovider.Offering{
-								CapacityType: ct,
-								Zone:         zone,
-								Price:        lo.Ternary(ct == v1beta1.CapacityTypeSpot, price*.7, price),
-								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1beta1.CapacityTypeLabelKey: ct,
+									v1.LabelTopologyZone:         zone,
+								}),
+								Price:     lo.Ternary(ct == v1beta1.CapacityTypeSpot, price*.7, price),
+								Available: true,
 							})
 						}
 					}
