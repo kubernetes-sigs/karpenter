@@ -57,8 +57,3 @@ prometheus:
     serviceMonitorNamespaceSelector:
       matchLabels:
         scrape: enabled
-    remoteWrite:
-      - queueConfig:
-          maxSamplesPerSend: 1000
-          maxShards: 200
-          capacity: 2500
