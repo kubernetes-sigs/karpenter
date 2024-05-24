@@ -37,7 +37,7 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
 		--set-string controller.env[0].name=ENABLE_PROFILING \
-		--set-string controller.env[0].value=true
+		--set-string controller.env[0].value=true 
 
 e2etests: ## Run the e2e suite against your local cluster
 	cd test && go test \
