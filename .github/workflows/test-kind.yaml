@@ -18,8 +18,6 @@ jobs:
     - uses: ./.github/actions/install-deps
       with:
           k8sVersion: ${{ matrix.k8sVersion }}
-    - name: install helm 
-      uses: ./.github/actions/install-helm
     - name: Kind Cluster
       uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
     - name: check kind cluster and taint nodes
