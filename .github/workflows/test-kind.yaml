@@ -43,6 +43,8 @@ jobs:
         KWOK_REPO=kind.local KIND_CLUSTER_NAME=chart-testing make apply-with-kind
     - name: install prometheus 
       uses: ./.github/actions/install-prometheus
+    - name: install grafana 
+      uses: ./.github/actions/install-grafana
     - name: apply pyroscope 
       shell: bash
       run: |
