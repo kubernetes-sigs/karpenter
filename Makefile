@@ -36,6 +36,7 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
+		--set serviceMonitor.enabled=true \
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true 
 
