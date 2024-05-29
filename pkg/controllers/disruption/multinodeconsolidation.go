@@ -60,10 +60,6 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	disruptableCandidates := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
 	for _, candidate := range candidates {
-		// If the candidate is empty, we don't want to consider it for single node consolidation
-		if hasEmptyCondition := candidate.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty) != nil; hasEmptyCondition {
-			continue
-		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
 		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] == 0 {
