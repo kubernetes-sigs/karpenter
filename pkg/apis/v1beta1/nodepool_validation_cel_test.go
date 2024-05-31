@@ -232,7 +232,7 @@ var _ = Describe("CEL/Validation", func() {
 		DescribeTable("should succeed when creating a budget with valid reasons", func(reason DisruptionReason) {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				Reasons:  []DisruptionReason{reason},
 			}}
@@ -247,7 +247,7 @@ var _ = Describe("CEL/Validation", func() {
 		DescribeTable("should fail when creating a budget with invalid reasons", func(reason string) {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				Reasons:  []DisruptionReason{DisruptionReason(reason)},
 			}}
@@ -260,7 +260,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should allow setting multiple reasons", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				Reasons:  []DisruptionReason{DisruptionReasonExpired, DisruptionReasonEmpty},
 			}}

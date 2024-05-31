@@ -60,8 +60,8 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	disruptableCandidates := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
 	for _, candidate := range candidates {
-		// Filter out empty candidates 
-		if candidate.NodeClaim.StatusConditions().GetCondition(v1beta1.Empty) != nil {
+		// Filter out empty candidates
+		if candidate.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty) != nil {
 			continue
 		}
 
