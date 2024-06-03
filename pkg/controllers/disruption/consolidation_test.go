@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -2159,99 +2158,6 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
-		DescribeTable("can replace nodes, considers karpenter.sh/do-not-consolidate on nodes",
-			func(spotToSpot bool) {
-				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
-				node = lo.Ternary(spotToSpot, spotNode, node)
-				// create our RS so we can link a pod to it
-				rs := test.ReplicaSet()
-				ExpectApplied(ctx, env.Client, rs)
-				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-				pods := test.Pods(3, test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: labels,
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion:         "apps/v1",
-								Kind:               "ReplicaSet",
-								Name:               rs.Name,
-								UID:                rs.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
-							},
-						},
-					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: v1.ResourceList{
-							v1.ResourceCPU: resource.MustParse("2"),
-						},
-					},
-				})
-				annotatedNodeClaim, annotatedNode := test.NodeClaimAndNode(v1beta1.NodeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							v1alpha5.DoNotConsolidateNodeAnnotationKey: "true",
-						},
-						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     nodePool.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
-						},
-					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("5"),
-							v1.ResourcePods: resource.MustParse("100"),
-						},
-					},
-				})
-
-				if spotToSpot {
-					annotatedNodeClaim.Labels = lo.Assign(annotatedNodeClaim.Labels, map[string]string{
-						v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveSpotOffering.Zone,
-					})
-					annotatedNode.Labels = lo.Assign(annotatedNode.Labels, map[string]string{
-						v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveSpotOffering.Zone,
-					})
-				}
-
-				ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
-				ExpectApplied(ctx, env.Client, nodeClaim, node, annotatedNodeClaim, annotatedNode)
-
-				// bind pods to node
-				ExpectManualBinding(ctx, env.Client, pods[0], node)
-				ExpectManualBinding(ctx, env.Client, pods[1], node)
-				ExpectManualBinding(ctx, env.Client, pods[2], annotatedNode)
-
-				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, annotatedNode}, []*v1beta1.NodeClaim{nodeClaim, annotatedNodeClaim})
-
-				fakeClock.Step(10 * time.Minute)
-
-				var wg sync.WaitGroup
-				ExpectTriggerVerifyAction(&wg)
-				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-				wg.Wait()
-
-				ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-				// Cascade any deletion of the nodeclaim to the node
-				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-				// we should delete the non-annotated node and replace with a cheaper node
-				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
-				Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-				ExpectNotFound(ctx, env.Client, nodeClaim, node)
-			},
-			Entry("if the candidate is on-demand node", false),
-			Entry("if the candidate is spot node", true),
-		)
 		DescribeTable("can replace nodes, considers karpenter.sh/do-not-disrupt on nodes",
 			func(spotToSpot bool) {
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
@@ -2324,98 +2230,6 @@ var _ = Describe("Consolidation", func() {
 
 				// inform cluster state about nodes and nodeClaims
 				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, annotatedNode}, []*v1beta1.NodeClaim{nodeClaim, annotatedNodeClaim})
-
-				fakeClock.Step(10 * time.Minute)
-
-				var wg sync.WaitGroup
-				ExpectTriggerVerifyAction(&wg)
-				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-				wg.Wait()
-
-				ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-				// Cascade any deletion of the nodeClaim to the node
-				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-				// we should delete the non-annotated node and replace with a cheaper node
-				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
-				Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-				ExpectNotFound(ctx, env.Client, nodeClaim, node)
-			},
-			Entry("if the candidate is on-demand node", false),
-			Entry("if the candidate is spot node", true),
-		)
-		DescribeTable("can replace nodes, considers karpenter.sh/do-not-evict on pods",
-			func(spotToSpot bool) {
-				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
-				node = lo.Ternary(spotToSpot, spotNode, node)
-				// create our RS so we can link a pod to it
-				rs := test.ReplicaSet()
-				ExpectApplied(ctx, env.Client, rs)
-				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-				pods := test.Pods(3, test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: labels,
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion:         "apps/v1",
-								Kind:               "ReplicaSet",
-								Name:               rs.Name,
-								UID:                rs.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
-							},
-						},
-					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: v1.ResourceList{
-							v1.ResourceCPU: resource.MustParse("2"),
-						},
-					},
-				})
-				nodeClaim2, node2 := test.NodeClaimAndNode(v1beta1.NodeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     nodePool.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
-						},
-					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("5"),
-							v1.ResourcePods: resource.MustParse("100"),
-						},
-					},
-				})
-
-				if spotToSpot {
-					nodeClaim2.Labels = lo.Assign(nodeClaim2.Labels, map[string]string{
-						v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveSpotOffering.Zone,
-					})
-					node2.Labels = lo.Assign(node2.Labels, map[string]string{
-						v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveSpotOffering.Zone,
-					})
-				}
-				// Block this pod from being disrupted with karpenter.sh/do-not-evict
-				pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
-
-				ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
-				ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
-
-				// bind pods to node
-				ExpectManualBinding(ctx, env.Client, pods[0], node)
-				ExpectManualBinding(ctx, env.Client, pods[1], node)
-				ExpectManualBinding(ctx, env.Client, pods[2], node2)
-
-				// inform cluster state about nodes and nodeClaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -2961,54 +2775,6 @@ var _ = Describe("Consolidation", func() {
 			// eviction
 			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
 		})
-		It("can delete nodes, considers karpneter.sh/do-not-consolidate on nodes", func() {
-			// create our RS so we can link a pod to it
-			rs := test.ReplicaSet()
-			ExpectApplied(ctx, env.Client, rs)
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
-						},
-					}}})
-			nodeClaims[1].Annotations = lo.Assign(nodeClaims[1].Annotations, map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"})
-			nodes[1].Annotations = lo.Assign(nodeClaims[1].Annotations, map[string]string{v1alpha5.DoNotConsolidateNodeAnnotationKey: "true"})
-
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
-			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
-			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-
-			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			wg.Wait()
-
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-			// Cascade any deletion of the nodeClaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
-
-			// we should delete the non-annotated node
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
-		})
 		It("can delete nodes, considers karpenter.sh/do-not-disrupt on nodes", func() {
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
@@ -3029,56 +2795,6 @@ var _ = Describe("Consolidation", func() {
 					}}})
 			nodeClaims[1].Annotations = lo.Assign(nodeClaims[1].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
 			nodes[1].Annotations = lo.Assign(nodeClaims[1].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
-
-			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
-			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
-			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-
-			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			wg.Wait()
-
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
-			// Cascade any deletion of the nodeClaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
-
-			// we should delete the non-annotated node
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
-		})
-		It("can delete nodes, considers karpenter.sh/do-not-evict on pods", func() {
-			// create our RS so we can link a pod to it
-			rs := test.ReplicaSet()
-			ExpectApplied(ctx, env.Client, rs)
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-			pods := test.Pods(3, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
-						},
-					},
-				}})
-			// Block this pod from being disrupted with karpenter.sh/do-not-evict
-			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1alpha5.DoNotEvictPodAnnotationKey: "true"})
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
 			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
@@ -3842,54 +3558,6 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaims[0])
 		})
-		It("should not replace node if a pod schedules with karpenter.sh/do-not-evict during the TTL wait", func() {
-			pod := test.Pod()
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-
-			// Trigger the reconcile loop to start but don't trigger the verify action
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			}()
-
-			// Iterate in a loop until we get to the validation action
-			// Then, apply the pods to the cluster and bind them to the nodes
-			for {
-				time.Sleep(100 * time.Millisecond)
-				if fakeClock.HasWaiters() {
-					break
-				}
-			}
-			doNotEvictPod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						v1alpha5.DoNotEvictPodAnnotationKey: "true",
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, doNotEvictPod)
-			ExpectManualBinding(ctx, env.Client, doNotEvictPod, node)
-
-			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectTriggerVerifyAction(&wg)
-			wg.Wait()
-
-			// we would normally be able to replace a node, but we are blocked by the do-not-evict pods during validation
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, node)
-		})
 		It("should not replace node if a pod schedules with karpenter.sh/do-not-disrupt during the TTL wait", func() {
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
@@ -3987,57 +3655,6 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, node)
-		})
-		It("should not delete node if pods schedule with karpenter.sh/do-not-evict during the TTL wait", func() {
-			pods := test.Pods(2, test.PodOptions{})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], pods[0], pods[1])
-
-			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-			ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-
-			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-
-			// Trigger the reconcile loop to start but don't trigger the verify action
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
-			}()
-
-			// Iterate in a loop until we get to the validation action
-			// Then, apply the pods to the cluster and bind them to the nodes
-			for {
-				time.Sleep(100 * time.Millisecond)
-				if fakeClock.HasWaiters() {
-					break
-				}
-			}
-			doNotEvictPods := test.Pods(2, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						v1alpha5.DoNotEvictPodAnnotationKey: "true",
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, doNotEvictPods[0], doNotEvictPods[1])
-			ExpectManualBinding(ctx, env.Client, doNotEvictPods[0], nodes[0])
-			ExpectManualBinding(ctx, env.Client, doNotEvictPods[1], nodes[1])
-
-			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectTriggerVerifyAction(&wg)
-			wg.Wait()
-
-			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-evict pods during validation
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-			ExpectExists(ctx, env.Client, nodes[0])
-			ExpectExists(ctx, env.Client, nodes[1])
 		})
 		It("should not delete node if pods schedule with karpenter.sh/do-not-disrupt during the TTL wait", func() {
 			pods := test.Pods(2, test.PodOptions{})
