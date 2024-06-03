@@ -30,7 +30,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
@@ -304,7 +303,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		// Expect a replace action
@@ -322,7 +321,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		// Another replacement disruption action
@@ -337,7 +336,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		// One more replacement disruption action
@@ -353,7 +352,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// Try one more time, but fail since the budgets only allow 3 disruptions.
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ncs = ExpectNodeClaims(ctx, env.Client)
@@ -435,11 +434,11 @@ var _ = Describe("Simulate Scheduling", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, queue)
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -537,7 +536,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 		}()
 		wg.Wait()
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -565,7 +564,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 		}()
 
 		// Iterate in a loop until we get to the validation action
@@ -590,7 +589,7 @@ var _ = Describe("Disruption Taints", func() {
 		// Increment the clock so that the nodeclaim deletion isn't caught by the
 		// eventual consistency delay.
 		fakeClock.Step(6 * time.Second)
-		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, queue)
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
@@ -1528,7 +1527,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1582,7 +1581,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1636,7 +1635,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1680,7 +1679,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1751,7 +1750,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1823,7 +1822,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{

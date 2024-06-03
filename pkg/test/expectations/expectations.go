@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
 	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
@@ -168,7 +169,20 @@ func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Objec
 	}
 }
 
-// TODO: Consider removing converting this into a standard reconciler; however, objects have to be properly updated if we don't rely on the Rconcile() method to get the object for us
+func ExpectSingletonReconciled(ctx context.Context, reconciler singleton.Reconciler) reconcile.Result {
+	GinkgoHelper()
+	result, err := singleton.AsReconciler(reconciler).Reconcile(ctx, reconcile.Request{})
+	Expect(err).ToNot(HaveOccurred())
+	return result
+}
+
+func ExpectSingletonReconcileFailed(ctx context.Context, reconciler singleton.Reconciler) error {
+	GinkgoHelper()
+	_, err := singleton.AsReconciler(reconciler).Reconcile(ctx, reconcile.Request{})
+	Expect(err).To(HaveOccurred())
+	return err
+}
+
 func ExpectObjectReconciled[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) reconcile.Result {
 	GinkgoHelper()
 	result, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
@@ -176,7 +190,6 @@ func ExpectObjectReconciled[T client.Object](ctx context.Context, c client.Clien
 	return result
 }
 
-// TODO: Consider removing converting this into a standard reconciler; however, objects have to be properly updated if we don't rely on the Rconcile() method to get the object for us
 func ExpectObjectReconcileFailed[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) error {
 	GinkgoHelper()
 	_, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
