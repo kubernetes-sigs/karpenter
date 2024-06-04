@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -68,6 +69,13 @@ func (n StateNodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error
 		pods = append(pods, p...)
 	}
 	return pods, nil
+}
+
+// Disruptable filters StateNodes that are meet the IsDisruptable condition
+func (n StateNodes) Disruptable(ctx context.Context, kubeClient client.Client, recorder events.Recorder) StateNodes {
+	return lo.Filter(n, func(node *StateNode, _ int) bool {
+		return node.IsDisruptable(ctx, kubeClient) == nil
+	})
 }
 
 func (n StateNodes) ReschedulablePods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
@@ -148,6 +156,54 @@ func (in *StateNode) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, erro
 		return nil, nil
 	}
 	return nodeutils.GetPods(ctx, c, in.Node)
+}
+
+// IsDisruptable returns an error if the StateNode cannot be disrupted
+// This checks all associated StateNode internals, node labels, and do-not-disrupt annotations
+// on both the pod and the node.
+// IsDisruptable takes in a recorder to emit events on the nodeclaims when the state node is not a candidate
+//
+//nolint:gocyclo
+func (in *StateNode) IsDisruptable(ctx context.Context, kubeClient client.Client) error {
+	if in.Node == nil || in.NodeClaim == nil {
+		return fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
+	}
+	if !in.Initialized() {
+		return fmt.Errorf("state node isn't initialized")
+	}
+	if in.MarkedForDeletion() {
+		return fmt.Errorf("state node is marked for deletion")
+	}
+	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
+	if in.Nominated() {
+		return fmt.Errorf("state node is nominated for a pending pod")
+	}
+	if _, ok := in.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
+		return fmt.Errorf("disruption is blocked through the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
+	}
+	// check whether the node has all the labels we need
+	for _, label := range []string{
+		v1beta1.CapacityTypeLabelKey,
+		v1.LabelTopologyZone,
+		v1.LabelInstanceTypeStable,
+		v1beta1.NodePoolLabelKey,
+	} {
+		if _, ok := in.Labels()[label]; !ok {
+			return fmt.Errorf("state node doesn't have required label %q", label)
+		}
+	}
+	pods, err := in.Pods(ctx, kubeClient)
+	if err != nil {
+		return fmt.Errorf("getting pods from state node, %w", err)
+	}
+	for _, po := range pods {
+		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
+		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
+		if !podutils.IsDisruptable(po) {
+			return fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po))
+		}
+	}
+	return nil
 }
 
 // ReschedulablePods gets the pods assigned to the Node that are reschedulable based on the kubernetes api-server bindings

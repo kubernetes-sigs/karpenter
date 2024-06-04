@@ -36,6 +36,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
 
 type Method interface {
@@ -60,42 +62,18 @@ type Candidate struct {
 }
 
 //nolint:gocyclo
-func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs *PDBLimits,
+func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs *pdb.Limits,
 	nodePoolMap map[string]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
-
-	if node.Node == nil || node.NodeClaim == nil {
-		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
-	}
-	// skip any candidates that are already marked for deletion and being handled
-	if node.MarkedForDeletion() {
-		return nil, fmt.Errorf("state node is marked for deletion")
-	}
-	// skip candidates that aren't initialized
-	if !node.Initialized() {
-		return nil, fmt.Errorf("state node isn't initialized")
+	if err := node.IsDisruptable(ctx, kubeClient); err != nil {
+		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
+		return nil, err
 	}
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
 	if queue.HasAny(node.ProviderID()) {
-		return nil, fmt.Errorf("candidate is already being deprovisioned")
+		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
-	if _, ok := node.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Disruption is blocked with the %q annotation", v1beta1.DoNotDisruptAnnotationKey))...)
-		return nil, fmt.Errorf("disruption is blocked through the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
-	}
-	// check whether the node has all the labels we need
-	for _, label := range []string{
-		v1beta1.CapacityTypeLabelKey,
-		v1.LabelTopologyZone,
-	} {
-		if _, ok := node.Labels()[label]; !ok {
-			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Required label %q doesn't exist", label))...)
-			return nil, fmt.Errorf("state node doesn't have required label %q", label)
-		}
-	}
-	nodePoolName, ok := node.Labels()[v1beta1.NodePoolLabelKey]
-	if !ok {
-		return nil, fmt.Errorf("state node doesn't have the Karpenter owner label")
-	}
+	// We know that the node will have the label key because of the node.IsDisruptable check above
+	nodePoolName := node.Labels()[v1beta1.NodePoolLabelKey]
 	nodePool := nodePoolMap[nodePoolName]
 	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
 	// skip any candidates where we can't determine the nodePool
@@ -108,11 +86,6 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	if instanceType == nil {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
 		return nil, fmt.Errorf("instance type %q can't be resolved", node.Labels()[v1.LabelInstanceTypeStable])
-	}
-	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
-	if node.Nominated() {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, "Nominated for a pending pod")...)
-		return nil, fmt.Errorf("state node is nominated for a pending pod")
 	}
 	pods, err := node.Pods(ctx, kubeClient)
 	if err != nil {
@@ -139,22 +112,8 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		zone:              node.Labels()[v1.LabelTopologyZone],
 		reschedulablePods: lo.Filter(pods, func(p *v1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
-		disruptionCost: disruptionCost(ctx, pods) * lifetimeRemaining(clk, nodePool, node.Node),
+		disruptionCost: disruptionutils.DisruptionCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.Node),
 	}, nil
-}
-
-// lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
-// is non-zero, we use it to scale down the disruption costs of candidates that are going to expire.  Just after creation, the
-// disruption cost is highest, and it approaches zero as the node ages towards its expiration time.
-func lifetimeRemaining(clock clock.Clock, nodePool *v1beta1.NodePool, node *v1.Node) float64 {
-	remaining := 1.0
-	if nodePool.Spec.Disruption.ExpireAfter.Duration != nil {
-		ageInSeconds := clock.Since(node.CreationTimestamp.Time).Seconds()
-		totalLifetimeSeconds := nodePool.Spec.Disruption.ExpireAfter.Duration.Seconds()
-		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
-		remaining = clamp(0.0, lifetimeRemainingSeconds/totalLifetimeSeconds, 1.0)
-	}
-	return remaining
 }
 
 type Command struct {
