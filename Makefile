@@ -32,8 +32,8 @@ build: ## Build the Karpenter KWOK controller images using ko build
 	
 apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	hack/validation/kwok-requirements.sh
-	kubectl apply -f pkg/apis/crds
-	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
+	kubectl apply -f kwok/charts/crds
+	kubectl apply -f kwok/apis/crds	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
@@ -44,7 +44,7 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 # Webhooks are currently not supported in the kwok provider.
 apply: verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	hack/validation/kwok-requirements.sh
-	kubectl apply -f pkg/apis/crds
+	kubectl apply -f kwok/charts/crds
 	kubectl apply -f kwok/apis/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
@@ -91,6 +91,7 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	hack/validation/labels.sh
 	hack/validation/resources.sh
 	hack/validation/status.sh
+	cp -r pkg/apis/crds kwok/charts
 	hack/dependabot.sh
 	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
 	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756

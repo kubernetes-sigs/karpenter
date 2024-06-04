@@ -28,7 +28,7 @@ type KWOKNodeClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// +kubebuilder:default:={conditions: {{type: "Ready", status: "True", reason:"Ready", lastTransitionTime: "2024-01-01T01:01:01Z", message: ""}}}
-	Status KwokNodeClassStatus `json:"status,omitempty"`
+	Status KWOKNodeClassStatus `json:"status,omitempty"`
 }
 
 // KWOKNodeClassList contains a list of KwokNodeClass
