@@ -35,6 +35,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 
+	kwokapis "sigs.k8s.io/karpenter/kwok/apis"
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
@@ -106,7 +107,7 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 	scheme := runtime.NewScheme()
 	lo.Must0(clientgoscheme.AddToScheme(scheme))
 	lo.Must0(apis.AddToScheme(scheme))
-	lo.Must0(apis.AddToScheme(scheme))
+	lo.Must0(kwokapis.AddToScheme(scheme))
 
 	cache := lo.Must(cache.New(config, cache.Options{Scheme: scheme}))
 	lo.Must0(cache.IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
