@@ -39,29 +39,6 @@ jobs:
       uses: ./.github/actions/install-prometheus
     - name: install grafana 
       uses: ./.github/actions/install-grafana
-    - name: apply pyroscope 
-      shell: bash
-      run: |
-        helm -n kube-system install pyroscope grafana/pyroscope
-        #Setup Metrics Endpoint
-        cat <<EOF | envsubst | kubectl apply -f -
-        apiVersion: monitoring.coreos.com/v1
-        kind: ServiceMonitor
-        metadata:
-          name: karpenter
-          labels:
-            release: prometheus
-        spec:
-          selector:
-            matchLabels:
-              app.kubernetes.io/name: karpenter
-          namespaceSelector:
-            matchNames:
-              - kube-system
-          endpoints:
-            - port: "8000"
-              path: /metrics
-        EOF
     - name: install kwok and controller
       shell: bash
       run: |
