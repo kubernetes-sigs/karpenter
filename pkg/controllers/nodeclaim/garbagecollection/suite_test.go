@@ -113,7 +113,7 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
 
 		// Expect the NodeClaim to not be removed since there is a Node that exists that has a Ready "true" condition
-		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, garbageCollectionController)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -137,7 +137,7 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
 
 		// Expect the NodeClaim to not be removed since there is a Node that exists that has a Ready "true" condition
-		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, garbageCollectionController)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
@@ -175,7 +175,7 @@ var _ = Describe("GarbageCollection", func() {
 		})
 
 		// Expect the NodeClaims to be removed now that the Instance is gone
-		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, garbageCollectionController)
 
 		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
 			defer GinkgoRecover()
@@ -202,7 +202,7 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
 
 		// Expect the NodeClaim to not be removed since the NodeClaim isn't registered
-		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, garbageCollectionController)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
@@ -224,7 +224,7 @@ var _ = Describe("GarbageCollection", func() {
 		fakeClock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Reconcile the NodeClaim. It should not be deleted by this flow since it has never been registered
-		ExpectReconcileSucceeded(ctx, garbageCollectionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, garbageCollectionController)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})

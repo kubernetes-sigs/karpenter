@@ -24,14 +24,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/clock"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -41,7 +45,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 )
 
@@ -92,12 +95,15 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	return controller.NewSingletonManagedBy(m).
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption").
-		Complete(c)
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(c))
 }
 
-func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "disruption")
+
 	// this won't catch if the reconcile loop hangs forever, but it will catch other issues
 	c.logAbnormalRuns(ctx)
 	defer c.logAbnormalRuns(ctx)
@@ -131,7 +137,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			return reconcile.Result{}, fmt.Errorf("disrupting via %q, %w", m.Type(), err)
 		}
 		if success {
-			return reconcile.Result{RequeueAfter: controller.Immediately}, nil
+			return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 		}
 	}
 

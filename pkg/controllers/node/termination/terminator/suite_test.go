@@ -142,7 +142,7 @@ var _ = Describe("Eviction/Queue", func() {
 				defer wg.Done()
 
 				for {
-					ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+					ExpectSingletonReconciled(ctx, queue)
 					if cancelCtx.Err() != nil {
 						return
 					}
