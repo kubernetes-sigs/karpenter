@@ -9,7 +9,7 @@ To enable this, Karpenter needs to change the semantic of Expiration as currentl
 
 **S** = State, **T** = Transitions between states
 
-[](./images/forceful-expiration.png)
+![](./images/forceful-expiration.png)
 
 **T1a (S1 → S2)**: Node gets marked as a Disruption Candidate. This could be for Drift, Underutilization, or Emptiness. Candidate nodes get tainted as `PreferNoSchedule`, so pods prioritize scheduling elsewhere. If a node is un-drifted or becomes utilized, the candidacy is removed **(S2 → S1)**. 
 
@@ -34,7 +34,7 @@ Karpenter’s original Expiration semantic was **Forceful**. It was changed to *
 
 The only difference in the diagram below is Expiration is moved to **T1 (S1 → S2)**.
 
-[](./images/graceful-expiration.png)
+![](./images/graceful-expiration.png)
 
 ## 🔑 Adding Forceful Expiration
 
