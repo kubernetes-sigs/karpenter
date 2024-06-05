@@ -45,36 +45,6 @@ jobs:
         make toolchain
         make install-kwok
         KWOK_REPO=kind.local KIND_CLUSTER_NAME=chart-testing make apply-with-kind
-    - name: apply nodepool 
-      shell: bash
-      run: |
-        # Setup node pool
-        cat <<EOF | envsubst | kubectl apply -f -
-        apiVersion: karpenter.sh/v1beta1
-        kind: NodePool
-        metadata:
-          name: default
-        spec:
-          template:
-            spec:
-              requirements:
-                - key: kubernetes.io/arch
-                  operator: In
-                  values: ["amd64"]
-                - key: kubernetes.io/os
-                  operator: In
-                  values: ["linux"]
-                - key: karpenter.sh/capacity-type
-                  operator: In
-                  values: ["spot"]
-              nodeClassRef:
-                name: nil
-          limits:
-            cpu: 1500
-          disruption:
-            consolidationPolicy: WhenUnderutilized
-            expireAfter: 720h # 30 * 24h = 720h
-        EOF
     - name: ping cluster
       shell: bash
       run: | 
