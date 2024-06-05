@@ -3,7 +3,7 @@
 Users need to enforce a maximum node lifetime to be compliant with security requirements. Cluster administrators that orchestrate Karpenter installations on clusters need a way to enforce this natively within Karpenter. 
 To enable this, Karpenter needs to change the semantic of Expiration as currently planned. This document proposes the desired state and what needs to change to get there. 
 
-***Terms**: For the purposes of this document, we’ll call the proposed Expiration as **Forceful** and the current Expiration semantic in OSS Karpenter today (v0.37) as **Graceful.** *
+**Terms**: For the purposes of this document, we’ll call the proposed Expiration as **Forceful** and the current Expiration semantic in OSS Karpenter today (v0.37) as **Graceful.**
 
 ## Proposed Flow - NodeClaim Disruption
 
@@ -21,7 +21,8 @@ To enable this, Karpenter needs to change the semantic of Expiration as currentl
 
 **T3 (S3 → S4):** Karpenter waits for necessary capacity in the cluster to be healthy and initialized. Once capacity is available, Karpenter will `kubectl delete` the node(s), tainting the node, beginning graceful termination.
 
-**S4:** ** Karpenter adds a `NoSchedule` taint and adds an Termination Grace Period Timestamp on the NodeClaim, indicating when Karpenter should transition to Forceful Termination of the node. Karpenter begins draining the node, _respecting PDBs and `do-not-disrupt` pods_. 
+**S4:** Karpenter adds a `NoSchedule` taint and adds an Termination Grace Period Timestamp on the NodeClaim, indicating when Karpenter should transition to Forceful Termination of the node. Karpenter begins draining the node, _respecting PDBs and `do-not-disrupt` pods_. 
+
 ***S4** is a point of no return. The node will be terminated within its TGP.* 
 
 **T4 (S4 → S5):** Once the node has no running drainable pods or the TGP timeout is reached, Karpenter directly terminates the underlying instance, initiating forceful termination and cleanup of daemons and networking applications.
