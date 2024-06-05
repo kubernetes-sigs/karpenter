@@ -108,7 +108,7 @@ jobs:
     - name: run performance simulation
       shell: bash
       run: | 
-        make e2etests
+        FOCUS="Perf" make e2etests
     - name: cleanup 
       shell: bash
       run: | 
