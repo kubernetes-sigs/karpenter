@@ -3,7 +3,7 @@
 Users need to enforce a maximum node lifetime to be compliant with security requirements. Cluster administrators that orchestrate Karpenter installations on clusters need a way to enforce this natively within Karpenter. 
 To enable this, Karpenter needs to change the semantic of Expiration as currently planned. This document proposes the desired state and what needs to change to get there. 
 
-**Terms**: For the purposes of this document, we’ll call the proposed Expiration as **Forceful** and the current Expiration semantic in OSS Karpenter today (v0.37) as **Graceful.**
+**Terms**: For the purposes of this document, we’ll call the proposed Expiration as **Forceful** and the current Expiration semantic in Upstream Karpenter today (v0.37) as **Graceful.**
 
 ## Proposed Flow - NodeClaim Disruption
 
@@ -29,7 +29,7 @@ To enable this, Karpenter needs to change the semantic of Expiration as currentl
 
 **T5 (S5 → S6):** After the termination has been finalized, all network attachments and volumes have been cleaned up, and the node can be removed from the cluster. 
 
-## What’s different in OSS Karpenter?
+## What’s different in Upstream Karpenter?
 
 Karpenter’s original Expiration semantic was **Forceful**. It was changed to **Graceful** in [this PR](https://github.com/kubernetes-sigs/karpenter/pull/59) so that Karpenter could orchestrate replacement capacity for expired nodes, grouping Expiration with Drift, Underutilization, and Emptiness in **T1**. Users with blocking NDBs, PDBs, or `do-not-disrupt` can prevent expiration from starting, preventing Karpenter from kicking off its TerminationGracePeriod. 
 
@@ -51,7 +51,7 @@ Revert Expiration’s semantic to be **Forceful**, bypassing past NDBs and `do-n
 
 If each NodePool should only represent one type of Expiration, this can be configured as `expirationPolicy: Forceful | Graceful`.  If a NodePool should be able to configure both **Forceful** and **Graceful** Expiration, Karpenter can add `expireAfter: 10d` in addition to `gracefulExpireAfter: 20d`, to represent **Forceful** and **Graceful** Expirations, respectively. 
 
-**Pro:** Allows OSS Karpenter users to use existing behavior, but changes the default semantic to **Forceful**.
+**Pro:** Allows Upstream Karpenter users to use existing behavior, but changes the default semantic to **Forceful**.
 
 **Con:** More configuration surface, and more concepts of disruption for users to reason about.
 
@@ -59,6 +59,6 @@ If each NodePool should only represent one type of Expiration, this can be confi
 
 If this semantic change is too large to do before v1, we can punt on this and require Cluster Admins to implement **Forceful** Expiration themselves by implementing a controller to watch nodes, making a simple `kubectl delete node` call when a node needs to be cleaned up. 
 
-**Pro:** No changes to the current v1 plan for OSS Karpenter.
+**Pro:** No changes to the current v1 plan for Upstream Karpenter.
 
 **Con:** Does not include native support for this use-case. 
