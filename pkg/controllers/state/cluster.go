@@ -41,6 +41,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+
+	podutilk8s "k8s.io/kubernetes/pkg/api/v1/pod"
+
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -290,7 +293,7 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 	defer c.mu.Unlock()
 
 	var err error
-	if podutils.IsTerminal(pod) {
+	if podutilk8s.IsPodTerminal(pod) {
 		c.updateNodeUsageFromPodCompletion(client.ObjectKeyFromObject(pod))
 	} else {
 		err = c.updateNodeUsageFromPod(ctx, pod)
@@ -495,7 +498,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, n *StateNode) er
 	}
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		if podutils.IsTerminal(pod) {
+		if podutilk8s.IsPodTerminal(pod) {
 			continue
 		}
 		if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
