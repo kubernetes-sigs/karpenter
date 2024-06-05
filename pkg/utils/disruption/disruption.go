@@ -47,8 +47,8 @@ func LifetimeRemaining(clock clock.Clock, nodePool *v1beta1.NodePool, node *v1.N
 	return remaining
 }
 
-// GetPodEvictionCost returns the disruption cost computed for evicting the given pod.
-func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
+// EvictionCost returns the disruption cost computed for evicting the given pod.
+func EvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	cost := 1.0
 	podDeletionCostStr, ok := p.Annotations[v1.PodDeletionCost]
 	if ok {
@@ -74,7 +74,7 @@ func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
 func DisruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 	cost := 0.0
 	for _, p := range pods {
-		cost += GetPodEvictionCost(ctx, p)
+		cost += EvictionCost(ctx, p)
 	}
 	return cost
 }
