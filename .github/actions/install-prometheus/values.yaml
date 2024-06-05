@@ -44,13 +44,6 @@ prometheus:
     tolerations:
       - key: CriticalAddonsOnly
         operator: Exists
-    resources:
-      requests:
-        cpu: 1
-        memory: 4Gi
-      limits:
-        cpu: 1
-        memory: 4Gi
     serviceMonitorSelector:
       matchLabels:
         scrape: enabled

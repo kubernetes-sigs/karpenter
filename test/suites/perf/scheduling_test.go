@@ -48,6 +48,8 @@ var _ = Describe("Performance Benchmark", func() {
 			env.EventuallyExpectHealthyPodCount(labelSelector, 100)
 			// Need a way to respond to the last pod healthy event or look at the pod status conditions after the fact to get the exact measurements here.
 			// would also be good to just pull the metrics directly from the Karpenter pod to get the scheduling simulation metrics.
+
+			// env.Monitor.GetLastPodSchedulingEvent()
 			duration := time.Since(start)
 
 			fmt.Println("--------- RESULTS ---------")
