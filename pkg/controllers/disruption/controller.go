@@ -123,7 +123,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process
 	// while it progresses in memory. If Karpenter restarts during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates that are not in the orchestration queue before continuing.
-	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, lo.Filter(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
+	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, lo.Filter(c.cluster.Nodes().Nodes, func(s *state.StateNode, _ int) bool {
 		return !c.queue.HasAny(s.ProviderID())
 	})...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("removing taint from nodes, %w", err)

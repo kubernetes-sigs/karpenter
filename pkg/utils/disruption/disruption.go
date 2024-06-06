@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"strconv"
 
@@ -29,8 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
@@ -77,47 +74,4 @@ func DisruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
 		cost += EvictionCost(ctx, p)
 	}
 	return cost
-}
-
-// FilterByPrice returns the instanceTypes that are lower priced than the current candidate.
-// The minValues requirement is checked again after FilterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim.
-// If the result of the filtering means that minValues can't be satisfied, we return an error.
-func FilterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, error) {
-	var res cloudprovider.InstanceTypes
-	for _, it := range options {
-		launchPrice := WorstLaunchPrice(it.Offerings.Available(), reqs)
-		if launchPrice < price {
-			res = append(res, it)
-		}
-	}
-	if reqs.HasMinValues() {
-		// We would have already filtered the invalid NodeClaim not meeting the minimum requirements in simulated scheduling results.
-		// Here the instanceTypeOptions changed again based on the price and requires re-validation.
-		if _, err := res.SatisfiesMinValues(reqs); err != nil {
-			return nil, fmt.Errorf("validating minValues, %w", err)
-		}
-	}
-	return res, nil
-}
-
-// WorstLaunchPrice gets the worst-case launch price from the offerings that are offered
-// on an instance type. If the instance type has a spot offering available, then it uses the spot offering
-// to get the launch price; else, it uses the on-demand launch price
-func WorstLaunchPrice(ofs cloudprovider.Offerings, reqs scheduling.Requirements) float64 {
-	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
-		spotOfferings := ofs.Compatible(reqs).Compatible(
-			scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot)))
-		if len(spotOfferings) > 0 {
-			return spotOfferings.MostExpensive().Price
-		}
-	}
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeOnDemand) {
-		onDemandOfferings := ofs.Compatible(reqs).Compatible(
-			scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeOnDemand)))
-		if len(onDemandOfferings) > 0 {
-			return onDemandOfferings.MostExpensive().Price
-		}
-	}
-	return math.MaxFloat64
 }

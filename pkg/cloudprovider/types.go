@@ -34,6 +34,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
+var (
+	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot))
+	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeOnDemand))
+)
+
 type DriftReason string
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
@@ -82,6 +87,20 @@ type InstanceType struct {
 }
 
 type InstanceTypes []*InstanceType
+
+func (its InstanceTypes) FilterByMinValues(reqs scheduling.Requirements) (InstanceTypes, error) {
+	if !reqs.HasMinValues() {
+		return its, nil
+	}
+
+	// We would have already filtered the invalid NodeClaim not meeting the minimum requirements in simulated scheduling results.
+	// Here the instanceTypeOptions changed again based on the price and requires re-validation.
+	if _, err := its.SatisfiesMinValues(reqs); err != nil {
+		return nil, fmt.Errorf("validating minValues, %w", err)
+	}
+
+	return its, nil
+}
 
 // precompute is used to ensure we only compute the allocatable resources onces as its called many times
 // and the operation is fairly expensive.
@@ -262,6 +281,26 @@ func (ofs Offerings) MostExpensive() Offering {
 	return lo.MaxBy(ofs, func(a, b Offering) bool {
 		return a.Price > b.Price
 	})
+}
+
+// WorstLaunchPrice gets the worst-case launch price from the offerings that are offered
+// on an instance type. If the instance type has a spot offering available, then it uses the spot offering
+// to get the launch price; else, it uses the on-demand launch price
+func (ofs Offerings) WorstLaunchPrice(reqs scheduling.Requirements) float64 {
+	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
+	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
+		spotOfferings := ofs.Compatible(reqs).Compatible(SpotRequirement)
+		if len(spotOfferings) > 0 {
+			return spotOfferings.MostExpensive().Price
+		}
+	}
+	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeOnDemand) {
+		onDemandOfferings := ofs.Compatible(reqs).Compatible(OnDemandRequirement)
+		if len(onDemandOfferings) > 0 {
+			return onDemandOfferings.MostExpensive().Price
+		}
+	}
+	return math.MaxFloat64
 }
 
 // NodeClaimNotFoundError is an error type returned by CloudProviders when the reason for failure is NotFound

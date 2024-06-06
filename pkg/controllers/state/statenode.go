@@ -30,7 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -42,27 +41,32 @@ import (
 
 // StateNodes is a typed version of a list of *Node
 // nolint: revive
-type StateNodes []*StateNode
+type StateNodes struct {
+	Nodes      []*StateNode
+	kubeClient client.Client
+}
 
 // Active filters StateNodes that are not in a MarkedForDeletion state
 func (n StateNodes) Active() StateNodes {
-	return lo.Filter(n, func(node *StateNode, _ int) bool {
+	n.Nodes = lo.Filter(n.Nodes, func(node *StateNode, _ int) bool {
 		return !node.MarkedForDeletion()
 	})
+	return n
 }
 
 // Deleting filters StateNodes that are in a MarkedForDeletion state
 func (n StateNodes) Deleting() StateNodes {
-	return lo.Filter(n, func(node *StateNode, _ int) bool {
+	n.Nodes = lo.Filter(n.Nodes, func(node *StateNode, _ int) bool {
 		return node.MarkedForDeletion()
 	})
+	return n
 }
 
 // Pods gets the pods assigned to all StateNodes based on the kubernetes api-server bindings
-func (n StateNodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+func (n StateNodes) Pods(ctx context.Context) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
-	for _, node := range n {
-		p, err := node.Pods(ctx, c)
+	for _, node := range n.Nodes {
+		p, err := node.Pods(ctx, n.kubeClient)
 		if err != nil {
 			return nil, err
 		}
@@ -72,16 +76,17 @@ func (n StateNodes) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error
 }
 
 // Disruptable filters StateNodes that are meet the IsDisruptable condition
-func (n StateNodes) Disruptable(ctx context.Context, kubeClient client.Client, recorder events.Recorder) StateNodes {
-	return lo.Filter(n, func(node *StateNode, _ int) bool {
-		return node.IsDisruptable(ctx, kubeClient) == nil
+func (n StateNodes) Disruptable(ctx context.Context) StateNodes {
+	n.Nodes = lo.Filter(n.Nodes, func(node *StateNode, _ int) bool {
+		return node.IsDisruptable(ctx, n.kubeClient) == nil
 	})
+	return n
 }
 
-func (n StateNodes) ReschedulablePods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+func (n StateNodes) ReschedulablePods(ctx context.Context) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
-	for _, node := range n {
-		p, err := node.ReschedulablePods(ctx, c)
+	for _, node := range n.Nodes {
+		p, err := node.ReschedulablePods(ctx, n.kubeClient)
 		if err != nil {
 			return nil, err
 		}

@@ -314,7 +314,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	// We do this after getting the pending pods so that we undershoot if pods are
 	// actively migrating from a node that is being deleted
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
-	deletingNodePods, err := nodes.Deleting().ReschedulablePods(ctx, p.kubeClient)
+	deletingNodePods, err := nodes.Deleting().ReschedulablePods(ctx)
 	if err != nil {
 		return scheduler.Results{}, err
 	}
@@ -323,7 +323,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(pods) == 0 {
 		return scheduler.Results{}, nil
 	}
-	s, err := p.NewScheduler(ctx, pods, nodes.Active())
+	s, err := p.NewScheduler(ctx, pods, nodes.Active().Nodes)
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			log.FromContext(ctx).Info("no nodepools found")
