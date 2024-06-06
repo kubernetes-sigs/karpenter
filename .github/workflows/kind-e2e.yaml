@@ -1,4 +1,4 @@
-name: kind-ci
+name: kind-e2e
 on:
   # enable running this on merges + presubmits when the action has tests that it will execute
   # push:
@@ -52,10 +52,10 @@ jobs:
         kubectl get nodepools
         kubectl get pods -A
         kubectl describe nodes
-    - name: run performance simulation
+    - name: run test suites
       shell: bash
       run: | 
-        FOCUS="Perf" make e2etests
+        make e2etests
     - name: cleanup 
       shell: bash
       run: | 
