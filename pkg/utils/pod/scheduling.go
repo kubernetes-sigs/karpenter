@@ -23,8 +23,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/clock"
 
-	podutilk8s "k8s.io/kubernetes/pkg/api/v1/pod"
-
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -34,7 +32,7 @@ import (
 // - Isn't a terminal pod (Failed or Succeeded)
 // - Isn't actively terminating
 func IsActive(pod *v1.Pod) bool {
-	return !podutilk8s.IsPodTerminal(pod) &&
+	return !IsTerminal(pod) &&
 		!IsTerminating(pod)
 }
 
@@ -67,7 +65,7 @@ func IsEvictable(pod *v1.Pod) bool {
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 func IsWaitingEviction(pod *v1.Pod, clk clock.Clock) bool {
-	return !podutilk8s.IsPodTerminal(pod) &&
+	return !IsTerminal(pod) &&
 		!IsStuckTerminating(pod, clk) &&
 		!ToleratesDisruptionNoScheduleTaint(pod) &&
 		// Mirror pods cannot be deleted through the API server since they are created and managed by kubelet
@@ -119,6 +117,10 @@ func IsScheduled(pod *v1.Pod) bool {
 
 func IsPreempting(pod *v1.Pod) bool {
 	return pod.Status.NominatedNodeName != ""
+}
+
+func IsTerminal(pod *v1.Pod) bool {
+	return pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded
 }
 
 func IsTerminating(pod *v1.Pod) bool {
