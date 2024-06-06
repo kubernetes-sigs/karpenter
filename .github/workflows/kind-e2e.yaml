@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x"]
+        k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
     steps:
     - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
     - uses: ./.github/actions/install-deps
