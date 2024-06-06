@@ -131,7 +131,6 @@ func NodePoolBlockedForDisruptionReason(nodePool *v1beta1.NodePool, reason v1bet
 		Reason:         "DisruptionBlocked",
 		Message:        fmt.Sprintf("No allowed disruptions for disruption reason %s due to blocking budget", reason),
 		DedupeValues:   []string{string(nodePool.UID), string(reason)},
-		// Set a small timeout as a NodePool's disruption budget can change every minute.
 		DedupeTimeout: 1 * time.Minute,
 	}
 }
