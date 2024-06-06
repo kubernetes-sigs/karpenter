@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/awslabs/operatorpkg/controller"
 	"github.com/samber/lo"
 	"k8s.io/client-go/rest"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -27,8 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 )

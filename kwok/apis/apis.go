@@ -19,8 +19,6 @@ package apis
 import (
 	_ "embed"
 
-	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
-
 	"github.com/samber/lo"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
