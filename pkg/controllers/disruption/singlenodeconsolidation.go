@@ -54,6 +54,9 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	constrainedByBudgets := false
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
+		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
+		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
+		// can find their nodes disrupted here.
 		if candidate.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty) != nil {
 			continue
 		}
