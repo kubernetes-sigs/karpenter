@@ -60,7 +60,9 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	disruptableCandidates := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
 	for _, candidate := range candidates {
-		// Filter out empty candidates
+		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
+		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
+		// can find their nodes disrupted here.
 		if candidate.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty) != nil {
 			continue
 		}
