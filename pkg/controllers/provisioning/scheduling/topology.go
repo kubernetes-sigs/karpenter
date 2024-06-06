@@ -37,8 +37,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	podutilk8s "k8s.io/kubernetes/pkg/api/v1/pod"
-
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -437,5 +435,5 @@ func mapOperator(operator metav1.LabelSelectorOperator) selection.Operator {
 }
 
 func IgnoredForTopology(p *v1.Pod) bool {
-	return !pod.IsScheduled(p) || podutilk8s.IsPodTerminal(p) || pod.IsTerminating(p)
+	return !pod.IsScheduled(p) || pod.IsTerminal(p) || pod.IsTerminating(p)
 }

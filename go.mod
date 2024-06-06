@@ -29,7 +29,6 @@ require (
 	k8s.io/component-base v0.30.1
 	k8s.io/csi-translation-lib v0.30.1
 	k8s.io/klog/v2 v2.120.1
-	k8s.io/kubernetes v1.30.1
 	k8s.io/utils v0.0.0-20240102154912-e7106e64919e
 	knative.dev/pkg v0.0.0-20230712131115-7051d301e7f4
 	sigs.k8s.io/controller-runtime v0.18.3
@@ -91,7 +90,7 @@ require (
 	golang.org/x/term v0.20.0 // indirect
 	golang.org/x/tools v0.21.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	google.golang.org/api v0.126.0 // indirect
+	google.golang.org/api v0.124.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230726155614-23370e0ffb3e // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect
