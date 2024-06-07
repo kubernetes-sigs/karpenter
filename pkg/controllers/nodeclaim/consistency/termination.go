@@ -25,8 +25,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
 
 // Termination detects nodes that are stuck terminating and reports why.
@@ -47,7 +47,7 @@ func (t *Termination) Check(ctx context.Context, node *v1.Node, nodeClaim *v1bet
 	if nodeClaim.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
-	pdbs, err := disruption.NewPDBLimits(ctx, t.clk, t.kubeClient)
+	pdbs, err := pdb.NewLimits(ctx, t.clk, t.kubeClient)
 	if err != nil {
 		return nil, err
 	}
