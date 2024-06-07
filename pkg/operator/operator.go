@@ -26,16 +26,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/controller"
 	"github.com/prometheus/client_golang/prometheus"
 	coordinationv1 "k8s.io/api/coordination/v1"
+	"k8s.io/klog/v2"
 	"knative.dev/pkg/changeset"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
-
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
-	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -44,16 +45,16 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/clock"
 	knativeinjection "knative.dev/pkg/injection"
-	knativelogging "knative.dev/pkg/logging"
 	"knative.dev/pkg/signals"
 	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
-	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	"github.com/go-logr/zapr"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -69,13 +70,15 @@ const (
 	component = "controller"
 )
 
-var BuildInfo = prometheus.NewGaugeVec(
-	prometheus.GaugeOpts{
-		Namespace: metrics.Namespace,
-		Name:      "build_info",
-		Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
-	},
-	[]string{"version", "goversion", "goarch", "commit"},
+var (
+	BuildInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Name:      "build_info",
+			Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
+		},
+		[]string{"version", "goversion", "goarch", "commit"},
+	)
 )
 
 // Version is the karpenter app version injected during compilation
@@ -122,7 +125,7 @@ func NewOperator() (context.Context, *Operator) {
 	})
 
 	// Client Config
-	config := controllerruntime.GetConfigOrDie()
+	config := ctrl.GetConfigOrDie()
 	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(options.FromContext(ctx).KubeClientQPS), options.FromContext(ctx).KubeClientBurst)
 	config.UserAgent = fmt.Sprintf("%s/%s", appName, Version)
 
@@ -130,15 +133,15 @@ func NewOperator() (context.Context, *Operator) {
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
 
 	// Logging
-	logger := logging.NewLogger(ctx, component)
-	ctx = knativelogging.WithLogger(ctx, logger)
-	logging.ConfigureGlobalLoggers(ctx)
+	logger := zapr.NewLogger(logging.NewLogger(ctx, component))
+	log.SetLogger(logger)
+	klog.SetLogger(logger)
 
-	knativelogging.FromContext(ctx).With("version", Version).Debugf("discovered karpenter version")
+	log.FromContext(ctx).WithValues("version", Version).V(1).Info("discovered karpenter version")
 
 	// Manager
-	mgrOpts := controllerruntime.Options{
-		Logger:                        logging.IgnoreDebugEvents(zapr.NewLogger(logger.Desugar())),
+	mgrOpts := ctrl.Options{
+		Logger:                        logging.IgnoreDebugEvents(logger),
 		LeaderElection:                options.FromContext(ctx).EnableLeaderElection,
 		LeaderElectionID:              "karpenter-leader-election",
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
@@ -150,8 +153,7 @@ func NewOperator() (context.Context, *Operator) {
 		},
 		HealthProbeBindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).HealthProbePort),
 		BaseContext: func() context.Context {
-			ctx := context.Background()
-			ctx = knativelogging.WithLogger(ctx, logger)
+			ctx := log.IntoContext(context.Background(), logger)
 			ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
 			return ctx
 		},
@@ -180,7 +182,7 @@ func NewOperator() (context.Context, *Operator) {
 			"/debug/pprof/threadcreate": pprof.Handler("threadcreate"),
 		})
 	}
-	mgr, err := controllerruntime.NewManager(config, mgrOpts)
+	mgr, err := ctrl.NewManager(config, mgrOpts)
 	mgr = lo.Must(mgr, err, "failed to setup manager")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*v1.Pod).Spec.NodeName}
@@ -239,7 +241,7 @@ func (o *Operator) Start(ctx context.Context) {
 		lo.Must0(o.Manager.Start(ctx))
 	}()
 	if options.FromContext(ctx).DisableWebhook {
-		knativelogging.FromContext(ctx).Infof("webhook disabled")
+		log.FromContext(ctx).Info("webhook disabled")
 	} else {
 		wg.Add(1)
 		go func() {

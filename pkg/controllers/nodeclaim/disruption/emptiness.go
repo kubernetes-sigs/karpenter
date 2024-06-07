@@ -23,8 +23,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -52,7 +52,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 		nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
 		if hasEmptyCondition {
 			_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
-			logging.FromContext(ctx).Debugf("removing emptiness status condition, emptiness is disabled")
+			log.FromContext(ctx).V(1).Info("removing emptiness status condition, emptiness is disabled")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -60,7 +60,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsTrue() {
 		if hasEmptyCondition {
 			_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
-			logging.FromContext(ctx).Debugf("removing emptiness status condition, isn't initialized")
+			log.FromContext(ctx).V(1).Info("removing emptiness status condition, isn't initialized")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -71,7 +71,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 		if nodeclaimutil.IsDuplicateNodeError(err) || nodeclaimutil.IsNodeNotFoundError(err) {
 			_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
 			if hasEmptyCondition {
-				logging.FromContext(ctx).Debugf("removing emptiness status condition, doesn't have a single node mapping")
+				log.FromContext(ctx).V(1).Info("removing emptiness status condition, doesn't have a single node mapping")
 			}
 			return reconcile.Result{}, nil
 		}
@@ -84,7 +84,7 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 	if e.cluster.IsNodeNominated(n.Spec.ProviderID) {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
 		if hasEmptyCondition {
-			logging.FromContext(ctx).Debugf("removing emptiness status condition, is nominated for pods")
+			log.FromContext(ctx).V(1).Info("removing emptiness status condition, is nominated for pods")
 		}
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 	}
@@ -96,14 +96,15 @@ func (e *Emptiness) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, n
 	if len(pods) > 0 {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeEmpty)
 		if hasEmptyCondition {
-			logging.FromContext(ctx).Debugf("removing emptiness status condition, not empty")
+			log.FromContext(ctx).V(1).Info("removing emptiness status condition, not empty")
 		}
 		return reconcile.Result{}, nil
 	}
 	// 6. Otherwise, add the emptiness status condition
 	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 	if !hasEmptyCondition {
-		logging.FromContext(ctx).Debugf("marking empty")
+		log.FromContext(ctx).V(1).Info("marking empty")
+
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 			metrics.TypeLabel:     metrics.EmptinessReason,
 			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],

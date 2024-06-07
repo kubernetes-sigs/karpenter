@@ -19,7 +19,6 @@ package informer
 import (
 	"context"
 
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -48,9 +47,7 @@ func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) *No
 }
 
 func (c *NodePoolController) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
-	//nolint:ineffassign
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("state.nodepool").With("nodepool", np.Name)) //nolint:ineffassign,staticcheck
-	ctx = injection.WithControllerName(ctx, "state.nodepool")                                                 //nolint:ineffassign,staticcheck
+	ctx = injection.WithControllerName(ctx, "state.nodepool") //nolint:ineffassign,staticcheck
 
 	// Something changed in the NodePool so we should re-consider consolidation
 	c.cluster.MarkUnconsolidated()

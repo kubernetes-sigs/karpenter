@@ -25,7 +25,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -228,7 +227,7 @@ func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.
 		Kind:               "NodeClaim",
 		Name:               nodeClaim.Name,
 		UID:                nodeClaim.UID,
-		BlockOwnerDeletion: ptr.Bool(true),
+		BlockOwnerDeletion: lo.ToPtr(true),
 	})
 	return node
 }

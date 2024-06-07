@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/ptr"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
@@ -108,7 +107,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("*"),
+				Schedule: lo.ToPtr("*"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -116,7 +115,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a schedule with less than 5 entries", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * "),
+				Schedule: lo.ToPtr("* * * * "),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -124,7 +123,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a negative duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -132,7 +131,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a seconds duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -158,7 +157,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
@@ -172,7 +171,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should succeed when creating a budget with both duration and cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -180,7 +179,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should succeed when creating a budget with hours and minutes in duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("2h20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -194,7 +193,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should succeed when creating a budget with special cased crons", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("@annually"),
+				Schedule: lo.ToPtr("@annually"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -203,12 +202,12 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("@annually"),
+					Schedule: lo.ToPtr("@annually"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("*"),
+					Schedule: lo.ToPtr("*"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -221,7 +220,7 @@ var _ = Describe("CEL/Validation", func() {
 				},
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("* * * * *"),
+					Schedule: lo.ToPtr("* * * * *"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{
@@ -426,14 +425,14 @@ var _ = Describe("CEL/Validation", func() {
 			Context("ImageGCHighThresholdPercent", func() {
 				It("should succeed on a imageGCHighThresholdPercent", func() {
 					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(10),
+						ImageGCHighThresholdPercent: lo.ToPtr(int32(10)),
 					}
 					Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 				})
 				It("should fail when imageGCHighThresholdPercent is less than imageGCLowThresholdPercent", func() {
 					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(50),
-						ImageGCLowThresholdPercent:  ptr.Int32(60),
+						ImageGCHighThresholdPercent: lo.ToPtr(int32(50)),
+						ImageGCLowThresholdPercent:  lo.ToPtr(int32(60)),
 					}
 					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				})
@@ -441,14 +440,14 @@ var _ = Describe("CEL/Validation", func() {
 			Context("ImageGCLowThresholdPercent", func() {
 				It("should succeed on a imageGCLowThresholdPercent", func() {
 					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCLowThresholdPercent: ptr.Int32(10),
+						ImageGCLowThresholdPercent: lo.ToPtr(int32(10)),
 					}
 					Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 				})
 				It("should fail when imageGCLowThresholdPercent is greather than imageGCHighThresheldPercent", func() {
 					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(50),
-						ImageGCLowThresholdPercent:  ptr.Int32(60),
+						ImageGCHighThresholdPercent: lo.ToPtr(int32(50)),
+						ImageGCLowThresholdPercent:  lo.ToPtr(int32(60)),
 					}
 					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				})

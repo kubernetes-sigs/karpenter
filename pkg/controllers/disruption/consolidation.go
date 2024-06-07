@@ -285,7 +285,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	var price float64
 	for _, c := range candidates {
-		offering, ok := c.instanceType.Offerings.Get(c.capacityType, c.zone)
+		offering, ok := c.instanceType.Offerings.Get(scheduling.NewLabelRequirements(c.StateNode.Labels()))
 		if !ok {
 			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
 		}

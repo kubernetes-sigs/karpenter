@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
@@ -36,7 +36,7 @@ type Preferences struct {
 }
 
 func (p *Preferences) Relax(ctx context.Context, pod *v1.Pod) bool {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)))
 	relaxations := []func(*v1.Pod) *string{
 		p.removeRequiredNodeAffinityTerm,
 		p.removePreferredPodAffinityTerm,
@@ -50,7 +50,7 @@ func (p *Preferences) Relax(ctx context.Context, pod *v1.Pod) bool {
 
 	for _, relaxFunc := range relaxations {
 		if reason := relaxFunc(pod); reason != nil {
-			logging.FromContext(ctx).Debugf("relaxing soft constraints for pod since it previously failed to schedule, %s", ptr.StringValue(reason))
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("relaxing soft constraints for pod since it previously failed to schedule, %s", lo.FromPtr(reason)))
 			return true
 		}
 	}
@@ -67,7 +67,7 @@ func (p *Preferences) removePreferredNodeAffinityTerm(pod *v1.Pod) *string {
 		// Sort descending by weight to remove heaviest preferences to try lighter ones
 		sort.SliceStable(terms, func(i, j int) bool { return terms[i].Weight > terms[j].Weight })
 		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = terms[1:]
-		return ptr.String(fmt.Sprintf("removing: spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
+		return lo.ToPtr(fmt.Sprintf("removing: spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
 	}
 	return nil
 }
@@ -83,7 +83,7 @@ func (p *Preferences) removeRequiredNodeAffinityTerm(pod *v1.Pod) *string {
 	// Remove the first term if there's more than one (terms are an OR semantic), Unlike preferred affinity, we cannot remove all terms
 	if len(terms) > 1 {
 		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = terms[1:]
-		return ptr.String(fmt.Sprintf("removing: spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
+		return lo.ToPtr(fmt.Sprintf("removing: spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
 	}
 	return nil
 }
@@ -94,7 +94,7 @@ func (p *Preferences) removeTopologySpreadScheduleAnyway(pod *v1.Pod) *string {
 			msg := fmt.Sprintf("removing: spec.topologySpreadConstraints = %s", pretty.Concise(tsc))
 			pod.Spec.TopologySpreadConstraints[i] = pod.Spec.TopologySpreadConstraints[len(pod.Spec.TopologySpreadConstraints)-1]
 			pod.Spec.TopologySpreadConstraints = pod.Spec.TopologySpreadConstraints[:len(pod.Spec.TopologySpreadConstraints)-1]
-			return ptr.String(msg)
+			return lo.ToPtr(msg)
 		}
 	}
 	return nil
@@ -110,7 +110,7 @@ func (p *Preferences) removePreferredPodAffinityTerm(pod *v1.Pod) *string {
 		// Sort descending by weight to remove heaviest preferences to try lighter ones
 		sort.SliceStable(terms, func(i, j int) bool { return terms[i].Weight > terms[j].Weight })
 		pod.Spec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution = terms[1:]
-		return ptr.String(fmt.Sprintf("removing: spec.affinity.podAffinity.preferredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
+		return lo.ToPtr(fmt.Sprintf("removing: spec.affinity.podAffinity.preferredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
 	}
 	return nil
 }
@@ -125,7 +125,7 @@ func (p *Preferences) removePreferredPodAntiAffinityTerm(pod *v1.Pod) *string {
 		// Sort descending by weight to remove heaviest preferences to try lighter ones
 		sort.SliceStable(terms, func(i, j int) bool { return terms[i].Weight > terms[j].Weight })
 		pod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = terms[1:]
-		return ptr.String(fmt.Sprintf("removing: spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
+		return lo.ToPtr(fmt.Sprintf("removing: spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0]=%s", pretty.Concise(terms[0])))
 	}
 	return nil
 }
@@ -143,5 +143,5 @@ func (p *Preferences) toleratePreferNoScheduleTaints(pod *v1.Pod) *string {
 	}
 	tolerations := append(pod.Spec.Tolerations, toleration)
 	pod.Spec.Tolerations = tolerations
-	return ptr.String("adding: toleration for PreferNoSchedule taints")
+	return lo.ToPtr("adding: toleration for PreferNoSchedule taints")
 }
