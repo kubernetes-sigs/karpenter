@@ -88,17 +88,6 @@ type InstanceType struct {
 
 type InstanceTypes []*InstanceType
 
-func (its InstanceTypes) FilterByMinValues(reqs scheduling.Requirements) (InstanceTypes, error) {
-
-	// We would have already filtered the invalid NodeClaim not meeting the minimum requirements in simulated scheduling results.
-	// Here the instanceTypeOptions changed again based on the price and requires re-validation.
-	if _, err := its.SatisfiesMinValues(reqs); err != nil {
-		return nil, fmt.Errorf("validating minValues, %w", err)
-	}
-
-	return its, nil
-}
-
 // precompute is used to ensure we only compute the allocatable resources onces as its called many times
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {

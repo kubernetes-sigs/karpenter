@@ -1085,7 +1085,7 @@ var _ = Describe("Candidate Filtering", func() {
 		_, err = disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(Equal(fmt.Sprintf(`pdb %q prevents pod evictions`, client.ObjectKeyFromObject(budget))))
-		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: PDB %q prevents pod evictions`, client.ObjectKeyFromObject(budget)))).To(BeTrue())
+		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: pdb %q prevents pod evictions`, client.ObjectKeyFromObject(budget)))).To(BeTrue())
 	})
 	It("should consider candidates that have fully blocking PDBs on mirror pods", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
