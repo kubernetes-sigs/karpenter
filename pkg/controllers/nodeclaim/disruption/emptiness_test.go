@@ -22,7 +22,6 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -94,8 +93,8 @@ var _ = Describe("Emptiness", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
 					},
 				},
 			},
@@ -131,8 +130,8 @@ var _ = Describe("Emptiness", func() {
 						Kind:               "DaemonSet",
 						Name:               ds.Name,
 						UID:                ds.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
 					},
 				},
 			},
@@ -223,8 +222,8 @@ var _ = Describe("Emptiness", func() {
 						Kind:               "StatefulSet",
 						Name:               ss.Name,
 						UID:                ss.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
 					},
 				},
 			},

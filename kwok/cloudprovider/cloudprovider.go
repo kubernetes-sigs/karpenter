@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -119,7 +120,13 @@ func (c CloudProvider) Name() string {
 }
 
 func (c CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
-	return []schema.GroupVersionKind{}
+	return []schema.GroupVersionKind{
+		{
+			Group:   v1alpha1.SchemeGroupVersion.Group,
+			Version: v1alpha1.SchemeGroupVersion.Version,
+			Kind:    "KWOKNodeClass",
+		},
+	}
 }
 
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {
@@ -203,15 +210,16 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 		}
 	}
 	// add in github.com/awslabs/eks-node-viewer label so that it shows up.
-	ret[nodeViewerLabelKey] = fmt.Sprintf("%f", offering.Price)
+	ret[v1alpha1.NodeViewerLabelKey] = fmt.Sprintf("%f", offering.Price)
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.
-	ret[kwokPartitionLabelKey] = lo.Sample(KwokPartitions)
-	ret[v1beta1.CapacityTypeLabelKey] = offering.CapacityType
-	ret[v1.LabelTopologyZone] = offering.Zone
+
+	ret[v1alpha1.KwokPartitionLabelKey] = lo.Sample(KwokPartitions)
+	ret[v1beta1.CapacityTypeLabelKey] = offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
+	ret[v1.LabelTopologyZone] = offering.Requirements.Get(v1.LabelTopologyZone).Any()
 	ret[v1.LabelHostname] = nodeClaim.Name
 
-	ret[kwokLabelKey] = kwokLabelValue
+	ret[v1alpha1.KwokLabelKey] = v1alpha1.KwokLabelValue
 	return ret
 }
 
@@ -220,7 +228,7 @@ func addKwokAnnotation(annotations map[string]string) map[string]string {
 	for k, v := range annotations {
 		ret[k] = v
 	}
-	ret[kwokLabelKey] = kwokLabelValue
+	ret[v1alpha1.KwokLabelKey] = v1alpha1.KwokLabelValue
 	return ret
 }
 

@@ -58,8 +58,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	. "knative.dev/pkg/logging/testing"
-	"knative.dev/pkg/ptr"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -1745,10 +1745,12 @@ var _ = Context("Scheduling", func() {
 					},
 					Offerings: []cloudprovider.Offering{
 						{
-							CapacityType: v1beta1.CapacityTypeOnDemand,
-							Zone:         "test-zone-1a",
-							Price:        3.00,
-							Available:    true,
+							Requirements: pscheduling.NewLabelRequirements(map[string]string{
+								v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
+								v1.LabelTopologyZone:         "test-zone-1a",
+							}),
+							Price:     3.00,
+							Available: true,
 						},
 					},
 				}),
@@ -1760,10 +1762,12 @@ var _ = Context("Scheduling", func() {
 					},
 					Offerings: []cloudprovider.Offering{
 						{
-							CapacityType: v1beta1.CapacityTypeOnDemand,
-							Zone:         "test-zone-1a",
-							Price:        2.00,
-							Available:    true,
+							Requirements: pscheduling.NewLabelRequirements(map[string]string{
+								v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
+								v1.LabelTopologyZone:         "test-zone-1a",
+							}),
+							Price:     2.00,
+							Available: true,
 						},
 					},
 				}),
@@ -1775,10 +1779,12 @@ var _ = Context("Scheduling", func() {
 					},
 					Offerings: []cloudprovider.Offering{
 						{
-							CapacityType: v1beta1.CapacityTypeOnDemand,
-							Zone:         "test-zone-1a",
-							Price:        1.00,
-							Available:    true,
+							Requirements: pscheduling.NewLabelRequirements(map[string]string{
+								v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
+								v1.LabelTopologyZone:         "test-zone-1a",
+							}),
+							Price:     1.00,
+							Available: true,
 						},
 					},
 				}),
@@ -2171,8 +2177,8 @@ var _ = Context("Scheduling", func() {
 					Kind:               "DaemonSet",
 					Name:               ds.Name,
 					UID:                ds.UID,
-					Controller:         ptr.Bool(true),
-					BlockOwnerDeletion: ptr.Bool(true),
+					Controller:         lo.ToPtr(true),
+					BlockOwnerDeletion: lo.ToPtr(true),
 				})
 
 				// delete the pod so that the node is empty
@@ -2259,8 +2265,8 @@ var _ = Context("Scheduling", func() {
 					Kind:               "DaemonSet",
 					Name:               ds1.Name,
 					UID:                ds1.UID,
-					Controller:         ptr.Bool(true),
-					BlockOwnerDeletion: ptr.Bool(true),
+					Controller:         lo.ToPtr(true),
+					BlockOwnerDeletion: lo.ToPtr(true),
 				})
 
 				// delete the pod so that the node is empty
@@ -2725,7 +2731,7 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(10),
+								Count: lo.ToPtr(int32(10)),
 							},
 						},
 					},
@@ -2736,18 +2742,18 @@ var _ = Context("Scheduling", func() {
 
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 			ExpectApplied(ctx, env.Client, sc)
 
 			var pods []*v1.Pod
 			for i := 0; i < 6; i++ {
 				pvcA := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-					StorageClassName: ptr.String("my-storage-class"),
+					StorageClassName: lo.ToPtr("my-storage-class"),
 					ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-a-%d", i)},
 				})
 				pvcB := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-					StorageClassName: ptr.String("my-storage-class"),
+					StorageClassName: lo.ToPtr("my-storage-class"),
 					ObjectMeta:       metav1.ObjectMeta{Name: fmt.Sprintf("my-claim-b-%d", i)},
 				})
 				ExpectApplied(ctx, env.Client, pvcA, pvcB)
@@ -2776,7 +2782,7 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(10),
+								Count: lo.ToPtr(int32(10)),
 							},
 						},
 					},
@@ -2787,7 +2793,7 @@ var _ = Context("Scheduling", func() {
 
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 			ExpectApplied(ctx, env.Client, sc)
 
@@ -2797,7 +2803,7 @@ var _ = Context("Scheduling", func() {
 
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				ObjectMeta:       metav1.ObjectMeta{Name: "my-claim"},
-				StorageClassName: ptr.String("my-storage-class"),
+				StorageClassName: lo.ToPtr("my-storage-class"),
 				VolumeName:       pv.Name,
 			})
 			ExpectApplied(ctx, env.Client, pv, pvc)
@@ -2835,7 +2841,7 @@ var _ = Context("Scheduling", func() {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				ObjectMeta:       metav1.ObjectMeta{Name: "my-claim"},
 				VolumeName:       pv.Name,
-				StorageClassName: ptr.String(""),
+				StorageClassName: lo.ToPtr(""),
 			})
 			ExpectApplied(ctx, env.Client, pv, pvc)
 
@@ -2859,7 +2865,7 @@ var _ = Context("Scheduling", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "my-storage-class",
 				},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 			// Create another default storage class that shouldn't be used and has no associated limits
 			sc2 := test.StorageClass(test.StorageClassOptions{
@@ -2869,7 +2875,7 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: ptr.String("other-provider"),
+				Provisioner: lo.ToPtr("other-provider"),
 				Zones:       []string{"test-zone-1"}})
 
 			initialPod := test.UnschedulablePod(test.PodOptions{})
@@ -2915,14 +2921,14 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(1),
+								Count: lo.ToPtr(int32(1)),
 							},
 						},
 						{
 							Name:   "other-provider",
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(10),
+								Count: lo.ToPtr(int32(10)),
 							},
 						},
 					},
@@ -2974,7 +2980,7 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 
 			initialPod := test.UnschedulablePod(test.PodOptions{})
@@ -3018,7 +3024,7 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(1),
+								Count: lo.ToPtr(int32(1)),
 							},
 						},
 					},
@@ -3072,7 +3078,7 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: ptr.String("other-provider"),
+				Provisioner: lo.ToPtr("other-provider"),
 				Zones:       []string{"test-zone-1"}})
 			sc2 := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -3081,7 +3087,7 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: ptr.String(csiProvider),
+				Provisioner: lo.ToPtr(csiProvider),
 				Zones:       []string{"test-zone-1"}})
 
 			ExpectApplied(ctx, env.Client, sc)
@@ -3130,14 +3136,14 @@ var _ = Context("Scheduling", func() {
 							Name:   csiProvider,
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(1),
+								Count: lo.ToPtr(int32(1)),
 							},
 						},
 						{
 							Name:   "other-provider",
 							NodeID: "fake-node-id",
 							Allocatable: &storagev1.VolumeNodeResources{
-								Count: ptr.Int32(10),
+								Count: lo.ToPtr(int32(10)),
 							},
 						},
 					},
@@ -3277,10 +3283,10 @@ var _ = Context("Scheduling", func() {
 							isDefaultStorageClassAnnotation: "true",
 						},
 					},
-					Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
+					Provisioner: lo.ToPtr(plugins.AWSEBSInTreePluginName),
 					Zones:       []string{"test-zone-1"}})
 				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-					StorageClassName: ptr.String(sc.Name),
+					StorageClassName: lo.ToPtr(sc.Name),
 				})
 				ExpectApplied(ctx, env.Client, nodePool, sc, pvc)
 				initialPod := test.UnschedulablePod(test.PodOptions{
@@ -3298,7 +3304,7 @@ var _ = Context("Scheduling", func() {
 								Name:   plugins.AWSEBSDriverName,
 								NodeID: "fake-node-id",
 								Allocatable: &storagev1.VolumeNodeResources{
-									Count: ptr.Int32(1),
+									Count: lo.ToPtr(int32(1)),
 								},
 							},
 						},
@@ -3315,7 +3321,7 @@ var _ = Context("Scheduling", func() {
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
 				pvc2 := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-					StorageClassName: ptr.String(sc.Name),
+					StorageClassName: lo.ToPtr(sc.Name),
 				})
 				pod := test.UnschedulablePod(test.PodOptions{
 					PersistentVolumeClaims: []string{pvc2.Name},
@@ -3335,7 +3341,7 @@ var _ = Context("Scheduling", func() {
 							isDefaultStorageClassAnnotation: "true",
 						},
 					},
-					Provisioner: ptr.String(plugins.AWSEBSInTreePluginName),
+					Provisioner: lo.ToPtr(plugins.AWSEBSInTreePluginName),
 					Zones:       []string{"test-zone-1"}})
 
 				initialPod := test.UnschedulablePod(test.PodOptions{})
@@ -3355,7 +3361,7 @@ var _ = Context("Scheduling", func() {
 											v1.ResourceStorage: resource.MustParse("1Gi"),
 										},
 									},
-									StorageClassName: ptr.String(sc.Name),
+									StorageClassName: lo.ToPtr(sc.Name),
 								},
 							},
 						},
@@ -3380,7 +3386,7 @@ var _ = Context("Scheduling", func() {
 								Name:   plugins.AWSEBSDriverName,
 								NodeID: "fake-node-id",
 								Allocatable: &storagev1.VolumeNodeResources{
-									Count: ptr.Int32(1),
+									Count: lo.ToPtr(int32(1)),
 								},
 							},
 						},
@@ -3405,7 +3411,7 @@ var _ = Context("Scheduling", func() {
 											v1.ResourceStorage: resource.MustParse("1Gi"),
 										},
 									},
-									StorageClassName: ptr.String(sc.Name),
+									StorageClassName: lo.ToPtr(sc.Name),
 								},
 							},
 						},
@@ -3493,8 +3499,8 @@ var _ = Context("Scheduling", func() {
 								Kind:               "DaemonSet",
 								Name:               ds.Name,
 								UID:                ds.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
 							},
 						},
 					},
@@ -3550,8 +3556,8 @@ var _ = Context("Scheduling", func() {
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
 							},
 						},
 					},
@@ -3594,8 +3600,8 @@ var _ = Context("Scheduling", func() {
 								Kind:               "StatefulSet",
 								Name:               ss.Name,
 								UID:                ss.UID,
-								Controller:         ptr.Bool(true),
-								BlockOwnerDeletion: ptr.Bool(true),
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
 							},
 						},
 					},
@@ -3795,7 +3801,7 @@ func ExpectInstancesWithOffering(instanceTypes []*cloudprovider.InstanceType, ca
 	for _, it := range instanceTypes {
 		matched := false
 		for _, offering := range it.Offerings {
-			if offering.CapacityType == capacityType && offering.Zone == zone {
+			if offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == capacityType && offering.Requirements.Get(v1.LabelTopologyZone).Any() == zone {
 				matched = true
 			}
 		}
@@ -3814,7 +3820,7 @@ func ExpectInstancesWithLabel(instanceTypes []*cloudprovider.InstanceType, label
 			{
 				matched := false
 				for _, offering := range it.Offerings {
-					if offering.Zone == value {
+					if offering.Requirements.Get(v1.LabelTopologyZone).Any() == value {
 						matched = true
 						break
 					}
@@ -3825,12 +3831,12 @@ func ExpectInstancesWithLabel(instanceTypes []*cloudprovider.InstanceType, label
 			{
 				matched := false
 				for _, offering := range it.Offerings {
-					if offering.CapacityType == value {
+					if offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == value {
 						matched = true
 						break
 					}
 				}
-				Expect(matched).To(BeTrue(), fmt.Sprintf("expected to find caapacity type %s in an offering", value))
+				Expect(matched).To(BeTrue(), fmt.Sprintf("expected to find capacity type %s in an offering", value))
 			}
 		default:
 			Fail(fmt.Sprintf("unsupported label %s in test", label))

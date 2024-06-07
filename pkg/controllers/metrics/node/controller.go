@@ -21,19 +21,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -135,7 +138,9 @@ func NewController(cluster *state.Cluster) *Controller {
 	}
 }
 
-func (c *Controller) Reconcile(_ context.Context, _ reconcile.Request) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "metrics.node") //nolint:ineffassign,staticcheck
+
 	nodes := lo.Reject(c.cluster.Nodes(), func(n *state.StateNode, _ int) bool {
 		return n.Node == nil
 	})
@@ -145,10 +150,11 @@ func (c *Controller) Reconcile(_ context.Context, _ reconcile.Request) (reconcil
 	return reconcile.Result{RequeueAfter: time.Second * 5}, nil
 }
 
-func (c *Controller) Register(_ context.Context, mgr manager.Manager) error {
-	return controller.NewSingletonManagedBy(mgr).
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("metrics.node").
-		Complete(c)
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(c))
 }
 
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {

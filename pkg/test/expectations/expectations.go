@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
 	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
@@ -43,7 +44,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -162,14 +162,27 @@ func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Objec
 func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Object) {
 	GinkgoHelper()
 	for _, object := range objects {
-		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: ptr.Int64(0)}); !errors.IsNotFound(err) {
+		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}); !errors.IsNotFound(err) {
 			Expect(err).To(BeNil())
 		}
 		ExpectNotFound(ctx, c, object)
 	}
 }
 
-// TODO: Consider removing converting this into a standard reconciler; however, objects have to be properly updated if we don't rely on the Rconcile() method to get the object for us
+func ExpectSingletonReconciled(ctx context.Context, reconciler singleton.Reconciler) reconcile.Result {
+	GinkgoHelper()
+	result, err := singleton.AsReconciler(reconciler).Reconcile(ctx, reconcile.Request{})
+	Expect(err).ToNot(HaveOccurred())
+	return result
+}
+
+func ExpectSingletonReconcileFailed(ctx context.Context, reconciler singleton.Reconciler) error {
+	GinkgoHelper()
+	_, err := singleton.AsReconciler(reconciler).Reconcile(ctx, reconcile.Request{})
+	Expect(err).To(HaveOccurred())
+	return err
+}
+
 func ExpectObjectReconciled[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) reconcile.Result {
 	GinkgoHelper()
 	result, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
@@ -177,7 +190,6 @@ func ExpectObjectReconciled[T client.Object](ctx context.Context, c client.Clien
 	return result
 }
 
-// TODO: Consider removing converting this into a standard reconciler; however, objects have to be properly updated if we don't rely on the Rconcile() method to get the object for us
 func ExpectObjectReconcileFailed[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) error {
 	GinkgoHelper()
 	_, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
@@ -227,7 +239,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 				defer wg.Done()
 				defer GinkgoRecover()
 				Expect(c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
-					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: ptr.Int64(0)}})).ToNot(HaveOccurred())
+					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}})).ToNot(HaveOccurred())
 			}(object, namespace.Name)
 		}
 	}

@@ -17,22 +17,7 @@ limitations under the License.
 package kwok
 
 const (
-	// Scheme Labels
-	Group              = "karpenter.kwok.sh"
 	kwokProviderPrefix = "kwok://"
-
-	// Internal labels that are propagated to the node
-	kwokLabelKey          = "kwok.x-k8s.io/node"
-	kwokLabelValue        = "fake"
-	nodeViewerLabelKey    = "eks-node-viewer/instance-price"
-	kwokPartitionLabelKey = "kwok-partition"
-
-	// Labels that can be selected on and are propagated to the node
-	InstanceTypeLabelKey   = Group + "/instance-type"
-	InstanceSizeLabelKey   = Group + "/instance-size"
-	InstanceFamilyLabelKey = Group + "/instance-family"
-	InstanceMemoryLabelKey = Group + "/instance-memory"
-	InstanceCPULabelKey    = Group + "/instance-cpu"
 )
 
 // Hard coded Kwok values

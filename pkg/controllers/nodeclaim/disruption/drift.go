@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -52,7 +52,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	if !options.FromContext(ctx).FeatureGates.Drift {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
 		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drift status condition, drift has been disabled")
+			log.FromContext(ctx).V(1).Info("removing drift status condition, drift has been disabled")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -60,7 +60,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue() {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
 		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drift status condition, isn't launched")
+			log.FromContext(ctx).V(1).Info("removing drift status condition, isn't launched")
 		}
 		return reconcile.Result{}, nil
 	}
@@ -72,14 +72,14 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	if driftedReason == "" {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
 		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drifted status condition, not drifted")
+			log.FromContext(ctx).V(1).Info("removing drifted status condition, not drifted")
 		}
 		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 	// 4. Finally, if the NodeClaim is drifted, but doesn't have status condition, add it.
 	nodeClaim.StatusConditions().SetTrueWithReason(v1beta1.ConditionTypeDrifted, string(driftedReason), string(driftedReason))
 	if !hasDriftedCondition {
-		logging.FromContext(ctx).With("reason", string(driftedReason)).Debugf("marking drifted")
+		log.FromContext(ctx).V(1).WithValues("reason", string(driftedReason)).Info("marking drifted")
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 			metrics.TypeLabel:     metrics.DriftReason,
 			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],

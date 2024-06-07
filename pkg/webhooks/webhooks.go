@@ -49,10 +49,12 @@ import (
 
 const component = "webhook"
 
-var Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
-	v1beta1.SchemeGroupVersion.WithKind("NodePool"):  &v1beta1.NodePool{},
-	v1beta1.SchemeGroupVersion.WithKind("NodeClaim"): &v1beta1.NodeClaim{},
-}
+var (
+	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
+		v1beta1.SchemeGroupVersion.WithKind("NodePool"):  &v1beta1.NodePool{},
+		v1beta1.SchemeGroupVersion.WithKind("NodeClaim"): &v1beta1.NodeClaim{},
+	}
+)
 
 func NewWebhooks() []knativeinjection.ControllerConstructor {
 	return []knativeinjection.ControllerConstructor{
@@ -85,11 +87,11 @@ func NewConfigValidationWebhook(ctx context.Context, _ configmap.Watcher) *contr
 // Start copies the relevant portions for starting the webhooks from sharedmain.MainWithConfig
 // https://github.com/knative/pkg/blob/0f52db700d63/injection/sharedmain/main.go#L227
 func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.ControllerConstructor) {
-	ctx, startInformers := knativeinjection.EnableInjectionOrDie(ctx, cfg)
-	logger := logging.NewLogger(ctx, component)
+	logger := logging.NewLogger(ctx, component).Sugar()
 	ctx = knativelogging.WithLogger(ctx, logger)
 
-	cmw := sharedmain.SetupConfigMapWatchOrDie(ctx, knativelogging.FromContext(ctx))
+	ctx, startInformers := knativeinjection.EnableInjectionOrDie(ctx, cfg)
+	cmw := sharedmain.SetupConfigMapWatchOrDie(ctx, logger)
 	controllers, webhooks := sharedmain.ControllersAndWebhooksFromCtors(ctx, cmw, ctors...)
 
 	// Many of the webhooks rely on configuration, e.g. configurable defaults, feature flags.
@@ -97,7 +99,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 	// webhooks, so that things are properly initialized.
 	logger.Info("Starting configuration manager...")
 	if err := cmw.Start(ctx.Done()); err != nil {
-		knativelogging.FromContext(ctx).Fatalw("Failed to start configuration manager", zap.Error(err))
+		logger.Fatalw("Failed to start configuration manager", zap.Error(err))
 	}
 
 	// If we have one or more admission controllers, then start the webhook
@@ -118,7 +120,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 
 		wh, err = webhook.New(ctx, webhooks)
 		if err != nil {
-			knativelogging.FromContext(ctx).Fatalw("Failed to create webhook", zap.Error(err))
+			logger.Fatalw("Failed to create webhook", zap.Error(err))
 		}
 		eg.Go(func() error {
 			return wh.Run(ctx.Done())
@@ -132,7 +134,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 	if wh != nil {
 		wh.InformersHaveSynced()
 	}
-	knativelogging.FromContext(ctx).Info("Starting controllers...")
+	logger.Info("Starting controllers...")
 	eg.Go(func() error {
 		return controller.StartAll(ctx, controllers...)
 	})
@@ -142,7 +144,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 
 	// Don't forward ErrServerClosed as that indicates we're already shutting down.
 	if err := eg.Wait(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		knativelogging.FromContext(ctx).Errorw("Error while running server", zap.Error(err))
+		logger.Errorw("Error while running server", zap.Error(err))
 	}
 }
 

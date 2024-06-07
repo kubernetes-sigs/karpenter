@@ -24,6 +24,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
+	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -31,20 +37,17 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
-	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
-
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 const (
@@ -153,12 +156,15 @@ func NewCommand(replacements []string, candidates []*state.StateNode, id types.U
 }
 
 func (q *Queue) Register(_ context.Context, m manager.Manager) error {
-	return controller.NewSingletonManagedBy(m).
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
-		Complete(q)
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(q))
 }
 
-func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "disruption.queue")
+
 	// The queue depth is the number of commands currently being considered.
 	// This should not use the RateLimitingInterface.Len() method, as this does not include
 	// commands that haven't completed their requeue backoff.
@@ -177,7 +183,8 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		panic("unexpected failure, disruption queue has shut down")
 	}
 	cmd := item.(*Command)
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("command-id", string(cmd.id)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("command-id", string(cmd.id)))
+
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
@@ -186,7 +193,7 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 			// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
 			q.RateLimitingInterface.Done(cmd)
 			q.RateLimitingInterface.AddRateLimited(cmd)
-			return reconcile.Result{RequeueAfter: controller.Immediately}, nil
+			return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 		}
 		// If the command failed, bail on the action.
 		// 1. Emit metrics for launch failures
@@ -201,14 +208,14 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		}).Add(float64(len(failedLaunches)))
 		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		// Log the error
-		logging.FromContext(ctx).With("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
+		log.FromContext(ctx).WithValues("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
 			return s.Name()
-		}), ",")).Errorf("failed to disrupt nodes, %s", multiErr)
+		}), ",")).Error(multiErr, "failed terminating nodes while executing a disruption command")
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
-	logging.FromContext(ctx).Infof("command succeeded")
-	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
+	log.FromContext(ctx).Info("command succeeded")
+	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
 // waitOrTerminate will wait until launched nodeclaims are ready.

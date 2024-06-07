@@ -66,11 +66,26 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 	}
 	if len(options.Offerings) == 0 {
 		options.Offerings = []cloudprovider.Offering{
-			{CapacityType: "spot", Zone: "test-zone-1", Price: PriceFromResources(options.Resources), Available: true},
-			{CapacityType: "spot", Zone: "test-zone-2", Price: PriceFromResources(options.Resources), Available: true},
-			{CapacityType: "on-demand", Zone: "test-zone-1", Price: PriceFromResources(options.Resources), Available: true},
-			{CapacityType: "on-demand", Zone: "test-zone-2", Price: PriceFromResources(options.Resources), Available: true},
-			{CapacityType: "on-demand", Zone: "test-zone-3", Price: PriceFromResources(options.Resources), Available: true},
+			{Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1beta1.CapacityTypeLabelKey: "spot",
+				v1.LabelTopologyZone:         "test-zone-1",
+			}), Price: PriceFromResources(options.Resources), Available: true},
+			{Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1beta1.CapacityTypeLabelKey: "spot",
+				v1.LabelTopologyZone:         "test-zone-2",
+			}), Price: PriceFromResources(options.Resources), Available: true},
+			{Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1beta1.CapacityTypeLabelKey: "on-demand",
+				v1.LabelTopologyZone:         "test-zone-1",
+			}), Price: PriceFromResources(options.Resources), Available: true},
+			{Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1beta1.CapacityTypeLabelKey: "on-demand",
+				v1.LabelTopologyZone:         "test-zone-2",
+			}), Price: PriceFromResources(options.Resources), Available: true},
+			{Requirements: scheduling.NewLabelRequirements(map[string]string{
+				v1beta1.CapacityTypeLabelKey: "on-demand",
+				v1.LabelTopologyZone:         "test-zone-3",
+			}), Price: PriceFromResources(options.Resources), Available: true},
 		}
 	}
 	if len(options.Architecture) == 0 {
@@ -83,8 +98,12 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
-		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.Zone })...),
-		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string { return o.CapacityType })...),
+		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+			return o.Requirements.Get(v1.LabelTopologyZone).Any()
+		})...),
+		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+			return o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
+		})...),
 		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
@@ -135,10 +154,12 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 							price := PriceFromResources(opts.Resources)
 							opts.Offerings = []cloudprovider.Offering{
 								{
-									CapacityType: ct,
-									Zone:         zone,
-									Price:        price,
-									Available:    true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{
+										v1beta1.CapacityTypeLabelKey: ct,
+										v1.LabelTopologyZone:         zone,
+									}),
+									Price:     price,
+									Available: true,
 								},
 							}
 							instanceTypes = append(instanceTypes, NewInstanceType(opts))
