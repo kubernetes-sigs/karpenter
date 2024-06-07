@@ -47,18 +47,16 @@ type StateNodes []*StateNode
 
 // Active filters StateNodes that are not in a MarkedForDeletion state
 func (n StateNodes) Active() StateNodes {
-	n = lo.Filter(n, func(node *StateNode, _ int) bool {
+	return lo.Filter(n, func(node *StateNode, _ int) bool {
 		return !node.MarkedForDeletion()
 	})
-	return n
 }
 
 // Deleting filters StateNodes that are in a MarkedForDeletion state
 func (n StateNodes) Deleting() StateNodes {
-	n = lo.Filter(n, func(node *StateNode, _ int) bool {
+	return lo.Filter(n, func(node *StateNode, _ int) bool {
 		return node.MarkedForDeletion()
 	})
-	return n
 }
 
 // Pods gets the pods assigned to all StateNodes based on the kubernetes api-server bindings
@@ -160,11 +158,11 @@ func (in *StateNode) ProviderID() string {
 }
 
 // Pods gets the pods assigned to the Node based on the kubernetes api-server bindings
-func (in *StateNode) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetPods(ctx, c, in.Node)
+	return nodeutils.GetPods(ctx, kubeClient, in.Node)
 }
 
 // ValidateDisruptable returns an error if the StateNode cannot be disrupted
@@ -220,11 +218,11 @@ func (in *StateNode) ValidateDisruptable(ctx context.Context, kubeClient client.
 }
 
 // ReschedulablePods gets the pods assigned to the Node that are reschedulable based on the kubernetes api-server bindings
-func (in *StateNode) ReschedulablePods(ctx context.Context, c client.Client) ([]*v1.Pod, error) {
+func (in *StateNode) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetReschedulablePods(ctx, c, in.Node)
+	return nodeutils.GetReschedulablePods(ctx, kubeClient, in.Node)
 }
 
 func (in *StateNode) HostName() string {

@@ -138,8 +138,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// required
 		replacementHasValidInstanceTypes := false
 		if cmd.Action() == ReplaceAction {
-			cmd.replacements[0].InstanceTypeOptions = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
-			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0
+			cmd.replacements[0].InstanceTypeOptions, err = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
+			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0 && err == nil
 		}
 
 		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
@@ -171,7 +171,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candidate) []*cloudprovider.InstanceType {
+func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candidate) ([]*cloudprovider.InstanceType, error) {
 	existingInstanceTypes := sets.New[string]()
 	pricesByInstanceType := map[string]float64{}
 
@@ -203,8 +203,8 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 		}
 	}
 	// swallow the error since we don't allow min values to impact reschedulability in multi node claim
-	newNodeClaim, _ = newNodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(newNodeClaim.Requirements, maxPrice)
-	return newNodeClaim.InstanceTypeOptions
+	newNodeClaim, err := newNodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(newNodeClaim.Requirements, maxPrice)
+	return newNodeClaim.InstanceTypeOptions, err
 }
 
 func (m *MultiNodeConsolidation) Type() string {
