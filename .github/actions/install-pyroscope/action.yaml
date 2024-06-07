@@ -7,9 +7,9 @@ runs:
     - name: download pyroscope
       shell: bash
       run: | 
-        curl -fL https://github.com/grafana/pyroscope/releases/download/v1.1.5/profilecli_1.1.5_linux_amd64.tar.gz | tar xz pyroscope
-        chmod +x pyroscope
-        sudo mv pyroscope /usr/local/bin
+        curl -fL https://github.com/grafana/pyroscope/releases/download/v1.1.5/profilecli_1.1.5_linux_amd64.tar.gz | tar xz profilecli
+        chmod +x profilecli
+        sudo mv profilecli /usr/local/bin
     - name: add grafana repo
       shell: bash
       run: |

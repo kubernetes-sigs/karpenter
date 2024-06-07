@@ -48,7 +48,7 @@ e2etests: ## Run the e2e suite against your local cluster
 		./suites/$(shell echo $(TEST_SUITE) | tr A-Z a-z)/... \
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.timeout=30m \
-		--ginkgo.grace-period=30m \
+		--ginkgo.grace-period=5m \
 		--ginkgo.vv	
 
 # Run make install-kwok to install the kwok controller in your cluster first

@@ -239,30 +239,6 @@ func (env *Environment) ExpectConfigMapDataOverridden(key types.NamespacedName, 
 	return true
 }
 
-func (env *Environment) ExpectPodENIEnabled() {
-	GinkgoHelper()
-	env.ExpectDaemonSetEnvironmentVariableUpdated(types.NamespacedName{Namespace: "kube-system", Name: "aws-node"},
-		"ENABLE_POD_ENI", "true", "aws-node")
-}
-
-func (env *Environment) ExpectPodENIDisabled() {
-	GinkgoHelper()
-	env.ExpectDaemonSetEnvironmentVariableUpdated(types.NamespacedName{Namespace: "kube-system", Name: "aws-node"},
-		"ENABLE_POD_ENI", "false", "aws-node")
-}
-
-func (env *Environment) ExpectPrefixDelegationEnabled() {
-	GinkgoHelper()
-	env.ExpectDaemonSetEnvironmentVariableUpdated(types.NamespacedName{Namespace: "kube-system", Name: "aws-node"},
-		"ENABLE_PREFIX_DELEGATION", "true", "aws-node")
-}
-
-func (env *Environment) ExpectPrefixDelegationDisabled() {
-	GinkgoHelper()
-	env.ExpectDaemonSetEnvironmentVariableUpdated(types.NamespacedName{Namespace: "kube-system", Name: "aws-node"},
-		"ENABLE_PREFIX_DELEGATION", "false", "aws-node")
-}
-
 func (env *Environment) ExpectExists(obj client.Object) client.Object {
 	GinkgoHelper()
 	Eventually(func(g Gomega) {
