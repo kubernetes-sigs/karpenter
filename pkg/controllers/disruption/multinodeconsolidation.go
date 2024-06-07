@@ -203,7 +203,7 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 		}
 	}
 	// swallow the error since we don't allow min values to impact reschedulability in multi node claim
-	newNodeClaim, _ = newNodeClaim.FilterInstanceTypeOptionsByPriceAndMinValues(newNodeClaim.Requirements, maxPrice)
+	newNodeClaim, _ = newNodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(newNodeClaim.Requirements, maxPrice)
 	return newNodeClaim.InstanceTypeOptions
 }
 
