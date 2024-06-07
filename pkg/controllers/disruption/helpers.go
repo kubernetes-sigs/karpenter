@@ -54,21 +54,21 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
-	stateNodes := lo.Filter(nodes.Active().Nodes, func(n *state.StateNode, _ int) bool {
+	stateNodes := lo.Filter(nodes.Active(), func(n *state.StateNode, _ int) bool {
 		return !candidateNames.Has(n.Name())
 	})
 
 	// We do one final check to ensure that the node that we are attempting to consolidate isn't
 	// already handled for deletion by some other controller. This could happen if the node was markedForDeletion
 	// between returning the candidates and getting the stateNodes above
-	if _, ok := lo.Find(deletingNodes.Nodes, func(n *state.StateNode) bool {
+	if _, ok := lo.Find(deletingNodes, func(n *state.StateNode) bool {
 		return candidateNames.Has(n.Name())
 	}); ok {
 		return pscheduling.Results{}, errCandidateDeleting
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx)
+	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
 	if err != nil {
 		return pscheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
@@ -154,7 +154,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	candidates := lo.FilterMap(cluster.Nodes().Nodes, func(n *state.StateNode, _ int) (*Candidate, bool) {
+	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		return cn, e == nil
 	})
@@ -177,7 +177,7 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 	// Get the number of deleting nodes for each of those nodePools
 	// Find the difference to know how much left we can disrupt
 	nodes := cluster.Nodes()
-	for _, node := range nodes.Nodes {
+	for _, node := range nodes {
 		// We only consider nodes that we own and are initialized towards the total.
 		// If a node is launched/registered, but not initialized, pods aren't scheduled
 		// to the node, and these are treated as unhealthy until they're cleaned up.

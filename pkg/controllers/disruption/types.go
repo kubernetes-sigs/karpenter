@@ -25,7 +25,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 
@@ -62,9 +61,11 @@ type Candidate struct {
 }
 
 //nolint:gocyclo
-func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs *pdb.Limits,
+func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
 	nodePoolMap map[string]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
-	if err := node.IsDisruptable(ctx, kubeClient); err != nil {
+	var err error
+	var pods []*v1.Pod
+	if pods, err = node.ValidateDisruptable(ctx, kubeClient, pdbs); err != nil {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
 		return nil, err
 	}
@@ -87,23 +88,6 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance Type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
 		return nil, fmt.Errorf("instance type %q can't be resolved", node.Labels()[v1.LabelInstanceTypeStable])
 	}
-	pods, err := node.Pods(ctx, kubeClient)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed resolving node pods")
-		return nil, fmt.Errorf("getting pods from state node, %w", err)
-	}
-	for _, po := range pods {
-		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
-		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
-		if !pod.IsDisruptable(po) {
-			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf(`Pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po)))...)
-			return nil, fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po))
-		}
-	}
-	if pdbKey, ok := pdbs.CanEvictPods(pods); !ok {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("PDB %q prevents pod evictions", pdbKey))...)
-		return nil, fmt.Errorf("pdb %q prevents pod evictions", pdbKey)
-	}
 	return &Candidate{
 		StateNode:         node.DeepCopy(),
 		instanceType:      instanceType,
@@ -112,7 +96,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		zone:              node.Labels()[v1.LabelTopologyZone],
 		reschedulablePods: lo.Filter(pods, func(p *v1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
-		disruptionCost: disruptionutils.DisruptionCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.Node),
+		disruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 	}, nil
 }
 

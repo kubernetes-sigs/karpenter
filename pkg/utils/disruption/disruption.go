@@ -30,13 +30,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
-// lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the TTLSecondsUntilExpired
+// lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the ExpireAfter
 // is non-zero, we use it to scale down the disruption costs of candidates that are going to expire.  Just after creation, the
 // disruption cost is highest, and it approaches zero as the node ages towards its expiration time.
-func LifetimeRemaining(clock clock.Clock, nodePool *v1beta1.NodePool, node *v1.Node) float64 {
+func LifetimeRemaining(clock clock.Clock, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) float64 {
 	remaining := 1.0
 	if nodePool.Spec.Disruption.ExpireAfter.Duration != nil {
-		ageInSeconds := clock.Since(node.CreationTimestamp.Time).Seconds()
+		ageInSeconds := clock.Since(nodeClaim.CreationTimestamp.Time).Seconds()
 		totalLifetimeSeconds := nodePool.Spec.Disruption.ExpireAfter.Duration.Seconds()
 		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
 		remaining = lo.Clamp(lifetimeRemainingSeconds/totalLifetimeSeconds, 0.0, 1.0)
@@ -68,7 +68,7 @@ func EvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return lo.Clamp(cost, -10.0, 10.0)
 }
 
-func DisruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
+func ReschedulingCost(ctx context.Context, pods []*v1.Pod) float64 {
 	cost := 0.0
 	for _, p := range pods {
 		cost += EvictionCost(ctx, p)

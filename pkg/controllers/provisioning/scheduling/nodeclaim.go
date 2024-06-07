@@ -132,8 +132,7 @@ func (n *NodeClaim) FilterInstanceTypeOptionsByPriceAndMinValues(reqs scheduling
 		launchPrice := it.Offerings.Available().WorstLaunchPrice(reqs)
 		return launchPrice < maxPrice
 	})
-	var err error
-	if n.InstanceTypeOptions, err = n.InstanceTypeOptions.FilterByMinValues(reqs); err != nil {
+	if _, err := n.InstanceTypeOptions.SatisfiesMinValues(reqs); err != nil {
 		return nil, err
 	}
 	return n, nil

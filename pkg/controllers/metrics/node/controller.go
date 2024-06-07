@@ -141,7 +141,7 @@ func NewController(cluster *state.Cluster) *Controller {
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "metrics.node") //nolint:ineffassign,staticcheck
 
-	nodes := lo.Reject(c.cluster.Nodes().Nodes, func(n *state.StateNode, _ int) bool {
+	nodes := lo.Reject(c.cluster.Nodes(), func(n *state.StateNode, _ int) bool {
 		return n.Node == nil
 	})
 	c.metricStore.ReplaceAll(lo.SliceToMap(nodes, func(n *state.StateNode) (string, []*metrics.StoreMetric) {

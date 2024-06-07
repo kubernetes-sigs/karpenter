@@ -173,13 +173,9 @@ func (c *Cluster) Nodes() StateNodes {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return StateNodes{
-		Nodes: lo.Map(lo.Values(c.nodes), func(n *StateNode, _ int) *StateNode {
-			return n.DeepCopy()
-		}),
-		kubeClient: c.kubeClient,
-	}
-
+	return lo.Map(lo.Values(c.nodes), func(n *StateNode, _ int) *StateNode {
+		return n.DeepCopy()
+	})
 }
 
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling

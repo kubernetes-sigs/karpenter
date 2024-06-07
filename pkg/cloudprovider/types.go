@@ -89,9 +89,6 @@ type InstanceType struct {
 type InstanceTypes []*InstanceType
 
 func (its InstanceTypes) FilterByMinValues(reqs scheduling.Requirements) (InstanceTypes, error) {
-	if !reqs.HasMinValues() {
-		return its, nil
-	}
 
 	// We would have already filtered the invalid NodeClaim not meeting the minimum requirements in simulated scheduling results.
 	// Here the instanceTypeOptions changed again based on the price and requires re-validation.
@@ -175,6 +172,9 @@ func (its InstanceTypes) Compatible(requirements scheduling.Requirements) Instan
 //		}
 //	  so it returns 3 and a non-nil error to indicate that the instance types weren't able to fulfill the minValues requirements
 func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements) (minNeededInstanceTypes int, err error) {
+	if !requirements.HasMinValues() {
+		return 0, nil
+	}
 	valuesForKey := map[string]sets.Set[string]{}
 	// We validate if sorting by price and truncating the number of instance types to minItems breaks the minValue requirement.
 	// If minValue requirement fails, we return an error that indicates the first requirement key that couldn't be satisfied.

@@ -27,12 +27,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -41,14 +43,11 @@ import (
 
 // StateNodes is a typed version of a list of *Node
 // nolint: revive
-type StateNodes struct {
-	Nodes      []*StateNode
-	kubeClient client.Client
-}
+type StateNodes []*StateNode
 
 // Active filters StateNodes that are not in a MarkedForDeletion state
 func (n StateNodes) Active() StateNodes {
-	n.Nodes = lo.Filter(n.Nodes, func(node *StateNode, _ int) bool {
+	n = lo.Filter(n, func(node *StateNode, _ int) bool {
 		return !node.MarkedForDeletion()
 	})
 	return n
@@ -56,17 +55,17 @@ func (n StateNodes) Active() StateNodes {
 
 // Deleting filters StateNodes that are in a MarkedForDeletion state
 func (n StateNodes) Deleting() StateNodes {
-	n.Nodes = lo.Filter(n.Nodes, func(node *StateNode, _ int) bool {
+	n = lo.Filter(n, func(node *StateNode, _ int) bool {
 		return node.MarkedForDeletion()
 	})
 	return n
 }
 
 // Pods gets the pods assigned to all StateNodes based on the kubernetes api-server bindings
-func (n StateNodes) Pods(ctx context.Context) ([]*v1.Pod, error) {
+func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
-	for _, node := range n.Nodes {
-		p, err := node.Pods(ctx, n.kubeClient)
+	for _, node := range n {
+		p, err := node.Pods(ctx, kubeClient)
 		if err != nil {
 			return nil, err
 		}
@@ -76,17 +75,22 @@ func (n StateNodes) Pods(ctx context.Context) ([]*v1.Pod, error) {
 }
 
 // Disruptable filters StateNodes that are meet the IsDisruptable condition
-func (n StateNodes) Disruptable(ctx context.Context) StateNodes {
-	n.Nodes = lo.Filter(n.Nodes, func(node *StateNode, _ int) bool {
-		return node.IsDisruptable(ctx, n.kubeClient) == nil
+func (n StateNodes) Disruptable(ctx context.Context, clk clock.Clock, kubeClient client.Client) (StateNodes, error) {
+	pdbs, err := pdb.NewLimits(ctx, clk, kubeClient)
+	if err != nil {
+		return StateNodes{}, fmt.Errorf("constructing pdbs, %w", err)
+	}
+	n = lo.Filter(n, func(node *StateNode, _ int) bool {
+		_, err := node.ValidateDisruptable(ctx, kubeClient, pdbs)
+		return err == nil
 	})
-	return n
+	return n, nil
 }
 
-func (n StateNodes) ReschedulablePods(ctx context.Context) ([]*v1.Pod, error) {
+func (n StateNodes) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
 	var pods []*v1.Pod
-	for _, node := range n.Nodes {
-		p, err := node.ReschedulablePods(ctx, n.kubeClient)
+	for _, node := range n {
+		p, err := node.ReschedulablePods(ctx, kubeClient)
 		if err != nil {
 			return nil, err
 		}
@@ -163,28 +167,28 @@ func (in *StateNode) Pods(ctx context.Context, c client.Client) ([]*v1.Pod, erro
 	return nodeutils.GetPods(ctx, c, in.Node)
 }
 
-// IsDisruptable returns an error if the StateNode cannot be disrupted
+// ValidateDisruptable returns an error if the StateNode cannot be disrupted
 // This checks all associated StateNode internals, node labels, and do-not-disrupt annotations
 // on both the pod and the node.
-// IsDisruptable takes in a recorder to emit events on the nodeclaims when the state node is not a candidate
+// ValidateDisruptable takes in a recorder to emit events on the nodeclaims when the state node is not a candidate
 //
 //nolint:gocyclo
-func (in *StateNode) IsDisruptable(ctx context.Context, kubeClient client.Client) error {
+func (in *StateNode) ValidateDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits) ([]*v1.Pod, error) {
 	if in.Node == nil || in.NodeClaim == nil {
-		return fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
+		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
 	}
 	if !in.Initialized() {
-		return fmt.Errorf("state node isn't initialized")
+		return nil, fmt.Errorf("state node isn't initialized")
 	}
 	if in.MarkedForDeletion() {
-		return fmt.Errorf("state node is marked for deletion")
+		return nil, fmt.Errorf("state node is marked for deletion")
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
 	if in.Nominated() {
-		return fmt.Errorf("state node is nominated for a pending pod")
+		return nil, fmt.Errorf("state node is nominated for a pending pod")
 	}
 	if _, ok := in.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
-		return fmt.Errorf("disruption is blocked through the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
+		return nil, fmt.Errorf("disruption is blocked through the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
 	}
 	// check whether the node has all the labels we need
 	for _, label := range []string{
@@ -194,21 +198,25 @@ func (in *StateNode) IsDisruptable(ctx context.Context, kubeClient client.Client
 		v1beta1.NodePoolLabelKey,
 	} {
 		if _, ok := in.Labels()[label]; !ok {
-			return fmt.Errorf("state node doesn't have required label %q", label)
+			return nil, fmt.Errorf("state node doesn't have required label %q", label)
 		}
 	}
 	pods, err := in.Pods(ctx, kubeClient)
 	if err != nil {
-		return fmt.Errorf("getting pods from state node, %w", err)
+		return nil, fmt.Errorf("getting pods from state node, %w", err)
 	}
 	for _, po := range pods {
 		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
 		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
 		if !podutils.IsDisruptable(po) {
-			return fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po))
+			return nil, fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po))
 		}
 	}
-	return nil
+	if pdbKey, ok := pdbs.CanEvictPods(pods); !ok {
+		return nil, fmt.Errorf("pdb %q prevents pod evictions", pdbKey)
+	}
+
+	return pods, nil
 }
 
 // ReschedulablePods gets the pods assigned to the Node that are reschedulable based on the kubernetes api-server bindings
