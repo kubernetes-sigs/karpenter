@@ -4,6 +4,12 @@ runs:
   using: "composite"
   steps:
     - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+    - name: download pyroscope
+      shell: bash
+      run: | 
+        curl -fL https://github.com/grafana/pyroscope/releases/download/v1.1.5/profilecli_1.1.5_linux_amd64.tar.gz | tar xz pyroscope
+        chmod +x pyroscope
+        sudo mv pyroscope /usr/local/bin
     - name: add grafana repo
       shell: bash
       run: |

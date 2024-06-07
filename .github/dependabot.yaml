@@ -46,7 +46,7 @@ updates:
         patterns:
           - '*'
   - package-ecosystem: github-actions
-    directory: .github/actions/install-grafana
+    directory: .github/actions/install-prometheus
     schedule:
       interval: weekly
     groups:
@@ -54,7 +54,7 @@ updates:
         patterns:
           - '*'
   - package-ecosystem: github-actions
-    directory: .github/actions/install-prometheus
+    directory: .github/actions/install-pyroscope
     schedule:
       interval: weekly
     groups:
