@@ -74,7 +74,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = BeforeEach(func() {
-	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
+	ctx = options.ToContext(ctx, test.Options())
 	fakeClock.SetTime(time.Now())
 })
 
@@ -126,7 +126,7 @@ var _ = Describe("Disruption", func() {
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
 		// Drift, Expiration, and Emptiness are disabled through configuration
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
+		ctx = options.ToContext(ctx, test.Options())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)

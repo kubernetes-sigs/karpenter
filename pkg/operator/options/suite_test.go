@@ -78,15 +78,15 @@ var _ = Describe("Options", func() {
 	Context("FeatureGates", func() {
 		DescribeTable(
 			"should successfully parse well formed feature gate strings",
-			func(str string, driftVal bool) {
+			func(str string, spotToSpotConsolidationVal bool) {
 				gates, err := options.ParseFeatureGates(str)
 				Expect(err).To(BeNil())
-				Expect(gates.Drift).To(Equal(driftVal))
+				Expect(gates.SpotToSpotConsolidation).To(Equal(spotToSpotConsolidationVal))
 			},
-			Entry("basic true", "Drift=true", true),
-			Entry("basic false", "Drift=false", false),
-			Entry("with whitespace", "Drift\t= false", false),
-			Entry("multiple values", "Hello=true,Drift=false,World=true", false),
+			Entry("basic true", "SpotToSpotConsolidation=true", true),
+			Entry("basic false", "SpotToSpotConsolidation=false", false),
+			Entry("with whitespace", "SpotToSpotConsolidation\t= false", false),
+			Entry("multiple values", "Hello=true,SpotToSpotConsolidation=false,World=true", false),
 		)
 	})
 
@@ -110,7 +110,7 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:     lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:    lo.ToPtr(time.Second),
 				FeatureGates: test.FeatureGates{
-					Drift: lo.ToPtr(true),
+					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
 			}))
 		})
@@ -132,7 +132,7 @@ var _ = Describe("Options", func() {
 				"--log-level", "debug",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
-				"--feature-gates", "Drift=true",
+				"--feature-gates", "SpotToSpotConsolidation=true",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -151,7 +151,7 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:    lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
-					Drift: lo.ToPtr(true),
+					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
 			}))
 		})
@@ -171,7 +171,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "Drift=true")
+			os.Setenv("FEATURE_GATES", "SpotToSpotConsolidation=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -194,7 +194,7 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:    lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
-					Drift: lo.ToPtr(true),
+					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
 			}))
 		})
@@ -212,7 +212,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "Drift=true")
+			os.Setenv("FEATURE_GATES", "SpotToSpotConsolidation=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -239,7 +239,7 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:    lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
-					Drift: lo.ToPtr(true),
+					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
 			}))
 		})
@@ -298,5 +298,5 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.LogLevel).To(Equal(optsB.LogLevel))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
 	Expect(optsA.BatchIdleDuration).To(Equal(optsB.BatchIdleDuration))
-	Expect(optsA.FeatureGates.Drift).To(Equal(optsB.FeatureGates.Drift))
+	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
 }

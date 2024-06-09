@@ -81,7 +81,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(coreapis.CRDs...))
-	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
+	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
@@ -113,7 +113,7 @@ var _ = BeforeEach(func() {
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
-	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(true)}}))
+	ctx = options.ToContext(ctx, test.Options())
 
 	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		for _, o := range i.Offerings.Available() {

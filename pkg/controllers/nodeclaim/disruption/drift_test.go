@@ -156,7 +156,7 @@ var _ = Describe("Drift", func() {
 	})
 	It("should not detect drift if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
+		ctx = options.ToContext(ctx, test.Options())
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
@@ -165,7 +165,7 @@ var _ = Describe("Drift", func() {
 	})
 	It("should remove the status condition from the nodeClaim if the feature flag is disabled", func() {
 		cp.Drifted = "drifted"
-		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
+		ctx = options.ToContext(ctx, test.Options())
 		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 

@@ -30,7 +30,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -47,16 +46,8 @@ type Drift struct {
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	hasDriftedCondition := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted) != nil
 
-	// From here there are three scenarios to handle:
-	// 1. If drift is not enabled but the NodeClaim is drifted, remove the status condition
-	if !options.FromContext(ctx).FeatureGates.Drift {
-		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
-		if hasDriftedCondition {
-			logging.FromContext(ctx).Debugf("removing drift status condition, drift has been disabled")
-		}
-		return reconcile.Result{}, nil
-	}
-	// 2. If NodeClaim is not launched, remove the drift status condition
+	// From here there are two scenarios to handle:
+	// 1. If NodeClaim is not launched, remove the drift status condition
 	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue() {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
 		if hasDriftedCondition {
@@ -68,7 +59,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 	if err != nil {
 		return reconcile.Result{}, cloudprovider.IgnoreNodeClaimNotFoundError(fmt.Errorf("getting drift, %w", err))
 	}
-	// 3. Otherwise, if the NodeClaim isn't drifted, but has the status condition, remove it.
+	// 2. Otherwise, if the NodeClaim isn't drifted, but has the status condition, remove it.
 	if driftedReason == "" {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
 		if hasDriftedCondition {

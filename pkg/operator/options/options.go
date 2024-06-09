@@ -41,7 +41,6 @@ type optionsKey struct{}
 type FeatureGates struct {
 	inputStr string
 
-	Drift                   bool
 	SpotToSpotConsolidation bool
 }
 
@@ -96,7 +95,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", "info"), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "Drift=true,SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: Drift,SpotToSpotConsolidation")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: SpotToSpotConsolidation")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -130,9 +129,6 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	// simple merging with environment vars.
 	if err := cliflag.NewMapStringBool(&gateMap).Set(gateStr); err != nil {
 		return gates, err
-	}
-	if val, ok := gateMap["Drift"]; ok {
-		gates.Drift = val
 	}
 	if val, ok := gateMap["SpotToSpotConsolidation"]; ok {
 		gates.SpotToSpotConsolidation = val
