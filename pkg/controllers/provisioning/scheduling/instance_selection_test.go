@@ -43,7 +43,7 @@ var _ = Describe("Instance Type Selection", func() {
 	var minPrice float64
 	var instanceTypeMap map[string]*cloudprovider.InstanceType
 	nodePrice := func(n *v1.Node) float64 {
-		of, _ := instanceTypeMap[n.Labels[v1.LabelInstanceTypeStable]].Offerings.Get(n.Labels[v1beta1.CapacityTypeLabelKey], n.Labels[v1.LabelTopologyZone])
+		of, _ := instanceTypeMap[n.Labels[v1.LabelInstanceTypeStable]].Offerings.Get(scheduler.NewLabelRequirements(n.Labels))
 		return of.Price
 	}
 
@@ -485,7 +485,7 @@ var _ = Describe("Instance Type Selection", func() {
 		// remove all Arm instance types in zone-2
 		cloudProvider.InstanceTypes = filterInstanceTypes(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType) bool {
 			for _, off := range i.Offerings {
-				if off.Zone == "test-zone-2" {
+				if off.Requirements.Get(v1.LabelTopologyZone).Any() == "test-zone-2" {
 					return i.Requirements.Get(v1.LabelArchStable).Has(v1beta1.ArchitectureAmd64)
 				}
 			}
@@ -514,7 +514,7 @@ var _ = Describe("Instance Type Selection", func() {
 		// remove all Arm instance types in zone-2
 		cloudProvider.InstanceTypes = filterInstanceTypes(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType) bool {
 			for _, off := range i.Offerings {
-				if off.Zone == "test-zone-2" {
+				if off.Requirements.Get(v1.LabelTopologyZone).Any() == "test-zone-2" {
 					return i.Requirements.Get(v1.LabelArchStable).Has(v1beta1.ArchitectureAmd64)
 				}
 			}
@@ -609,8 +609,8 @@ var _ = Describe("Instance Type Selection", func() {
 					v1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 				Offerings: []cloudprovider.Offering{
-					{CapacityType: v1beta1.CapacityTypeOnDemand, Zone: "test-zone-1a", Price: 1.0, Available: true},
-					{CapacityType: v1beta1.CapacityTypeSpot, Zone: "test-zone-1a", Price: 0.2, Available: true},
+					{Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}), Price: 1.0, Available: true},
+					{Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1a"}), Price: 0.2, Available: true},
 				},
 			}),
 			fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -622,8 +622,8 @@ var _ = Describe("Instance Type Selection", func() {
 					v1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 				Offerings: []cloudprovider.Offering{
-					{CapacityType: v1beta1.CapacityTypeOnDemand, Zone: "test-zone-1a", Price: 1.3, Available: true},
-					{CapacityType: v1beta1.CapacityTypeSpot, Zone: "test-zone-1a", Price: 0.1, Available: true},
+					{Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}), Price: 1.3, Available: true},
+					{Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1a"}), Price: 0.1, Available: true},
 				},
 			}),
 		}
@@ -658,8 +658,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -675,8 +674,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
 					Available:    true,
 				},
@@ -738,8 +736,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -755,8 +752,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
 					Available:    true,
 				},
@@ -772,8 +768,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts3.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
 					Available:    true,
 				},
@@ -837,8 +832,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -854,8 +848,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
 					Available:    true,
 				},
@@ -915,8 +908,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -932,8 +924,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
 					Available:    true,
 				},
@@ -949,8 +940,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts3.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
 					Available:    true,
 				},
@@ -1013,8 +1003,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -1030,8 +1019,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
 					Available:    true,
 				},
@@ -1084,8 +1072,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -1101,8 +1088,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
 					Available:    true,
 				},
@@ -1118,8 +1104,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts3.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
 					Available:    true,
 				},
@@ -1189,8 +1174,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -1206,8 +1190,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
 					Available:    true,
 				},
@@ -1223,8 +1206,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts3.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
 					Available:    true,
 				},
@@ -1240,8 +1222,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts4.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
 					Available:    true,
 				},
@@ -1339,8 +1320,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -1356,8 +1336,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
 					Available:    true,
 				},
@@ -1416,8 +1395,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -1433,8 +1411,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
 					Available:    true,
 				},
@@ -1503,8 +1480,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts1.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
 					Available:    true,
 				},
@@ -1520,8 +1496,7 @@ var _ = Describe("Instance Type Selection", func() {
 			}
 			opts2.Offerings = []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1-spot",
+					Requirements: scheduler.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
 					Available:    true,
 				},

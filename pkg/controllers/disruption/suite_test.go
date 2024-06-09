@@ -30,13 +30,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
-	. "knative.dev/pkg/logging/testing"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -117,7 +116,7 @@ var _ = BeforeEach(func() {
 
 	onDemandInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		for _, o := range i.Offerings.Available() {
-			if o.CapacityType == v1beta1.CapacityTypeOnDemand {
+			if o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == v1beta1.CapacityTypeOnDemand {
 				return true
 			}
 		}
@@ -131,7 +130,7 @@ var _ = BeforeEach(func() {
 	leastExpensiveOffering, mostExpensiveOffering = leastExpensiveInstance.Offerings[0], mostExpensiveInstance.Offerings[0]
 	spotInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		for _, o := range i.Offerings.Available() {
-			if o.CapacityType == v1beta1.CapacityTypeSpot {
+			if o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == v1beta1.CapacityTypeSpot {
 				return true
 			}
 		}
@@ -167,8 +166,8 @@ var _ = Describe("Simulate Scheduling", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -237,8 +236,8 @@ var _ = Describe("Simulate Scheduling", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -304,7 +303,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		wg := sync.WaitGroup{}
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		// Expect a replace action
@@ -322,7 +321,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		// Another replacement disruption action
@@ -337,7 +336,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		// One more replacement disruption action
@@ -353,7 +352,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// Try one more time, but fail since the budgets only allow 3 disruptions.
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ncs = ExpectNodeClaims(ctx, env.Client)
@@ -365,8 +364,8 @@ var _ = Describe("Simulate Scheduling", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -416,8 +415,8 @@ var _ = Describe("Simulate Scheduling", func() {
 						Kind:               "StatefulSet",
 						Name:               ss.Name,
 						UID:                ss.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
 					},
 				},
 			},
@@ -435,11 +434,11 @@ var _ = Describe("Simulate Scheduling", func() {
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, queue)
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -465,8 +464,7 @@ var _ = Describe("Disruption Taints", func() {
 			Name: "current-on-demand",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeOnDemand,
-					Zone:         "test-zone-1a",
+					Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        1.5,
 					Available:    false,
 				},
@@ -476,20 +474,17 @@ var _ = Describe("Disruption Taints", func() {
 			Name: "spot-replacement",
 			Offerings: []cloudprovider.Offering{
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1a",
+					Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        1.0,
 					Available:    true,
 				},
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1b",
+					Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1b"}),
 					Price:        0.2,
 					Available:    true,
 				},
 				{
-					CapacityType: v1beta1.CapacityTypeSpot,
-					Zone:         "test-zone-1c",
+					Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1c"}),
 					Price:        0.4,
 					Available:    true,
 				},
@@ -500,8 +495,8 @@ var _ = Describe("Disruption Taints", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.LabelInstanceTypeStable:   currentInstance.Name,
-					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         currentInstance.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 				},
 			},
@@ -541,7 +536,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 		}()
 		wg.Wait()
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -569,7 +564,7 @@ var _ = Describe("Disruption Taints", func() {
 		go func() {
 			defer wg.Done()
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 		}()
 
 		// Iterate in a loop until we get to the validation action
@@ -594,7 +589,7 @@ var _ = Describe("Disruption Taints", func() {
 		// Increment the clock so that the nodeclaim deletion isn't caught by the
 		// eventual consistency delay.
 		fakeClock.Step(6 * time.Second)
-		ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, queue)
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
@@ -615,8 +610,8 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -655,8 +650,8 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -780,13 +775,13 @@ var _ = Describe("Pod Eviction Cost", func() {
 	})
 	It("should have a higher disruptionCost for a pod with a higher priority", func() {
 		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
-			Spec: v1.PodSpec{Priority: ptr.Int32(1)},
+			Spec: v1.PodSpec{Priority: lo.ToPtr(int32(1))},
 		})
 		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 	It("should have a lower disruptionCost for a pod with a lower priority", func() {
 		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
-			Spec: v1.PodSpec{Priority: ptr.Int32(-1)},
+			Spec: v1.PodSpec{Priority: lo.ToPtr(int32(-1))},
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
@@ -817,8 +812,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -845,8 +840,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -884,8 +879,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -922,8 +917,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -952,8 +947,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -993,8 +988,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1013,8 +1008,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1050,8 +1045,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1096,8 +1091,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1142,8 +1137,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1186,8 +1181,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1224,8 +1219,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1243,8 +1238,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1262,8 +1257,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1283,8 +1278,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1305,8 +1300,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1326,8 +1321,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1345,8 +1340,8 @@ var _ = Describe("Candidate Filtering", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1364,8 +1359,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1389,7 +1384,7 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:   nodePool.Name,
 					v1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-					v1.LabelTopologyZone:       mostExpensiveOffering.Zone,
+					v1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1408,7 +1403,7 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
 				},
 			},
 		})
@@ -1426,8 +1421,8 @@ var _ = Describe("Candidate Filtering", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1446,8 +1441,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1469,8 +1464,8 @@ var _ = Describe("Candidate Filtering", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 		})
@@ -1510,8 +1505,8 @@ var _ = Describe("Metrics", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -1532,7 +1527,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1556,8 +1551,8 @@ var _ = Describe("Metrics", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -1586,7 +1581,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1610,8 +1605,8 @@ var _ = Describe("Metrics", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -1640,7 +1635,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1664,8 +1659,8 @@ var _ = Describe("Metrics", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -1684,7 +1679,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1711,8 +1706,8 @@ var _ = Describe("Metrics", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         leastExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -1734,8 +1729,8 @@ var _ = Describe("Metrics", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
 					},
 				},
 			},
@@ -1755,7 +1750,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
@@ -1782,8 +1777,8 @@ var _ = Describe("Metrics", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -1805,8 +1800,8 @@ var _ = Describe("Metrics", func() {
 						Kind:               "ReplicaSet",
 						Name:               rs.Name,
 						UID:                rs.UID,
-						Controller:         ptr.Bool(true),
-						BlockOwnerDeletion: ptr.Bool(true),
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
 					},
 				},
 			},
@@ -1827,7 +1822,7 @@ var _ = Describe("Metrics", func() {
 
 		var wg sync.WaitGroup
 		ExpectTriggerVerifyAction(&wg)
-		ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{

@@ -14,9 +14,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// +kubebuilder:skip
-// +k8s:openapi-gen=true
-// +k8s:deepcopy-gen=package,register
-// +k8s:defaulter-gen=TypeMeta
-// +groupName=karpenter.sh
-package v1alpha5 // doc.go is discovered by codegen
+package testing
+
+import (
+	"context"
+
+	"github.com/go-logr/zapr"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+)
+
+// TestContextWithLogger returns a context with a logger to be used in tests
+func TestContextWithLogger(t zaptest.TestingT) context.Context {
+	opts := zaptest.WrapOptions(
+		zap.AddCaller(),
+		zap.Development(),
+	)
+	return log.IntoContext(context.Background(), zapr.NewLogger(zaptest.NewLogger(t, opts)))
+}

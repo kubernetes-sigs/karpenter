@@ -28,8 +28,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	. "knative.dev/pkg/logging/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 
@@ -140,7 +141,7 @@ var _ = Describe("Eviction/Queue", func() {
 				defer wg.Done()
 
 				for {
-					ExpectReconcileSucceeded(ctx, queue, client.ObjectKey{})
+					ExpectSingletonReconciled(ctx, queue)
 					if cancelCtx.Err() != nil {
 						return
 					}

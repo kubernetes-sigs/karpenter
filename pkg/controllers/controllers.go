@@ -17,10 +17,9 @@ limitations under the License.
 package controllers
 
 import (
+	"github.com/awslabs/operatorpkg/controller"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"

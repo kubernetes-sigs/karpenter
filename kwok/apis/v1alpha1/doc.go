@@ -14,11 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha5
-
-// Karpenter specific annotations
-// These are deprecated. These should be removed as part of the migration to v1.
-const (
-	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
-	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
-)
+// +k8s:openapi-gen=true
+// +k8s:deepcopy-gen=package,register
+// +k8s:defaulter-gen=TypeMeta
+// +groupName=kwok.karpenter.sh
+package v1alpha1 // doc.go is discovered by codegen

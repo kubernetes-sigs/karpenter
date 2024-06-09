@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -31,14 +32,16 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
-	"knative.dev/pkg/logging"
+	"k8s.io/klog/v2"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
+	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
@@ -96,9 +99,10 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 }
 
 func (q *Queue) Register(_ context.Context, m manager.Manager) error {
-	return controller.NewSingletonManagedBy(m).
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("eviction-queue").
-		Complete(q)
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(q))
 }
 
 // Add adds pods to the Queue
@@ -122,7 +126,9 @@ func (q *Queue) Has(pod *v1.Pod) bool {
 	return q.set.Has(NewQueueKey(pod))
 }
 
-func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "eviction-queue")
+
 	EvictionQueueDepth.Set(float64(q.RateLimitingInterface.Len()))
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
@@ -143,16 +149,16 @@ func (q *Queue) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.R
 		q.mu.Lock()
 		q.set.Delete(qk)
 		q.mu.Unlock()
-		return reconcile.Result{RequeueAfter: controller.Immediately}, nil
+		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 	// Requeue pod if eviction failed
 	q.RateLimitingInterface.AddRateLimited(qk)
-	return reconcile.Result{RequeueAfter: controller.Immediately}, nil
+	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
 // Evict returns true if successful eviction call, and false if not an eviction-related error
 func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("pod", key.NamespacedName))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(key.Namespace, key.Name)))
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		&v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}},
 		&policyv1.Eviction{
@@ -178,7 +184,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", key.Namespace, key.Name)))
 			return false
 		}
-		logging.FromContext(ctx).Errorf("evicting pod, %s", err)
+		log.FromContext(ctx).Error(err, "failed evicting pod")
 		return false
 	}
 	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))

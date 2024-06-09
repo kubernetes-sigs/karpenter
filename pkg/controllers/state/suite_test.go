@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
-	"knative.dev/pkg/ptr"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -48,7 +47,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	. "knative.dev/pkg/logging/testing"
+	"github.com/samber/lo"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -120,7 +121,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		})
 		sc = test.StorageClass(test.StorageClassOptions{
 			ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
-			Provisioner: ptr.String(csiProvider),
+			Provisioner: lo.ToPtr(csiProvider),
 			Zones:       []string{"test-zone-1"},
 		})
 		csiNode = &storagev1.CSINode{
@@ -133,7 +134,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 						Name:   csiProvider,
 						NodeID: "fake-node-id",
 						Allocatable: &storagev1.VolumeNodeResources{
-							Count: ptr.Int32(10),
+							Count: lo.ToPtr(int32(10)),
 						},
 					},
 				},
@@ -144,7 +145,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		ExpectApplied(ctx, env.Client, sc, node, csiNode)
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
+				StorageClassName: lo.ToPtr(sc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
@@ -165,7 +166,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
+				StorageClassName: lo.ToPtr(sc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
@@ -196,7 +197,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		var pvcs []*v1.PersistentVolumeClaim
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
-				StorageClassName: ptr.String(sc.Name),
+				StorageClassName: lo.ToPtr(sc.Name),
 			})
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
@@ -753,8 +754,8 @@ var _ = Describe("Node Resource Level", func() {
 			Kind:               "DaemonSet",
 			Name:               ds.Name,
 			UID:                ds.UID,
-			Controller:         ptr.Bool(true),
-			BlockOwnerDeletion: ptr.Bool(true),
+			Controller:         lo.ToPtr(true),
+			BlockOwnerDeletion: lo.ToPtr(true),
 		})
 
 		node := test.Node(test.NodeOptions{
@@ -1334,8 +1335,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -1362,8 +1363,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -1383,8 +1384,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -1411,8 +1412,8 @@ var _ = Describe("DaemonSet Controller", func() {
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},

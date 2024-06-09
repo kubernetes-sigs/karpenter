@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -77,7 +76,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodeclaim.lifecycle").With("nodeclaim", nodeClaim.Name))
 	ctx = injection.WithControllerName(ctx, "nodeclaim.lifecycle")
 
 	if !nodeClaim.DeletionTimestamp.IsZero() {

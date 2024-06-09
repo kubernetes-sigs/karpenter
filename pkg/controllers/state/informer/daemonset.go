@@ -22,7 +22,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -47,7 +46,6 @@ func NewDaemonSetController(kubeClient client.Client, cluster *state.Cluster) *D
 }
 
 func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("state.daemonset").With("daemonset", req.String()))
 	ctx = injection.WithControllerName(ctx, "state.daemonset")
 
 	daemonSet := appsv1.DaemonSet{}

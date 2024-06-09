@@ -23,8 +23,8 @@ import (
 
 	"k8s.io/utils/clock"
 
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
@@ -112,7 +112,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 			e.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, results.NonPendingPodSchedulingErrors())...)
 			continue
 		}
-		logging.FromContext(ctx).With("ttl", candidates[0].nodePool.Spec.Disruption.ExpireAfter.String()).Infof("triggering termination for expired node after TTL")
+		log.FromContext(ctx).WithValues("ttl", candidates[0].nodePool.Spec.Disruption.ExpireAfter.String()).Info("triggering termination for expired node after TTL")
 		return Command{
 			candidates:   []*Candidate{candidate},
 			replacements: results.NewNodeClaims,

@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/apimachinery/pkg/types"
 	clock "k8s.io/utils/clock/testing"
 
 	v1 "k8s.io/api/core/v1"
@@ -40,7 +39,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	. "knative.dev/pkg/logging/testing"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -87,7 +87,7 @@ var _ = Describe("Node Metrics", func() {
 		node := test.Node(test.NodeOptions{Allocatable: resources})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, metricsStateController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, metricsStateController)
 
 		for k, v := range resources {
 			metric, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
@@ -108,7 +108,7 @@ var _ = Describe("Node Metrics", func() {
 		node := test.Node(test.NodeOptions{Allocatable: resources})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, metricsStateController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, metricsStateController)
 
 		_, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 			"node_name": node.GetName(),
@@ -117,7 +117,7 @@ var _ = Describe("Node Metrics", func() {
 
 		ExpectDeleted(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, metricsStateController, types.NamespacedName{})
+		ExpectSingletonReconciled(ctx, metricsStateController)
 
 		_, found = FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 			"node_name": node.GetName(),

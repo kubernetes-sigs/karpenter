@@ -28,15 +28,13 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -64,8 +62,8 @@ var _ = Describe("Expiration", func() {
 				Labels: map[string]string{
 					v1beta1.NodePoolLabelKey:     nodePool.Name,
 					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-					v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1beta1.NodeClaimStatus{
@@ -99,7 +97,7 @@ var _ = Describe("Expiration", func() {
 			fakeClock.Step(10 * time.Minute)
 			wg := sync.WaitGroup{}
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, eligibleNodesLabels)
@@ -111,7 +109,7 @@ var _ = Describe("Expiration", func() {
 
 			fakeClock.Step(10 * time.Minute)
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, eligibleNodesLabels)
@@ -139,8 +137,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -164,7 +162,7 @@ var _ = Describe("Expiration", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
@@ -174,7 +172,7 @@ var _ = Describe("Expiration", func() {
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 10))
 
 			// Execute command, thus deleting all nodes
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 		It("should allow no empty nodes to be disrupted", func() {
@@ -186,8 +184,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -211,7 +209,7 @@ var _ = Describe("Expiration", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
@@ -221,7 +219,7 @@ var _ = Describe("Expiration", func() {
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
 
 			// Execute command, thus deleting no nodes
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
 		})
 		It("should only allow 3 empty nodes to be disrupted", func() {
@@ -233,8 +231,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -258,7 +256,7 @@ var _ = Describe("Expiration", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
@@ -268,7 +266,7 @@ var _ = Describe("Expiration", func() {
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
 
 			// Execute command, thus deleting 3 nodes
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
 		It("should disrupt 3 nodes, taking into account commands in progress", func() {
@@ -277,8 +275,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -315,8 +313,8 @@ var _ = Describe("Expiration", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					}}})
 			// Bind the pods to the first n nodes.
@@ -332,7 +330,7 @@ var _ = Describe("Expiration", func() {
 			ExpectTriggerVerifyAction(&wg)
 			// Reconcile 5 times, enqueuing 3 commands total.
 			for i := 0; i < 5; i++ {
-				ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+				ExpectSingletonReconciled(ctx, disruptionController)
 			}
 			wg.Wait()
 
@@ -342,7 +340,7 @@ var _ = Describe("Expiration", func() {
 			}))).To(Equal(3))
 			// Execute all commands in the queue, only deleting 3 nodes
 			for i := 0; i < 5; i++ {
-				ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+				ExpectSingletonReconciled(ctx, queue)
 			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
@@ -372,8 +370,8 @@ var _ = Describe("Expiration", func() {
 						Labels: map[string]string{
 							v1beta1.NodePoolLabelKey:     np.Name,
 							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 						},
 					},
 					Status: v1beta1.NodeClaimStatus{
@@ -397,7 +395,7 @@ var _ = Describe("Expiration", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			for _, np := range nps {
@@ -409,7 +407,7 @@ var _ = Describe("Expiration", func() {
 			}
 
 			// Execute the command in the queue, only deleting 20 nodes
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
 		})
 		It("should allow all empty nodes from each nodePool to be deleted", func() {
@@ -437,8 +435,8 @@ var _ = Describe("Expiration", func() {
 						Labels: map[string]string{
 							v1beta1.NodePoolLabelKey:     np.Name,
 							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-							v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 						},
 					},
 					Status: v1beta1.NodeClaimStatus{
@@ -462,7 +460,7 @@ var _ = Describe("Expiration", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, client.ObjectKey{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			for _, np := range nps {
@@ -474,7 +472,7 @@ var _ = Describe("Expiration", func() {
 			}
 
 			// Execute the command in the queue, deleting all nodes
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 
@@ -487,7 +485,7 @@ var _ = Describe("Expiration", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -501,28 +499,7 @@ var _ = Describe("Expiration", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
-
-			// Expect to not create or delete more nodeclaims
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, nodeClaim)
-		})
-		It("should ignore nodes that have pods with the karpenter.sh/do-not-evict annotation", func() {
-			pod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						v1alpha5.DoNotEvictPodAnnotationKey: "true",
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -543,7 +520,7 @@ var _ = Describe("Expiration", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -576,8 +553,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -599,11 +576,11 @@ var _ = Describe("Expiration", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
@@ -620,7 +597,7 @@ var _ = Describe("Expiration", func() {
 
 			fakeClock.Step(10 * time.Minute)
 
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -634,11 +611,11 @@ var _ = Describe("Expiration", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -653,8 +630,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -678,11 +655,11 @@ var _ = Describe("Expiration", func() {
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
 
@@ -706,8 +683,8 @@ var _ = Describe("Expiration", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -721,8 +698,8 @@ var _ = Describe("Expiration", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.CapacityType,
-						v1.LabelTopologyZone:         mostExpensiveOffering.Zone,
+						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -751,11 +728,11 @@ var _ = Describe("Expiration", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 
@@ -782,8 +759,8 @@ var _ = Describe("Expiration", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -800,11 +777,11 @@ var _ = Describe("Expiration", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -836,8 +813,8 @@ var _ = Describe("Expiration", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					},
 				},
@@ -853,10 +830,10 @@ var _ = Describe("Expiration", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			// We should have tried to create a new nodeClaim but failed to do so; therefore, we uncordoned the existing node
 			node = ExpectExists(ctx, env.Client, node)
 			Expect(node.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
@@ -866,8 +843,7 @@ var _ = Describe("Expiration", func() {
 				Name: "current-on-demand",
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: v1beta1.CapacityTypeOnDemand,
-						Zone:         "test-zone-1a",
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.5,
 						Available:    false,
 					},
@@ -877,8 +853,7 @@ var _ = Describe("Expiration", func() {
 				Name: "replacement-on-demand",
 				Offerings: []cloudprovider.Offering{
 					{
-						CapacityType: v1beta1.CapacityTypeOnDemand,
-						Zone:         "test-zone-1a",
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.3,
 						Available:    true,
 					},
@@ -906,8 +881,8 @@ var _ = Describe("Expiration", func() {
 							Kind:               "ReplicaSet",
 							Name:               rs.Name,
 							UID:                rs.UID,
-							Controller:         ptr.Bool(true),
-							BlockOwnerDeletion: ptr.Bool(true),
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					}},
 				// Make each pod request about a third of the allocatable on the node
@@ -917,14 +892,14 @@ var _ = Describe("Expiration", func() {
 			})
 			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
 				v1.LabelInstanceTypeStable:   currentInstance.Name,
-				v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-				v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+				v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				v1.LabelTopologyZone:         currentInstance.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
 			})
 			nodeClaim.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
 			node.Labels = lo.Assign(node.Labels, map[string]string{
 				v1.LabelInstanceTypeStable:   currentInstance.Name,
-				v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-				v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+				v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				v1.LabelTopologyZone:         currentInstance.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
 			})
 			node.Status.Allocatable = map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("8")}
 
@@ -942,11 +917,11 @@ var _ = Describe("Expiration", func() {
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
-			ExpectReconcileSucceeded(ctx, disruptionController, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 

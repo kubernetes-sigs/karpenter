@@ -28,7 +28,6 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
@@ -86,11 +85,6 @@ func (c *consolidation) markConsolidated() {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
-	// TODO: Remove the check for do-not-consolidate at v1
-	if cn.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("%s annotation exists", v1alpha5.DoNotConsolidateNodeAnnotationKey))...)
-		return false
-	}
 	// If we don't have the "WhenUnderutilized" policy set, we should not do any of the consolidation methods, but
 	// we should also not fire an event here to users since this can be confusing when the field on the NodePool
 	// is named "consolidationPolicy"
@@ -291,7 +285,7 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	var price float64
 	for _, c := range candidates {
-		offering, ok := c.instanceType.Offerings.Get(c.capacityType, c.zone)
+		offering, ok := c.instanceType.Offerings.Get(scheduling.NewLabelRequirements(c.StateNode.Labels()))
 		if !ok {
 			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
 		}

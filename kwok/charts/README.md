@@ -43,7 +43,7 @@ For full Karpenter documentation please checkout [https://karpenter.sh](https://
 | podLabels | object | `{}` | Additional labels for the pod. |
 | podSecurityContext | object | `{"fsGroup":65536}` | SecurityContext for the pod. |
 | priorityClassName | string | `"system-cluster-critical"` | PriorityClass name for the pod. |
-| replicas | int | `2` | Number of replicas. |
+| replicas | int | `1` | Number of replicas. |
 | revisionHistoryLimit | int | `10` | The number of old ReplicaSets to retain to allow rollback. |
 | serviceAccount.annotations | object | `{}` | Additional annotations for the ServiceAccount. |
 | serviceAccount.create | bool | `true` | Specifies if a ServiceAccount should be created. |

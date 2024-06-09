@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -31,15 +32,19 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
-	"knative.dev/pkg/logging"
+	"k8s.io/klog/v2"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -101,23 +106,26 @@ func (p *Provisioner) Trigger() {
 	p.batcher.Trigger()
 }
 
-func (p *Provisioner) Register(_ context.Context, mgr manager.Manager) error {
-	return controller.NewSingletonManagedBy(mgr).
+func (p *Provisioner) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner").
-		Complete(p)
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(p))
 }
 
-func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (result reconcile.Result, err error) {
+func (p *Provisioner) Reconcile(ctx context.Context) (result reconcile.Result, err error) {
+	ctx = injection.WithControllerName(ctx, "provisioner")
+
 	// Batch pods
 	if triggered := p.batcher.Wait(ctx); !triggered {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !p.cluster.Synced(ctx) {
-		logging.FromContext(ctx).Debugf("waiting on cluster sync")
-		return reconcile.Result{RequeueAfter: time.Second}, nil
+		log.FromContext(ctx).V(1).Info("waiting on cluster sync")
+		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
@@ -126,10 +134,12 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 		return reconcile.Result{}, err
 	}
 	if len(results.NewNodeClaims) == 0 {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
-	_, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination)
-	return reconcile.Result{}, err
+	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
 // CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
@@ -158,7 +168,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 	}
 	return lo.Reject(pods, func(po *v1.Pod, _ int) bool {
 		if err := p.Validate(ctx, po); err != nil {
-			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(po)).Debugf("ignoring pod, %s", err)
+			log.FromContext(ctx).WithValues("Pod", klog.KRef(po.Namespace, po.Name)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
 		p.consolidationWarnings(ctx, po)
@@ -174,14 +184,14 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, po *v1.Pod) {
 	if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
 		if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
 			if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
-				logging.FromContext(ctx).Infof("pod %q has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(po))
+				log.FromContext(ctx).Info(fmt.Sprintf("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(po)))
 			}
 		}
 	}
 	for _, tsc := range po.Spec.TopologySpreadConstraints {
 		if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
 			if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
-				logging.FromContext(ctx).Infof("pod %q has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(po))
+				log.FromContext(ctx).Info(fmt.Sprintf("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(po)))
 			}
 		}
 	}
@@ -198,7 +208,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
 		if err := n.RuntimeValidate(); err != nil {
-			logging.FromContext(ctx).With("nodepool", n.Name).Errorf("nodepool failed validation, %s", err)
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.Name)).Error(err, "nodepool failed validation")
 			return false
 		}
 		return n.DeletionTimestamp.IsZero()
@@ -220,11 +230,12 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		if err != nil {
 			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
 			// all scheduling
-			logging.FromContext(ctx).With("nodepool", nodePool.Name).Errorf("skipping, unable to resolve instance types, %s", err)
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", nodePool.Name)).Error(err, "skipping, unable to resolve instance types")
 			continue
 		}
 		if len(instanceTypeOptions) == 0 {
-			logging.FromContext(ctx).With("nodepool", nodePool.Name).Info("skipping, no resolved instance types found")
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", nodePool.Name)).Info("skipping, no resolved instance types found")
+
 			continue
 		}
 		instanceTypes[nodePool.Name] = append(instanceTypes[nodePool.Name], instanceTypeOptions...)
@@ -315,23 +326,21 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	s, err := p.NewScheduler(ctx, pods, nodes.Active())
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
-			logging.FromContext(ctx).Info(ErrNodePoolsNotFound)
+			log.FromContext(ctx).Info("no nodepools found")
 			return scheduler.Results{}, nil
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	if len(results.NewNodeClaims) > 0 {
-		logging.FromContext(ctx).With("pods", pretty.Slice(lo.Map(pods, func(p *v1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() }), 5)).
-			With("duration", time.Since(start)).
-			Infof("found provisionable pod(s)")
+		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *v1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
 	}
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (string, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("nodepool", n.NodePoolName))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.NodePoolName)))
 	options := functional.ResolveOptions(opts...)
 	latest := &v1beta1.NodePool{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {
@@ -348,7 +357,9 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	instanceTypeRequirement, _ := lo.Find(nodeClaim.Spec.Requirements, func(req v1beta1.NodeSelectorRequirementWithMinValues) bool {
 		return req.Key == v1.LabelInstanceTypeStable
 	})
-	logging.FromContext(ctx).With("nodeclaim", nodeClaim.Name, "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).Infof("created nodeclaim")
+
+	log.FromContext(ctx).WithValues("NodeClaim", klog.KRef("", nodeClaim.Name), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
+		Info("created nodeclaim")
 	metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:       options.Reason,
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],
@@ -435,7 +446,7 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 	var schedulablePods []*v1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
-			logging.FromContext(ctx).With("pod", client.ObjectKeyFromObject(pod)).Errorf("getting volume topology requirements, %s", err)
+			log.FromContext(ctx).WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)).Error(err, "failed getting volume topology requirements")
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}

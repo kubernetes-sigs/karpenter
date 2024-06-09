@@ -14,8 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha5
+package v1alpha1
 
 const (
-	Group = "karpenter.sh"
+	// Labels that can be selected on and are propagated to the node
+	InstanceTypeLabelKey   = Group + "/instance-type"
+	InstanceSizeLabelKey   = Group + "/instance-size"
+	InstanceFamilyLabelKey = Group + "/instance-family"
+	InstanceMemoryLabelKey = Group + "/instance-memory"
+	InstanceCPULabelKey    = Group + "/instance-cpu"
+
+	// Internal labels that are propagated to the node
+	KwokLabelKey          = "kwok.x-k8s.io/node"
+	KwokLabelValue        = "fake"
+	NodeViewerLabelKey    = "eks-node-viewer/instance-price"
+	KwokPartitionLabelKey = "kwok-partition"
 )

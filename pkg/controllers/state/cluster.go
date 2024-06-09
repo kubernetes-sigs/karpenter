@@ -34,9 +34,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
-	"knative.dev/pkg/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -93,12 +93,12 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	}()
 	nodeClaimList := &v1beta1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
-		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
+		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
 	nodeList := &v1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList); err != nil {
-		logging.FromContext(ctx).Errorf("checking cluster state sync, %v", err)
+		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
 	c.mu.RLock()
@@ -483,7 +483,7 @@ func (c *Cluster) populateVolumeLimits(ctx context.Context, n *StateNode) error 
 		if driver.Allocatable == nil {
 			continue
 		}
-		n.volumeUsage.AddLimit(driver.Name, int(ptr.Int32Value(driver.Allocatable.Count)))
+		n.volumeUsage.AddLimit(driver.Name, int(lo.FromPtr(driver.Allocatable.Count)))
 	}
 	return nil
 }
