@@ -26,6 +26,7 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -261,6 +262,7 @@ func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock
 
 // GetAllowedDisruptionsByReason returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
 func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
+	var multiErr error
 	allowedDisruptions := map[DisruptionReason]int{}
 	for _, reason := range WellKnownDisruptionReasons {
 		allowedDisruptions[reason] = math.MaxInt32
@@ -269,7 +271,7 @@ func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.C
 	for _, budget := range in.Spec.Disruption.Budgets {
 		val, err := budget.GetAllowedDisruptions(c, numNodes)
 		if err != nil {
-			return nil, err
+			multiErr = multierr.Append(multiErr, err)
 		}
 		// If reasons is nil, it applies to all well known disruption reasons
 		for _, reason := range lo.Ternary(budget.Reasons == nil, WellKnownDisruptionReasons, budget.Reasons) {
@@ -277,7 +279,7 @@ func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.C
 		}
 	}
 
-	return allowedDisruptions, nil
+	return allowedDisruptions, multiErr
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
