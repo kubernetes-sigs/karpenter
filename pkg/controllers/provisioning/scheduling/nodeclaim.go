@@ -256,7 +256,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)
 		itFits := fits(it, requests)
-		itHasOffering := len(it.Offerings.Available().Compatible(requirements)) > 0
+		itHasOffering := it.Offerings.Available().HasCompatible(requirements)
 
 		// track if any single instance type met a single criteria
 		results.requirementsMet = results.requirementsMet || itCompat
