@@ -337,8 +337,6 @@ func newNodeClaimNeeded(ctx context.Context, s *Scheduler, pod *v1.Pod) (bool, e
 			// Pod is not scheduled to existing node because it is more expensive
 			return true, nil
 		}
-		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
-		return false, errs
 	}
 	return false, errs
 }
