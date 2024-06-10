@@ -111,7 +111,7 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:     lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:    lo.ToPtr(time.Second),
 				FeatureGates: test.FeatureGates{
-					SpotToSpotConsolidation: lo.ToPtr(true),
+					SpotToSpotConsolidation: lo.ToPtr(false),
 				},
 			}))
 		})
