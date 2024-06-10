@@ -83,3 +83,20 @@ func GetCondition(n *v1.Node, match v1.NodeConditionType) v1.NodeCondition {
 	}
 	return v1.NodeCondition{}
 }
+
+// PatchTaints performs a strategic merge patch to the provided node, applying the taints which are on the new node.
+// The patch operation will return a 409 error if there has been an update to the taints between getting the old node
+// and the patch.
+func PatchTaints(ctx context.Context, kubeClient client.Client, oldNode, newNode *v1.Node) error {
+	// Strip the resource version off the original node. This ensures the patch will fail with a conflict if the node
+	// had been updated between the original GET and the PATCH. This is necessary because .spec.taints does not specify
+	// a patchMergeKey and patchStrategy. Ref: https://github.com/kubernetes/kubernetes/pull/113136
+	oldNodeStripped := oldNode.DeepCopy()
+	oldNodeStripped.ResourceVersion = ""
+
+	newTaints := newNode.Spec.Taints
+	newNodeCloned := oldNode.DeepCopy()
+	newNodeCloned.Spec.Taints = newTaints
+
+	return kubeClient.Patch(ctx, newNodeCloned, client.StrategicMergeFrom(oldNodeStripped))
+}
