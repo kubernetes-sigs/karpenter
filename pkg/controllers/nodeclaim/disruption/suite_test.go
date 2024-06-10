@@ -131,7 +131,7 @@ var _ = Describe("Disruption", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).GetStatus()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired)).To(BeNil())
 	})
