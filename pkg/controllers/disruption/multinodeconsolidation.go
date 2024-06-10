@@ -178,16 +178,16 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, c := range consolidate {
 		existingInstanceTypes.Insert(c.instanceType.Name)
-		of, ok := c.instanceType.Offerings.Get(scheduler.NewLabelRequirements(c.StateNode.Labels()))
-		if !ok {
+		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduler.NewLabelRequirements(c.StateNode.Labels()))
+		if len(compatibleOfferings) == 0 {
 			continue
 		}
 		existingPrice, ok := pricesByInstanceType[c.instanceType.Name]
 		if !ok {
 			existingPrice = math.MaxFloat64
 		}
-		if of.Price < existingPrice {
-			pricesByInstanceType[c.instanceType.Name] = of.Price
+		if p := compatibleOfferings.Cheapest().Price; p < existingPrice {
+			pricesByInstanceType[c.instanceType.Name] = p
 		}
 	}
 

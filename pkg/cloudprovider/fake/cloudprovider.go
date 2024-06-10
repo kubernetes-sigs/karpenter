@@ -108,7 +108,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	np := &v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nodeClaim.Labels[v1beta1.NodePoolLabelKey]}}
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, np)), func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.Compatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil &&
-			len(i.Offerings.Compatible(reqs).Available()) > 0 &&
+			i.Offerings.Available().HasCompatible(reqs) &&
 			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
 	})
 	// Order instance types so that we get the cheapest instance types of the available offerings

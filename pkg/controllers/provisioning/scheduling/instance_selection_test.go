@@ -43,8 +43,7 @@ var _ = Describe("Instance Type Selection", func() {
 	var minPrice float64
 	var instanceTypeMap map[string]*cloudprovider.InstanceType
 	nodePrice := func(n *v1.Node) float64 {
-		of, _ := instanceTypeMap[n.Labels[v1.LabelInstanceTypeStable]].Offerings.Get(scheduler.NewLabelRequirements(n.Labels))
-		return of.Price
+		return instanceTypeMap[n.Labels[v1.LabelInstanceTypeStable]].Offerings.Compatible(scheduler.NewLabelRequirements(n.Labels)).Cheapest().Price
 	}
 
 	BeforeEach(func() {
