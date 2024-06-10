@@ -218,6 +218,10 @@ func (m *MultiNodeConsolidation) Type() string {
 	return metrics.ConsolidationReason
 }
 
+func (m *MultiNodeConsolidation) Class() string {
+	return GracefulDisruptionClass
+}
+
 func (m *MultiNodeConsolidation) ConsolidationType() string {
 	return "multi"
 }

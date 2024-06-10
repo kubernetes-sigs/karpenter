@@ -39,10 +39,16 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
 
+const (
+	GracefulDisruptionClass = "graceful" // graceful disruption always respects blocking pod PDBs and the do-not-disrupt annotation
+	EventualDisruptionClass = "eventual" // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
+)
+
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
 	ComputeCommand(context.Context, map[string]map[v1.DisruptionReason]int, ...*Candidate) (Command, scheduling.Results, error)
 	Type() string
+	Class() string
 	ConsolidationType() string
 }
 
@@ -62,10 +68,10 @@ type Candidate struct {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
-	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
+	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue, disruptionClass string) (*Candidate, error) {
 	var err error
 	var pods []*corev1.Pod
-	if pods, err = node.ValidateDisruptable(ctx, kubeClient, pdbs); err != nil {
+	if err = node.ValidateNodeDisruptable(ctx, kubeClient); err != nil {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
 		return nil, err
 	}
@@ -87,6 +93,14 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	if instanceType == nil {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance Type %q not found", node.Labels()[corev1.LabelInstanceTypeStable]))...)
 		return nil, fmt.Errorf("instance type %q can't be resolved", node.Labels()[corev1.LabelInstanceTypeStable])
+	}
+	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
+		// if the disruption class is not eventual or the nodepool has no TerminationGracePeriod, block disruption of pods
+		// if the error is anything but a PodBlockEvictionError, also block disruption of pods
+		if !state.IsPodBlockEvictionError(err) || nodePool.Spec.Disruption.TerminationGracePeriod == nil || disruptionClass != EventualDisruptionClass {
+			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
+			return nil, err
+		}
 	}
 	return &Candidate{
 		StateNode:         node.DeepCopy(),

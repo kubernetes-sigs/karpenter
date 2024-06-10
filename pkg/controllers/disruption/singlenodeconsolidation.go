@@ -103,6 +103,10 @@ func (s *SingleNodeConsolidation) Type() string {
 	return metrics.ConsolidationReason
 }
 
+func (s *SingleNodeConsolidation) Class() string {
+	return GracefulDisruptionClass
+}
+
 func (s *SingleNodeConsolidation) ConsolidationType() string {
 	return "single"
 }

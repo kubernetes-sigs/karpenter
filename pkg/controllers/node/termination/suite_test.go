@@ -69,7 +69,7 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewQueue(env.Client, recorder)
-	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue), recorder)
+	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
 })
 
 var _ = AfterSuite(func() {
@@ -79,8 +79,10 @@ var _ = AfterSuite(func() {
 var _ = Describe("Termination", func() {
 	var node *corev1.Node
 	var nodeClaim *v1.NodeClaim
+	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
+		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
 		node.Labels[v1.NodePoolLabelKey] = test.NodePool().Name
 		cloudProvider.CreatedNodeClaims[node.Spec.ProviderID] = nodeClaim
@@ -109,7 +111,7 @@ var _ = Describe("Termination", func() {
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should delete nodeclaims associated with nodes", func() {
-			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			ExpectApplied(ctx, env.Client, node, nodeClaim, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 
@@ -134,7 +136,7 @@ var _ = Describe("Termination", func() {
 						Finalizers: []string{v1.TerminationFinalizer},
 					},
 				})
-				ExpectApplied(ctx, env.Client, node)
+				ExpectApplied(ctx, env.Client, node, nodeClaim)
 				Expect(env.Client.Delete(ctx, node)).To(Succeed())
 				node = ExpectNodeExists(ctx, env.Client, node.Name)
 				nodes = append(nodes, node)
@@ -394,7 +396,7 @@ var _ = Describe("Termination", func() {
 				BlockOwnerDeletion: lo.ToPtr(true),
 			}}}})
 
-			ExpectApplied(ctx, env.Client, node, nodeClaim, nodeClaim, podEvict, podNodeCritical, podClusterCritical, podDaemonEvict, podDaemonNodeCritical, podDaemonClusterCritical)
+			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podNodeCritical, podClusterCritical, podDaemonEvict, podDaemonNodeCritical, podDaemonClusterCritical)
 
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
@@ -707,10 +709,42 @@ var _ = Describe("Termination", func() {
 				g.Expect(pod.DeletionTimestamp.IsZero()).To(BeTrue())
 			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
 		})
+		It("should preemptively delete pods to satisfy their terminationGracePeriodSeconds", func() {
+			pod := test.Pod(test.PodOptions{
+				NodeName:                      node.Name,
+				ObjectMeta:                    metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+				TerminationGracePeriodSeconds: lo.ToPtr(int64(300)),
+			})
+			nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 60}
+			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pod)
+
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectSingletonReconciled(ctx, queue)
+			ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectDeleted(ctx, env.Client, pod)
+		})
+		It("should not delete pods if their terminationGracePeriodSeconds is less than the the node's remaining terminationGracePeriod", func() {
+			pod := test.Pod(test.PodOptions{
+				NodeName:                      node.Name,
+				ObjectMeta:                    metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+				TerminationGracePeriodSeconds: lo.ToPtr(int64(60)),
+			})
+			nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			fakeClock.SetTime(time.Now())
+			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pod)
+
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			fakeClock.SetTime(time.Now().Add(90 * time.Second))
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectSingletonReconciled(ctx, queue)
+			ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectPodExists(ctx, env.Client, pod.Name, pod.Namespace)
+		})
 	})
 	Context("Metrics", func() {
 		It("should fire the terminationSummary metric when deleting nodes", func() {
-			ExpectApplied(ctx, env.Client, node)
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
@@ -722,7 +756,7 @@ var _ = Describe("Termination", func() {
 			Expect(m.GetSummary().GetSampleCount()).To(BeNumerically("==", 1))
 		})
 		It("should fire the nodesTerminated counter metric when deleting nodes", func() {
-			ExpectApplied(ctx, env.Client, node)
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).

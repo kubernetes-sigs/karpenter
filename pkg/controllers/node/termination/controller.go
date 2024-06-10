@@ -84,10 +84,15 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	if err := c.deleteAllNodeClaims(ctx, node); err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
 	}
-	if err := c.terminator.Taint(ctx, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("tainting node, %w", err)
+
+	nodeTerminationTime, err := c.nodeTerminationTime(node)
+	if err != nil {
+		return reconcile.Result{}, err
 	}
-	if err := c.terminator.Drain(ctx, node); err != nil {
+	if err := c.terminator.Taint(ctx, node, v1.DisruptionNoScheduleTaint); err != nil {
+		return reconcile.Result{}, fmt.Errorf("tainting node with %s, %w", v1.DisruptionTaintKey, err)
+	}
+	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
@@ -105,6 +110,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 				return reconcile.Result{}, fmt.Errorf("getting nodeclaim, %w", err)
 			}
 		}
+
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	nodeClaims, err := nodeutils.GetNodeClaims(ctx, node, c.kubeClient)
@@ -167,6 +173,18 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error 
 		log.FromContext(ctx).Info("deleted node")
 	}
 	return nil
+}
+
+func (c *Controller) nodeTerminationTime(node *corev1.Node) (*time.Time, error) {
+	expirationTimeString, exists := node.ObjectMeta.Annotations[v1.NodeTerminationTimestampAnnotationKey]
+	if !exists {
+		return nil, nil
+	}
+	expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s annotation, %w", v1.NodeTerminationTimestampAnnotationKey, err)
+	}
+	return &expirationTime, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

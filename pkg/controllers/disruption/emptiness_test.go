@@ -470,14 +470,8 @@ var _ = Describe("Emptiness", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
-		It("should ignore nodes that have pods with the karpenter.sh/do-not-disrupt annotation", func() {
-			pod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						v1.DoNotDisruptAnnotationKey: "true",
-					},
-				},
-			})
+		It("should ignore nodes that have pods", func() {
+			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
