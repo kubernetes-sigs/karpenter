@@ -326,18 +326,16 @@ func newNodeClaimNeeded(ctx context.Context, s *Scheduler, pod *v1.Pod) (bool, e
 				err))
 			continue
 		}
-		if existingNodeClaim != nil {
-			existingNodeClaim.InstanceTypeOptions.OrderByPrice(existingNodeClaim.NodeClaimTemplate.Requirements)
-			nodeClaim.InstanceTypeOptions.OrderByPrice(nodeClaim.NodeClaimTemplate.Requirements)
-			existingMinPrice := existingNodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(existingNodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
-			newMinPrice := nodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(nodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
+		existingNodeClaim.InstanceTypeOptions.OrderByPrice(existingNodeClaim.NodeClaimTemplate.Requirements)
+		nodeClaim.InstanceTypeOptions.OrderByPrice(nodeClaim.NodeClaimTemplate.Requirements)
+		existingMinPrice := existingNodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(existingNodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
+		newMinPrice := nodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(nodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
 
-			if existingMinPrice/float64(len(existingNodeClaim.Pods)) <= newMinPrice {
-				return false, nil
-			} else {
-				// Pod is not scheduled to existing node because it is more expensive
-				return true, nil
-			}
+		if existingMinPrice/float64(len(existingNodeClaim.Pods)) <= newMinPrice {
+			return false, nil
+		} else {
+			// Pod is not scheduled to existing node because it is more expensive
+			return true, nil
 		}
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
 		return false, errs
