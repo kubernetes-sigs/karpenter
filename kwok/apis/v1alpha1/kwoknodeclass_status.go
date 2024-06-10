@@ -20,8 +20,8 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 )
 
-// KwokNodeClassStatus contains the resolved state of the KwokNodeClass
-type KwokNodeClassStatus struct {
+// KWOKNodeClassStatus contains the resolved state of the KwokNodeClass
+type KWOKNodeClassStatus struct {
 	// Conditions contains signals for health and readiness
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }

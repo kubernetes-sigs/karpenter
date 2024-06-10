@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/controller"
 	"github.com/prometheus/client_golang/prometheus"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/klog/v2"
@@ -33,8 +34,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
-
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 

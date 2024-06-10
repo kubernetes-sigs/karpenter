@@ -127,12 +127,9 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	}
 	// Find Offering
 	for _, o := range instanceType.Offerings.Available() {
-		if reqs.Compatible(scheduling.NewRequirements(
-			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, o.Zone),
-			scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, o.CapacityType),
-		), scheduling.AllowUndefinedWellKnownLabels) == nil {
-			labels[v1.LabelTopologyZone] = o.Zone
-			labels[v1beta1.CapacityTypeLabelKey] = o.CapacityType
+		if reqs.Compatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil {
+			labels[v1.LabelTopologyZone] = o.Requirements.Get(v1.LabelTopologyZone).Any()
+			labels[v1beta1.CapacityTypeLabelKey] = o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
 			break
 		}
 	}

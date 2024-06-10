@@ -20,13 +20,13 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 
 	"github.com/samber/lo"
 
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -43,7 +43,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
@@ -143,58 +142,6 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
 }
 
-// GetPodEvictionCost returns the disruption cost computed for evicting the given pod.
-func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
-	cost := 1.0
-	podDeletionCostStr, ok := p.Annotations[v1.PodDeletionCost]
-	if ok {
-		podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
-		if err != nil {
-			log.FromContext(ctx).Error(err, fmt.Sprintf("failed parsing %s=%s from pod %s", v1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p)))
-		} else {
-			// the pod deletion disruptionCost is in [-2147483647, 2147483647]
-			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
-			cost += podDeletionCost / math.Pow(2, 27.0)
-		}
-	}
-	// the scheduling priority is in [-2147483648, 1000000000]
-	if p.Spec.Priority != nil {
-		cost += float64(*p.Spec.Priority) / math.Pow(2, 25)
-	}
-
-	// overall we clamp the pod cost to the range [-10.0, 10.0] with the default being 1.0
-	return clamp(-10.0, cost, 10.0)
-}
-
-// filterByPrice returns the instanceTypes that are lower priced than the current candidate.
-// The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim.
-// If the result of the filtering means that minValues can't be satisfied, we return an error.
-func filterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, error) {
-	var res cloudprovider.InstanceTypes
-	for _, it := range options {
-		launchPrice := worstLaunchPrice(it.Offerings.Available(), reqs)
-		if launchPrice < price {
-			res = append(res, it)
-		}
-	}
-	if reqs.HasMinValues() {
-		// We would have already filtered the invalid NodeClaim not meeting the minimum requirements in simulated scheduling results.
-		// Here the instanceTypeOptions changed again based on the price and requires re-validation.
-		if _, err := res.SatisfiesMinValues(reqs); err != nil {
-			return nil, fmt.Errorf("validating minValues, %w", err)
-		}
-	}
-	return res, nil
-}
-
-func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
-	cost := 0.0
-	for _, p := range pods {
-		cost += GetPodEvictionCost(ctx, p)
-	}
-	return cost
-}
-
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue,
@@ -203,7 +150,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, err
 	}
-	pdbs, err := NewPDBLimits(ctx, clk, kubeClient)
+	pdbs, err := pdb.NewLimits(ctx, clk, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
@@ -307,42 +254,4 @@ func mapCandidates(proposed, current []*Candidate) []*Candidate {
 	return lo.Filter(current, func(c *Candidate, _ int) bool {
 		return proposedNames.Has(c.Name())
 	})
-}
-
-// worstLaunchPrice gets the worst-case launch price from the offerings that are offered
-// on an instance type. If the instance type has a spot offering available, then it uses the spot offering
-// to get the launch price; else, it uses the on-demand launch price
-func worstLaunchPrice(ofs []cloudprovider.Offering, reqs scheduling.Requirements) float64 {
-	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
-		spotOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
-			return of.CapacityType == v1beta1.CapacityTypeSpot && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
-		})
-		if len(spotOfferings) > 0 {
-			return lo.MaxBy(spotOfferings, func(of1, of2 cloudprovider.Offering) bool {
-				return of1.Price > of2.Price
-			}).Price
-		}
-	}
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeOnDemand) {
-		onDemandOfferings := lo.Filter(ofs, func(of cloudprovider.Offering, _ int) bool {
-			return of.CapacityType == v1beta1.CapacityTypeOnDemand && reqs.Get(v1.LabelTopologyZone).Has(of.Zone)
-		})
-		if len(onDemandOfferings) > 0 {
-			return lo.MaxBy(onDemandOfferings, func(of1, of2 cloudprovider.Offering) bool {
-				return of1.Price > of2.Price
-			}).Price
-		}
-	}
-	return math.MaxFloat64
-}
-
-func clamp(min, val, max float64) float64 {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
 }

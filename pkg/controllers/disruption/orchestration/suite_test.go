@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -113,8 +112,8 @@ var _ = Describe("Queue", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[0].Name,
-						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().CapacityType,
-						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Zone,
+						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -129,8 +128,8 @@ var _ = Describe("Queue", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[0].Name,
-						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().CapacityType,
-						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Zone,
+						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -151,8 +150,8 @@ var _ = Describe("Queue", func() {
 					Labels: map[string]string{
 						v1beta1.NodePoolLabelKey:     nodePool.Name,
 						v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[0].Name,
-						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().CapacityType,
-						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Zone,
+						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1beta1.NodeClaimStatus{
@@ -173,7 +172,7 @@ var _ = Describe("Queue", func() {
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 
 			// Update state
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -187,7 +186,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type"))).To(BeNil())
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 		})
 		It("should untaint nodes when a command times out", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
@@ -199,7 +198,7 @@ var _ = Describe("Queue", func() {
 			// Step the clock to trigger the timeout.
 			fakeClock.Step(11 * time.Minute)
 
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
 		})
@@ -210,7 +209,7 @@ var _ = Describe("Queue", func() {
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 
 			// Get the command
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
@@ -221,7 +220,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
 				[]*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
 
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 
 			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, cmd.Reason())
@@ -248,21 +247,21 @@ var _ = Describe("Queue", func() {
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
 
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
 
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode2}, []*v1beta1.NodeClaim{replacementNodeClaim2})
 
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeTrue())
 
@@ -277,7 +276,7 @@ var _ = Describe("Queue", func() {
 			cmd := orchestration.NewCommand([]string{}, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
 
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 
 			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, cmd.Reason())
 			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
@@ -307,7 +306,7 @@ var _ = Describe("Queue", func() {
 			Expect(queue.Add(cmd2)).To(BeNil())
 
 			// Reconcile the first command and expect nothing to be initialized
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeFalse())
@@ -316,14 +315,14 @@ var _ = Describe("Queue", func() {
 			// Make the first command's node initialized
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
 			// Reconcile the second command and expect nothing to be initialized
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim2).Message)).To(BeTrue())
 
 			// Reconcile the first command and expect the replacement to be initialized
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeFalse())
 
@@ -334,7 +333,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode2}, []*v1beta1.NodeClaim{replacementnodeClaim2})
 
 			// Reconcile the second command and expect the replacement to be initialized
-			ExpectReconcileSucceeded(ctx, queue, types.NamespacedName{})
+			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeTrue())
 

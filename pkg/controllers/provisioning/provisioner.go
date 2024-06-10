@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -32,16 +33,18 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -103,23 +106,26 @@ func (p *Provisioner) Trigger() {
 	p.batcher.Trigger()
 }
 
-func (p *Provisioner) Register(_ context.Context, mgr manager.Manager) error {
-	return controller.NewSingletonManagedBy(mgr).
+func (p *Provisioner) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner").
-		Complete(p)
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(p))
 }
 
-func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (result reconcile.Result, err error) {
+func (p *Provisioner) Reconcile(ctx context.Context) (result reconcile.Result, err error) {
+	ctx = injection.WithControllerName(ctx, "provisioner")
+
 	// Batch pods
 	if triggered := p.batcher.Wait(ctx); !triggered {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !p.cluster.Synced(ctx) {
 		log.FromContext(ctx).V(1).Info("waiting on cluster sync")
-		return reconcile.Result{RequeueAfter: time.Second}, nil
+		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
@@ -128,10 +134,12 @@ func (p *Provisioner) Reconcile(ctx context.Context, _ reconcile.Request) (resul
 		return reconcile.Result{}, err
 	}
 	if len(results.NewNodeClaims) == 0 {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
-	_, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination)
-	return reconcile.Result{}, err
+	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
 // CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node

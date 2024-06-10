@@ -20,9 +20,10 @@ import (
 	_ "embed"
 
 	"github.com/samber/lo"
-	"k8s.io/api/node/v1alpha1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )

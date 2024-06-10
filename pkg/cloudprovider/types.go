@@ -34,6 +34,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
+var (
+	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot))
+	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeOnDemand))
+)
+
 type DriftReason string
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
@@ -156,6 +161,9 @@ func (its InstanceTypes) Compatible(requirements scheduling.Requirements) Instan
 //		}
 //	  so it returns 3 and a non-nil error to indicate that the instance types weren't able to fulfill the minValues requirements
 func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements) (minNeededInstanceTypes int, err error) {
+	if !requirements.HasMinValues() {
+		return 0, nil
+	}
 	valuesForKey := map[string]sets.Set[string]{}
 	// We validate if sorting by price and truncating the number of instance types to minItems breaks the minValue requirement.
 	// If minValue requirement fails, we return an error that indicates the first requirement key that couldn't be satisfied.
@@ -215,10 +223,11 @@ func (i InstanceTypeOverhead) Total() v1.ResourceList {
 }
 
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
-// may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type)
+// may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
+// these properties are captured with labels in Requirements.
+// Requirements are required to contain the keys v1beta1.CapacityTypeLabelKey and v1.LabelTopologyZone
 type Offering struct {
-	CapacityType string
-	Zone         string
+	Requirements scheduling.Requirements
 	Price        float64
 	// Available is added so that Offerings can return all offerings that have ever existed for an instance type,
 	// so we can get historical pricing data for calculating savings in consolidation
@@ -228,10 +237,10 @@ type Offering struct {
 type Offerings []Offering
 
 // Get gets the offering from an offering slice that matches the
-// passed zone and capacity type
-func (ofs Offerings) Get(ct, zone string) (Offering, bool) {
+// passed zone, capacityType, and other constraints
+func (ofs Offerings) Get(reqs scheduling.Requirements) (Offering, bool) {
 	return lo.Find(ofs, func(of Offering) bool {
-		return of.CapacityType == ct && of.Zone == zone
+		return reqs.Compatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
 	})
 }
 
@@ -245,8 +254,7 @@ func (ofs Offerings) Available() Offerings {
 // Compatible returns the offerings based on the passed requirements
 func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering Offering, _ int) bool {
-		return (!reqs.Has(v1.LabelTopologyZone) || reqs.Get(v1.LabelTopologyZone).Has(offering.Zone)) &&
-			(!reqs.Has(v1beta1.CapacityTypeLabelKey) || reqs.Get(v1beta1.CapacityTypeLabelKey).Has(offering.CapacityType))
+		return reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
 	})
 }
 
@@ -255,6 +263,33 @@ func (ofs Offerings) Cheapest() Offering {
 	return lo.MinBy(ofs, func(a, b Offering) bool {
 		return a.Price < b.Price
 	})
+}
+
+// MostExpensive returns the most expensive offering from the return offerings
+func (ofs Offerings) MostExpensive() Offering {
+	return lo.MaxBy(ofs, func(a, b Offering) bool {
+		return a.Price > b.Price
+	})
+}
+
+// WorstLaunchPrice gets the worst-case launch price from the offerings that are offered
+// on an instance type. If the instance type has a spot offering available, then it uses the spot offering
+// to get the launch price; else, it uses the on-demand launch price
+func (ofs Offerings) WorstLaunchPrice(reqs scheduling.Requirements) float64 {
+	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
+	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
+		spotOfferings := ofs.Compatible(reqs).Compatible(SpotRequirement)
+		if len(spotOfferings) > 0 {
+			return spotOfferings.MostExpensive().Price
+		}
+	}
+	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeOnDemand) {
+		onDemandOfferings := ofs.Compatible(reqs).Compatible(OnDemandRequirement)
+		if len(onDemandOfferings) > 0 {
+			return onDemandOfferings.MostExpensive().Price
+		}
+	}
+	return math.MaxFloat64
 }
 
 // NodeClaimNotFoundError is an error type returned by CloudProviders when the reason for failure is NotFound

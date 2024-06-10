@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -28,10 +29,13 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
@@ -39,7 +43,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	operatorcontroller "sigs.k8s.io/karpenter/pkg/operator/controller"
 )
 
 type Controller struct {
@@ -56,7 +59,9 @@ func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudp
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "nodeclaim.garbagecollection")
+
 	nodeClaimList := &v1beta1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
 		return reconcile.Result{}, err
@@ -115,7 +120,8 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	return operatorcontroller.NewSingletonManagedBy(m).
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.garbagecollection").
-		Complete(c)
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(c))
 }

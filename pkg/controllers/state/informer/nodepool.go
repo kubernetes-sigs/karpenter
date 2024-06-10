@@ -47,7 +47,6 @@ func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) *No
 }
 
 func (c *NodePoolController) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
-	//nolint:ineffassign
 	ctx = injection.WithControllerName(ctx, "state.nodepool") //nolint:ineffassign,staticcheck
 
 	// Something changed in the NodePool so we should re-consider consolidation

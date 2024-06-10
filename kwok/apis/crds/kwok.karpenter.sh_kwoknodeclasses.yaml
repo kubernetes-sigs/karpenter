@@ -49,7 +49,7 @@ spec:
                 reason: Ready
                 status: "True"
                 type: Ready
-            description: KwokNodeClassStatus contains the resolved state of the KwokNodeClass
+            description: KWOKNodeClassStatus contains the resolved state of the KwokNodeClass
             properties:
               conditions:
                 description: Conditions contains signals for health and readiness
