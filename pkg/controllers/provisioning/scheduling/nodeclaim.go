@@ -17,6 +17,7 @@ limitations under the License.
 package scheduling
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -24,6 +25,8 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -62,7 +65,7 @@ func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daem
 	}
 }
 
-func (n *NodeClaim) Add(pod *v1.Pod) error {
+func (n *NodeClaim) Add(ctx context.Context, pod *v1.Pod) error {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).Tolerates(pod); err != nil {
 		return err
@@ -101,7 +104,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, resources.RequestsForPods(pod))
 
-	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
+	filtered := filterInstanceTypesByRequirements(ctx, n.InstanceTypeOptions, nodeClaimRequirements, requests)
 
 	if len(filtered.remaining) == 0 {
 		// log the total resources being requested (daemonset + the pod)
@@ -239,7 +242,7 @@ func (r filterResults) FailureReason() string {
 }
 
 //nolint:gocyclo
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) filterResults {
+func filterInstanceTypesByRequirements(ctx context.Context, instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) filterResults {
 	results := filterResults{
 		requests:        requests,
 		requirementsMet: false,
@@ -252,6 +255,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 	}
 
 	for _, it := range instanceTypes {
+		log.FromContext(ctx).Info(fmt.Sprintf("DEBUGGING: This is the instance type %s and requirements %s", it.Name, it.Requirements))
 		// the tradeoff to not short circuiting on the filtering is that we can report much better error messages
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)

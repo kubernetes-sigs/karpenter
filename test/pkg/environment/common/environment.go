@@ -171,21 +171,6 @@ func (env *Environment) DefaultNodePool(nodeClass *v1alpha1.KWOKNodeClass) *v1be
 				Values:   []string{v1beta1.CapacityTypeOnDemand},
 			},
 		},
-		// TODO @njtran: replace with kwok labels
-		// {
-		// 	NodeSelectorRequirement: v1.NodeSelectorRequirement{
-		// 		Key:      v1beta1.LabelInstanceCategory,
-		// 		Operator: v1.NodeSelectorOpIn,
-		// 		Values:   []string{"c", "m", "r"},
-		// 	},
-		// },
-		// {
-		// 	NodeSelectorRequirement: v1.NodeSelectorRequirement{
-		// 		Key:      v1beta1.LabelInstanceGeneration,
-		// 		Operator: v1.NodeSelectorOpGt,
-		// 		Values:   []string{"2"},
-		// 	},
-		// },
 	}
 	nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{}
 	nodePool.Spec.Disruption.ExpireAfter.Duration = nil
