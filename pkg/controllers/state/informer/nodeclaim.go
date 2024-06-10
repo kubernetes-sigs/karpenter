@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -48,7 +47,6 @@ func NewNodeClaimController(kubeClient client.Client, cluster *state.Cluster) *N
 }
 
 func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("state.nodeclaim").With("nodeclaim", req.Name))
 	ctx = injection.WithControllerName(ctx, "state.nodeclaim")
 
 	nodeClaim := &v1beta1.NodeClaim{}

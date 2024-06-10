@@ -24,8 +24,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -83,7 +83,8 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		switch {
 		case cloudprovider.IsInsufficientCapacityError(err):
 			l.recorder.Publish(InsufficientCapacityErrorEvent(nodeClaim, err))
-			logging.FromContext(ctx).Error(err)
+			log.FromContext(ctx).Error(err, "failed launching nodeclaim")
+
 			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
 			}
@@ -102,12 +103,12 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1beta1.NodeCla
 			return nil, fmt.Errorf("launching nodeclaim, %w", err)
 		}
 	}
-	logging.FromContext(ctx).With(
+	log.FromContext(ctx).WithValues(
 		"provider-id", created.Status.ProviderID,
 		"instance-type", created.Labels[v1.LabelInstanceTypeStable],
 		"zone", created.Labels[v1.LabelTopologyZone],
 		"capacity-type", created.Labels[v1beta1.CapacityTypeLabelKey],
-		"allocatable", created.Status.Allocatable).Infof("launched nodeclaim")
+		"allocatable", created.Status.Allocatable).Info("launched nodeclaim")
 	return created, nil
 }
 

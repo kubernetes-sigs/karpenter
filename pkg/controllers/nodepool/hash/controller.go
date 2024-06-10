@@ -22,7 +22,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -48,7 +47,6 @@ func NewController(kubeClient client.Client) *Controller {
 
 // Reconcile the resource
 func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodepool.hash").With("nodepool", np.Name))
 	ctx = injection.WithControllerName(ctx, "nodepool.hash")
 
 	stored := np.DeepCopy()

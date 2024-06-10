@@ -25,7 +25,6 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/ptr"
 )
 
 type PersistentVolumeOptions struct {
@@ -144,7 +143,7 @@ func StorageClass(overrides ...StorageClassOptions) *storagev1.StorageClass {
 		allowedTopologies = []v1.TopologySelectorTerm{{MatchLabelExpressions: []v1.TopologySelectorLabelRequirement{{Key: v1.LabelTopologyZone, Values: options.Zones}}}}
 	}
 	if options.Provisioner == nil {
-		options.Provisioner = ptr.String("test-provisioner")
+		options.Provisioner = lo.ToPtr("test-provisioner")
 	}
 
 	return &storagev1.StorageClass{

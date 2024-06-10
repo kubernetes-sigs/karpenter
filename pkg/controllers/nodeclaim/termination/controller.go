@@ -26,13 +26,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
-	"knative.dev/pkg/logging"
+	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -60,7 +61,6 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 func (c *Controller) Reconcile(ctx context.Context, n *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named("nodeclaim.termination").With("nodeclaim", n.Name))
 	ctx = injection.WithControllerName(ctx, "nodeclaim.termination")
 
 	if !n.GetDeletionTimestamp().IsZero() {
@@ -71,7 +71,7 @@ func (c *Controller) Reconcile(ctx context.Context, n *v1beta1.NodeClaim) (recon
 
 //nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).With("node", nodeClaim.Status.NodeName, "provider-id", nodeClaim.Status.ProviderID))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName), "provider-id", nodeClaim.Status.ProviderID))
 	stored := nodeClaim.DeepCopy()
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1beta1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
@@ -109,7 +109,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 			}
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
-		logging.FromContext(ctx).Infof("deleted nodeclaim")
+		log.FromContext(ctx).Info("deleted nodeclaim")
 	}
 	return reconcile.Result{}, nil
 }

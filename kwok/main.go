@@ -17,8 +17,9 @@ limitations under the License.
 package main
 
 import (
-	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers"
@@ -27,13 +28,13 @@ import (
 )
 
 func init() {
-	v1beta1.RestrictedLabelDomains = v1beta1.RestrictedLabelDomains.Insert(kwok.Group)
+	v1beta1.RestrictedLabelDomains = v1beta1.RestrictedLabelDomains.Insert(v1alpha1.Group)
 	v1beta1.WellKnownLabels = v1beta1.WellKnownLabels.Insert(
-		kwok.InstanceTypeLabelKey,
-		kwok.InstanceSizeLabelKey,
-		kwok.InstanceFamilyLabelKey,
-		kwok.InstanceCPULabelKey,
-		kwok.InstanceMemoryLabelKey,
+		v1alpha1.InstanceTypeLabelKey,
+		v1alpha1.InstanceSizeLabelKey,
+		v1alpha1.InstanceFamilyLabelKey,
+		v1alpha1.InstanceCPULabelKey,
+		v1alpha1.InstanceMemoryLabelKey,
 	)
 }
 
@@ -41,7 +42,7 @@ func main() {
 	ctx, op := operator.NewOperator()
 	instanceTypes, err := kwok.ConstructInstanceTypes()
 	if err != nil {
-		logging.FromContext(ctx).Fatalf("failed to construct instance types: %s", err)
+		log.FromContext(ctx).Error(err, "failed constructing instance types")
 	}
 
 	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)

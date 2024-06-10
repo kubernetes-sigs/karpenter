@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"knative.dev/pkg/apis"
-	"knative.dev/pkg/ptr"
 )
 
 var (
@@ -268,7 +267,7 @@ func validateEvictionThresholds(m map[string]string, fieldName string) (errs *ap
 
 // Validate validateImageGCHighThresholdPercent
 func (in *KubeletConfiguration) validateImageGCHighThresholdPercent() (errs *apis.FieldError) {
-	if in.ImageGCHighThresholdPercent != nil && ptr.Int32Value(in.ImageGCHighThresholdPercent) < ptr.Int32Value(in.ImageGCLowThresholdPercent) {
+	if in.ImageGCHighThresholdPercent != nil && lo.FromPtr(in.ImageGCHighThresholdPercent) < lo.FromPtr(in.ImageGCLowThresholdPercent) {
 		return errs.Also(apis.ErrInvalidValue("must be greater than imageGCLowThresholdPercent", "imageGCHighThresholdPercent"))
 	}
 
@@ -277,7 +276,7 @@ func (in *KubeletConfiguration) validateImageGCHighThresholdPercent() (errs *api
 
 // Validate imageGCLowThresholdPercent
 func (in *KubeletConfiguration) validateImageGCLowThresholdPercent() (errs *apis.FieldError) {
-	if in.ImageGCHighThresholdPercent != nil && ptr.Int32Value(in.ImageGCLowThresholdPercent) > ptr.Int32Value(in.ImageGCHighThresholdPercent) {
+	if in.ImageGCHighThresholdPercent != nil && lo.FromPtr(in.ImageGCLowThresholdPercent) > lo.FromPtr(in.ImageGCHighThresholdPercent) {
 		return errs.Also(apis.ErrInvalidValue("must be less than imageGCHighThresholdPercent", "imageGCLowThresholdPercent"))
 	}
 
