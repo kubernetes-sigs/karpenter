@@ -18,7 +18,6 @@ package disruption_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -132,8 +131,7 @@ var _ = Describe("Disruption", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		fmt.Println("Testing nodeclaim: ", nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted))
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).Status).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).GetStatus()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired)).To(BeNil())
 	})
