@@ -236,14 +236,6 @@ type Offering struct {
 
 type Offerings []Offering
 
-// Get gets the offering from an offering slice that matches the
-// passed zone, capacityType, and other constraints
-func (ofs Offerings) Get(reqs scheduling.Requirements) (Offering, bool) {
-	return lo.Find(ofs, func(of Offering) bool {
-		return reqs.Compatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
-	})
-}
-
 // Available filters the available offerings from the returned offerings
 func (ofs Offerings) Available() Offerings {
 	return lo.Filter(ofs, func(o Offering, _ int) bool {
