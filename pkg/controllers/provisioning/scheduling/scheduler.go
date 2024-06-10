@@ -259,19 +259,51 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	// Consider using https://pkg.go.dev/container/heap
 	sort.Slice(s.newNodeClaims, func(a, b int) bool { return len(s.newNodeClaims[a].Pods) < len(s.newNodeClaims[b].Pods) })
 
-	var existingOriginalNodeClaim *NodeClaim = nil
-	var existingCopiedNodeClaim *NodeClaim = nil
-	// Pick existing node that we are about to create
+	clonedScheduler := reprint.This(s).(*Scheduler)
+	newNodeClaimNeeded, err := newNodeClaimNeeded(ctx, clonedScheduler, pod)
+	if err != nil {
+		return err
+	}
+	if !newNodeClaimNeeded {
+		for _, nodeClaim := range s.newNodeClaims {
+			if err := nodeClaim.Add(pod); err == nil {
+				return nil
+			}
+		}
+		return fmt.Errorf("pod didn't schedule to existing node or new node")
+	}
+	var errs error
+	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
+		instanceTypes := s.instanceTypes[nodeClaimTemplate.NodePoolName]
+		newNodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
+		// Pod is not scheduled to existing node because it is more expensive
+		if err := newNodeClaim.Add(pod); err != nil {
+			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, daemonset overhead=%s, %w",
+				nodeClaimTemplate.NodePoolName,
+				resources.String(s.daemonOverhead[nodeClaimTemplate]),
+				err))
+			continue
+		}
+		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
+		s.newNodeClaims = append(s.newNodeClaims, newNodeClaim)
+		s.remainingResources[nodeClaimTemplate.NodePoolName] = subtractMax(s.remainingResources[nodeClaimTemplate.NodePoolName], newNodeClaim.InstanceTypeOptions)
+		return nil
+	}
+	return errs
+}
+
+func newNodeClaimNeeded(ctx context.Context, s *Scheduler, pod *v1.Pod) (bool, error) {
+	var existingNodeClaim *NodeClaim = nil
 	for _, nodeClaim := range s.newNodeClaims {
-		copiedNodeClaim := reprint.This(nodeClaim).(*NodeClaim)
-		if err := copiedNodeClaim.Add(pod); err == nil {
-			existingCopiedNodeClaim = copiedNodeClaim
-			existingOriginalNodeClaim = nodeClaim
+		if err := nodeClaim.Add(pod); err == nil {
+			existingNodeClaim = nodeClaim
 			break
 		}
 	}
+	if existingNodeClaim == nil {
+		return true, nil
+	}
 
-	// Create new node
 	var errs error
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
 		instanceTypes := s.instanceTypes[nodeClaimTemplate.NodePoolName]
@@ -282,7 +314,6 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool: %q", nodeClaimTemplate.NodePoolName))
 				continue
 			} else if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) != len(instanceTypes) {
-
 				log.FromContext(ctx).V(1).WithValues("NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName)).Info(fmt.Sprintf("%d out of %d instance types were excluded because they would breach limits",
 					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName])))
 			}
@@ -295,24 +326,23 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 				err))
 			continue
 		}
-		if existingCopiedNodeClaim != nil {
-			existingCopiedNodeClaim.InstanceTypeOptions.OrderByPrice(existingCopiedNodeClaim.NodeClaimTemplate.Requirements)
+		if existingNodeClaim != nil {
+			existingNodeClaim.InstanceTypeOptions.OrderByPrice(existingNodeClaim.NodeClaimTemplate.Requirements)
 			nodeClaim.InstanceTypeOptions.OrderByPrice(nodeClaim.NodeClaimTemplate.Requirements)
-			existingMinPrice := existingCopiedNodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(existingCopiedNodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
+			existingMinPrice := existingNodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(existingNodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
 			newMinPrice := nodeClaim.InstanceTypeOptions[0].Offerings.Available().Compatible(nodeClaim.NodeClaimTemplate.Requirements).Cheapest().Price
 
-			if existingMinPrice/float64(len(existingCopiedNodeClaim.Pods)) <= newMinPrice {
-				if err := existingOriginalNodeClaim.Add(pod); err == nil {
-					return nil
-				}
+			if existingMinPrice/float64(len(existingNodeClaim.Pods)) <= newMinPrice {
+				return false, nil
+			} else {
+				// Pod is not scheduled to existing node because it is more expensive
+				return true, nil
 			}
 		}
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
-		s.newNodeClaims = append(s.newNodeClaims, nodeClaim)
-		s.remainingResources[nodeClaimTemplate.NodePoolName] = subtractMax(s.remainingResources[nodeClaimTemplate.NodePoolName], nodeClaim.InstanceTypeOptions)
-		return nil
+		return false, errs
 	}
-	return errs
+	return false, errs
 }
 
 func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, daemonSetPods []*v1.Pod) {
