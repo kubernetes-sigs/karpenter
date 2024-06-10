@@ -125,9 +125,6 @@ var _ = Describe("Disruption", func() {
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-
-		// Expiration, and Emptiness are disabled through configuration
-		ctx = options.ToContext(ctx, test.Options())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
