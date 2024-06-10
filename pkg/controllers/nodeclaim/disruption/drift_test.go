@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -152,26 +151,6 @@ var _ = Describe("Drift", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).Reason).To(Equal(string(disruption.RequirementsDrifted)))
-	})
-	It("should not detect drift if the feature flag is disabled", func() {
-		cp.Drifted = "drifted"
-		ctx = options.ToContext(ctx, test.Options())
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
-	})
-	It("should remove the status condition from the nodeClaim if the feature flag is disabled", func() {
-		cp.Drifted = "drifted"
-		ctx = options.ToContext(ctx, test.Options())
-		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when the nodeClaim launch condition is unknown", func() {
 		cp.Drifted = "drifted"

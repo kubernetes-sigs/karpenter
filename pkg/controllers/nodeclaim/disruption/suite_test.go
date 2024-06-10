@@ -126,12 +126,12 @@ var _ = Describe("Disruption", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
-		// Drift, Expiration, and Emptiness are disabled through configuration
+		// Expiration, and Emptiness are disabled through configuration
 		ctx = options.ToContext(ctx, test.Options())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired)).To(BeNil())
 	})

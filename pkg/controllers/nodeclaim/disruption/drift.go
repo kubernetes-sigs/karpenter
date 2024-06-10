@@ -46,7 +46,7 @@ type Drift struct {
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
 	hasDriftedCondition := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted) != nil
 
-	// From here there are two scenarios to handle:
+	// From here there are three scenarios to handle:
 	// 1. If NodeClaim is not launched, remove the drift status condition
 	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue() {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeDrifted)
@@ -67,7 +67,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeC
 		}
 		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
-	// 4. Finally, if the NodeClaim is drifted, but doesn't have status condition, add it.
+	// 3. Finally, if the NodeClaim is drifted, but doesn't have status condition, add it.
 	nodeClaim.StatusConditions().SetTrueWithReason(v1beta1.ConditionTypeDrifted, string(driftedReason), string(driftedReason))
 	if !hasDriftedCondition {
 		log.FromContext(ctx).V(1).WithValues("reason", string(driftedReason)).Info("marking drifted")
