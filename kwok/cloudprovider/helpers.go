@@ -40,7 +40,7 @@ var (
 )
 
 // Wrap cloudprovider.Offerings with NodeSelectorRequirements for post-json processing translation
-type KwokOfferings []KWOKOffering
+type KWOKOfferings []KWOKOffering
 
 type KWOKOffering struct {
 	cloudprovider.Offering
@@ -49,7 +49,7 @@ type KWOKOffering struct {
 
 type InstanceTypeOptions struct {
 	Name             string          `json:"name"`
-	Offerings        KwokOfferings   `json:"offerings"`
+	Offerings        KWOKOfferings   `json:"offerings"`
 	Architecture     string          `json:"architecture"`
 	OperatingSystems []v1.OSName     `json:"operatingSystems"`
 	Resources        v1.ResourceList `json:"resources"`
