@@ -40,9 +40,9 @@ var (
 )
 
 // Wrap cloudprovider.Offerings with NodeSelectorRequirements for post-json processing translation
-type KwokOfferings []KwokOffering
+type KwokOfferings []KWOKOffering
 
-type KwokOffering struct {
+type KWOKOffering struct {
 	cloudprovider.Offering
 	Requirements []v1.NodeSelectorRequirement
 }
@@ -145,13 +145,13 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	osNames := lo.Map(options.OperatingSystems, func(os v1.OSName, _ int) string { return string(os) })
 
-	zones := lo.Uniq(lo.Flatten(lo.Map(options.Offerings, func(o KwokOffering, _ int) []string {
+	zones := lo.Uniq(lo.Flatten(lo.Map(options.Offerings, func(o KWOKOffering, _ int) []string {
 		req, _ := lo.Find(o.Requirements, func(req v1.NodeSelectorRequirement) bool {
 			return req.Key == v1.LabelTopologyZone
 		})
 		return req.Values
 	})))
-	capacityTypes := lo.Uniq(lo.Flatten(lo.Map(options.Offerings, func(o KwokOffering, _ int) []string {
+	capacityTypes := lo.Uniq(lo.Flatten(lo.Map(options.Offerings, func(o KWOKOffering, _ int) []string {
 		req, _ := lo.Find(o.Requirements, func(req v1.NodeSelectorRequirement) bool {
 			return req.Key == v1beta1.CapacityTypeLabelKey
 		})
@@ -173,7 +173,7 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	return &cloudprovider.InstanceType{
 		Name:         options.Name,
 		Requirements: requirements,
-		Offerings: lo.Map(options.Offerings, func(off KwokOffering, _ int) cloudprovider.Offering {
+		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) cloudprovider.Offering {
 			return off.Offering
 		}),
 		Capacity: options.Resources,

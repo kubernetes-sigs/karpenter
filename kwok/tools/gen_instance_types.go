@@ -89,10 +89,10 @@ func constructGenericInstanceTypes() []kwok.InstanceTypeOptions {
 					}
 					price := priceFromResources(opts.Resources)
 
-					opts.Offerings = []kwok.KwokOffering{}
+					opts.Offerings = []kwok.KWOKOffering{}
 					for _, zone := range KwokZones {
 						for _, ct := range []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand} {
-							opts.Offerings = append(opts.Offerings, kwok.KwokOffering{
+							opts.Offerings = append(opts.Offerings, kwok.KWOKOffering{
 								Requirements: []v1.NodeSelectorRequirement{
 									v1.NodeSelectorRequirement{Key: v1beta1.CapacityTypeLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{ct}},
 									v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{zone}},
