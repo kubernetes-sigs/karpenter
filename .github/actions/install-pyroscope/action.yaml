@@ -1,5 +1,5 @@
-name: InstallGrafana
-description: 'Installs grafana'
+name: InstallPyroscope
+description: 'Installs Pyroscope'
 runs:
   using: "composite"
   steps:
@@ -10,10 +10,6 @@ runs:
         curl -fL https://github.com/grafana/pyroscope/releases/download/v1.1.5/profilecli_1.1.5_linux_amd64.tar.gz | tar xz profilecli
         chmod +x profilecli
         sudo mv profilecli /usr/local/bin
-    - name: add grafana repo
-      shell: bash
-      run: |
-        helm repo add grafana https://grafana.github.io/helm-charts
     - name: create monitoring namespace
       shell: bash
       run: |

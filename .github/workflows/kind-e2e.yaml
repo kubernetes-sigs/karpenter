@@ -26,12 +26,9 @@ jobs:
         kubectl config current-context
         kubectl get nodes
         kubectl taint nodes chart-testing-control-plane CriticalAddonsOnly:NoSchedule
-    - name: Enable the actionlint matcher
-      shell: bash
-      run: echo "::add-matcher::.github/actionlint-matcher.json"
     - name: install prometheus 
       uses: ./.github/actions/install-prometheus
-    - name: install grafana 
+    - name: install pyroscope 
       uses: ./.github/actions/install-pyroscope
     - name: install kwok and controller
       shell: bash
