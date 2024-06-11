@@ -39,7 +39,6 @@ var (
 	familyDelim = regexp.MustCompile(`[.-]`)
 )
 
-<<<<<<< HEAD
 // Wrap cloudprovider.Offerings with NodeSelectorRequirements for post-json processing translation
 type KWOKOfferings []KWOKOffering
 
@@ -54,14 +53,6 @@ type InstanceTypeOptions struct {
 	Architecture     string          `json:"architecture"`
 	OperatingSystems []v1.OSName     `json:"operatingSystems"`
 	Resources        v1.ResourceList `json:"resources"`
-=======
-type InstanceTypeOptions struct {
-	Name             string                  `json:"name"`
-	Offerings        cloudprovider.Offerings `json:"offerings"`
-	Architecture     string                  `json:"architecture"`
-	OperatingSystems []v1.OSName             `json:"operatingSystems"`
-	Resources        v1.ResourceList         `json:"resources"`
->>>>>>> fe6cd29 (revert change)
 
 	// These are used for setting default requirements, they should not be used
 	// for setting arbitrary node labels.  Set the labels on the created NodePool for
@@ -154,7 +145,6 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	osNames := lo.Map(options.OperatingSystems, func(os v1.OSName, _ int) string { return string(os) })
 
-<<<<<<< HEAD
 	zones := lo.Uniq(lo.Flatten(lo.Map(options.Offerings, func(o KWOKOffering, _ int) []string {
 		req, _ := lo.Find(o.Requirements, func(req v1.NodeSelectorRequirement) bool {
 			return req.Key == v1.LabelTopologyZone
@@ -167,18 +157,12 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		})
 		return req.Values
 	})))
-=======
->>>>>>> fe6cd29 (revert change)
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, osNames...),
-		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
-			return o.Requirements.Get(v1.LabelTopologyZone).Any()
-		})...),
-		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
-			return o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
-		})...),
+		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zones...),
+		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, capacityTypes...),
 		scheduling.NewRequirement(v1alpha1.InstanceSizeLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceSizeLabelKey]),
 		scheduling.NewRequirement(v1alpha1.InstanceFamilyLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceFamilyLabelKey]),
 		scheduling.NewRequirement(v1alpha1.InstanceCPULabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceCPULabelKey]),
@@ -188,15 +172,10 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	return &cloudprovider.InstanceType{
 		Name:         options.Name,
 		Requirements: requirements,
-<<<<<<< HEAD
 		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) cloudprovider.Offering {
 			return off.Offering
 		}),
 		Capacity: options.Resources,
-=======
-		Offerings:    options.Offerings,
-		Capacity:     options.Resources,
->>>>>>> fe6cd29 (revert change)
 		Overhead: &cloudprovider.InstanceTypeOverhead{
 			KubeReserved: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("100m"),
