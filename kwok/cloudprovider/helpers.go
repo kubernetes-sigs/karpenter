@@ -157,22 +157,12 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		})
 		return req.Values
 	})))
-
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, osNames...),
-<<<<<<< HEAD
 		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zones...),
 		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, capacityTypes...),
-=======
-		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings, func(o KwokOffering, _ int) string {
-			return o.Requirements.Get(v1.LabelTopologyZone).Any()
-		})...),
-		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings, func(o KwokOffering, _ int) string {
-			return o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
-		})...),
->>>>>>> 03080a0 (checkpointing)
 		scheduling.NewRequirement(v1alpha1.InstanceSizeLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceSizeLabelKey]),
 		scheduling.NewRequirement(v1alpha1.InstanceFamilyLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceFamilyLabelKey]),
 		scheduling.NewRequirement(v1alpha1.InstanceCPULabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceCPULabelKey]),
@@ -181,13 +171,8 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 
 	return &cloudprovider.InstanceType{
 		Name:         options.Name,
-<<<<<<< HEAD
 		Requirements: requirements,
 		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) cloudprovider.Offering {
-=======
-		Requirements: off.,
-		Offerings: lo.Map(options.Offerings, func(off KwokOffering, _ int) cloudprovider.Offering {
->>>>>>> 03080a0 (checkpointing)
 			return off.Offering
 		}),
 		Capacity: options.Resources,
