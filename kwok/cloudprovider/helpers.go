@@ -157,7 +157,6 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		})
 		return req.Values
 	})))
-
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
