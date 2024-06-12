@@ -23,14 +23,14 @@ import (
 
 const (
 	NodeSubsystem      = "nodes"
-	nodeClaimSubsystem = "nodeclaims"
+	NodeClaimSubsystem = "nodeclaims"
 )
 
 var (
 	NodeClaimsCreatedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Subsystem: nodeClaimSubsystem,
+			Subsystem: NodeClaimSubsystem,
 			Name:      "created",
 			Help:      "Number of nodeclaims created in total by Karpenter. Labeled by reason the nodeclaim was created and the owning nodepool.",
 		},
@@ -43,7 +43,7 @@ var (
 	NodeClaimsTerminatedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Subsystem: nodeClaimSubsystem,
+			Subsystem: NodeClaimSubsystem,
 			Name:      "terminated",
 			Help:      "Number of nodeclaims terminated in total by Karpenter. Labeled by reason the nodeclaim was terminated and the owning nodepool.",
 		},
@@ -56,7 +56,7 @@ var (
 	NodeClaimsLaunchedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Subsystem: nodeClaimSubsystem,
+			Subsystem: NodeClaimSubsystem,
 			Name:      "launched",
 			Help:      "Number of nodeclaims launched in total by Karpenter. Labeled by the owning nodepool.",
 		},
@@ -67,7 +67,7 @@ var (
 	NodeClaimsRegisteredCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Subsystem: nodeClaimSubsystem,
+			Subsystem: NodeClaimSubsystem,
 			Name:      "registered",
 			Help:      "Number of nodeclaims registered in total by Karpenter. Labeled by the owning nodepool.",
 		},
@@ -78,7 +78,7 @@ var (
 	NodeClaimsInitializedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Subsystem: nodeClaimSubsystem,
+			Subsystem: NodeClaimSubsystem,
 			Name:      "initialized",
 			Help:      "Number of nodeclaims initialized in total by Karpenter. Labeled by the owning nodepool.",
 		},
@@ -89,7 +89,7 @@ var (
 	NodeClaimsDisruptedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Subsystem: nodeClaimSubsystem,
+			Subsystem: NodeClaimSubsystem,
 			Name:      "disrupted",
 			Help:      "Number of nodeclaims disrupted in total by Karpenter. Labeled by disruption type of the nodeclaim and the owning nodepool.",
 		},
@@ -101,7 +101,7 @@ var (
 	NodeClaimsDriftedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Subsystem: nodeClaimSubsystem,
+			Subsystem: NodeClaimSubsystem,
 			Name:      "drifted",
 			Help:      "Number of nodeclaims drifted reasons in total by Karpenter. Labeled by drift type of the nodeclaim and the owning nodepool.",
 		},
