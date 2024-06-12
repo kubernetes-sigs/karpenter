@@ -102,7 +102,7 @@ type Disruption struct {
 type Budget struct {
 	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// If omitted, it will apply to all well-known disruption reasons. Otherwise, this will apply to each reason defined.
-	// allowed reasons are underutilized, empty, and drifted.
+	// allowed reasons are underutilized, expired, empty, and drifted.
 	// +optional
 	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
@@ -142,18 +142,19 @@ const (
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.
-// +kubebuilder:validation:Enum={underutilized,empty,drifted}
+// +kubebuilder:validation:Enum={underutilized,expired,empty,drifted}
 type DisruptionReason string
 
 const (
 	DisruptionReasonUnderutilized DisruptionReason = "underutilized"
+	DisruptionReasonExpired       DisruptionReason = "expired"
 	DisruptionReasonEmpty         DisruptionReason = "empty"
 	DisruptionReasonDrifted       DisruptionReason = "drifted"
 )
 
 var (
 	// DisruptionReasons is a list of all valid reasons for disruption budgets.
-	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonEmpty, DisruptionReasonDrifted}
+	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonExpired, DisruptionReasonEmpty, DisruptionReasonDrifted}
 )
 
 type Limits v1.ResourceList
