@@ -240,7 +240,6 @@ var _ = Describe("CEL/Validation", func() {
 		},
 			Entry("Drifted", DisruptionReasonDrifted),
 			Entry("Underutilized", DisruptionReasonUnderutilized),
-			Entry("Expired", DisruptionReasonExpired),
 			Entry("Empty", DisruptionReasonEmpty),
 		)
 
@@ -253,6 +252,7 @@ var _ = Describe("CEL/Validation", func() {
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		},
+			Entry("expiration reason", "expired"),
 			Entry("invalid reason", "invalid"),
 			Entry("empty reason", ""),
 		)
@@ -262,7 +262,7 @@ var _ = Describe("CEL/Validation", func() {
 				Nodes:    "10",
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
-				Reasons:  []DisruptionReason{DisruptionReasonExpired, DisruptionReasonEmpty},
+				Reasons:  []DisruptionReason{DisruptionReasonDrifted, DisruptionReasonEmpty},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
