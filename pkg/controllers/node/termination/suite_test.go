@@ -111,6 +111,7 @@ var _ = Describe("Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectExists(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 			ExpectNotFound(ctx, env.Client, node, nodeClaim)
 		})
