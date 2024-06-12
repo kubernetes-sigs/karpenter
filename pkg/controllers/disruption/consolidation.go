@@ -96,14 +96,14 @@ func (c *Consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.nodePool.Name))...)
 		return false
 	}
-	return cn.NodeClaim.StatusConditions().GetCondition(v1beta1.Underutilized).IsTrue()
+	return cn.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeUnderutilized).IsTrue()
 }
 
 // ComputeCommand computes a consolidation action to take
 //
 // nolint:gocyclo
 func (c *Consolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, pscheduling.Results, error) {
-	// All the candidates here all have the v1beta1.Underutilized condition
+	// All the candidates here all have the v1beta1.ConditionTypeUnderutilized condition
 	commands := c.getActiveValidConsolidations(ctx, candidates...)
 	for _, cmd := range commands {
 		// Run scheduling simulation to compute consolidation option
@@ -141,7 +141,7 @@ func (c *Consolidation) getActiveValidConsolidations(ctx context.Context, candid
 	lo.ForEach(c.cluster.Nodes().Disruptable(ctx, c.kubeClient, c.recorder), func(s *state.StateNode, _ int) {
 		// if the nodeclaim doesn't have the underutilized status condition, it's not part of
 		// an active consolidation.
-		cond := s.NodeClaim.StatusConditions().GetCondition(v1beta1.Underutilized)
+		cond := s.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeUnderutilized)
 		if !cond.IsTrue() {
 			return
 		}
@@ -169,10 +169,10 @@ func (c *Consolidation) getActiveValidConsolidations(ctx context.Context, candid
 		// notValid is true if there is a candidate that hasn't been marked as Underutilized
 		// for long enough
 		_, notValid := lo.Find(cmd.Candidates, func(s *state.StateNode) bool {
-			cond := s.NodeClaim.StatusConditions().GetCondition(v1beta1.Underutilized)
+			cond := s.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeUnderutilized)
 			// We want all of the candidates to have the underutilized condition and have the last transition time be at least
 			// as long ago as the max consolidate after of all the candidates included in the command.
-			return time.Since(cond.LastTransitionTime.Inner.Time) < cmd.ConsolidateAfter
+			return time.Since(cond.LastTransitionTime.Time) < cmd.ConsolidateAfter
 		})
 		// Get the disruption.candidate representations of the command's candidates
 		validCandidates := lo.FilterMap(cmd.Candidates, func(s *state.StateNode, _ int) (*Candidate, bool) {
@@ -248,7 +248,7 @@ func validateResults(ctx context.Context, results pscheduling.Results, recorder 
 		if len(candidates) == 1 {
 			recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Filtering by price: %v", err))...)
 		}
-		return Command{}, pscheduling.Results{}, nil
+		return pscheduling.Results{}, false, nil
 	}
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
@@ -297,13 +297,13 @@ func validateSpotToSpotConsolidation(ctx context.Context, candidates []*Candidat
 		if len(candidates) == 1 {
 			recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Filtering by price: %v", err))...)
 		}
-		return Command{}, pscheduling.Results{}, nil
+		return Command{}, pscheduling.Results{}
 	}
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
 			recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
 		}
-		return Command{}, pscheduling.Results{}, nil
+		return Command{}, pscheduling.Results{}
 	}
 
 	// For multi-node consolidation:

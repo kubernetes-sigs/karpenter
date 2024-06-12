@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"k8s.io/apimachinery/pkg/api/errors"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -48,11 +47,8 @@ func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) *No
 	}
 }
 
-func (c *NodePoolController) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "state.nodepool") //nolint:ineffassign,staticcheck
-
 func (c *NodePoolController) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
-	ctx = logging.WithLogger(ctx, logging.FromContext(ctx).Named(c.Name()).With("nodepool", nodePool.Name))
+	ctx = injection.WithControllerName(ctx, "state.nodepool") //nolint:ineffassign,staticcheck
 	np := &v1beta1.NodePool{}
 	if err := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(nodePool), np); err != nil {
 		if errors.IsNotFound(err) {

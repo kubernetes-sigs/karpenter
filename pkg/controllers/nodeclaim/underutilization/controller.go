@@ -23,14 +23,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/apis"
 	"knative.dev/pkg/logging"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -40,11 +41,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/controller"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
+	provutils "sigs.k8s.io/karpenter/pkg/utils/provisioning"
 )
 
 const (
@@ -79,8 +81,11 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	}
 }
 
-func (c *Controller) Builder(_ context.Context, m manager.Manager) controller.Builder {
-	return controller.NewSingletonManagedBy(m)
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("underutilization").
+		WatchesRawSource(singleton.Source()).
+		Complete(singleton.AsReconciler(c))
 }
 
 func (c *Controller) Name() string {
@@ -107,7 +112,7 @@ func (c *Controller) markConsolidated() {
 //     wait for these to finish.
 //  4. Compute a consolidation decision with scheduling simulations
 //  5. If we find a valid decision, mark all node claims as Underutilized.
-func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	noms := c.getActiveConsolidations(ctx)
 	// If there are no active nominations and it's been less than 5 minutes since the last time
 	// the cluster was marked as consolidated, wait.
@@ -153,7 +158,7 @@ func (c *Controller) getActiveConsolidations(ctx context.Context) map[string]dis
 	lo.ForEach(c.cluster.Nodes().Disruptable(ctx, c.kubeClient, c.recorder), func(s *state.StateNode, _ int) {
 		// if the nodeclaim doesn't have the underutilized status condition, it's not part of
 		// an active consolidation.
-		cond := s.NodeClaim.StatusConditions().GetCondition(v1beta1.Underutilized)
+		cond := s.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeUnderutilized)
 		if !cond.IsTrue() {
 			return
 		}
@@ -256,7 +261,7 @@ func (c *Controller) computeConsolidation(ctx context.Context) ([]*state.StateNo
 			}
 			maxIndex := lo.Clamp(i+batchSize, 0, len(candidates))
 			nodesToConsolidate := lo.Slice(candidates, i, maxIndex)
-			results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.recorder, nodesToConsolidate...)
+			results, err := provutils.SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, c.recorder, nodesToConsolidate...)
 			if err != nil {
 				return nil, fmt.Errorf("failed to simulate scheduling, %w", err)
 			}
@@ -291,10 +296,10 @@ func (c *Controller) Candidates(ctx context.Context) []*state.StateNode {
 	candidatesToPods := candidates.ReschedulablePodsForStateNodes(ctx, c.kubeClient)
 	nodePools := c.cluster.NodePools()
 	sort.Slice(candidates, func(i, j int) bool {
-		iDisruptionCost := disruptionutils.DisruptionCost(ctx, candidatesToPods[candidates[i]]) *
-			disruptionutils.LifetimeRemaining(c.clk, nodePools[candidates[i].Labels()[v1beta1.NodePoolLabelKey]], candidates[i].Node)
-		jDisruptionCost := disruptionutils.DisruptionCost(ctx, candidatesToPods[candidates[j]]) *
-			disruptionutils.LifetimeRemaining(c.clk, nodePools[candidates[j].Labels()[v1beta1.NodePoolLabelKey]], candidates[j].Node)
+		iDisruptionCost := disruptionutils.ReschedulingCost(ctx, candidatesToPods[candidates[i]]) *
+			disruptionutils.LifetimeRemaining(c.clk, nodePools[candidates[i].Labels()[v1beta1.NodePoolLabelKey]], candidates[i].NodeClaim)
+		jDisruptionCost := disruptionutils.ReschedulingCost(ctx, candidatesToPods[candidates[j]]) *
+			disruptionutils.LifetimeRemaining(c.clk, nodePools[candidates[j].Labels()[v1beta1.NodePoolLabelKey]], candidates[j].NodeClaim)
 		return iDisruptionCost < jDisruptionCost
 	})
 	return candidates
@@ -303,7 +308,7 @@ func (c *Controller) Candidates(ctx context.Context) []*state.StateNode {
 // Analyze results will look at the consolidation command, and return true if it should be executed
 //
 //nolint:gocyclo
-func (c *Controller) analyzeResults(ctx context.Context, results scheduling.Results, candidates []*state.StateNode) (bool, error) {
+func (c *Controller) analyzeResults(ctx context.Context, results pscheduling.Results, candidates []*state.StateNode) (bool, error) {
 	// if not all of the pods were scheduled, don't continue
 	if !results.AllNonPendingPodsScheduled() {
 		if len(candidates) == 1 {
@@ -347,18 +352,16 @@ func (c *Controller) analyzeResults(ctx context.Context, results scheduling.Resu
 		return c.validateSpotToSpotConsolidation(ctx, candidates, results, candidatePrice)
 	}
 
-	var incompatibleMinReqKey string
 	// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and the requirement for the NodeClaim that does not meet minValues.
 	// If we use this directly for spot-to-spot consolidation, we are bound to get repeated consolidations because the strategy that chooses to launch the spot instance from the list does
 	// it based on availability and price which could result in selection/launch of non-lowest priced instance in the list. So, we would keep repeating this loop till we get to lowest priced instance
 	// causing churns and landing onto lower available spot instance ultimately resulting in higher interruptions.
-	results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions, incompatibleMinReqKey, _ =
-		disruptionutils.FilterByPriceWithMinValues(results.NewNodeClaims[0].InstanceTypeOptions, results.NewNodeClaims[0].Requirements, candidatePrice)
+	results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValues(results.NewNodeClaims[0].Requirements, candidatePrice)
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
-			if len(incompatibleMinReqKey) > 0 {
-				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("minValues requirement is not met for %s", incompatibleMinReqKey))...)
+			if err != nil {
+				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("minValues requirement not met, %s", err.Error()))...)
 			} else {
 				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
 			}
@@ -373,7 +376,7 @@ func (c *Controller) analyzeResults(ctx context.Context, results scheduling.Resu
 func (c *Controller) setNodeClaimsUnderutilized(ctx context.Context, setTrue bool, commandID types.UID, candidates ...*state.StateNode) error {
 	for i := range candidates {
 		nc := candidates[i].NodeClaim
-		cond := nc.StatusConditions().GetCondition(v1beta1.Underutilized)
+		cond := nc.StatusConditions().Get(v1beta1.ConditionTypeUnderutilized)
 		// If we want to set the condition and it's already true
 		// or if we don't want to set the condition and it isn't true
 		// e.g. (T && T) || (F && F), then do nothing
@@ -382,13 +385,9 @@ func (c *Controller) setNodeClaimsUnderutilized(ctx context.Context, setTrue boo
 		}
 		deepCopy := nc.DeepCopy()
 		if setTrue {
-			nc.StatusConditions().SetCondition(apis.Condition{
-				Type:    v1beta1.Underutilized,
-				Status:  v1.ConditionTrue,
-				Message: (string)(commandID),
-			})
+			nc.StatusConditions().SetTrueWithReason(v1beta1.ConditionTypeUnderutilized, (string)(commandID), (string)(commandID))
 		} else {
-			err := nc.StatusConditions().ClearCondition(v1beta1.Underutilized)
+			err := nc.StatusConditions().Clear(v1beta1.ConditionTypeUnderutilized)
 			if err != nil {
 				return fmt.Errorf("clearing underutilized condition from nodeclaim %q", nc.Name)
 			}
@@ -410,11 +409,17 @@ func (c *Controller) getCandidatePrices(ctx context.Context, candidates ...*stat
 		itName := candidate.Labels()[v1.LabelInstanceTypeStable]
 		ct := candidate.Labels()[v1beta1.CapacityTypeLabelKey]
 		zone := candidate.Labels()[v1.LabelTopologyZone]
-		offering, ok := c.instanceTypes[npName][itName].Offerings.Get(ct, zone)
-		if !ok {
+		reqs := scheduling.NewRequirements(
+			scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, ct),
+			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone),
+		)
+		offs := c.instanceTypes[npName][itName].Offerings.Available().Compatible(reqs)
+		if len(offs) == 0 {
 			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", itName, ct, zone)
 		}
-		price += offering.Price
+		// We choose most expensive here rather than cheapest, since we assume that if there are multiple matching offerings
+		// we get the most expensive, to ensure we only make cost saving decisions.
+		price += offs.MostExpensive().Price
 	}
 	return price, nil
 }

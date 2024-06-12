@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -96,19 +95,6 @@ func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*v1.P
 		pods = append(pods, p...)
 	}
 	return pods, nil
-}
-
-// Disruptable filters StateNodes that are meet the IsDisruptable condition
-func (n StateNodes) Disruptable(ctx context.Context, clk clock.Clock, kubeClient client.Client) (StateNodes, error) {
-	pdbs, err := pdb.NewLimits(ctx, clk, kubeClient)
-	if err != nil {
-		return StateNodes{}, fmt.Errorf("constructing pdbs, %w", err)
-	}
-	n = lo.Filter(n, func(node *StateNode, _ int) bool {
-		_, err := node.ValidateDisruptable(ctx, kubeClient, pdbs)
-		return err == nil
-	})
-	return n, nil
 }
 
 func (n StateNodes) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {

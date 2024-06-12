@@ -25,8 +25,8 @@ import (
 	"github.com/samber/lo"
 
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -150,13 +150,13 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, err
 	}
-	pdbs, err := disruptionutils.NewPDBLimits(ctx, clk, kubeClient)
+	budget, err := pdb.NewLimits(ctx, clk, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 	// Get disruptable nodes
 	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue)
+		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, budget, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should disrupt

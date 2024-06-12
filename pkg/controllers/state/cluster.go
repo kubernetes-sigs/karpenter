@@ -315,7 +315,7 @@ func (c *Cluster) DeleteNodeClaim(name string, nodePoolName string) {
 	defer c.mu.Unlock()
 
 	c.cleanupNodeClaim(name, nodePoolName)
-	clusterStateNodesCount.Set(float64(len(c.nodes)))
+	ClusterStateNodesCount.Set(float64(len(c.nodes)))
 }
 
 func (c *Cluster) UpdateNode(ctx context.Context, node *v1.Node) error {

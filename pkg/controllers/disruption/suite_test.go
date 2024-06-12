@@ -52,7 +52,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
-	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 )
 
 var ctx context.Context
@@ -218,12 +217,12 @@ var _ = Describe("Simulate Scheduling", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 		}
 
-		pdbs, err := disruptionutils.NewPDBLimits(ctx, fakeClock, env.Client)
+		budget, err := pdb.NewLimits(ctx, fakeClock, env.Client)
 		Expect(err).To(Succeed())
 
 		// Generate a candidate
 		stateNode := ExpectStateNodeExists(cluster, nodes[0])
-		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue)
+		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, stateNode, budget, nodePoolMap, nodePoolToInstanceTypesMap, queue)
 		Expect(err).To(Succeed())
 
 		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, candidate)
@@ -734,73 +733,11 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 	})
 })
 
-<<<<<<< HEAD
-var _ = Describe("Pod Eviction Cost", func() {
-	const standardPodCost = 1.0
-	It("should have a standard disruptionCost for a pod with no priority or disruptionCost specified", func() {
-		cost := disruptionutils.EvictionCost(ctx, &v1.Pod{})
-		Expect(cost).To(BeNumerically("==", standardPodCost))
-	})
-	It("should have a higher disruptionCost for a pod with a positive deletion disruptionCost", func() {
-		cost := disruptionutils.EvictionCost(ctx, &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.PodDeletionCost: "100",
-			}},
-		})
-		Expect(cost).To(BeNumerically(">", standardPodCost))
-	})
-	It("should have a lower disruptionCost for a pod with a positive deletion disruptionCost", func() {
-		cost := disruptionutils.EvictionCost(ctx, &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.PodDeletionCost: "-100",
-			}},
-		})
-		Expect(cost).To(BeNumerically("<", standardPodCost))
-	})
-	It("should have higher costs for higher deletion costs", func() {
-		cost1 := disruptionutils.EvictionCost(ctx, &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.PodDeletionCost: "101",
-			}},
-		})
-		cost2 := disruptionutils.EvictionCost(ctx, &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.PodDeletionCost: "100",
-			}},
-		})
-		cost3 := disruptionutils.EvictionCost(ctx, &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-				v1.PodDeletionCost: "99",
-			}},
-		})
-		Expect(cost1).To(BeNumerically(">", cost2))
-		Expect(cost2).To(BeNumerically(">", cost3))
-	})
-	It("should have a higher disruptionCost for a pod with a higher priority", func() {
-		cost := disruptionutils.EvictionCost(ctx, &v1.Pod{
-			Spec: v1.PodSpec{Priority: lo.ToPtr(int32(1))},
-		})
-		Expect(cost).To(BeNumerically(">", standardPodCost))
-	})
-	It("should have a lower disruptionCost for a pod with a lower priority", func() {
-		cost := disruptionutils.EvictionCost(ctx, &v1.Pod{
-			Spec: v1.PodSpec{Priority: lo.ToPtr(int32(-1))},
-		})
-		Expect(cost).To(BeNumerically("<", standardPodCost))
-	})
-})
-
-=======
->>>>>>> 8fe253f (feat: implement consolidateAfter)
 var _ = Describe("Candidate Filtering", func() {
 	var nodePool *v1beta1.NodePool
 	var nodePoolMap map[string]*v1beta1.NodePool
 	var nodePoolInstanceTypeMap map[string]map[string]*cloudprovider.InstanceType
-<<<<<<< HEAD
 	var pdbLimits pdb.Limits
-=======
-	var pdbLimits *disruptionutils.PDBLimits
->>>>>>> 8fe253f (feat: implement consolidateAfter)
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 		nodePoolMap = map[string]*v1beta1.NodePool{
@@ -812,11 +749,7 @@ var _ = Describe("Candidate Filtering", func() {
 			}),
 		}
 		var err error
-<<<<<<< HEAD
 		pdbLimits, err = pdb.NewLimits(ctx, fakeClock, env.Client)
-=======
-		pdbLimits, err = disruptionutils.NewPDBLimits(ctx, fakeClock, env.Client)
->>>>>>> 8fe253f (feat: implement consolidateAfter)
 		Expect(err).ToNot(HaveOccurred())
 	})
 	It("should not consider candidates that have do-not-disrupt pods scheduled", func() {
@@ -1042,11 +975,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-<<<<<<< HEAD
 		pdbLimits, err = pdb.NewLimits(ctx, fakeClock, env.Client)
-=======
-		pdbLimits, err = disruptionutils.NewPDBLimits(ctx, fakeClock, env.Client)
->>>>>>> 8fe253f (feat: implement consolidateAfter)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
@@ -1093,11 +1022,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-<<<<<<< HEAD
 		pdbLimits, err = pdb.NewLimits(ctx, fakeClock, env.Client)
-=======
-		pdbLimits, err = disruptionutils.NewPDBLimits(ctx, fakeClock, env.Client)
->>>>>>> 8fe253f (feat: implement consolidateAfter)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
@@ -1143,11 +1068,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-<<<<<<< HEAD
 		pdbLimits, err = pdb.NewLimits(ctx, fakeClock, env.Client)
-=======
-		pdbLimits, err = disruptionutils.NewPDBLimits(ctx, fakeClock, env.Client)
->>>>>>> 8fe253f (feat: implement consolidateAfter)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
@@ -1191,11 +1112,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-<<<<<<< HEAD
 		pdbLimits, err = pdb.NewLimits(ctx, fakeClock, env.Client)
-=======
-		pdbLimits, err = disruptionutils.NewPDBLimits(ctx, fakeClock, env.Client)
->>>>>>> 8fe253f (feat: implement consolidateAfter)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
@@ -1233,11 +1150,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
 
 		var err error
-<<<<<<< HEAD
 		pdbLimits, err = pdb.NewLimits(ctx, fakeClock, env.Client)
-=======
-		pdbLimits, err = disruptionutils.NewPDBLimits(ctx, fakeClock, env.Client)
->>>>>>> 8fe253f (feat: implement consolidateAfter)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cluster.Nodes()).To(HaveLen(1))

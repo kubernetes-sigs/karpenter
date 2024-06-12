@@ -57,11 +57,11 @@ var _ = AfterSuite(func() {
 var _ = Describe("Pod Eviction Cost", func() {
 	const standardPodCost = 1.0
 	It("should have a standard disruptionCost for a pod with no priority or disruptionCost specified", func() {
-		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{})
+		cost := disruption.EvictionCost(ctx, &v1.Pod{})
 		Expect(cost).To(BeNumerically("==", standardPodCost))
 	})
 	It("should have a higher disruptionCost for a pod with a positive deletion disruptionCost", func() {
-		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := disruption.EvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "100",
 			}},
@@ -69,7 +69,7 @@ var _ = Describe("Pod Eviction Cost", func() {
 		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 	It("should have a lower disruptionCost for a pod with a positive deletion disruptionCost", func() {
-		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := disruption.EvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "-100",
 			}},
@@ -77,17 +77,17 @@ var _ = Describe("Pod Eviction Cost", func() {
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
 	It("should have higher costs for higher deletion costs", func() {
-		cost1 := disruption.GetPodEvictionCost(ctx, &v1.Pod{
+		cost1 := disruption.EvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "101",
 			}},
 		})
-		cost2 := disruption.GetPodEvictionCost(ctx, &v1.Pod{
+		cost2 := disruption.EvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "100",
 			}},
 		})
-		cost3 := disruption.GetPodEvictionCost(ctx, &v1.Pod{
+		cost3 := disruption.EvictionCost(ctx, &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 				v1.PodDeletionCost: "99",
 			}},
@@ -96,13 +96,13 @@ var _ = Describe("Pod Eviction Cost", func() {
 		Expect(cost2).To(BeNumerically(">", cost3))
 	})
 	It("should have a higher disruptionCost for a pod with a higher priority", func() {
-		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := disruption.EvictionCost(ctx, &v1.Pod{
 			Spec: v1.PodSpec{Priority: ptr.Int32(1)},
 		})
 		Expect(cost).To(BeNumerically(">", standardPodCost))
 	})
 	It("should have a lower disruptionCost for a pod with a lower priority", func() {
-		cost := disruption.GetPodEvictionCost(ctx, &v1.Pod{
+		cost := disruption.EvictionCost(ctx, &v1.Pod{
 			Spec: v1.PodSpec{Priority: ptr.Int32(-1)},
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
