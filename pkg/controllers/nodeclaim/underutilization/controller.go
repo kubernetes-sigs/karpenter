@@ -385,7 +385,7 @@ func (c *Controller) setNodeClaimsUnderutilized(ctx context.Context, setTrue boo
 		}
 		deepCopy := nc.DeepCopy()
 		if setTrue {
-			nc.StatusConditions().SetTrueWithReason(v1beta1.ConditionTypeUnderutilized, (string)(commandID), (string)(commandID))
+			nc.StatusConditions().SetTrueWithReason(v1beta1.ConditionTypeUnderutilized, v1beta1.ConditionTypeUnderutilized, (string)(commandID))
 		} else {
 			err := nc.StatusConditions().Clear(v1beta1.ConditionTypeUnderutilized)
 			if err != nil {
