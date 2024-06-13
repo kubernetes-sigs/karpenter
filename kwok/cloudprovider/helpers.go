@@ -157,6 +157,7 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		})
 		return req.Values
 	})))
+
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
@@ -173,7 +174,13 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		Name:         options.Name,
 		Requirements: requirements,
 		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) cloudprovider.Offering {
-			return off.Offering
+			return cloudprovider.Offering{
+				Requirements: scheduling.NewRequirements(lo.Map(off.Requirements, func(req v1.NodeSelectorRequirement, _ int) *scheduling.Requirement {
+					return scheduling.NewRequirement(req.Key, req.Operator, req.Values...)
+				})...),
+				Price:     off.Offering.Price,
+				Available: off.Offering.Available,
+			}
 		}),
 		Capacity: options.Resources,
 		Overhead: &cloudprovider.InstanceTypeOverhead{
