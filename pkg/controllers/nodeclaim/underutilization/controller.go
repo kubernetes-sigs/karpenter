@@ -30,9 +30,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -395,7 +395,7 @@ func (c *Controller) setNodeClaimsUnderutilized(ctx context.Context, setTrue boo
 		if err := c.kubeClient.Status().Patch(ctx, nc, client.MergeFrom(deepCopy)); err != nil {
 			return fmt.Errorf("patching nodeclaim, %w", err)
 		}
-		logging.FromContext(ctx).With("nodeclaim", nc.Name).Debugf("%s nodeclaim underutilization status condition", lo.Ternary(setTrue, "set", "removed"))
+		log.FromContext(ctx).WithValues("nodeclaim", nc.Name).V(1).Info(fmt.Sprintf("%s nodeclaim underutilized", lo.Ternary(setTrue, "marked", "unmarked")))
 	}
 	return nil
 }
@@ -449,7 +449,7 @@ func (c *Controller) refreshInstanceTypeMapping(ctx context.Context) {
 	}
 	if errs != nil {
 		// only log, so that we can continue with the rest of the nodePools that succeeded
-		logging.FromContext(ctx).With("nodePoolNames", strings.Join(failedNodePools, ",")).Errorf("listing instance types, %s", errs)
+		log.FromContext(ctx).WithValues("nodePoolNames", strings.Join(failedNodePools, ",")).Error(errs, "failed listing instance types")
 	}
 	c.instanceTypes = nodePoolToInstanceTypesMap
 }
