@@ -65,7 +65,7 @@ jobs:
       shell: bash
       run: |
         echo "run KPIs here"
-        python ./karpenter_eval/main.py your_file_here.csv
+        python ./karpenter_eval/main.py "$TEMP_DIR"
     - name: cleanup 
       shell: bash
       run: | 
