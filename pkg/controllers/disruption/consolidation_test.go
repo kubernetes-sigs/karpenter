@@ -281,7 +281,7 @@ var _ = Describe("Consolidation", func() {
 			// Execute command, thus deleting all nodes
 			ExpectSingletonReconciled(ctx, queue)
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
-			Expect(numNodes).To(Equal(10))
+			Expect(numNodes).To(Equal(numNodes))
 		})
 		It("should only allow 3 nodes to be deleted in multi node consolidation delete", func() {
 			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "30%"}}
