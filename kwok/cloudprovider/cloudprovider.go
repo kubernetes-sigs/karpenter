@@ -82,6 +82,9 @@ func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1beta1.Nod
 		}
 		return nil, fmt.Errorf("finding node, %w", err)
 	}
+	if node.DeletionTimestamp != nil {
+		return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("nodeclaim not found"))
+	}
 	return c.toNodeClaim(node)
 }
 
