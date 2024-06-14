@@ -98,7 +98,7 @@ func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs
 
 //nolint:gocyclo
 func (in *Disruption) validate() (errs *apis.FieldError) {
-	if in.ConsolidateAfter == nil {
+	if in.ConsolidateAfter.Duration == nil {
 		return errs.Also(apis.ErrGeneric("consolidateAfter must be specified"))
 	}
 	for i := range in.Budgets {

@@ -49,7 +49,7 @@ var _ = Describe("Expiration", func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Disruption: v1beta1.Disruption{
-					ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+					ConsolidateAfter: v1beta1.NillableDuration{Duration: nil},
 					ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
 					// Disrupt away!
 					Budgets: []v1beta1.Budget{{
@@ -355,7 +355,7 @@ var _ = Describe("Expiration", func() {
 							Nodes: "50%",
 						}},
 						ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+						ConsolidateAfter: v1beta1.NillableDuration{Duration: nil},
 					},
 				},
 			})
@@ -420,7 +420,7 @@ var _ = Describe("Expiration", func() {
 							Nodes: "100%",
 						}},
 						ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+						ConsolidateAfter: v1beta1.NillableDuration{Duration: nil},
 					},
 				},
 			})

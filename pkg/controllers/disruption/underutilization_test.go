@@ -48,7 +48,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-var _ = Describe("Consolidation", func() {
+var _ = Describe("Underutilization", func() {
 	var nodePool *v1beta1.NodePool
 	var nodeClaim, spotNodeClaim *v1beta1.NodeClaim
 	var node, spotNode *v1.Node
@@ -99,7 +99,7 @@ var _ = Describe("Consolidation", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmpty", func() {
 			pod := test.Pod()
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-			nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Minute)}
+			nodePool.Spec.Disruption.ConsolidateAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Minute)}
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -114,7 +114,7 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
 			pod := test.Pod()
-			nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{}
+			nodePool.Spec.Disruption.ConsolidateAfter = v1beta1.NillableDuration{}
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 

@@ -69,7 +69,7 @@ type Disruption struct {
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +optional
-	ConsolidateAfter *NillableDuration `json:"consolidateAfter,omitempty"`
+	ConsolidateAfter NillableDuration `json:"consolidateAfter,omitempty"`
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenUnderutilized" if not specified
 	// +kubebuilder:default:="WhenUnderutilized"

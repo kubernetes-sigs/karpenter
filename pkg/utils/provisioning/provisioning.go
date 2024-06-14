@@ -41,7 +41,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 
 	// We get the pods that are on nodes that are deleting
 	// and track them separately for understanding simulation results
-	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
+	deletingNodesToPods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
@@ -60,14 +60,16 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		}
 		pods = append(pods, reschedulable...)
 	}
-	pods = append(pods, deletingNodePods...)
+	for _, v := range deletingNodesToPods {
+		pods = append(pods, v...)
+	}
 	// Add a nop logger so we don't emit any logs from the scheduling simulation, as we're only simulating.
 
 	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, nodes)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
-	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *v1.Pod) (client.ObjectKey, interface{}) {
+	deletingNodePodKeys := lo.SliceToMap(deletingNodesToPods, func(p *v1.Pod) (client.ObjectKey, interface{}) {
 		return client.ObjectKeyFromObject(p), nil
 	})
 

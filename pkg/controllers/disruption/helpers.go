@@ -68,7 +68,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 
 	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
+	deletingNodesToPods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
 	if err != nil {
 		return pscheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
@@ -80,13 +80,15 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	for _, n := range candidates {
 		pods = append(pods, n.reschedulablePods...)
 	}
-	pods = append(pods, deletingNodePods...)
+	for _, v := range deletingNodesToPods {
+		pods = append(pods, v...)
+	}
 	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, stateNodes)
 	if err != nil {
 		return pscheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *v1.Pod) (client.ObjectKey, interface{}) {
+	deletingNodePodKeys := lo.SliceToMap(lo.Flatten(lo.Values(deletingNodesToPods)), func(p *v1.Pod) (client.ObjectKey, interface{}) {
 		return client.ObjectKeyFromObject(p), nil
 	})
 
@@ -133,13 +135,6 @@ func (u *UninitializedNodeError) Error() string {
 		info = append(info, fmt.Sprintf("node/%s", u.Node.Name))
 	}
 	return fmt.Sprintf("would schedule against uninitialized %s", strings.Join(info, ", "))
-}
-
-// instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
-func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovider.InstanceType) bool {
-	rhsNames := sets.NewString(lo.Map(rhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
-	lhsNames := sets.NewString(lo.Map(lhs, func(t *cloudprovider.InstanceType, i int) string { return t.Name })...)
-	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
 }
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool

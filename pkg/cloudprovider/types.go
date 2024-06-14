@@ -129,6 +129,13 @@ func (its InstanceTypes) Compatible(requirements scheduling.Requirements) Instan
 	return filteredInstanceTypes
 }
 
+// instanceTypesAreSubset returns true if the lhs slice of instance types are a subset of the rhs.
+func (its InstanceTypes) IsSubset(rhs InstanceTypes) bool {
+	rhsNames := sets.NewString(lo.Map(rhs, func(t *InstanceType, i int) string { return t.Name })...)
+	lhsNames := sets.NewString(lo.Map(its, func(t *InstanceType, i int) string { return t.Name })...)
+	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
+}
+
 // SatisfiesMinValues validates whether the InstanceTypes satisfies the minValues requirements
 // It returns the minimum number of needed instance types to satisfy the minValues requirement and an error
 // that indicates whether the InstanceTypes satisfy the passed-in requirements

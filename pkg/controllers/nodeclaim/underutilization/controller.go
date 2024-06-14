@@ -19,6 +19,7 @@ package underutilization
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -46,6 +48,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	provutils "sigs.k8s.io/karpenter/pkg/utils/provisioning"
 )
 
@@ -113,7 +116,10 @@ func (c *Controller) markConsolidated() {
 //  4. Compute a consolidation decision with scheduling simulations
 //  5. If we find a valid decision, mark all node claims as Underutilized.
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
-	noms := c.getActiveConsolidations(ctx)
+	noms, err := c.getActiveConsolidations(ctx)
+	if err != nil {
+		return reconcile.Result{RequeueAfter: time.Second}, fmt.Errorf("getting underutilization nominations, %w", err)
+	}
 	// If there are no active nominations and it's been less than 5 minutes since the last time
 	// the cluster was marked as consolidated, wait.
 	if len(noms) == 0 && c.IsConsolidated() {
@@ -124,8 +130,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		for _, cmd := range noms {
 			// If any nomination is invalid, remove the nomination and requeue
 			// Short circuit and only unmark one of the commands to optimistically save work done
-			if err := c.validateCandidates(ctx, cmd.Candidates...); err != nil {
-				err = multierr.Append(err, c.setNodeClaimsUnderutilized(ctx, false, "", cmd.Candidates...))
+			if err := c.validateCandidates(ctx, cmd...); err != nil {
+				err = multierr.Append(err, c.markUnderutilized(ctx, false, "", cmd.Candidates...))
 				return reconcile.Result{}, fmt.Errorf("validating candidates, %w", err)
 			}
 		}
@@ -143,7 +149,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		return reconcile.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	if err := c.setNodeClaimsUnderutilized(ctx, true, uuid.NewUUID(), newCandidateSet...); err != nil {
+	if err := c.markUnderutilized(ctx, true, uuid.NewUUID(), newCandidateSet...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("propagating nomination, %w", err)
 	}
 
@@ -152,31 +158,40 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 // returns a map of command-id to list of candidate nodeclaim names
 // returned sorted by creation timestamp
-func (c *Controller) getActiveConsolidations(ctx context.Context) map[string]disruption.ConsolidationCommand {
+func (c *Controller) getActiveConsolidations(ctx context.Context) (map[string]disruption.Nomination, error) {
 	nodePools := c.cluster.NodePools()
-	commands := map[string]disruption.ConsolidationCommand{}
-	lo.ForEach(c.cluster.Nodes().Disruptable(ctx, c.kubeClient, c.recorder), func(s *state.StateNode, _ int) {
+	nominations := map[string]disruption.Nomination{}
+	pdbs, err := pdb.NewLimits(ctx, c.clk, c.kubeClient)
+	if err != nil {
+		return nil, err
+	}
+	c.cluster.ForEachNode(func(s *state.StateNode) bool {
+		_, err := s.ValidateDisruptable(ctx, c.kubeClient, pdbs)
+		if err != nil {
+			c.recorder.Publish(disruptionevents.Blocked(s.Node, s.NodeClaim, err.Error())...)
+		}
 		// if the nodeclaim doesn't have the underutilized status condition, it's not part of
 		// an active consolidation.
 		cond := s.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeUnderutilized)
 		if !cond.IsTrue() {
-			return
+			return true
 		}
 		// If the nodepool isn't found, we assume it's deleted or cluster state hasn't seen it yet.
 		// If it was deleted, we rely on the termination controller to clean this up
 		np, found := nodePools[s.Node.Labels[v1beta1.NodePoolLabelKey]]
 		if !found {
-			return
+			return true
 		}
-		cmd := commands[cond.Message]
+		nom := nominations[cond.Message]
 		// Add the command ID in idempotently
-		cmd.CommandID = cond.Message
-		cmd.Candidates = append(cmd.Candidates, s)
+		nom.CommandID = cond.Message
+		nom.Candidates = append(nom.Candidates, s)
 		// Use the larger consolidateAfter when batching
-		cmd.ConsolidateAfter = lo.Max([]time.Duration{cmd.ConsolidateAfter, *np.Spec.Disruption.ConsolidateAfter.Duration})
-		commands[cmd.CommandID] = cmd
+		nom.ConsolidateAfter = lo.Max([]time.Duration{nom.ConsolidateAfter, *np.Spec.Disruption.ConsolidateAfter.Duration})
+		nominations[nom.CommandID] = nom
+		return true
 	})
-	return commands
+	return nominations, nil
 }
 
 // Returns true if the candidates should be unmarked if used to validate existing commands.
@@ -240,7 +255,10 @@ func (c *Controller) validateCandidates(ctx context.Context, candidates ...*stat
 //     a. With a max batch size of 100, this means the max number of scheduling simulations for each starting point will be
 //     1 -> 2 -> 4 -> 8 -> 16 -> 32 -> 64 -> 100 = 8
 func (c *Controller) computeConsolidation(ctx context.Context) ([]*state.StateNode, error) {
-	candidates := c.Candidates(ctx)
+	candidates, err := c.Candidates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get candidates, %w", err)
+	}
 	lastValidMax := -1
 	start := c.clk.Now()
 	for i := range candidates {
@@ -291,9 +309,15 @@ func (c *Controller) computeConsolidation(ctx context.Context) ([]*state.StateNo
 }
 
 // Candidates returns a list of the stateNodes ordered by their disruption cost
-func (c *Controller) Candidates(ctx context.Context) []*state.StateNode {
-	candidates := c.cluster.Nodes().Disruptable(ctx, c.kubeClient, c.recorder)
-	candidatesToPods := candidates.ReschedulablePodsForStateNodes(ctx, c.kubeClient)
+func (c *Controller) Candidates(ctx context.Context) ([]*state.StateNode, error) {
+	candidates, err := c.cluster.Nodes().Disruptable(ctx, c.clk, c.kubeClient)
+	if err != nil {
+		return nil, err
+	}
+	candidatesToPods, err := candidates.ReschedulablePods(ctx, c.kubeClient)
+	if err != nil {
+		return nil, err
+	}
 	nodePools := c.cluster.NodePools()
 	sort.Slice(candidates, func(i, j int) bool {
 		iDisruptionCost := disruptionutils.ReschedulingCost(ctx, candidatesToPods[candidates[i]]) *
@@ -302,7 +326,7 @@ func (c *Controller) Candidates(ctx context.Context) []*state.StateNode {
 			disruptionutils.LifetimeRemaining(c.clk, nodePools[candidates[j].Labels()[v1beta1.NodePoolLabelKey]], candidates[j].NodeClaim)
 		return iDisruptionCost < jDisruptionCost
 	})
-	return candidates
+	return candidates, nil
 }
 
 // Analyze results will look at the consolidation command, and return true if it should be executed
@@ -333,7 +357,7 @@ func (c *Controller) analyzeResults(ctx context.Context, results pscheduling.Res
 
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
-	candidatePrice, err := c.getCandidatePrices(ctx, candidates...)
+	totalPrice, cheapestOfferingsPrices, err := c.getCandidatePrices(ctx, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
@@ -349,14 +373,14 @@ func (c *Controller) analyzeResults(ctx context.Context, results pscheduling.Res
 
 	if allExistingAreSpot &&
 		results.NewNodeClaims[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
-		return c.validateSpotToSpotConsolidation(ctx, candidates, results, candidatePrice)
+		return c.validateSpotToSpotConsolidation(ctx, candidates, results, totalPrice)
 	}
 
 	// filterByPriceWithMinValues returns the instanceTypes that are lower priced than the current candidate and the requirement for the NodeClaim that does not meet minValues.
 	// If we use this directly for spot-to-spot consolidation, we are bound to get repeated consolidations because the strategy that chooses to launch the spot instance from the list does
 	// it based on availability and price which could result in selection/launch of non-lowest priced instance in the list. So, we would keep repeating this loop till we get to lowest priced instance
 	// causing churns and landing onto lower available spot instance ultimately resulting in higher interruptions.
-	results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValues(results.NewNodeClaims[0].Requirements, candidatePrice)
+	results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValues(results.NewNodeClaims[0].Requirements, totalPrice)
 
 	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
 		if len(candidates) == 1 {
@@ -368,12 +392,29 @@ func (c *Controller) analyzeResults(ctx context.Context, results pscheduling.Res
 		}
 		return false, nil
 	}
+	// Remove replacement node options that are in the list of candidates we're trying to disrupt
+	// see explanation on RemoveSameInstanceTypeOptions for why this is required
+	results.NewNodeClaims[0].InstanceTypeOptions, err = results.NewNodeClaims[0].RemoveSameInstanceTypeOptions(cheapestOfferingsPrices, sets.New(lo.Map(candidates, func(s *state.StateNode, _ int) string {
+		return s.Labels()[v1.LabelInstanceTypeStable]
+	})...))
+
+	if len(results.NewNodeClaims[0].NodeClaimTemplate.InstanceTypeOptions) == 0 {
+		if len(candidates) == 1 {
+			if err != nil {
+				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("minValues requirement not met, %s", err.Error()))...)
+			} else {
+				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
+			}
+		}
+		return false, nil
+	}
+
 	return true, nil
 }
 
 // propagates the consolidation decision to cluster state and also marks all
 // associated nodeclaims as underutilized
-func (c *Controller) setNodeClaimsUnderutilized(ctx context.Context, setTrue bool, commandID types.UID, candidates ...*state.StateNode) error {
+func (c *Controller) markUnderutilized(ctx context.Context, setTrue bool, commandID types.UID, candidates ...*state.StateNode) error {
 	for i := range candidates {
 		nc := candidates[i].NodeClaim
 		cond := nc.StatusConditions().Get(v1beta1.ConditionTypeUnderutilized)
@@ -401,8 +442,14 @@ func (c *Controller) setNodeClaimsUnderutilized(ctx context.Context, setTrue boo
 }
 
 // getCandidatePrices returns the sum of the prices of the given candidates
-func (c *Controller) getCandidatePrices(ctx context.Context, candidates ...*state.StateNode) (float64, error) {
+// and the cheapest offering for each of the candidates we're trying to disrupt
+func (c *Controller) getCandidatePrices(ctx context.Context, candidates ...*state.StateNode) (float64, map[string]float64, error) {
+	// get instance types mapping
 	c.refreshInstanceTypeMapping(ctx)
+
+	existingInstanceTypes := sets.New[string]()
+	pricesByInstanceType := map[string]float64{}
+
 	var price float64
 	for _, candidate := range candidates {
 		npName := candidate.Labels()[v1beta1.NodePoolLabelKey]
@@ -413,15 +460,26 @@ func (c *Controller) getCandidatePrices(ctx context.Context, candidates ...*stat
 			scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, ct),
 			scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zone),
 		)
+
+		existingInstanceTypes.Insert(itName)
 		offs := c.instanceTypes[npName][itName].Offerings.Available().Compatible(reqs)
 		if len(offs) == 0 {
-			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", itName, ct, zone)
+			return 0.0, nil, fmt.Errorf("unable to determine offering for %s/%s/%s", itName, ct, zone)
 		}
+
+		existingPrice, ok := pricesByInstanceType[itName]
+		if !ok {
+			existingPrice = math.MaxFloat64
+		}
+		if p := offs.Cheapest().Price; p < existingPrice {
+			pricesByInstanceType[itName] = p
+		}
+
 		// We choose most expensive here rather than cheapest, since we assume that if there are multiple matching offerings
 		// we get the most expensive, to ensure we only make cost saving decisions.
 		price += offs.MostExpensive().Price
 	}
-	return price, nil
+	return price, pricesByInstanceType, nil
 }
 
 // refreshInstanceTypeMapping tries to update the Controller's NodePoolToInstanceTypesMap

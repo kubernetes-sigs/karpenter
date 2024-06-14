@@ -61,20 +61,20 @@ var _ = Describe("Webhook/Validation", func() {
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should succeed on a disabled consolidateAfter", func() {
-			nodePool.Spec.Disruption.ConsolidateAfter = &NillableDuration{Duration: nil}
+			nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: nil}
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should succeed on a valid consolidateAfter", func() {
-			nodePool.Spec.Disruption.ConsolidateAfter = &NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("30s")))}
+			nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("30s")))}
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should succeed when setting consolidateAfter with consolidationPolicy=WhenEmpty", func() {
-			nodePool.Spec.Disruption.ConsolidateAfter = &NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("30s")))}
+			nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("30s")))}
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should succeed when setting consolidateAfter with consolidationPolicy=WhenUnderutilized", func() {
-			nodePool.Spec.Disruption.ConsolidateAfter = &NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("30s")))}
+			nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("30s")))}
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})

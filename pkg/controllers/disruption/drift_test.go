@@ -50,7 +50,7 @@ var _ = Describe("Drift", func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Disruption: v1beta1.Disruption{
-					ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+					ConsolidateAfter: v1beta1.NillableDuration{Duration: nil},
 					ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
 					// Disrupt away!
 					Budgets: []v1beta1.Budget{{
@@ -341,7 +341,7 @@ var _ = Describe("Drift", func() {
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+						ConsolidateAfter: v1beta1.NillableDuration{Duration: nil},
 						ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
 						Budgets: []v1beta1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
@@ -408,7 +408,7 @@ var _ = Describe("Drift", func() {
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+						ConsolidateAfter: v1beta1.NillableDuration{Duration: nil},
 						ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
 						Budgets: []v1beta1.Budget{{
 							Nodes: "100%",

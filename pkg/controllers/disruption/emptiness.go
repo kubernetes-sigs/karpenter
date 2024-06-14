@@ -47,14 +47,14 @@ func NewEmptiness(clk clock.Clock, recorder events.Recorder) *Emptiness {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	// If we don't have the "WhenEmpty" policy set, we should not do this method, but
-	// we should also not fire an event here to users since this can be confusing when the field on the NodePool
-	// is named "consolidationPolicy"
-	if c.nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenEmpty {
+	if c.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
+		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.nodePool.Name))...)
 		return false
 	}
-	if c.nodePool.Spec.Disruption.ConsolidateAfter != nil && c.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
-		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.nodePool.Name))...)
+	// If "WhenEmpty" is not the consolidation policy, only consider underutilization for
+	// cost consolidation
+	if c.nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenEmpty {
+		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has empty consolidation disabled", c.nodePool.Name))...)
 		return false
 	}
 	if len(c.reschedulablePods) != 0 {

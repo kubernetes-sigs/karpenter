@@ -18,12 +18,14 @@ package scheduling
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"sync/atomic"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -117,6 +119,38 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	n.topology.Record(pod, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, hostPorts)
 	return nil
+}
+
+// RemoveSameInstanceTypeOptions filters out instance types that are more expensive than the cheapest instance type that is being
+// consolidated if the list of replacement instance types include one of the instance types that is being removed
+//
+// This handles the following potential consolidation result:
+// NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.small, t3a.xlarge, t3a.2xlarge
+//
+// In this case, we shouldn't perform this consolidation at all.  This is equivalent to just
+// deleting the 2x t3a.xlarge NodeClaims.  This code will identify that t3a.small is in both lists and filter
+// out any instance type that is the same or more expensive than the t3a.small
+//
+// For another scenario:
+// NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano, t3a.small, t3a.xlarge, t3a.2xlarge
+//
+// This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
+// leaving the valid consolidation:
+// NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
+func (n *NodeClaim) RemoveSameInstanceTypeOptions(cheapestCandidateOfferingsPrices map[string]float64, candidateInstanceTypes sets.Set[string]) ([]*cloudprovider.InstanceType, error) {
+	maxPrice := math.MaxFloat64
+	for _, it := range n.InstanceTypeOptions {
+		// we are considering replacing multiple NodeClaims with a single NodeClaim of one of the same types, so the replacement
+		// node must be cheaper than the price of the existing node, or we should just keep that one and do a
+		// deletion only to reduce cluster disruption (fewer pods will re-schedule).
+		if candidateInstanceTypes.Has(it.Name) {
+			if cheapestCandidateOfferingsPrices[it.Name] < maxPrice {
+				maxPrice = cheapestCandidateOfferingsPrices[it.Name]
+			}
+		}
+	}
+	newNodeClaim, err := n.RemoveInstanceTypeOptionsByPriceAndMinValues(n.Requirements, maxPrice)
+	return newNodeClaim.InstanceTypeOptions, err
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup

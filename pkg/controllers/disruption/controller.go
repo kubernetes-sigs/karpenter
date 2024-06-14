@@ -81,10 +81,11 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
 			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 			NewDrift(kubeClient, cluster, provisioner, recorder),
-			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
-			// emptyNodeConsolidation are mutually exclusive, only one of these will operate
+			// Delete any remaining Empty/Underutilized NodeClaims.
+			// While Emptiness and Underutilization occurs across the cluster, they are mutually
+			// exclusive within a NodePool.
 			NewEmptiness(clk, recorder),
-			NewConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
+			NewUnderutilization(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
 		},
 	}
 }
