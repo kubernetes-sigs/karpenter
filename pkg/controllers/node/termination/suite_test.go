@@ -78,6 +78,9 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Termination", func() {
+	// expectedReconciliations is the number of reconciliations the termination controller should need to remove a node.
+	// One reconciliation to start terminating the nodeclaim, and another to get the instance, see that it's gone, and remove the node.
+	const expectedReconciliations = 2
 	var node *v1.Node
 	var nodeClaim *v1beta1.NodeClaim
 
@@ -104,12 +107,10 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should delete nodeclaims associated with nodes", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
@@ -143,7 +144,7 @@ var _ = Describe("Termination", func() {
 				nodes = append(nodes, node)
 			}
 
-			Eventually(func(g Gomega) {
+			for range expectedReconciliations {
 				var wg sync.WaitGroup
 				// this is enough to trip the race detector
 				for i := 0; i < numNodes; i++ {
@@ -151,16 +152,12 @@ var _ = Describe("Termination", func() {
 					go func(node *v1.Node) {
 						defer GinkgoRecover()
 						defer wg.Done()
-						_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-						g.Expect(err).ToNot(HaveOccurred())
+						ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 					}(nodes[i])
 				}
 				wg.Wait()
-				for _, n := range nodes {
-					tmpNode := &v1.Node{}
-					g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(n), tmpNode))).To(BeTrue())
-				}
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			}
+			ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
 		})
 		It("should exclude nodes from load balancers when terminating", func() {
 			labels := map[string]string{"foo": "bar"}
@@ -208,12 +205,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not evict pods that tolerate karpenter disruption taint with exists operator", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -242,12 +237,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should evict pods that tolerate the node.kubernetes.io/unschedulable taint", func() {
 			podEvict := test.Pod(test.PodOptions{
@@ -272,12 +265,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should delete nodes that have pods without an ownerRef", func() {
 			pod := test.Pod(test.PodOptions{
@@ -304,12 +295,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile node to evict pod and delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should delete nodes with terminal pods", func() {
 			podEvictPhaseSucceeded := test.Pod(test.PodOptions{
@@ -325,12 +314,10 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			// Trigger Termination Controller, which should ignore these pods and delete the node
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should fail to evict pods that violate a PDB", func() {
 			minAvailable := intstr.FromInt32(1)
@@ -371,12 +358,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should evict pods in order", func() {
 			daemonEvict := test.DaemonSet()
@@ -461,12 +446,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should evict non-critical pods first", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -500,12 +483,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not evict static pods", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -547,12 +528,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not delete nodes until all pods are deleted", func() {
 			pods := test.Pods(2, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -584,12 +563,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should delete nodes with no underlying instance even if not fully drained", func() {
 			pods := test.Pods(2, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -621,12 +598,10 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not delete nodes with no underlying instance if the node is still Ready", func() {
 			pods := test.Pods(2, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -656,12 +631,10 @@ var _ = Describe("Termination", func() {
 			// Reconcile to try to delete the node, but don't succeed because the readiness condition
 			// of the node still won't let us delete it
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Consistently(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeFalse())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectExists(ctx, env.Client, node)
 		})
 		It("should wait for pods to terminate", func() {
 			pod := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
@@ -679,12 +652,10 @@ var _ = Describe("Termination", func() {
 			// to eliminate test-flakiness we reset the time to current time + 90 seconds instead of just advancing
 			// the clock by 90 seconds.
 			fakeClock.SetTime(time.Now().Add(90 * time.Second))
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			for range expectedReconciliations {
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			}
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not evict a new pod with the same name using the old pod's eviction queue key", func() {
 			pod := test.Pod(test.PodOptions{
