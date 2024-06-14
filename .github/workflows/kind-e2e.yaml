@@ -15,9 +15,17 @@ jobs:
         k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
     steps:
     - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+    - uses: actions/checkout@v4
+      with:
+        repository: nathangeology/karpenter_evaluate
+        path: ./karpenter_eval/ #<-- clone https://github.com/org1/repo1
     - uses: ./.github/actions/install-deps
       with:
           k8sVersion: ${{ matrix.k8sVersion }}
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.10"
     - name: Kind Cluster
       uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
     - name: check kind cluster and taint nodes
@@ -43,11 +51,22 @@ jobs:
         kubectl get nodepools
         kubectl get pods -A
         kubectl describe nodes
+    - name: install KPI report dependencies
+      shell: bash
+      run: |
+        pip install awswrangler
+        pip install prometheus-api-client
+        pip install ./karpenter_eval/
     - name: run test suites
       shell: bash
       run: | 
         make e2etests
-    - name: cleanup 
+    - name: run KPI report
+      shell: bash
+      run: |
+        echo "run KPIs here"
+        python ./karpenter_eval/main.py your_file_here.csv
+    - name: cleanup
       shell: bash
       run: | 
         kubectl delete nodepools --all 
