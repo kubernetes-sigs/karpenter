@@ -54,17 +54,17 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	constrainedByBudgets := false
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
-		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
-		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
-		// can find their nodes disrupted here.
-		if candidate.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty) != nil {
-			continue
-		}
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.
 		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] == 0 {
 			constrainedByBudgets = true
+			continue
+		}
+		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
+		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
+		// can find their nodes disrupted here.
+		if len(candidate.reschedulablePods) == 0 {
 			continue
 		}
 		if s.clock.Now().After(timeout) {
