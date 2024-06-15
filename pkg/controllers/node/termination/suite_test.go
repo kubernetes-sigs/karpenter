@@ -80,7 +80,6 @@ var _ = AfterSuite(func() {
 var _ = Describe("Termination", func() {
 	// expectedReconciliations is the number of reconciliations the termination controller should need to remove a node.
 	// One reconciliation to start terminating the nodeclaim, and another to get the instance, see that it's gone, and remove the node.
-	const expectedReconciliations = 2
 	var node *v1.Node
 	var nodeClaim *v1beta1.NodeClaim
 
@@ -107,9 +106,9 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should delete nodeclaims associated with nodes", func() {
@@ -144,7 +143,8 @@ var _ = Describe("Termination", func() {
 				nodes = append(nodes, node)
 			}
 
-			for range expectedReconciliations {
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			for range 2 {
 				var wg sync.WaitGroup
 				// this is enough to trip the race detector
 				for i := 0; i < numNodes; i++ {
@@ -205,9 +205,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not evict pods that tolerate karpenter disruption taint with exists operator", func() {
@@ -237,9 +237,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should evict pods that tolerate the node.kubernetes.io/unschedulable taint", func() {
@@ -265,9 +265,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should delete nodes that have pods without an ownerRef", func() {
@@ -295,9 +295,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile node to evict pod and delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should delete nodes with terminal pods", func() {
@@ -314,9 +314,9 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			// Trigger Termination Controller, which should ignore these pods and delete the node
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should fail to evict pods that violate a PDB", func() {
@@ -358,9 +358,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should evict pods in order", func() {
@@ -446,9 +446,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should evict non-critical pods first", func() {
@@ -483,9 +483,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not evict static pods", func() {
@@ -528,9 +528,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not delete nodes until all pods are deleted", func() {
@@ -563,9 +563,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should delete nodes with no underlying instance even if not fully drained", func() {
@@ -598,9 +598,9 @@ var _ = Describe("Termination", func() {
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not delete nodes with no underlying instance if the node is still Ready", func() {
@@ -631,9 +631,9 @@ var _ = Describe("Termination", func() {
 			// Reconcile to try to delete the node, but don't succeed because the readiness condition
 			// of the node still won't let us delete it
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectExists(ctx, env.Client, node)
 		})
 		It("should wait for pods to terminate", func() {
@@ -652,9 +652,9 @@ var _ = Describe("Termination", func() {
 			// to eliminate test-flakiness we reset the time to current time + 90 seconds instead of just advancing
 			// the clock by 90 seconds.
 			fakeClock.SetTime(time.Now().Add(90 * time.Second))
-			for range expectedReconciliations {
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			}
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should not evict a new pod with the same name using the old pod's eviction queue key", func() {
