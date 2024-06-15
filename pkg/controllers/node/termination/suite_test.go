@@ -76,8 +76,6 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Termination", func() {
-	// expectedReconciliations is the number of reconciliations the termination controller should need to remove a node.
-	// One reconciliation to start terminating the nodeclaim, and another to get the instance, see that it's gone, and remove the node.
 	var node *v1.Node
 	var nodeClaim *v1beta1.NodeClaim
 
