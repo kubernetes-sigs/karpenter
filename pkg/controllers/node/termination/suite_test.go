@@ -27,7 +27,6 @@ import (
 	"github.com/samber/lo"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -39,7 +38,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -716,12 +714,9 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 
 			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"nodepool": node.Labels[v1beta1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
@@ -731,12 +726,9 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Eventually(func(g Gomega) {
-				_, err := reconcile.AsReconciler(env.Client, terminationController).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
-				g.Expect(err).ToNot(HaveOccurred())
-				tmpNode := &v1.Node{}
-				g.Expect(errors.IsNotFound(env.Client.Get(ctx, client.ObjectKeyFromObject(node), tmpNode))).To(BeTrue())
-			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 
 			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"nodepool": node.Labels[v1beta1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
