@@ -276,7 +276,7 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 	podKeys := sets.NewString(lo.Map(pods, func(p *v1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
 	for pod, binding := range bindings {
 		// Only bind the pods that are passed through
-	if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
+		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
 			ExpectManualBinding(ctx, c, pod, binding.Node)
 			Expect(cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
 		}
