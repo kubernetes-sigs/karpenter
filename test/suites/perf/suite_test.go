@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -64,6 +65,13 @@ var _ = BeforeEach(func() {
 	env.BeforeEach()
 	nodeClass = env.DefaultNodeClass()
 	nodePool = env.DefaultNodePool(nodeClass)
+	test.ReplaceRequirements(nodePool, v1beta1.NodeSelectorRequirementWithMinValues{
+		NodeSelectorRequirement: v1.NodeSelectorRequirement{
+			Key:      v1alpha1.InstanceSizeLabelKey,
+			Operator: v1.NodeSelectorOpLt,
+			Values:   []string{"32"},
+		},
+	})
 	nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
 })
 

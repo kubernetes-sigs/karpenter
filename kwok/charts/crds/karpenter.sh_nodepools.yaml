@@ -359,8 +359,6 @@ spec:
                                     rule: self != "karpenter.sh/nodepool"
                                   - message: label "kubernetes.io/hostname" is restricted
                                     rule: self != "kubernetes.io/hostname"
-                                  - message: label domain "karpenter.kwok.sh" is restricted
-                                    rule: self in ["karpenter.kwok.sh/instance-cpu", "karpenter.kwok.sh/instance-memory", "karpenter.kwok.sh/instance-family", "karpenter.kwok.sh/instance-size"] || !self.find("^([^/]+)").endsWith("karpenter.kwok.sh")
                               minValues:
                                 description: |-
                                   This field is ALPHA and can be dropped or replaced at any time
