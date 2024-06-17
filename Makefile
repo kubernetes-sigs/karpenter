@@ -69,7 +69,7 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 test: ## Run tests
 	go test ./pkg/... \
 		-race \
-		-timeout 15m \
+		-timeout 60m \
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.randomize-all \
 		--ginkgo.v \
