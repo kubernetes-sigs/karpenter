@@ -28,7 +28,6 @@ import (
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 var (
@@ -90,16 +89,18 @@ func constructGenericInstanceTypes() []kwok.InstanceTypeOptions {
 					}
 					price := priceFromResources(opts.Resources)
 
-					opts.Offerings = cloudprovider.Offerings{}
+					opts.Offerings = []kwok.KWOKOffering{}
 					for _, zone := range KwokZones {
 						for _, ct := range []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand} {
-							opts.Offerings = append(opts.Offerings, cloudprovider.Offering{
-								Requirements: scheduling.NewLabelRequirements(map[string]string{
-									v1beta1.CapacityTypeLabelKey: ct,
-									v1.LabelTopologyZone:         zone,
-								}),
-								Price:     lo.Ternary(ct == v1beta1.CapacityTypeSpot, price*.7, price),
-								Available: true,
+							opts.Offerings = append(opts.Offerings, kwok.KWOKOffering{
+								Requirements: []v1.NodeSelectorRequirement{
+									v1.NodeSelectorRequirement{Key: v1beta1.CapacityTypeLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{ct}},
+									v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{zone}},
+								},
+								Offering: cloudprovider.Offering{
+									Price:     lo.Ternary(ct == v1beta1.CapacityTypeSpot, price*.7, price),
+									Available: true,
+								},
 							})
 						}
 					}

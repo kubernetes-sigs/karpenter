@@ -104,11 +104,11 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 	sort.Slice(its, func(i, j int) bool {
 		iPrice := math.MaxFloat64
 		jPrice := math.MaxFloat64
-		if len(its[i].Offerings.Available().Compatible(reqs)) > 0 {
-			iPrice = its[i].Offerings.Available().Compatible(reqs).Cheapest().Price
+		if ofs := its[i].Offerings.Available().Compatible(reqs); len(ofs) > 0 {
+			iPrice = ofs.Cheapest().Price
 		}
-		if len(its[j].Offerings.Available().Compatible(reqs)) > 0 {
-			jPrice = its[j].Offerings.Available().Compatible(reqs).Cheapest().Price
+		if ofs := its[j].Offerings.Available().Compatible(reqs); len(ofs) > 0 {
+			jPrice = ofs.Cheapest().Price
 		}
 		if iPrice == jPrice {
 			return its[i].Name < its[j].Name
@@ -122,7 +122,7 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 func (its InstanceTypes) Compatible(requirements scheduling.Requirements) InstanceTypes {
 	var filteredInstanceTypes []*InstanceType
 	for _, instanceType := range its {
-		if len(instanceType.Offerings.Available().Compatible(requirements)) > 0 {
+		if instanceType.Offerings.Available().HasCompatible(requirements) {
 			filteredInstanceTypes = append(filteredInstanceTypes, instanceType)
 		}
 	}
@@ -236,14 +236,6 @@ type Offering struct {
 
 type Offerings []Offering
 
-// Get gets the offering from an offering slice that matches the
-// passed zone, capacityType, and other constraints
-func (ofs Offerings) Get(reqs scheduling.Requirements) (Offering, bool) {
-	return lo.Find(ofs, func(of Offering) bool {
-		return reqs.Compatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
-	})
-}
-
 // Available filters the available offerings from the returned offerings
 func (ofs Offerings) Available() Offerings {
 	return lo.Filter(ofs, func(o Offering, _ int) bool {
@@ -256,6 +248,16 @@ func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering Offering, _ int) bool {
 		return reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
 	})
+}
+
+// HasCompatible returns whether there is a compatible offering based on the passed requirements
+func (ofs Offerings) HasCompatible(reqs scheduling.Requirements) bool {
+	for _, of := range ofs {
+		if reqs.Compatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Cheapest returns the cheapest offering from the returned offerings

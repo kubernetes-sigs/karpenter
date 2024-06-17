@@ -21,6 +21,10 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/errors"
+
+	"sigs.k8s.io/karpenter/pkg/utils/termination"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
@@ -43,7 +47,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 // Controller for the resource
@@ -104,11 +107,26 @@ func (c *Controller) finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
-	// Be careful when removing this delete call in the Node termination flow
-	// This delete call is needed so that we ensure that we don't remove the node from the cluster
-	// until the full instance shutdown has taken place
-	if err := c.cloudProvider.Delete(ctx, nodeclaimutil.NewFromNode(node)); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
-		return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
+	nodeClaims, err := nodeutils.GetNodeClaims(ctx, node, c.kubeClient)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
+	}
+	for _, nodeClaim := range nodeClaims {
+		isInstanceTerminated, err := termination.EnsureTerminated(ctx, c.kubeClient, nodeClaim, c.cloudProvider)
+		if err != nil {
+			// 404 = the nodeClaim no longer exists
+			if errors.IsNotFound(err) {
+				continue
+			}
+			// 409 - The nodeClaim exists, but its status has already been modified
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, fmt.Errorf("ensuring instance termination, %w", err)
+		}
+		if !isInstanceTerminated {
+			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+		}
 	}
 	if err := c.removeFinalizer(ctx, node); err != nil {
 		return reconcile.Result{}, err
@@ -117,14 +135,14 @@ func (c *Controller) finalize(ctx context.Context, node *v1.Node) (reconcile.Res
 }
 
 func (c *Controller) deleteAllNodeClaims(ctx context.Context, node *v1.Node) error {
-	nodeClaimList := &v1beta1.NodeClaimList{}
-	if err := c.kubeClient.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+	nodeClaims, err := nodeutils.GetNodeClaims(ctx, node, c.kubeClient)
+	if err != nil {
 		return err
 	}
-	for i := range nodeClaimList.Items {
+	for _, nodeClaim := range nodeClaims {
 		// If we still get the NodeClaim, but it's already marked as terminating, we don't need to call Delete again
-		if nodeClaimList.Items[i].DeletionTimestamp.IsZero() {
-			if err := c.kubeClient.Delete(ctx, &nodeClaimList.Items[i]); err != nil {
+		if nodeClaim.DeletionTimestamp.IsZero() {
+			if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 				return client.IgnoreNotFound(err)
 			}
 		}
