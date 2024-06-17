@@ -27,6 +27,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -43,7 +44,7 @@ func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidat
 	return &MultiNodeConsolidation{consolidation: consolidation}
 }
 
-func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1beta1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if m.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
@@ -61,13 +62,19 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	for _, candidate := range candidates {
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized] == 0 {
 			constrainedByBudgets = true
+			continue
+		}
+		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
+		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
+		// can find their nodes disrupted here.
+		if len(candidate.reschedulablePods) == 0 {
 			continue
 		}
 		// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 		disruptableCandidates = append(disruptableCandidates, candidate)
-		disruptionBudgetMapping[candidate.nodePool.Name]--
+		disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonUnderutilized]--
 	}
 
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.
@@ -89,7 +96,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, scheduling.Results{}, nil
 	}
 
-	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue).IsValid(ctx, cmd, consolidationTTL); err != nil {
+	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue, v1beta1.DisruptionReasonUnderutilized).IsValid(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
 			return Command{}, scheduling.Results{}, nil

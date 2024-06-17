@@ -641,7 +641,9 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 		// This should not bring in the unmanaged node.
-		Expect(budgets[nodePool.Name]).To(Equal(10))
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
+			Expect(budgets[nodePool.Name][reason]).To(Equal(10))
+		}
 	})
 	It("should not consider nodes that are not initialized as part of disruption count", func() {
 		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
@@ -670,7 +672,9 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 		// This should not bring in the uninitialized node.
-		Expect(budgets[nodePool.Name]).To(Equal(10))
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
+			Expect(budgets[nodePool.Name][reason]).To(Equal(10))
+		}
 	})
 	It("should not return a negative disruption value", func() {
 		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "10%"}}
@@ -689,7 +693,9 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
-		Expect(budgets[nodePool.Name]).To(Equal(0))
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
+			Expect(budgets[nodePool.Name][reason]).To(Equal(0))
+		}
 	})
 	It("should consider nodes with a deletion timestamp set and MarkedForDeletion to the disruption count", func() {
 		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
@@ -711,7 +717,10 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
-		Expect(budgets[nodePool.Name]).To(Equal(8))
+
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
+			Expect(budgets[nodePool.Name][reason]).To(Equal(8))
+		}
 	})
 	It("should consider not ready nodes to the disruption count", func() {
 		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
@@ -730,7 +739,9 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
-		Expect(budgets[nodePool.Name]).To(Equal(8))
+		for _, reason := range v1beta1.WellKnownDisruptionReasons {
+			Expect(budgets[nodePool.Name][reason]).To(Equal(8))
+		}
 	})
 })
 

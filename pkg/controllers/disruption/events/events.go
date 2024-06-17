@@ -124,6 +124,17 @@ func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) (evs []
 	return evs
 }
 
+func NodePoolBlockedForDisruptionReason(nodePool *v1beta1.NodePool, reason v1beta1.DisruptionReason) events.Event {
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DisruptionBlocked",
+		Message:        fmt.Sprintf("No allowed disruptions for disruption reason %s due to blocking budget", reason),
+		DedupeValues:   []string{string(nodePool.UID), string(reason)},
+		DedupeTimeout:  1 * time.Minute,
+	}
+}
+
 func NodePoolBlocked(nodePool *v1beta1.NodePool) events.Event {
 	return events.Event{
 		InvolvedObject: nodePool,
