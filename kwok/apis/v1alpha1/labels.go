@@ -16,9 +16,10 @@ limitations under the License.
 
 package v1alpha1
 
+import "sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+
 const (
 	// Labels that can be selected on and are propagated to the node
-	InstanceTypeLabelKey   = Group + "/instance-type"
 	InstanceSizeLabelKey   = Group + "/instance-size"
 	InstanceFamilyLabelKey = Group + "/instance-family"
 	InstanceMemoryLabelKey = Group + "/instance-memory"
@@ -30,3 +31,13 @@ const (
 	NodeViewerLabelKey    = "eks-node-viewer/instance-price"
 	KwokPartitionLabelKey = "kwok-partition"
 )
+
+func init() {
+	v1beta1.RestrictedLabelDomains = v1beta1.RestrictedLabelDomains.Insert(Group)
+	v1beta1.WellKnownLabels = v1beta1.WellKnownLabels.Insert(
+		InstanceSizeLabelKey,
+		InstanceFamilyLabelKey,
+		InstanceCPULabelKey,
+		InstanceMemoryLabelKey,
+	)
+}
