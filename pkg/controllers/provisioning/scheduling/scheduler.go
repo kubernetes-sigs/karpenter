@@ -261,10 +261,10 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 
 	clonedScheduler := reprint.This(s).(*Scheduler)
 	newNodeClaimNeeded, err := newNodeClaimNeeded(ctx, clonedScheduler, pod)
-	if err != nil {
-		return err
-	}
 	if !newNodeClaimNeeded {
+		if err != nil {
+			return err
+		}
 		for _, nodeClaim := range s.newNodeClaims {
 			if err := nodeClaim.Add(pod); err == nil {
 				return nil
