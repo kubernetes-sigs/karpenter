@@ -17,10 +17,8 @@ limitations under the License.
 package perf_test
 
 import (
-	"fmt"
-	"time"
-
 	. "github.com/onsi/ginkgo/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,11 +26,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var _ = Describe("Performance Benchmark", func() {
+var replicas int = 100
+
+var _ = Describe("Performance", func() {
 	Context("Provisioning", func() {
 		It("should do simple provisioning", func() {
 			deployment := test.Deployment(test.DeploymentOptions{
-				Replicas: 100,
+				Replicas: int32(replicas),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: testLabels,
@@ -44,18 +44,27 @@ var _ = Describe("Performance Benchmark", func() {
 					},
 				}})
 			env.ExpectCreated(deployment)
-			start := time.Now()
 			env.ExpectCreated(nodePool, nodeClass)
-			env.EventuallyExpectHealthyPodCount(labelSelector, 100)
-			// Need a way to respond to the last pod healthy event or look at the pod status conditions after the fact to get the exact measurements here.
-			// would also be good to just pull the metrics directly from the Karpenter pod to get the scheduling simulation metrics.
+			env.EventuallyExpectHealthyPodCount(labelSelector, replicas)
+		})
+		It("should do complex provisioning", func() {
+			deployments := []*appsv1.Deployment{}
+			for _, option := range test.MakeDiversePodOptions() {
+				deployments = append(deployments, test.Deployment(
+					test.DeploymentOptions{
+						PodOptions: option,
+						Replicas:   int32(replicas),
+					},
+				))
+			}
+			for _, dep := range deployments {
+				env.ExpectCreated(dep)
+			}
+			env.TimeIntervalCollector.Start("PostDeployment")
+			defer env.TimeIntervalCollector.End("PostDeployment")
 
-			// env.Monitor.GetLastPodSchedulingEvent()
-			duration := time.Since(start)
-
-			fmt.Println("--------- RESULTS ---------")
-			fmt.Printf("This is the duration: %s\n", duration)
+			env.ExpectCreated(nodePool, nodeClass)
+			env.EventuallyExpectHealthyPodCount(labelSelector, len(deployments)*replicas)
 		})
 	})
-
 })

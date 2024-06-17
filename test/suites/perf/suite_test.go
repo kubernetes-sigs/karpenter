@@ -17,14 +17,18 @@ limitations under the License.
 package perf_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/test/pkg/debug"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -35,6 +39,7 @@ import (
 var nodePool *v1beta1.NodePool
 var nodeClass *v1alpha1.KWOKNodeClass
 var env *common.Environment
+
 var testLabels = map[string]string{
 	test.DiscoveryLabel: "owned",
 }
@@ -46,6 +51,10 @@ func TestPerf(t *testing.T) {
 		env = common.NewEnvironment(t)
 	})
 	AfterSuite(func() {
+		// Write out the timestamps from our tests
+		if err := debug.WriteTimestamps("path", env.TimeIntervalCollector); err != nil {
+			log.FromContext(env).Info(fmt.Sprintf("Failed to write timestamps to files, %s", err))
+		}
 		env.Stop()
 	})
 	RunSpecs(t, "Perf")
@@ -57,5 +66,8 @@ var _ = BeforeEach(func() {
 	nodePool = env.DefaultNodePool(nodeClass)
 	nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
 })
-var _ = AfterEach(func() { env.Cleanup() })
-var _ = AfterEach(func() { env.AfterEach() })
+
+var _ = AfterEach(func() {
+	env.Cleanup()
+	env.AfterEach()
+})

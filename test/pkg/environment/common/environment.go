@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
+	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"knative.dev/pkg/system"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -60,10 +61,11 @@ type Environment struct {
 	context.Context
 	cancel context.CancelFunc
 
-	Client     client.Client
-	Config     *rest.Config
-	KubeClient kubernetes.Interface
-	Monitor    *Monitor
+	TimeIntervalCollector *debug.TimeIntervalCollector
+	Client                client.Client
+	Config                *rest.Config
+	KubeClient            kubernetes.Interface
+	Monitor               *Monitor
 
 	StartingNodeCount int
 }
@@ -82,12 +84,13 @@ func NewEnvironment(t *testing.T) *Environment {
 	gomega.SetDefaultEventuallyTimeout(5 * time.Minute)
 	gomega.SetDefaultEventuallyPollingInterval(1 * time.Second)
 	return &Environment{
-		Context:    ctx,
-		cancel:     cancel,
-		Config:     config,
-		Client:     client,
-		KubeClient: kubernetes.NewForConfigOrDie(config),
-		Monitor:    NewMonitor(ctx, client),
+		Context:               ctx,
+		cancel:                cancel,
+		Config:                config,
+		Client:                client,
+		KubeClient:            kubernetes.NewForConfigOrDie(config),
+		Monitor:               NewMonitor(ctx, client),
+		TimeIntervalCollector: debug.NewTimestampCollector(),
 	}
 }
 

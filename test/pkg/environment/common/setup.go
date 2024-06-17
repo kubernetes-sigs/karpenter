@@ -33,6 +33,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
+
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -59,7 +61,7 @@ var (
 		&schedulingv1.PriorityClass{},
 		&v1.Node{},
 		&v1beta1.NodeClaim{},
-		// TODO @njtran add KWOKNodeClass
+		&v1alpha1.KWOKNodeClass{},
 	}
 )
 
@@ -69,6 +71,8 @@ func (env *Environment) BeforeEach() {
 
 	// Expect this cluster to be clean for test runs to execute successfully
 	env.ExpectCleanCluster()
+	env.TimeIntervalCollector.Reset()
+	env.TimeIntervalCollector.Start(debug.StageE2E)
 
 	env.Monitor.Reset()
 	env.StartingNodeCount = env.Monitor.NodeCountAtReset()
@@ -108,6 +112,8 @@ func (env *Environment) Cleanup() {
 
 func (env *Environment) AfterEach() {
 	debug.AfterEach(env.Context)
+	env.TimeIntervalCollector.End(debug.StageE2E)
+	Expect(env.TimeIntervalCollector.Record(CurrentSpecReport().LeafNodeText)).To(Succeed())
 	env.printControllerLogs(&v1.PodLogOptions{Container: "controller"})
 }
 
