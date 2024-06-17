@@ -122,7 +122,6 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 	}
 
 	opts.instanceTypeLabels = map[string]string{
-		v1alpha1.InstanceTypeLabelKey:   opts.Name,
 		v1alpha1.InstanceSizeLabelKey:   parseSizeFromType(opts.Name, cpu),
 		v1alpha1.InstanceFamilyLabelKey: parseFamilyFromType(opts.Name),
 		v1alpha1.InstanceCPULabelKey:    cpu,

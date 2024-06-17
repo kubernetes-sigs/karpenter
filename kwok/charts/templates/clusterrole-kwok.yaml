@@ -29,10 +29,10 @@ metadata:
   {{- end }}
 rules:
   # Read
-  - apiGroups: ["kwok.karpenter.sh"]
+  - apiGroups: ["karpenter.kwok.sh"]
     resources: ["kwoknodeclasses"]
     verbs: ["get", "list", "watch"]
   # Write
-  - apiGroups: ["kwok.karpenter.sh"]
+  - apiGroups: ["karpenter.kwok.sh"]
     resources: ["kwoknodeclasses", "kwoknodeclasses/status"]
     verbs: ["patch", "update"]
