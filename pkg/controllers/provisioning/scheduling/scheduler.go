@@ -275,6 +275,17 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	var errs error
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
 		instanceTypes := s.instanceTypes[nodeClaimTemplate.NodePoolName]
+		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
+		if remaining, ok := s.remainingResources[nodeClaimTemplate.NodePoolName]; ok {
+			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeClaimTemplate.NodePoolName], remaining)
+			if len(instanceTypes) == 0 {
+				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool: %q", nodeClaimTemplate.NodePoolName))
+				continue
+			} else if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) != len(instanceTypes) {
+				log.FromContext(ctx).V(1).WithValues("NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName)).Info(fmt.Sprintf("%d out of %d instance types were excluded because they would breach limits",
+					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName])))
+			}
+		}
 		newNodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
 		// Pod is not scheduled to existing node because it is more expensive
 		if err := newNodeClaim.Add(pod); err != nil {
@@ -300,9 +311,6 @@ func newNodeClaimNeeded(ctx context.Context, s *Scheduler, pod *v1.Pod) (bool, e
 			break
 		}
 	}
-	// if existingNodeClaim == nil {
-	// 	return true, nil
-	// }
 
 	var errs error
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
@@ -340,6 +348,9 @@ func newNodeClaimNeeded(ctx context.Context, s *Scheduler, pod *v1.Pod) (bool, e
 			}
 		}
 		return true, errs
+	}
+	if existingNodeClaim != nil {
+		return false, nil
 	}
 	return false, errs
 }
