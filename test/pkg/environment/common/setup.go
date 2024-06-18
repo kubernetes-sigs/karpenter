@@ -70,7 +70,6 @@ func (env *Environment) BeforeEach() {
 	debug.BeforeEach(env.Context, env.Config, env.Client)
 	// Expect this cluster to be clean for test runs to execute successfully
 	env.ExpectCleanCluster()
-	env.TimeIntervalCollector.Reset()
 	env.TimeIntervalCollector.Start(debug.StageE2E)
 
 	env.Monitor.Reset()

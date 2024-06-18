@@ -643,6 +643,17 @@ func (env *Environment) EventuallyExpectCreatedNodeClaimCount(comparator string,
 	})
 }
 
+func (env *Environment) EventuallyExpectNodeClaimsReady(nodeClaims ...*v1beta1.NodeClaim) {
+	GinkgoHelper()
+	Eventually(func(g Gomega) {
+		for _, nc := range nodeClaims {
+			temp := &v1beta1.NodeClaim{}
+			g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(nc), temp)).Should(Succeed())
+			g.Expect(temp.StatusConditions().Root().IsTrue()).To(BeTrue())
+		}
+	}).Should(Succeed())
+}
+
 func (env *Environment) EventuallyExpectExpired(nodeClaims ...*v1beta1.NodeClaim) {
 	GinkgoHelper()
 	Eventually(func(g Gomega) {

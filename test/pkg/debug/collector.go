@@ -58,7 +58,7 @@ func (t *TimeIntervalCollector) Reset() {
 }
 
 // Record adds the current starts/ends/stages as a list of time intervals,
-// and adds it to the existingTimestamps
+// and adds it to the existingTimestamps, then resets the starts/ends/stages.
 func (t *TimeIntervalCollector) Record(name string) {
 	intervals := t.translate()
 	caser := cases.Title(language.AmericanEnglish)
