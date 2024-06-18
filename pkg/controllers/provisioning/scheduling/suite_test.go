@@ -2141,6 +2141,58 @@ var _ = Context("Scheduling", func() {
 
 				Expect(node1.Name).To(Equal(node2.Name))
 			})
+			It("should not schedule a pod to an eventual disruption candidate", func() {
+				ExpectApplied(ctx, env.Client, nodePool)
+				initialPod := test.UnschedulablePod()
+				bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+				ExpectScheduled(ctx, env.Client, initialPod)
+
+				nodeClaim1 := bindings.Get(initialPod).NodeClaim
+				node1 := bindings.Get(initialPod).Node
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
+				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
+
+				// delete the pod so that the node is empty
+				ExpectDeleted(ctx, env.Client, initialPod)
+				// make the node an eventual disruption candidate by marking it as expired
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
+				ExpectApplied(ctx, env.Client, nodeClaim1, node1)
+				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeClaim1))
+
+				secondPod := test.UnschedulablePod()
+				bindings = ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
+				Expect(bindings.Get(secondPod).Node.Name).ToNot(Equal(node1.Name))
+			})
+			It("should schedule a pod to an eventual disruption candidate if it tolerates karpenter.sh/candidate", func() {
+				ExpectApplied(ctx, env.Client, nodePool)
+				initialPod := test.UnschedulablePod()
+				bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+				ExpectScheduled(ctx, env.Client, initialPod)
+
+				nodeClaim1 := bindings.Get(initialPod).NodeClaim
+				node1 := bindings.Get(initialPod).Node
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
+				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
+
+				// delete the pod so that the node is empty
+				ExpectDeleted(ctx, env.Client, initialPod)
+				// make the node an eventual disruption candidate by marking it as expired
+				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
+				ExpectApplied(ctx, env.Client, nodeClaim1, node1)
+				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodeClaim1))
+
+				secondPod := test.UnschedulablePod(test.PodOptions{
+					Tolerations: []v1.Toleration{{
+						Key:      v1beta1.DisruptionCandidateTaintKey,
+						Operator: v1.TolerationOpExists,
+					}},
+				})
+				secondPod.Spec.Tolerations = append(secondPod.Spec.Tolerations, v1.Toleration{
+					Operator: v1.TolerationOpExists,
+				})
+				bindings = ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
+				Expect(bindings.Get(secondPod).Node.Name).To(Equal(node1.Name))
+			})
 		})
 		Context("Daemonsets", func() {
 			It("should track daemonset usage separately so we know how many DS resources are remaining to be scheduled", func() {

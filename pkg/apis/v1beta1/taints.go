@@ -42,6 +42,16 @@ var (
 		Key:    DisruptionCandidateTaintKey,
 		Effect: v1.TaintEffectPreferNoSchedule,
 	}
+
+	// DisruptionCandidateNoScheduleTaint is applied in-memory to drifted and expired nodes.
+	// This, along with the PreferNoSchedule taint applied to all disruption candidates, ensures
+	// that we don't reschedule nodes on disruption candidates to other disruption candidates.
+	// Note: this taint is **only** applied in-memory. It does not get applied to nodes on the
+	// API server.
+	DisruptionCandidateNoScheduleTaint = v1.Taint{
+		Key:    DisruptionCandidateTaintKey,
+		Effect: v1.TaintEffectNoSchedule,
+	}
 )
 
 func IsDisruptingTaint(taint v1.Taint) bool {

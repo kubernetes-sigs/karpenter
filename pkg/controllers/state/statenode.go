@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
@@ -117,8 +118,6 @@ type StateNode struct {
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
 
-	// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
-	// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 	markedForDeletion bool
 	nominatedUntil    metav1.Time
 }
@@ -291,6 +290,13 @@ func (in *StateNode) Taints() []v1.Taint {
 			return false
 		})
 	}
+	// Add an in-memory NoSchedule taint for all eventual disruption candidates. This ensures that we don't consider
+	// these nodes as candidates for pending pods being rescheduled from other disruption candidates.
+	if in.EventualDisruptionCandidate() && !lo.ContainsBy(taints, func(t v1.Taint) bool {
+		return t.MatchTaint(&v1beta1.DisruptionCandidateNoScheduleTaint)
+	}) {
+		taints = append(taints, v1beta1.DisruptionCandidateNoScheduleTaint)
+	}
 	return taints
 }
 
@@ -310,6 +316,18 @@ func (in *StateNode) Initialized() bool {
 	}
 	// Nodes not managed by Karpenter are always considered Initialized
 	return true
+}
+
+func (in *StateNode) EventualDisruptionCandidate() bool {
+	if !in.Managed() {
+		return false
+	}
+	return lo.ContainsBy(in.NodeClaim.GetConditions(), func(cond status.Condition) bool {
+		if cond.Type != v1beta1.ConditionTypeDrifted && cond.Type != v1beta1.ConditionTypeExpired {
+			return false
+		}
+		return cond.IsTrue()
+	})
 }
 
 func (in *StateNode) Capacity() v1.ResourceList {
