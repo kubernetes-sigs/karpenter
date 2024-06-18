@@ -133,16 +133,11 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 		})
 		return []string{t.Value}
 	}))
-	// disruption status conditions
 	lo.Must0(cache.IndexField(ctx, &v1beta1.NodeClaim{}, "status.conditions[*].type", func(o client.Object) []string {
 		nodeClaim := o.(*v1beta1.NodeClaim)
-		conditionTypes := lo.FilterMap(nodeClaim.Status.Conditions, func(c status.Condition, _ int) (string, bool) {
-			if c.Type == v1beta1.ConditionTypeDrifted || c.Type == v1beta1.ConditionTypeEmpty || c.Type == v1beta1.ConditionTypeExpired {
-				return c.Type, true
-			}
-			return "", false
+		return lo.Map(nodeClaim.Status.Conditions, func(c status.Condition, _ int) string {
+			return c.Type
 		})
-		return conditionTypes
 	}))
 
 	c := lo.Must(client.New(config, client.Options{Scheme: scheme, Cache: &client.CacheOptions{Reader: cache}}))
