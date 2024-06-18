@@ -33,6 +33,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
+
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -59,16 +61,16 @@ var (
 		&schedulingv1.PriorityClass{},
 		&v1.Node{},
 		&v1beta1.NodeClaim{},
-		// TODO @njtran add KWOKNodeClass
+		&v1alpha1.KWOKNodeClass{},
 	}
 )
 
 // nolint:gocyclo
 func (env *Environment) BeforeEach() {
 	debug.BeforeEach(env.Context, env.Config, env.Client)
-
 	// Expect this cluster to be clean for test runs to execute successfully
 	env.ExpectCleanCluster()
+	env.TimeIntervalCollector.Start(debug.StageE2E)
 
 	env.Monitor.Reset()
 	env.StartingNodeCount = env.Monitor.NodeCountAtReset()
@@ -91,7 +93,7 @@ func (env *Environment) ExpectCleanCluster() {
 			fmt.Sprintf("expected no pods in the `default` namespace, found %s/%s", pods.Items[i].Namespace, pods.Items[i].Name))
 	}
 	// TODO @njtran add KWOKNodeClass
-	for _, obj := range []client.Object{&v1beta1.NodePool{}} {
+	for _, obj := range []client.Object{&v1beta1.NodePool{}, &v1alpha1.KWOKNodeClass{}} {
 		metaList := &metav1.PartialObjectMetadataList{}
 		gvk := lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme()))
 		metaList.SetGroupVersionKind(gvk)
@@ -101,13 +103,16 @@ func (env *Environment) ExpectCleanCluster() {
 }
 
 func (env *Environment) Cleanup() {
+	env.TimeIntervalCollector.Start(debug.StageAfterEach)
 	env.CleanupObjects(CleanableObjects...)
 	env.eventuallyExpectScaleDown()
 	env.ExpectNoCrashes()
+	env.TimeIntervalCollector.End(debug.StageAfterEach)
 }
 
 func (env *Environment) AfterEach() {
 	debug.AfterEach(env.Context)
+	env.TimeIntervalCollector.Record(CurrentSpecReport().LeafNodeText)
 	env.printControllerLogs(&v1.PodLogOptions{Container: "controller"})
 }
 

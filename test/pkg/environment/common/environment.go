@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/onsi/gomega"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -39,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
+	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"knative.dev/pkg/system"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -60,10 +62,11 @@ type Environment struct {
 	context.Context
 	cancel context.CancelFunc
 
-	Client     client.Client
-	Config     *rest.Config
-	KubeClient kubernetes.Interface
-	Monitor    *Monitor
+	TimeIntervalCollector *debug.TimeIntervalCollector
+	Client                client.Client
+	Config                *rest.Config
+	KubeClient            kubernetes.Interface
+	Monitor               *Monitor
 
 	StartingNodeCount int
 }
@@ -82,12 +85,13 @@ func NewEnvironment(t *testing.T) *Environment {
 	gomega.SetDefaultEventuallyTimeout(5 * time.Minute)
 	gomega.SetDefaultEventuallyPollingInterval(1 * time.Second)
 	return &Environment{
-		Context:    ctx,
-		cancel:     cancel,
-		Config:     config,
-		Client:     client,
-		KubeClient: kubernetes.NewForConfigOrDie(config),
-		Monitor:    NewMonitor(ctx, client),
+		Context:               ctx,
+		cancel:                cancel,
+		Config:                config,
+		Client:                client,
+		KubeClient:            kubernetes.NewForConfigOrDie(config),
+		Monitor:               NewMonitor(ctx, client),
+		TimeIntervalCollector: debug.NewTimestampCollector(),
 	}
 }
 
@@ -128,6 +132,12 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 			return t.Key == v1beta1.DisruptionTaintKey
 		})
 		return []string{t.Value}
+	}))
+	lo.Must0(cache.IndexField(ctx, &v1beta1.NodeClaim{}, "status.conditions[*].type", func(o client.Object) []string {
+		nodeClaim := o.(*v1beta1.NodeClaim)
+		return lo.Map(nodeClaim.Status.Conditions, func(c status.Condition, _ int) string {
+			return c.Type
+		})
 	}))
 
 	c := lo.Must(client.New(config, client.Options{Scheme: scheme, Cache: &client.CacheOptions{Reader: cache}}))
