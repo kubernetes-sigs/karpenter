@@ -21,14 +21,14 @@ require (
 	golang.org/x/sync v0.7.0
 	golang.org/x/text v0.16.0
 	golang.org/x/time v0.5.0
-	k8s.io/api v0.30.1
-	k8s.io/apiextensions-apiserver v0.30.1
-	k8s.io/apimachinery v0.30.1
-	k8s.io/client-go v0.30.1
-	k8s.io/cloud-provider v0.30.1
-	k8s.io/component-base v0.30.1
-	k8s.io/csi-translation-lib v0.30.1
-	k8s.io/klog/v2 v2.120.1
+	k8s.io/api v0.30.2
+	k8s.io/apiextensions-apiserver v0.30.2
+	k8s.io/apimachinery v0.30.2
+	k8s.io/client-go v0.30.2
+	k8s.io/cloud-provider v0.30.2
+	k8s.io/component-base v0.30.2
+	k8s.io/csi-translation-lib v0.30.2
+	k8s.io/klog/v2 v2.130.0
 	k8s.io/utils v0.0.0-20240102154912-e7106e64919e
 	knative.dev/pkg v0.0.0-20230712131115-7051d301e7f4
 	sigs.k8s.io/controller-runtime v0.18.4
