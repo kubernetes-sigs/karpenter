@@ -59,43 +59,64 @@ func (t *TimeIntervalCollector) Reset() {
 
 // Record adds the current starts/ends/stages as a list of time intervals,
 // and adds it to the existingTimestamps
-func (t *TimeIntervalCollector) Record(name string) error {
-	intervals, err := t.translate()
-	if err != nil {
-		return err
-	}
+func (t *TimeIntervalCollector) Record(name string) {
+	intervals := t.translate()
 	caser := cases.Title(language.AmericanEnglish)
 	sanitized := strings.ReplaceAll(caser.String(name), " ", "")
 	t.suiteTimeIntervals[sanitized] = intervals
 	t.Reset()
-	return nil
 }
 
 // Start will add a timestamp with the given stage and add it to the list
-// Collect will fail, if there's no paired End() call.
-func (t *TimeIntervalCollector) Start(stage string) {
+// If there is no End associated with a Start, the interval's inferred End
+// is at the start of the AfterEach.
+func (t *TimeIntervalCollector) Start(stage string) time.Time {
 	t.starts[stage] = time.Now()
 	t.Stages = append(t.Stages, stage)
+	return time.Now()
 }
 
+// Finalize will automatically add End time entries for Start entries
+// without a corresponding set End. This is useful for when the test
+// fails, since deferring time recording is tough to do.
+func (t *TimeIntervalCollector) Finalize() {
+	for stage := range t.starts {
+		// If it's one of the enum stages, don't add, as these are added automatically.
+		if stage == StageE2E || stage == StageBeforeEach || stage == StageAfterEach {
+			continue
+		}
+		_, ok := t.ends[stage]
+		if ok {
+			continue
+		}
+		t.ends[stage] = time.Now()
+	}
+}
+
+// End will mark the interval's end time.
+// If there is no End associated with a Start, the interval's inferred End
+// is at the start of the AfterEach.
 func (t *TimeIntervalCollector) End(stage string) {
 	t.ends[stage] = time.Now()
 }
 
-func (t *TimeIntervalCollector) translate() ([]TimeInterval, error) {
-	// If we haven't added the same number of starts and ends, fail
-	if len(t.starts) != len(t.ends) {
-		return nil, fmt.Errorf("failed to collect timestamps, numstarts != numends")
-	}
+// translate takes the starts and ends in the existing TimeIntervalCollector
+// and adds the lists of intervals into the suiteTimeIntervals to be used
+// later for csv printing.
+func (t *TimeIntervalCollector) translate() []TimeInterval {
 	intervals := []TimeInterval{}
 	for _, stage := range t.Stages {
+		end, ok := t.ends[stage]
+		if !ok {
+			end = time.Now()
+		}
 		intervals = append(intervals, TimeInterval{
 			Start: t.starts[stage],
-			End:   t.ends[stage],
+			End:   end,
 			Stage: stage,
 		})
 	}
-	return intervals, nil
+	return intervals
 }
 
 type TimeInterval struct {

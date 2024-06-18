@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/onsi/gomega"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -131,6 +132,14 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 			return t.Key == v1beta1.DisruptionTaintKey
 		})
 		return []string{t.Value}
+	}))
+	// drifted type
+	lo.Must0(cache.IndexField(ctx, &v1beta1.NodeClaim{}, "status.conditions[*].type", func(o client.Object) []string {
+		nodeClaim := o.(*v1beta1.NodeClaim)
+		t, _ := lo.Find(nodeClaim.Status.Conditions, func(c status.Condition) bool {
+			return c.Type == v1beta1.ConditionTypeDrifted
+		})
+		return []string{t.Type}
 	}))
 
 	c := lo.Must(client.New(config, client.Options{Scheme: scheme, Cache: &client.CacheOptions{Reader: cache}}))

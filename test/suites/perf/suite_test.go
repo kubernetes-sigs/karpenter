@@ -72,10 +72,11 @@ var _ = BeforeEach(func() {
 			Values:   []string{"32"},
 		},
 	})
-	nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
+	nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
 })
 
 var _ = AfterEach(func() {
+	env.TimeIntervalCollector.Finalize()
 	env.Cleanup()
 	env.AfterEach()
 })

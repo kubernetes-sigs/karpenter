@@ -72,7 +72,6 @@ var _ = Describe("Performance", func() {
 			env.EventuallyExpectHealthyPodCount(labelSelector, replicas)
 
 			env.TimeIntervalCollector.Start("Drift")
-			env.TimeIntervalCollector.End("Drift")
 			nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{
 				"test-drift": "true",
 			})
@@ -80,24 +79,25 @@ var _ = Describe("Performance", func() {
 			// Eventually expect one node to be drifted
 			Eventually(func(g Gomega) {
 				nodeClaims := &v1beta1.NodeClaimList{}
-				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].Type": v1beta1.ConditionTypeDrifted})).To(Succeed())
+				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1beta1.ConditionTypeDrifted})).To(Succeed())
 				g.Expect(len(nodeClaims.Items)).ToNot(Equal(0))
-			}).WithTimeout(30 * time.Second)
+			}).WithTimeout(5 * time.Second).Should(Succeed())
 			// Then eventually expect no nodes to be drifted
 			Eventually(func(g Gomega) {
 				nodeClaims := &v1beta1.NodeClaimList{}
-				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].Type": v1beta1.ConditionTypeDrifted})).To(Succeed())
+				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1beta1.ConditionTypeDrifted})).To(Succeed())
 				g.Expect(len(nodeClaims.Items)).To(Equal(0))
-			}).WithTimeout(100 * time.Second)
+			}).WithTimeout(300 * time.Second).Should(Succeed())
 			env.TimeIntervalCollector.End("Drift")
 		})
 		It("should do complex provisioning", func() {
 			deployments := []*appsv1.Deployment{}
-			for _, option := range test.MakeDiversePodOptions() {
+			podOptions := test.MakeDiversePodOptions()
+			for _, option := range podOptions {
 				deployments = append(deployments, test.Deployment(
 					test.DeploymentOptions{
 						PodOptions: option,
-						Replicas:   int32(replicas),
+						Replicas:   int32(replicas / len(podOptions)),
 					},
 				))
 			}
@@ -105,27 +105,46 @@ var _ = Describe("Performance", func() {
 				env.ExpectCreated(dep)
 			}
 			env.TimeIntervalCollector.Start("PostDeployment")
-			defer env.TimeIntervalCollector.End("PostDeployment")
 			env.ExpectCreated(nodePool, nodeClass)
 			env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, len(deployments)*replicas)
+			env.TimeIntervalCollector.End("PostDeployment")
 		})
 		It("should do complex provisioning and complex drift", func() {
 			deployments := []*appsv1.Deployment{}
-			for _, option := range test.MakeDiversePodOptions() {
+			podOptions := test.MakeDiversePodOptions()
+			for _, option := range podOptions {
 				deployments = append(deployments, test.Deployment(
 					test.DeploymentOptions{
 						PodOptions: option,
-						Replicas:   int32(replicas),
+						Replicas:   int32(replicas / len(podOptions)),
 					},
 				))
 			}
 			for _, dep := range deployments {
 				env.ExpectCreated(dep)
 			}
-			env.TimeIntervalCollector.Start("PostDeployment")
-			defer env.TimeIntervalCollector.End("PostDeployment")
+
 			env.ExpectCreated(nodePool, nodeClass)
 			env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, len(deployments)*replicas)
+
+			env.TimeIntervalCollector.Start("Drift")
+			nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{
+				"test-drift": "true",
+			})
+			env.ExpectUpdated(nodePool)
+			// Eventually expect one node to be drifted
+			Eventually(func(g Gomega) {
+				nodeClaims := &v1beta1.NodeClaimList{}
+				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1beta1.ConditionTypeDrifted})).To(Succeed())
+				g.Expect(len(nodeClaims.Items)).ToNot(Equal(0))
+			}).WithTimeout(5 * time.Second).Should(Succeed())
+			// Then eventually expect no nodes to be drifted
+			Eventually(func(g Gomega) {
+				nodeClaims := &v1beta1.NodeClaimList{}
+				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1beta1.ConditionTypeDrifted})).To(Succeed())
+				g.Expect(len(nodeClaims.Items)).To(Equal(0))
+			}).WithTimeout(10 * time.Minute).Should(Succeed())
+			env.TimeIntervalCollector.End("Drift")
 		})
 	})
 })
