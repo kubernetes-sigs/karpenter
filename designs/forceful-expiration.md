@@ -1,7 +1,10 @@
 # Forceful Expiration - v0.37+
 
-Users need to enforce a maximum node lifetime to be compliant with security requirements. Cluster administrators that orchestrate Karpenter installations on clusters need a way to enforce this natively within Karpenter. 
-To enable this, Karpenter needs to change the semantic of Expiration as currently planned. This document proposes the desired state and what needs to change to get there. 
+Users need to enforce a maximum node lifetime to be compliant with security requirements. Cluster administrators that orchestrate Karpenter installations on clusters need a way to enforce this natively within Karpenter. In v0.37 and below, Karpenter respects NDBS, `do-not-disrupt` annotations on nodes, PDBs, `do-not-disrupt` annotations on pods, and waits for pre-spin capacity to initialize before terminating expired nodes. 
+
+This document recommends changing the semantic of expiration so that Karpenter will immediately begin gracefully draining a node once it's expired, regardless of node/pod/availability safeguards, but respect pod `do-not-disrupt` or PDB blocking pods until the node's [TerminationGracePeriod](https://github.com/kubernetes-sigs/karpenter/pull/916) is reached. 
+
+Karpenter needs to change the semantic of Expiration. This document proposes the desired state and what needs to change to get there. 
 
 **Terms**: For the purposes of this document, we’ll call the proposed Expiration as **Forceful** and the current Expiration semantic in Upstream Karpenter today (v0.37) as **Graceful.**
 
