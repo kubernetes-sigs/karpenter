@@ -142,10 +142,16 @@ func PrintTestTimes(times map[string][]TimeInterval) map[string][][]string {
 }
 
 // WriteTimestamps will create a temp directory and a .csv file for each suite test
+// If the OUTPUT_DIR environment variable is set, we'll print the csvs to that directory.
 func WriteTimestamps(path string, timestamps *TimeIntervalCollector) error {
-	directory, err := os.MkdirTemp("/tmp", "")
-	if err != nil {
-		return err
+	var directory string
+	var err error
+	directory, ok := os.LookupEnv("OUTPUT_DIR")
+	if !ok {
+		directory, err = os.MkdirTemp("/tmp", "")
+		if err != nil {
+			return err
+		}
 	}
 	for name, table := range PrintTestTimes(timestamps.suiteTimeIntervals) {
 		file, err := os.CreateTemp(directory, fmt.Sprintf("*-%s.csv", name))
