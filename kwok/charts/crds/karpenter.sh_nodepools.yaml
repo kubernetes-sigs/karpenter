@@ -611,7 +611,6 @@ spec:
                               description: DisruptionReason defines valid reasons for disruption budgets.
                               enum:
                                 - underutilized
-                                - expired
                                 - empty
                                 - drifted
                               type: string

@@ -142,19 +142,18 @@ const (
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.
-// +kubebuilder:validation:Enum={underutilized,expired,empty,drifted}
+// +kubebuilder:validation:Enum={underutilized,empty,drifted}
 type DisruptionReason string
 
 const (
 	DisruptionReasonUnderutilized DisruptionReason = "underutilized"
-	DisruptionReasonExpired       DisruptionReason = "expired"
 	DisruptionReasonEmpty         DisruptionReason = "empty"
 	DisruptionReasonDrifted       DisruptionReason = "drifted"
 )
 
 var (
 	// DisruptionReasons is a list of all valid reasons for disruption budgets.
-	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonExpired, DisruptionReasonEmpty, DisruptionReasonDrifted}
+	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonEmpty, DisruptionReasonDrifted}
 )
 
 type Limits v1.ResourceList
