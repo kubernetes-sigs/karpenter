@@ -111,7 +111,8 @@ func isolateKarpenterRegistrationTaint(ts []v1.Taint) (*v1.Taint, []v1.Taint) {
 	var taints []v1.Taint
 	for _, t := range ts {
 		if t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint) {
-			unregisteredTaint = &t
+			taint := t
+			unregisteredTaint = &taint
 		} else {
 			taints = append(taints, t)
 		}
