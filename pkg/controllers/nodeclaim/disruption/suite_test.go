@@ -119,7 +119,6 @@ var _ = Describe("Disruption", func() {
 
 		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
-		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
@@ -128,6 +127,5 @@ var _ = Describe("Disruption", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired)).To(BeNil())
 	})
 })

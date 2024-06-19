@@ -36,26 +36,15 @@ type Expiration struct {
 }
 
 func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	hasExpiredCondition := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired) != nil
-
 	// From here there are three scenarios to handle:
-	// 1. If ExpireAfter is not configured, remove the expired status condition
+	// 1. If ExpireAfter is not configured, exit expiration loop
 	if nodePool.Spec.Disruption.ExpireAfter.Duration == nil {
-		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeExpired)
-		if hasExpiredCondition {
-			log.FromContext(ctx).V(1).Info("removing expiration status condition, expiration has been disabled")
-		}
 		return reconcile.Result{}, nil
 	}
 	expirationTime := nodeClaim.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
 	// 2. If the NodeClaim isn't expired, remove the status condition and leave the reconcile loop
 	if e.clock.Now().Before(expirationTime) {
-		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeExpired)
-		if hasExpiredCondition {
-			log.FromContext(ctx).V(1).Info("removing expired status condition, not expired")
-			return reconcile.Result{}, nil
-		}
-		// If the NodeClaim isn't expired and doesn't have the status condition, return.
+		// If the NodeClaim isn't expired, return.
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
 		return reconcile.Result{RequeueAfter: expirationTime.Sub(e.clock.Now())}, nil
 	}
