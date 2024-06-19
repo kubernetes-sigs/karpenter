@@ -279,7 +279,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "3"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 
-		// Mark all nodeclaims as expired
+		// Mark all nodeclaims as drifted
 		for _, nc := range nodeClaims {
 			nc.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, nc)
