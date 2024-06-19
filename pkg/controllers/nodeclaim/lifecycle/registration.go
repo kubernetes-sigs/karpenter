@@ -80,6 +80,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 
 func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClaim, node *v1.Node) error {
 	stored := node.DeepCopy()
+	stored.ResourceVersion = ""
 	controllerutil.AddFinalizer(node, v1beta1.TerminationFinalizer)
 
 	node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
@@ -88,13 +89,32 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClai
 	// Sync all taints inside NodeClaim into the Node taints
 	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.Taints)
 	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.StartupTaints)
+	// Remove karpenter.sh/unregistered taint
+	unregisteredTaint, taints := isolateKarpenterRegistrationTaint(node.Spec.Taints)
+	if unregisteredTaint == nil {
+		return fmt.Errorf("missing required startup taint")
+	}
+	node.Spec.Taints = taints
 	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels, map[string]string{
 		v1beta1.NodeRegisteredLabelKey: "true",
 	})
 	if !equality.Semantic.DeepEqual(stored, node) {
 		if err := r.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
-			return fmt.Errorf("syncing node labels, %w", err)
+			return fmt.Errorf("syncing node, %w", err)
 		}
 	}
 	return nil
+}
+
+func isolateKarpenterRegistrationTaint(ts []v1.Taint) (*v1.Taint, []v1.Taint) {
+	var unregisteredTaint *v1.Taint
+	var taints []v1.Taint
+	for _, t := range ts {
+		if t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint) {
+			unregisteredTaint = &t
+		} else {
+			taints = append(taints, t)
+		}
+	}
+	return unregisteredTaint, taints
 }

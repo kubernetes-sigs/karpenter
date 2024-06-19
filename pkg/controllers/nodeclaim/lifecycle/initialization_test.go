@@ -480,6 +480,7 @@ var _ = Describe("Initialization", func() {
 					Effect: v1.TaintEffectNoSchedule,
 					Value:  "true",
 				},
+				v1beta1.UnregisteredNoExecuteTaint,
 			},
 		})
 		ExpectApplied(ctx, env.Client, node)
@@ -549,6 +550,7 @@ var _ = Describe("Initialization", func() {
 					Effect: v1.TaintEffectNoSchedule,
 					Value:  "true",
 				},
+				v1beta1.UnregisteredNoExecuteTaint,
 			},
 		})
 		ExpectApplied(ctx, env.Client, node)
@@ -560,7 +562,7 @@ var _ = Describe("Initialization", func() {
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
-		node.Spec.Taints = []v1.Taint{}
+		node.Spec.Taints = []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}
 		ExpectApplied(ctx, env.Client, node)
 
 		// nodeClaim should now be ready since all startup taints are removed

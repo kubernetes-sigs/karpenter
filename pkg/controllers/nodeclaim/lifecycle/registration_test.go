@@ -201,6 +201,61 @@ var _ = Describe("Registration", func() {
 			},
 		))
 	})
+	It("should remove the karpenter.sh/unregistered=true:NoExecute from the node when the comes online", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+			Spec: v1beta1.NodeClaimSpec{
+				Taints: []v1.Taint{
+					{
+						Key:    "custom-taint",
+						Effect: v1.TaintEffectNoSchedule,
+						Value:  "custom-value",
+					},
+					{
+						Key:    "other-custom-taint",
+						Effect: v1.TaintEffectNoExecute,
+						Value:  "other-custom-value",
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Spec.Taints).To(ContainElements(
+			v1.Taint{
+				Key:    "custom-taint",
+				Effect: v1.TaintEffectNoSchedule,
+				Value:  "custom-value",
+			},
+			v1.Taint{
+				Key:    "other-custom-taint",
+				Effect: v1.TaintEffectNoExecute,
+				Value:  "other-custom-value",
+			},
+		))
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		node = ExpectExists(ctx, env.Client, node)
+
+		Expect(node.Spec.Taints).To(ContainElements(
+			v1.Taint{
+				Key:    "custom-taint",
+				Effect: v1.TaintEffectNoSchedule,
+				Value:  "custom-value",
+			},
+			v1.Taint{
+				Key:    "other-custom-taint",
+				Effect: v1.TaintEffectNoExecute,
+				Value:  "other-custom-value",
+			},
+		))
+	})
 	It("should sync the startupTaints to the Node when the Node comes online", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
