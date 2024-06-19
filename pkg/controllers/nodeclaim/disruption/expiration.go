@@ -42,7 +42,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 		return reconcile.Result{}, nil
 	}
 	expirationTime := nodeClaim.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
-	// 2. If the NodeClaim isn't expired, remove the status condition and leave the reconcile loop
+	// 2. If the NodeClaim isn't expire leave the reconcile loop.
 	if e.clock.Now().Before(expirationTime) {
 		// If the NodeClaim isn't expired, return.
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
