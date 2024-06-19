@@ -48,28 +48,27 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 		return reconcile.Result{}, nil
 	}
 	expirationTime := nodeClaim.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
-	// 2. If the NodeClaim isn't expired, remove the status condition.
+	// 2. If the NodeClaim isn't expired, remove the status condition and leave the reconcile loop
 	if e.clock.Now().Before(expirationTime) {
 		_ = nodeClaim.StatusConditions().Clear(v1beta1.ConditionTypeExpired)
 		if hasExpiredCondition {
 			log.FromContext(ctx).V(1).Info("removing expired status condition, not expired")
+			return reconcile.Result{}, nil
 		}
 		// If the NodeClaim isn't expired and doesn't have the status condition, return.
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
 		return reconcile.Result{RequeueAfter: expirationTime.Sub(e.clock.Now())}, nil
 	}
 	// 3. Otherwise, if the NodeClaim is expired and doesn't meet any of these status conditions, we can forcefully expire the nodeclaim (by deleting it)
-	err := e.kubeClient.Delete(ctx, nodeClaim, nil)
+	err := e.kubeClient.Delete(ctx, nodeClaim)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
-	if !hasExpiredCondition {
-		log.FromContext(ctx).V(1).Info("removed expired nodeclaim")
-		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:     metrics.ExpirationReason,
-			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-		}).Inc()
-	}
+	// At this point we know we would have returned
+	log.FromContext(ctx).V(1).Info("removed expired nodeclaim")
+	metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
+		metrics.TypeLabel:     metrics.ExpirationReason,
+		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+	}).Inc()
 	return reconcile.Result{}, nil
 }
