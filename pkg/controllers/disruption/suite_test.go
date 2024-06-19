@@ -281,7 +281,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// Mark all nodeclaims as expired
 		for _, nc := range nodeClaims {
-			nc.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
+			nc.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, nc)
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
 		}
