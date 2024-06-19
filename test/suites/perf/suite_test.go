@@ -53,7 +53,7 @@ func TestPerf(t *testing.T) {
 	})
 	AfterSuite(func() {
 		// Write out the timestamps from our tests
-		if err := debug.WriteTimestamps("path", env.TimeIntervalCollector); err != nil {
+		if err := debug.WriteTimestamps(env.OutputDir, env.TimeIntervalCollector); err != nil {
 			log.FromContext(env).Info(fmt.Sprintf("Failed to write timestamps to files, %s", err))
 		}
 		env.Stop()

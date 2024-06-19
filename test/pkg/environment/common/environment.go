@@ -68,6 +68,7 @@ type Environment struct {
 	KubeClient            kubernetes.Interface
 	Monitor               *Monitor
 
+	OutputDir         string
 	StartingNodeCount int
 }
 
@@ -81,6 +82,8 @@ func NewEnvironment(t *testing.T) *Environment {
 	if val, ok := os.LookupEnv("GIT_REF"); ok {
 		ctx = context.WithValue(ctx, GitRefContextKey, val)
 	}
+	// Get the output dir if it's set
+	outputDir, _ := os.LookupEnv("OUTPUT_DIR")
 
 	gomega.SetDefaultEventuallyTimeout(5 * time.Minute)
 	gomega.SetDefaultEventuallyPollingInterval(1 * time.Second)
@@ -92,6 +95,7 @@ func NewEnvironment(t *testing.T) *Environment {
 		KubeClient:            kubernetes.NewForConfigOrDie(config),
 		Monitor:               NewMonitor(ctx, client),
 		TimeIntervalCollector: debug.NewTimestampCollector(),
+		OutputDir:             outputDir,
 	}
 }
 
