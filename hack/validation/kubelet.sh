@@ -1,9 +1,8 @@
 # Kubelet Validation 
 
-# Adding validation to both v1 and v1beta1 APIs
-# Version = 0 // v1 API 
+# Adding validation to both v1beta1 APIs
 # Version = 1 // v1beta1 API
-for Version in $(seq 0 1); do 
+for Version in $(seq 1); do 
     # The regular expression adds validation for kubelet.kubeReserved and kubelet.systemReserved values of the map are resource.Quantity
     # Quantity: https://github.com/kubernetes/apimachinery/blob/d82afe1e363acae0e8c0953b1bc230d65fdb50e2/pkg/api/resource/quantity.go#L100
     # NodeClaim Validation:
