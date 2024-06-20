@@ -50,6 +50,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/instancetype"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -73,6 +74,7 @@ var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
+var instanceTypeProvider *instancetype.Provider
 var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
 var podStateController *informer.PodController
@@ -95,10 +97,11 @@ var _ = BeforeSuite(func() {
 	cloudProvider.InstanceTypes = instanceTypes
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client)
+	instanceTypeProvider = instancetype.NewProvider(cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), instanceTypeProvider, cluster)
 })
 
 var _ = AfterSuite(func() {
@@ -116,6 +119,7 @@ var _ = BeforeEach(func() {
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cluster.Reset()
+	instanceTypeProvider.Flush()
 	scheduling.QueueDepth.Reset()
 	scheduling.SimulationDurationSeconds.Reset()
 })

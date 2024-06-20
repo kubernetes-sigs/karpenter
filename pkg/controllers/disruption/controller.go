@@ -38,8 +38,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
+	"sigs.k8s.io/karpenter/pkg/controllers/instancetype"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -49,34 +49,34 @@ import (
 )
 
 type Controller struct {
-	queue         *orchestration.Queue
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	clock         clock.Clock
-	cloudProvider cloudprovider.CloudProvider
-	methods       []Method
-	mu            sync.Mutex
-	lastRun       map[string]time.Time
+	queue                *orchestration.Queue
+	kubeClient           client.Client
+	cluster              *state.Cluster
+	provisioner          *provisioning.Provisioner
+	recorder             events.Recorder
+	clock                clock.Clock
+	instanceTypeProvider *instancetype.Provider
+	methods              []Method
+	mu                   sync.Mutex
+	lastRun              map[string]time.Time
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
 const pollingPeriod = 10 * time.Second
 
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue,
+	instanceTypeProvider *instancetype.Provider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue,
 ) *Controller {
-	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, instanceTypeProvider, recorder, queue)
 	return &Controller{
-		queue:         queue,
-		clock:         clk,
-		kubeClient:    kubeClient,
-		cluster:       cluster,
-		provisioner:   provisioner,
-		recorder:      recorder,
-		cloudProvider: cp,
-		lastRun:       map[string]time.Time{},
+		queue:                queue,
+		clock:                clk,
+		kubeClient:           kubeClient,
+		cluster:              cluster,
+		provisioner:          provisioner,
+		recorder:             recorder,
+		instanceTypeProvider: instanceTypeProvider,
+		lastRun:              map[string]time.Time{},
 		methods: []Method{
 			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 			NewDrift(kubeClient, cluster, provisioner, recorder),
@@ -148,7 +148,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.queue)
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.instanceTypeProvider, disruption.ShouldDisrupt, c.queue)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}

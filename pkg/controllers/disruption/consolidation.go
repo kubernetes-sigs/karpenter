@@ -29,9 +29,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
+	"sigs.k8s.io/karpenter/pkg/controllers/instancetype"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -55,21 +55,21 @@ type consolidation struct {
 	cluster                *state.Cluster
 	kubeClient             client.Client
 	provisioner            *provisioning.Provisioner
-	cloudProvider          cloudprovider.CloudProvider
+	instanceTypeProvider   *instancetype.Provider
 	recorder               events.Recorder
 	lastConsolidationState time.Time
 }
 
 func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) consolidation {
+	instanceTypeProvider *instancetype.Provider, recorder events.Recorder, queue *orchestration.Queue) consolidation {
 	return consolidation{
-		queue:         queue,
-		clock:         clock,
-		cluster:       cluster,
-		kubeClient:    kubeClient,
-		provisioner:   provisioner,
-		cloudProvider: cloudProvider,
-		recorder:      recorder,
+		queue:                queue,
+		clock:                clock,
+		cluster:              cluster,
+		kubeClient:           kubeClient,
+		provisioner:          provisioner,
+		instanceTypeProvider: instanceTypeProvider,
+		recorder:             recorder,
 	}
 }
 

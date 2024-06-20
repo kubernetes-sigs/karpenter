@@ -27,8 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
+	"sigs.k8s.io/karpenter/pkg/controllers/instancetype"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -54,29 +54,29 @@ func IsValidationError(err error) bool {
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
 type Validation struct {
-	start         time.Time
-	clock         clock.Clock
-	cluster       *state.Cluster
-	kubeClient    client.Client
-	cloudProvider cloudprovider.CloudProvider
-	provisioner   *provisioning.Provisioner
-	once          sync.Once
-	recorder      events.Recorder
-	queue         *orchestration.Queue
-	reason        v1beta1.DisruptionReason
+	start                time.Time
+	clock                clock.Clock
+	cluster              *state.Cluster
+	kubeClient           client.Client
+	instanceTypeProvider *instancetype.Provider
+	provisioner          *provisioning.Provisioner
+	once                 sync.Once
+	recorder             events.Recorder
+	queue                *orchestration.Queue
+	reason               v1beta1.DisruptionReason
 }
 
 func NewValidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue, reason v1beta1.DisruptionReason) *Validation {
+	instanceTypeProvider *instancetype.Provider, recorder events.Recorder, queue *orchestration.Queue, reason v1beta1.DisruptionReason) *Validation {
 	return &Validation{
-		clock:         clk,
-		cluster:       cluster,
-		kubeClient:    kubeClient,
-		provisioner:   provisioner,
-		cloudProvider: cp,
-		recorder:      recorder,
-		queue:         queue,
-		reason:        reason,
+		clock:                clk,
+		cluster:              cluster,
+		kubeClient:           kubeClient,
+		provisioner:          provisioner,
+		instanceTypeProvider: instanceTypeProvider,
+		recorder:             recorder,
+		queue:                queue,
+		reason:               reason,
 	}
 }
 
@@ -118,7 +118,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command, validationPeriod 
 //
 // If these conditions are met for all candidates, ValidateCandidates returns a slice with the updated representations.
 func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
-	validatedCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.ShouldDisrupt, v.queue)
+	validatedCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.instanceTypeProvider, v.ShouldDisrupt, v.queue)
 	if err != nil {
 		return nil, fmt.Errorf("constructing validation candidates, %w", err)
 	}

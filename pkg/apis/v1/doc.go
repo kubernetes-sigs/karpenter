@@ -35,5 +35,6 @@ func init() {
 		&NodePool{},
 		&NodePoolList{},
 		&NodeClaim{},
-		&NodeClaimList{})
+		&NodeClaimList{},
+	)
 }

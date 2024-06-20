@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/instancetype"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 
@@ -144,9 +145,9 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
-	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue,
+	instanceTypeProvider *instancetype.Provider, shouldDeprovision CandidateFilter, queue *orchestration.Queue,
 ) ([]*Candidate, error) {
-	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
+	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, instanceTypeProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +164,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
-func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
+func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, instanceTypeProvider *instancetype.Provider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
 	nodePoolMap := map[string]*v1beta1.NodePool{}
 	nodePoolList := &v1beta1.NodePoolList{}
 	if err := kubeClient.List(ctx, nodePoolList); err != nil {
@@ -174,7 +175,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		np := &nodePoolList.Items[i]
 		nodePoolMap[np.Name] = np
 
-		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
+		nodePoolInstanceTypes, err := instanceTypeProvider.Get(ctx, np)
 		if err != nil {
 			// don't error out on building the node pool, we just won't be able to handle any nodes that
 			// were created by it

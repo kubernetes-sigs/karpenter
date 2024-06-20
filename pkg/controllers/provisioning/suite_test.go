@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/instancetype"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -53,15 +54,16 @@ import (
 )
 
 var (
-	ctx                 context.Context
-	fakeClock           *clock.FakeClock
-	cluster             *state.Cluster
-	nodeController      *informer.NodeController
-	daemonsetController *informer.DaemonSetController
-	cloudProvider       *fake.CloudProvider
-	prov                *provisioning.Provisioner
-	env                 *test.Environment
-	instanceTypeMap     map[string]*cloudprovider.InstanceType
+	ctx                  context.Context
+	fakeClock            *clock.FakeClock
+	cluster              *state.Cluster
+	nodeController       *informer.NodeController
+	daemonsetController  *informer.DaemonSetController
+	instanceTypeProvider *instancetype.Provider
+	cloudProvider        *fake.CloudProvider
+	prov                 *provisioning.Provisioner
+	env                  *test.Environment
+	instanceTypeMap      map[string]*cloudprovider.InstanceType
 )
 
 func TestAPIs(t *testing.T) {
@@ -74,10 +76,11 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
+	instanceTypeProvider = instancetype.NewProvider(cloudProvider)
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), instanceTypeProvider, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
@@ -98,6 +101,7 @@ var _ = AfterSuite(func() {
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
+	instanceTypeProvider.Flush()
 	cluster.Reset()
 })
 

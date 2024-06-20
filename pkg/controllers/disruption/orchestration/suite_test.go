@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
+	"sigs.k8s.io/karpenter/pkg/controllers/instancetype"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -51,6 +52,7 @@ var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
+var instanceTypeProvider *instancetype.Provider
 var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
 var fakeClock *clock.FakeClock
@@ -76,11 +78,12 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	fakeClock = clock.NewFakeClock(time.Now())
 	cloudProvider = fake.NewCloudProvider()
+	instanceTypeProvider = instancetype.NewProvider(cloudProvider)
 	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster)
+	prov = provisioning.NewProvisioner(env.Client, recorder, instanceTypeProvider, cluster)
 	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
 })
 

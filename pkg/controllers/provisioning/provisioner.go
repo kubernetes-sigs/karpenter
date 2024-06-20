@@ -52,6 +52,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/instancetype"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -80,26 +81,26 @@ func WithReason(reason string) func(LaunchOptions) LaunchOptions {
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
-	cloudProvider  cloudprovider.CloudProvider
-	kubeClient     client.Client
-	batcher        *Batcher
-	volumeTopology *scheduler.VolumeTopology
-	cluster        *state.Cluster
-	recorder       events.Recorder
-	cm             *pretty.ChangeMonitor
+	instanceTypeProvider *instancetype.Provider
+	kubeClient           client.Client
+	batcher              *Batcher
+	volumeTopology       *scheduler.VolumeTopology
+	cluster              *state.Cluster
+	recorder             events.Recorder
+	cm                   *pretty.ChangeMonitor
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
-	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+	instanceTypeProvider *instancetype.Provider, cluster *state.Cluster,
 ) *Provisioner {
 	p := &Provisioner{
-		batcher:        NewBatcher(),
-		cloudProvider:  cloudProvider,
-		kubeClient:     kubeClient,
-		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
-		cluster:        cluster,
-		recorder:       recorder,
-		cm:             pretty.NewChangeMonitor(),
+		batcher:              NewBatcher(),
+		instanceTypeProvider: instanceTypeProvider,
+		kubeClient:           kubeClient,
+		volumeTopology:       scheduler.NewVolumeTopology(kubeClient),
+		cluster:              cluster,
+		recorder:             recorder,
+		cm:                   pretty.NewChangeMonitor(),
 	}
 	return p
 }
@@ -247,7 +248,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			continue
 		}
 		// Get instance type options
-		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, lo.ToPtr(nodePool))
+		instanceTypeOptions, err := p.instanceTypeProvider.Get(ctx, lo.ToPtr(nodePool))
 		if err != nil {
 			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
 			// all scheduling
