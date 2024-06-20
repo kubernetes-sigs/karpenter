@@ -2069,8 +2069,8 @@ var _ = Context("Scheduling", func() {
 
 				// delete the pod so that the node is empty
 				ExpectDeleted(ctx, env.Client, initialPod)
-				// startup taint + node not ready taint = 2
-				Expect(node1.Spec.Taints).To(HaveLen(2))
+				// startup taint + node not ready taint + karpenter.sh/unregistered taint = 3
+				Expect(node1.Spec.Taints).To(HaveLen(3))
 				Expect(node1.Spec.Taints).To(ContainElement(v1.Taint{
 					Key:    "foo.com/taint",
 					Value:  "tainted",
