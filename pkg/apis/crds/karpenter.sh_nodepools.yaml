@@ -310,7 +310,7 @@ spec:
                         nodeClassRef:
                           description: NodeClassRef is a reference to an object that defines provider specific configuration
                           properties:
-                            apiVersion:
+                            group:
                               description: API version of the referent
                               type: string
                             kind:

@@ -60,6 +60,37 @@ var _ = Describe("Validation", func() {
 		}
 	})
 
+	Context("NodeClassRef", func() {
+		It("should succeed when all fields on the nodeClassRef are defined", func() {
+			nodeClaim.Spec.NodeClassRef = &NodeClassReference{
+				Group: "NodeClassGroup",
+				Kind:  "NodeClassKind",
+				Name:  "default",
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
+		})
+		It("should fail when group is not defined", func() {
+			nodeClaim.Spec.NodeClassRef = &NodeClassReference{
+				Kind: "NodeClassKind",
+				Name: "default",
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+		})
+		It("should fail when kind is not defined", func() {
+			nodeClaim.Spec.NodeClassRef = &NodeClassReference{
+				Group: "NodeClassGroup",
+				Name:  "default",
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+		})
+		It("should fail when name is not defined", func() {
+			nodeClaim.Spec.NodeClassRef = &NodeClassReference{
+				Group: "NodeClassGroup",
+				Kind:  "NodeClassKind",
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+		})
+	})
 	Context("Taints", func() {
 		It("should succeed for valid taints", func() {
 			nodeClaim.Spec.Taints = []v1.Taint{
