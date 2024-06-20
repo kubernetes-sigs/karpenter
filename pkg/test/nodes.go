@@ -39,7 +39,7 @@ type NodeOptions struct {
 }
 
 func Node(overrides ...NodeOptions) *v1.Node {
-	options := NodeOptions{Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}}
+	options := NodeOptions{}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
 			panic(fmt.Sprintf("Failed to merge node options: %s", err))
