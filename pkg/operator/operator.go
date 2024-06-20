@@ -19,6 +19,7 @@ package operator
 import (
 	"context"
 	"fmt"
+	golog "log"
 	"net/http"
 	"net/http/pprof"
 	"runtime"
@@ -194,13 +195,25 @@ func NewOperator() (context.Context, *Operator) {
 		return []string{o.(*v1beta1.NodeClaim).Status.ProviderID}
 	}), "failed to setup nodeclaim provider id indexer")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "spec.nodeClassRef.apiVersion", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodeClaim).Spec.NodeClassRef.APIVersion}
+		nc := o.(*v1beta1.NodeClaim)
+		if nc.Spec.NodeClassRef == nil {
+			golog.Fatalf("failed to setup nodeclaim nodeclassref apiversion indexer, nodeclaim %q has a missing nodeclassref", nc.Name)
+		}
+		return []string{nc.Spec.NodeClassRef.APIVersion}
 	}), "failed to setup nodeclaim nodeclassref apiversion indexer")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "spec.nodeClassRef.kind", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodeClaim).Spec.NodeClassRef.Kind}
+		nc := o.(*v1beta1.NodeClaim)
+		if nc.Spec.NodeClassRef == nil {
+			golog.Fatalf("failed to setup nodeclaim nodeclassref kind indexer, nodeclaim %q has a missing nodeclassref", nc.Name)
+		}
+		return []string{nc.Spec.NodeClassRef.Kind}
 	}), "failed to setup nodeclaim nodeclassref kind indexer")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "spec.nodeClassRef.name", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodeClaim).Spec.NodeClassRef.Name}
+		nc := o.(*v1beta1.NodeClaim)
+		if nc.Spec.NodeClassRef == nil {
+			golog.Fatalf("failed to setup nodeclaim nodeclassref name indexer, nodeclaim %q has a missing nodeclassref", nc.Name)
+		}
+		return []string{nc.Spec.NodeClassRef.Name}
 	}), "failed to setup nodeclaim nodeclassref name indexer")
 
 	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
