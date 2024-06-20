@@ -82,7 +82,6 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 		},
 		Spec: i.Spec,
 	}
-	// nc.Spec.Taints = append(nc.Spec.Taints, v1beta1.UnregisteredNoExecuteTaint)
 	nc.Spec.StartupTaints = append(nc.Spec.StartupTaints, v1beta1.UnregisteredNoExecuteTaint)
 	nc.Spec.Requirements = i.Requirements.NodeSelectorRequirements()
 	return nc

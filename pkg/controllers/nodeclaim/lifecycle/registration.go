@@ -64,7 +64,6 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
 		return reconcile.Result{Requeue: true}, fmt.Errorf("sync node %w", err)
-		// return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
 	}
 	log.FromContext(ctx).Info("registered nodeclaim")
 	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
@@ -81,6 +80,10 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 
 func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClaim, node *v1.Node) error {
 	stored := node.DeepCopy()
+	// Strip the resource version off the original node. This ensures the patch will fail with a conflict if the node
+	// had been updated between the original GET and the PATCH. This is necessary because .spec.taints does not specify
+	// a patchMergeKey and patchStrategy. Ref: https://github.com/kubernetes/kubernetes/pull/113136
+	stored.ResourceVersion = ""
 	controllerutil.AddFinalizer(node, v1beta1.TerminationFinalizer)
 
 	node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
