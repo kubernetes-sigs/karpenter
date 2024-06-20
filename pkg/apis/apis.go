@@ -20,9 +20,10 @@ import (
 	_ "embed"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
@@ -31,6 +32,7 @@ var (
 	// Builder includes all types within the apis package
 	Builder = runtime.NewSchemeBuilder(
 		v1beta1.SchemeBuilder.AddToScheme,
+		v1.SchemeBuilder.AddToScheme,
 	)
 	// AddToScheme may be used to add all resources defined in the project to a Scheme
 	AddToScheme = Builder.AddToScheme
@@ -42,8 +44,8 @@ var (
 	NodePoolCRD []byte
 	//go:embed crds/karpenter.sh_nodeclaims.yaml
 	NodeClaimCRD []byte
-	CRDs         = []*v1.CustomResourceDefinition{
-		lo.Must(functional.Unmarshal[v1.CustomResourceDefinition](NodePoolCRD)),
-		lo.Must(functional.Unmarshal[v1.CustomResourceDefinition](NodeClaimCRD)),
+	CRDs         = []*apiextensionsv1.CustomResourceDefinition{
+		lo.Must(functional.Unmarshal[apiextensionsv1.CustomResourceDefinition](NodePoolCRD)),
+		lo.Must(functional.Unmarshal[apiextensionsv1.CustomResourceDefinition](NodeClaimCRD)),
 	}
 )

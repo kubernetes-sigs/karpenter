@@ -14,11 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha5
+package v1
 
-// Karpenter specific annotations
-// These are deprecated. These should be removed as part of the migration to v1.
-const (
-	DoNotEvictPodAnnotationKey        = Group + "/do-not-evict"
-	DoNotConsolidateNodeAnnotationKey = Group + "/do-not-consolidate"
-)
+import "context"
+
+// SetDefaults for the NodeClaim
+func (in *NodeClaim) SetDefaults(_ context.Context) {}

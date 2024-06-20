@@ -14,9 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// +kubebuilder:skip
 // +k8s:openapi-gen=true
 // +k8s:deepcopy-gen=package,register
 // +k8s:defaulter-gen=TypeMeta
 // +groupName=karpenter.sh
-package v1alpha5 // doc.go is discovered by codegen
+package v1 // doc.go is discovered by codegen
