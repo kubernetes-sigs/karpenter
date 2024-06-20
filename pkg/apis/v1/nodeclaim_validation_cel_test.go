@@ -59,7 +59,13 @@ var _ = Describe("Validation", func() {
 			},
 		}
 	})
-
+	Context("NodeClaim Spec Immutability", func() {
+		It("should fail to mutate NodeClaim.Spec", func() {
+			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
+			nodeClaim.Spec.NodeClassRef.Name = "testNodeClass"
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+		})
+	})
 	Context("Taints", func() {
 		It("should succeed for valid taints", func() {
 			nodeClaim.Spec.Taints = []v1.Taint{
