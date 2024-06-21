@@ -111,4 +111,4 @@ prometheus:
             namespaces:
               own_namespace: false
               names:
-                - karpenter
+                - kube-system

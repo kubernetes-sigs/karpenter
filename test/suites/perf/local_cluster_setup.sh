@@ -22,10 +22,10 @@ helm upgrade --values valuesv3.yaml --install prometheus prometheus-community/ku
   --wait
 #make toolchain
 make install-kwok
-KWOK_REPO=kind.local
-KIND_CLUSTER_NAME=chart-testing
+export KWOK_REPO=kind.local
+export KIND_CLUSTER_NAME=chart-testing
 make apply-with-kind
-
+echo "$IMG_REPOSITORY"
 # Testing out pyroscope for profiling
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
