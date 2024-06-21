@@ -30,7 +30,7 @@ build: ## Build the Karpenter KWOK controller images using ko build
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
 	
-apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
+apply-with-kind: build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	kubectl apply -f kwok/charts/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
@@ -110,11 +110,11 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	go vet ./...
 	cd kwok/charts && helm-docs
 	golangci-lint run
-	#	@git diff --quiet ||\
-	#		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
-	#		if [ "${CI}" = true ]; then\
-	#			exit 1;\
-	#		fi;}
+	@git diff --quiet ||\
+		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
+		if [ "${CI}" = true ]; then\
+			exit 1;\
+		fi;}
 	actionlint -oneline
 
 download: ## Recursively "go mod download" on all directories where go.mod exists
