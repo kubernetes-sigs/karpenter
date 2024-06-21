@@ -18,14 +18,14 @@ jobs:
     - uses: actions/checkout@v4
       with:
         repository: nathangeology/karpenter_evaluate
-        path: ./karpenter_eval/ #<-- clone https://github.com/org1/repo1
-    - uses: ./.github/actions/install-deps
-      with:
-          k8sVersion: ${{ matrix.k8sVersion }}
+        path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
     - name: Set up Python 3.10
       uses: actions/setup-python@v3
       with:
         python-version: "3.10"
+    - uses: ./.github/actions/install-deps
+      with:
+          k8sVersion: ${{ matrix.k8sVersion }}
     - name: Kind Cluster
       uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
     - name: check kind cluster and taint nodes
@@ -59,8 +59,12 @@ jobs:
         pip install ./karpenter_eval/
     - name: run test suites
       shell: bash
-      run: | 
-        make e2etests
+      run: |
+        export e2e_test_output=$(make e2etests | tail -n 50)
+        line=$(echo "$e2e_test_output" | grep "Printed CSV TO")
+        directory=$(echo "$line" | sed -E 's|.*Printed CSV TO (/tmp/[0-9]+).*|\1|')
+        export TEMP_DIR="$directory"
+        echo "The KPI milestones data is in $TEMP_DIR"
     - name: run KPI report
       shell: bash
       run: |
