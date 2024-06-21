@@ -53,7 +53,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 		return reconcile.Result{}, err
 	}
 	// At this point we know we would have returned
-	log.FromContext(ctx).V(1).Info("removed expired nodeclaim")
+	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
 	metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 		metrics.TypeLabel:     metrics.ExpirationReason,
 		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
