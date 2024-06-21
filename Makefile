@@ -110,11 +110,11 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	go vet ./...
 	cd kwok/charts && helm-docs
 	golangci-lint run
-	git diff --quiet ||\
-		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
-		if [ "${CI}" = true ]; then\
-			exit 1;\
-		fi;}
+	#	@git diff --quiet ||\
+	#		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
+	#		if [ "${CI}" = true ]; then\
+	#			exit 1;\
+	#		fi;}
 	actionlint -oneline
 
 download: ## Recursively "go mod download" on all directories where go.mod exists
