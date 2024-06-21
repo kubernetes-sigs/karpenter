@@ -72,7 +72,7 @@ jobs:
       shell: bash
       run: |
         echo "run KPIs here"
-        python ./karpenter_eval/main.py "$TEMP_DIR"
+        python ./karpenter_eval/main.py
     - name: cleanup 
       shell: bash
       run: | 
