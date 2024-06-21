@@ -51,7 +51,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	if err := e.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, err
 	}
-	// At this point we know we would have returned
+	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
 	metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 		metrics.TypeLabel:     metrics.ExpirationReason,
