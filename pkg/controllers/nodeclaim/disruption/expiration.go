@@ -48,8 +48,7 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 		return reconcile.Result{RequeueAfter: expirationTime.Sub(e.clock.Now())}, nil
 	}
 	// 3. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
-	err := e.kubeClient.Delete(ctx, nodeClaim)
-	if err != nil {
+	if err := e.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, err
 	}
 	// At this point we know we would have returned
