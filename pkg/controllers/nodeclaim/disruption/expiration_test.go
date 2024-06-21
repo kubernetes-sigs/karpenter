@@ -86,7 +86,7 @@ var _ = Describe("Expiration", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
-	It("should delete NodeClaims as expired if the nodeClaim is expired but the node isn't", func() {
+	It("should delete NodeClaims if the nodeClaim is expired but the node isn't", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
