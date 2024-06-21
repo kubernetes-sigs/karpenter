@@ -39,7 +39,7 @@ jobs:
       run: |
         make toolchain
         make install-kwok
-        @git diff || { echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; if [ "${CI}" = true ]; then exit 1; fi;}
+        git diff || { echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; if [ "${CI}" = true ]; then exit 1; fi;}
         KWOK_REPO=kind.local KIND_CLUSTER_NAME=chart-testing make apply-with-kind
     - name: ping cluster
       shell: bash
