@@ -45,6 +45,7 @@ jobs:
     - name: ping cluster
       shell: bash
       run: | 
+        sleep 15
         kubectl get pods -n kube-system | grep karpenter 
         kubectl get nodepools
         kubectl get pods -A
