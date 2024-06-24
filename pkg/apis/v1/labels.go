@@ -47,6 +47,7 @@ const (
 	ManagedByAnnotationKey             = Group + "/managed-by"
 	NodePoolHashAnnotationKey          = Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey   = Group + "/nodepool-hash-version"
+	V1Beta1KubeletConfiguration        = Group + "/v1beta1-kubelet"
 )
 
 // Karpenter specific finalizers

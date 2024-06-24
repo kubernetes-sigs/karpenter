@@ -19,13 +19,11 @@ package v1_test
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	"knative.dev/pkg/ptr"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
 
@@ -44,15 +42,17 @@ var _ = Describe("Validation", func() {
 		nodeClaim = &NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
 			Spec: NodeClaimSpec{
-				NodeClassRef: &NodeClassReference{
-					Kind: "NodeClaim",
-					Name: "default",
-				},
-				Requirements: []NodeSelectorRequirementWithMinValues{
-					{
-						NodeSelectorRequirement: v1.NodeSelectorRequirement{
-							Key:      CapacityTypeLabelKey,
-							Operator: v1.NodeSelectorOpExists,
+				NodeClaimTemplateSpec: NodeClaimTemplateSpec{
+					NodeClassRef: &NodeClassReference{
+						Kind: "NodeClaim",
+						Name: "default",
+					},
+					Requirements: []NodeSelectorRequirementWithMinValues{
+						{
+							NodeSelectorRequirement: v1.NodeSelectorRequirement{
+								Key:      CapacityTypeLabelKey,
+								Operator: v1.NodeSelectorOpExists,
+							},
 						},
 					},
 				},
@@ -213,209 +213,6 @@ var _ = Describe("Validation", func() {
 				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"insance-type-1"}}, MinValues: lo.ToPtr(2)},
 			}
 			Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
-		})
-	})
-	Context("Kubelet", func() {
-		It("should fail on kubeReserved with invalid keys", func() {
-			nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-				KubeReserved: map[string]string{
-					string(v1.ResourcePods): "2",
-				},
-			}
-			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-		})
-		It("should fail on systemReserved with invalid keys", func() {
-			nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-				SystemReserved: map[string]string{
-					string(v1.ResourcePods): "2",
-				},
-			}
-			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-		})
-		Context("Eviction Signals", func() {
-			Context("Eviction Hard", func() {
-				It("should succeed on evictionHard with valid keys", func() {
-					nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory.available":   "5%",
-							"nodefs.available":   "10%",
-							"nodefs.inodesFree":  "15%",
-							"imagefs.available":  "5%",
-							"imagefs.inodesFree": "5%",
-							"pid.available":      "5%",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
-				})
-				It("should fail on evictionHard with invalid keys", func() {
-					nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory": "5%",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-				})
-				It("should fail on invalid formatted percentage value in evictionHard", func() {
-					nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory.available": "5%3",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-				})
-				It("should fail on invalid percentage value (too large) in evictionHard", func() {
-					nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory.available": "110%",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-				})
-				It("should fail on invalid quantity value in evictionHard", func() {
-					nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory.available": "110GB",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-				})
-			})
-		})
-		Context("Eviction Soft", func() {
-			It("should succeed on evictionSoft with valid keys", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available":   "5%",
-						"nodefs.available":   "10%",
-						"nodefs.inodesFree":  "15%",
-						"imagefs.available":  "5%",
-						"imagefs.inodesFree": "5%",
-						"pid.available":      "5%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available":   {Duration: time.Minute},
-						"nodefs.available":   {Duration: time.Second * 90},
-						"nodefs.inodesFree":  {Duration: time.Minute * 5},
-						"imagefs.available":  {Duration: time.Hour},
-						"imagefs.inodesFree": {Duration: time.Hour * 24},
-						"pid.available":      {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
-			})
-			It("should fail on evictionSoft with invalid keys", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory": "5%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-			})
-			It("should fail on invalid formatted percentage value in evictionSoft", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available": "5%3",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-			})
-			It("should fail on invalid percentage value (too large) in evictionSoft", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available": "110%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-			})
-			It("should fail on invalid quantity value in evictionSoft", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available": "110GB",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-			})
-			It("should fail when eviction soft doesn't have matching grace period", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available": "200Mi",
-					},
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-			})
-		})
-		Context("GCThresholdPercent", func() {
-			It("should succeed on a valid imageGCHighThresholdPercent", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					ImageGCHighThresholdPercent: ptr.Int32(10),
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
-			})
-			It("should fail when imageGCHighThresholdPercent is less than imageGCLowThresholdPercent", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					ImageGCHighThresholdPercent: ptr.Int32(50),
-					ImageGCLowThresholdPercent:  ptr.Int32(60),
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-			})
-			It("should fail when imageGCLowThresholdPercent is greather than imageGCHighThresheldPercent", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					ImageGCHighThresholdPercent: ptr.Int32(50),
-					ImageGCLowThresholdPercent:  ptr.Int32(60),
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-			})
-		})
-		Context("Eviction Soft Grace Period", func() {
-			It("should succeed on evictionSoftGracePeriod with valid keys", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available":   "5%",
-						"nodefs.available":   "10%",
-						"nodefs.inodesFree":  "15%",
-						"imagefs.available":  "5%",
-						"imagefs.inodesFree": "5%",
-						"pid.available":      "5%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available":   {Duration: time.Minute},
-						"nodefs.available":   {Duration: time.Second * 90},
-						"nodefs.inodesFree":  {Duration: time.Minute * 5},
-						"imagefs.available":  {Duration: time.Hour},
-						"imagefs.inodesFree": {Duration: time.Hour * 24},
-						"pid.available":      {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
-			})
-			It("should fail on evictionSoftGracePeriod with invalid keys", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-			})
-			It("should fail when eviction soft grace period doesn't have matching threshold", func() {
-				nodeClaim.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-			})
 		})
 	})
 })

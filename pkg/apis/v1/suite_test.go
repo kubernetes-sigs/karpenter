@@ -28,6 +28,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -35,15 +36,17 @@ import (
 
 var ctx context.Context
 var env *test.Environment
+var cloudProvider *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "v1beta1")
+	RunSpecs(t, "v1")
 }
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
+	cloudProvider = fake.NewCloudProvider()
 })
 
 var _ = AfterEach(func() {

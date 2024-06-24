@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"github.com/samber/lo"
@@ -233,7 +234,7 @@ func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.C
 	return o
 }
 
-func (o *Operator) Start(ctx context.Context) {
+func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
@@ -246,6 +247,9 @@ func (o *Operator) Start(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Taking the first supported NodeClass to be the default NodeClass
+			ctx = injection.NodeClassToContext(ctx, cp.GetSupportedNodeClasses())
+			ctx = injection.WithClient(ctx, o.GetClient())
 			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()
 	}

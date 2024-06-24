@@ -22,13 +22,19 @@ import (
 	"os"
 
 	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 type controllerNameKeyType struct{}
+type clientKeyType struct{}
+type nodeClassType struct{}
 
 var controllerNameKey = controllerNameKeyType{}
+var clientKey = clientKeyType{}
+var nodeClassKey = nodeClassType{}
 
 func WithControllerName(ctx context.Context, name string) context.Context {
 	return context.WithValue(ctx, controllerNameKey, name)
@@ -56,4 +62,30 @@ func WithOptionsOrDie(ctx context.Context, opts ...options.Injectable) context.C
 		ctx = opt.ToContext(ctx)
 	}
 	return ctx
+}
+
+func WithClient(ctx context.Context, client client.Client) context.Context {
+	return context.WithValue(ctx, clientKey, client)
+}
+
+func GetClient(ctx context.Context) client.Client {
+	c := ctx.Value(clientKey)
+	if c == nil {
+		// This is a developer error if this happens, so we should panic
+		panic("client doesn't exist in context")
+	}
+	return c.(client.Client)
+}
+
+func NodeClassToContext(ctx context.Context, opts []schema.GroupVersionKind) context.Context {
+	return context.WithValue(ctx, nodeClassKey, opts)
+}
+
+func NodeClassFromContext(ctx context.Context) []schema.GroupVersionKind {
+	retval := ctx.Value(nodeClassKey)
+	if retval == nil {
+		// This is a developer error if this happens, so we should panic
+		panic("nodeclass doesn't exist in context")
+	}
+	return retval.([]schema.GroupVersionKind)
 }

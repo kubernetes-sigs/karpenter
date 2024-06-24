@@ -34,6 +34,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
+var (
+	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot))
+	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeOnDemand))
+)
+
 type DriftReason string
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
