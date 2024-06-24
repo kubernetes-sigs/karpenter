@@ -62,6 +62,23 @@ var _ = Describe("Expiration", func() {
 			Expect(found).To(BeTrue())
 			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
 		})
+		FIt("should fire a karpenter_nodeclaims_terminated metric when expired", func() {
+			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+			// step forward to make the node expired
+			fakeClock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated", map[string]string{
+				"reason":        "expiration",
+				"nodepool":      nodePool.Name,
+				"capacity_type": nodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
 	})
 	It("should not remove the NodeClaims when expiration is disabled", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
