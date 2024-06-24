@@ -62,7 +62,7 @@ var _ = Describe("Expiration", func() {
 			Expect(found).To(BeTrue())
 			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
 		})
-		FIt("should fire a karpenter_nodeclaims_terminated metric when expired", func() {
+		It("should fire a karpenter_nodeclaims_terminated metric when expired", func() {
 			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
