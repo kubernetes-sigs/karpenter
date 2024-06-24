@@ -3,7 +3,7 @@ prometheus:
     serviceMonitorSelector: {}
     serviceMonitorNamespaceSelector: {}
     additionalScrapeConfigs:
-      - job_name: serviceMonitor/karpenter/karpenter/0
+      - job_name: serviceMonitor/kube-system/karpenter/0
         honor_timestamps: true
         track_timestamps_staleness: false
         scrape_interval: 30s
