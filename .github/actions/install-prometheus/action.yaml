@@ -18,7 +18,7 @@ runs:
       run: |
         helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
         -n monitoring \
-        -f ./.github/actions/install-prometheus/valuesv.yaml \
+        -f ./.github/actions/install-prometheus/values.yaml \
         --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].targetLabel=metrics_path" \
         --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].action=replace" \
         --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].sourceLabels[0]=__metrics_path__" \
