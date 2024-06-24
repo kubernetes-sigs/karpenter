@@ -18,8 +18,8 @@ runs:
       run: |
         helm upgrade --values ./.github/actions/install-prometheus/valuesv3.yaml --install prometheus prometheus-community/kube-prometheus-stack \
         -n monitoring \
-        --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].targetLabel=metrics_path" \
-        --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].action=replace" \
-        --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].sourceLabels[0]=__metrics_path__" \
         --wait
         # -f ./.github/actions/install-prometheus/valuesv3.yaml \
+        #--set "kubelet.serviceMonitor.cAdvisorRelabelings[0].targetLabel=metrics_path" \
+        #        --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].action=replace" \
+        #        --set "kubelet.serviceMonitor.cAdvisorRelabelings[0].sourceLabels[0]=__metrics_path__" \
