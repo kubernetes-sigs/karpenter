@@ -68,9 +68,6 @@ jobs:
         directory=$(echo "$line" | sed -E 's|.*Printed CSV TO (/tmp/[0-9]+).*|\1|')
         export TEMP_DIR="$directory"
         echo "The KPI milestones data is in $TEMP_DIR"
-    - name: run KPI report
-      shell: bash
-      run: |
         echo "run KPIs here"
         python ./karpenter_eval/main.py
     - name: cleanup 
