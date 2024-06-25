@@ -53,7 +53,7 @@ jobs:
     - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
       with:
         repository: nathangeology/karpenter_evaluate
-        ref: main/42340d4eaeff0b7954d580f5d0993d295b8e4d71
+        ref: main/42340d4
         fetch-depth: 0
         path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
     - name: install KPI report dependencies
@@ -62,6 +62,8 @@ jobs:
         pip install awswrangler
         pip install tabulate
         pip install prometheus-api-client
+        cd ./karpenter_eval/
+        git checkout 42340d4
         pip install ./karpenter_eval/
     - name: run test suites
       shell: bash
