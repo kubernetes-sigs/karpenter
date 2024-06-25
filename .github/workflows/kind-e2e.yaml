@@ -53,7 +53,7 @@ jobs:
     - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
       with:
         repository: nathangeology/karpenter_evaluate
-        ref: main/42340d4
+        ref: main/42340d4eaeff0b7954d580f5d0993d295b8e4d71
         fetch-depth: 0
         path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
     - name: install KPI report dependencies
