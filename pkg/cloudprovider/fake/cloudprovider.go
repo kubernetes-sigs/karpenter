@@ -111,7 +111,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	np := &v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nodeClaim.Labels[v1beta1.NodePoolLabelKey]}}
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, np)), func(i *cloudprovider.InstanceType, _ int) bool {
-		return reqs.Compatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil &&
+		return reqs.IsCompatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) &&
 			i.Offerings.Available().HasCompatible(reqs) &&
 			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
 	})
@@ -131,7 +131,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	}
 	// Find Offering
 	for _, o := range instanceType.Offerings.Available() {
-		if reqs.Compatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil {
+		if reqs.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 			labels[v1.LabelTopologyZone] = o.Requirements.Get(v1.LabelTopologyZone).Any()
 			labels[v1beta1.CapacityTypeLabelKey] = o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
 			break
