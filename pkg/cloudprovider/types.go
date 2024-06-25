@@ -246,14 +246,14 @@ func (ofs Offerings) Available() Offerings {
 // Compatible returns the offerings based on the passed requirements
 func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering Offering, _ int) bool {
-		return reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+		return reqs.IsCompatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels)
 	})
 }
 
 // HasCompatible returns whether there is a compatible offering based on the passed requirements
 func (ofs Offerings) HasCompatible(reqs scheduling.Requirements) bool {
 	for _, of := range ofs {
-		if reqs.Compatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil {
+		if reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
 			return true
 		}
 	}
