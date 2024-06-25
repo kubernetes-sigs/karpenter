@@ -60,7 +60,6 @@ jobs:
         pip install awswrangler
         pip install tabulate
         pip install prometheus-api-client
-        cd ./karpenter_eval/
         git checkout 42340d4
         pip install ./karpenter_eval/
     - name: run test suites
