@@ -14,18 +14,14 @@ jobs:
       matrix:
         k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
     steps:
-    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+    - name: Set up Python 3.10
+      uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1
       with:
-        repository: nathangeology/karpenter_evaluate
-        path: ./karpenter_eval/ #<-- clone https://github.com/org1/repo1
+        python-version: "3.10"
     - uses: ./.github/actions/install-deps
       with:
           k8sVersion: ${{ matrix.k8sVersion }}
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v3
-      with:
-        python-version: "3.10"
     - name: Kind Cluster
       uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
     - name: check kind cluster and taint nodes
@@ -43,29 +39,40 @@ jobs:
       run: |
         make toolchain
         make install-kwok
-        KWOK_REPO=kind.local KIND_CLUSTER_NAME=chart-testing make apply-with-kind
+        export KWOK_REPO=kind.local
+        export KIND_CLUSTER_NAME=chart-testing
+        make apply-with-kind
     - name: ping cluster
       shell: bash
       run: | 
+        sleep 15
         kubectl get pods -n kube-system | grep karpenter 
         kubectl get nodepools
         kubectl get pods -A
         kubectl describe nodes
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        repository: nathangeology/karpenter_evaluate
+        ref: main/42340d4
+        fetch-depth: 0
+        path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
     - name: install KPI report dependencies
       shell: bash
       run: |
-        pip install pandas
+        pip install awswrangler
+        pip install tabulate
         pip install prometheus-api-client
         pip install ./karpenter_eval/
     - name: run test suites
       shell: bash
-      run: | 
-        make e2etests
-    - name: run KPI report
-      shell: bash
       run: |
+        export e2e_test_output=$(make e2etests | tail -n 50)
+        line=$(echo "$e2e_test_output" | grep "Printed CSV TO")
+        directory=$(echo "$line" | sed -E 's|.*Printed CSV TO (/tmp/[0-9]+).*|\1|')
+        export TEMP_DIR="$directory"
+        echo "The KPI milestones data is in $TEMP_DIR"
         echo "run KPIs here"
-        python ./karpenter_eval/main.py "$TEMP_DIR"
+        python ./karpenter_eval/main.py
     - name: cleanup 
       shell: bash
       run: | 
