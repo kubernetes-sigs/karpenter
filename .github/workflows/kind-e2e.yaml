@@ -66,7 +66,7 @@ jobs:
     - name: run test suites
       shell: bash
       run: |
-        OUTPUT_DIR=mktmp -d 
+        OUTPUT_DIR=$(mktmp -d) 
         export OUTPUT_DIR
         make e2etests
         #        e2e_test_output=$(make e2etests | tail -n 50)
