@@ -1153,7 +1153,7 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 	Context("Replace", func() {
-		FDescribeTable("can replace node",
+		DescribeTable("can replace node",
 			func(spotToSpot bool) {
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
 				node = lo.Ternary(spotToSpot, spotNode, node)
