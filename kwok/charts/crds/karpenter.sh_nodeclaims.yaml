@@ -361,6 +361,9 @@ spec:
                 - nodeClassRef
                 - requirements
               type: object
+              x-kubernetes-validations:
+                - message: immutable field changed
+                  rule: self == oldSelf
             status:
               description: NodeClaimStatus defines the observed state of NodeClaim
               properties:
