@@ -2446,6 +2446,6 @@ var _ = Describe("Taints", func() {
 		pod := test.UnschedulablePod(test.PodOptions{Tolerations: []v1.Toleration{{Key: "test-key", Operator: v1.TolerationOpExists, Effect: v1.TaintEffectNoExecute}}})
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
-		Expect(node.Spec.Taints).To(HaveLen(2)) // Expect no taints generated beyond the default
+		Expect(node.Spec.Taints).To(HaveLen(1)) // Expect no taints generated beyond the default
 	})
 })
