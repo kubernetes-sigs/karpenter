@@ -54,7 +54,7 @@ jobs:
       with:
         repository: nathangeology/karpenter_evaluate
         path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
-        ref: "9556f85e7392c03206ef745efceb93c3d0ba6069"
+        ref: "f55d0415964cb81c31dcea29124638bffd7b910a"
         fetch-depth: 0
     - name: install KPI report dependencies
       shell: bash
