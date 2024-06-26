@@ -134,6 +134,14 @@ var (
 	)
 )
 
+// GetLabelOrDefault returns a default aggregation value of "n/a" if the label we are looking for doesn't have a value in our labels
+func GetLabelOrDefault(labels map[string]string, key string) string {
+	if value, exists := labels[key]; exists {
+		return value
+	}
+	return "n/a"
+}
+
 func init() {
 	crmetrics.Registry.MustRegister(NodeClaimsCreatedCounter, NodeClaimsTerminatedCounter, NodeClaimsLaunchedCounter,
 		NodeClaimsRegisteredCounter, NodeClaimsInitializedCounter, NodeClaimsDisruptedCounter, NodeClaimsDriftedCounter,

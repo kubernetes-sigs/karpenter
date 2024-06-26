@@ -64,6 +64,7 @@ var _ = Describe("Expiration", func() {
 		})
 		It("should fire a karpenter_nodeclaims_terminated metric when expired", func() {
 			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+			nodeClaim.Labels[v1beta1.CapacityTypeLabelKey] = v1beta1.CapacityTypeSpot
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 			// step forward to make the node expired
