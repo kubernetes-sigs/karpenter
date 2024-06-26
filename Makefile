@@ -40,16 +40,23 @@ apply-with-kind: build-with-kind ## Deploy the kwok controller from the current 
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true 
 
-e2etests: ## Run the e2e suite against your local cluster
-	cd test && go test \
-		-count 1 \
-		-timeout 30m \
-		-v \
-		./suites/$(shell echo $(TEST_SUITE) | tr A-Z a-z)/... \
-		--ginkgo.focus="${FOCUS}" \
-		--ginkgo.timeout=30m \
-		--ginkgo.grace-period=5m \
-		--ginkgo.vv	
+e2etests:
+ 	## Run the e2e suite against your local cluster
+ 	@output = $$(cd test && go test \
+                		-count 1 \
+                		-timeout 30m \
+                		-v \
+                		./suites/$(shell echo $(TEST_SUITE) | tr A-Z a-z)/... \
+                		--ginkgo.focus="${FOCUS}" \
+                		--ginkgo.timeout=30m \
+                		--ginkgo.grace-period=5m \
+                		--ginkgo.vv);\
+	echo "$$output"; \
+	status=$$?; \
+	if [$$status -ne 0]; then \
+		echo "Tests failed"; \
+	fi; \
+	exit 0
 
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
