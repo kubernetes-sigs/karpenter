@@ -22,8 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// NodeClaimSpec describes the desired state of the NodeClaim
-type NodeClaimSpec struct {
+// NodeClaimTemplateSpec describes the desired shared fields between NodeClaimTemplate and NodeClaimSpec
+type NodeClaimTemplateSpec struct {
 	// Taints will be applied to the NodeClaim's node.
 	// +optional
 	Taints []v1.Taint `json:"taints,omitempty"`
@@ -40,9 +40,6 @@ type NodeClaimSpec struct {
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
 	Requirements []NodeSelectorRequirementWithMinValues `json:"requirements" hash:"ignore"`
-	// Resources models the resource requirements for the NodeClaim to launch
-	// +optional
-	Resources ResourceRequirements `json:"resources,omitempty" hash:"ignore"`
 	// Kubelet defines args to be used when configuring kubelet on provisioned nodes.
 	// They are a subset of the upstream types, recognizing not all options may be supported.
 	// Wherever possible, the types and names should reflect the upstream kubelet types.
@@ -53,6 +50,14 @@ type NodeClaimSpec struct {
 	// NodeClassRef is a reference to an object that defines provider specific configuration
 	// +required
 	NodeClassRef *NodeClassReference `json:"nodeClassRef"`
+}
+
+// NodeClaimSpec describes the desired state of the NodeClaim
+type NodeClaimSpec struct {
+	NodeClaimTemplateSpec `json:",inline"`
+	// Resources models the resource requirements for the NodeClaim to launch
+	// +optional
+	Resources ResourceRequirements `json:"resources,omitempty" hash:"ignore"`
 }
 
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
