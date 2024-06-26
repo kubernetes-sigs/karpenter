@@ -64,8 +64,7 @@ jobs:
     - name: run test suites
       shell: bash
       run: |
-        e2e_test_output=$(make e2etests | tail -n 50)
-        export e2e_test_output
+        export e2e_test_output=$(make e2etests | tail -n 50)
         line=$(echo "$e2e_test_output" | grep "Printed CSV TO")
         directory=$(echo "$line" | sed -E 's|.*Printed CSV TO (/tmp/[0-9]+).*|\1|')
         TEMP_DIR="$directory"
