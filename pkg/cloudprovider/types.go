@@ -104,11 +104,11 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 	sort.Slice(its, func(i, j int) bool {
 		iPrice := math.MaxFloat64
 		jPrice := math.MaxFloat64
-		if len(its[i].Offerings.Available().Compatible(reqs)) > 0 {
-			iPrice = its[i].Offerings.Available().Compatible(reqs).Cheapest().Price
+		if ofs := its[i].Offerings.Available().Compatible(reqs); len(ofs) > 0 {
+			iPrice = ofs.Cheapest().Price
 		}
-		if len(its[j].Offerings.Available().Compatible(reqs)) > 0 {
-			jPrice = its[j].Offerings.Available().Compatible(reqs).Cheapest().Price
+		if ofs := its[j].Offerings.Available().Compatible(reqs); len(ofs) > 0 {
+			jPrice = ofs.Cheapest().Price
 		}
 		if iPrice == jPrice {
 			return its[i].Name < its[j].Name
@@ -122,7 +122,7 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 func (its InstanceTypes) Compatible(requirements scheduling.Requirements) InstanceTypes {
 	var filteredInstanceTypes []*InstanceType
 	for _, instanceType := range its {
-		if len(instanceType.Offerings.Available().Compatible(requirements)) > 0 {
+		if instanceType.Offerings.Available().HasCompatible(requirements) {
 			filteredInstanceTypes = append(filteredInstanceTypes, instanceType)
 		}
 	}
@@ -161,6 +161,9 @@ func (its InstanceTypes) Compatible(requirements scheduling.Requirements) Instan
 //		}
 //	  so it returns 3 and a non-nil error to indicate that the instance types weren't able to fulfill the minValues requirements
 func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements) (minNeededInstanceTypes int, err error) {
+	if !requirements.HasMinValues() {
+		return 0, nil
+	}
 	valuesForKey := map[string]sets.Set[string]{}
 	// We validate if sorting by price and truncating the number of instance types to minItems breaks the minValue requirement.
 	// If minValue requirement fails, we return an error that indicates the first requirement key that couldn't be satisfied.
@@ -233,14 +236,6 @@ type Offering struct {
 
 type Offerings []Offering
 
-// Get gets the offering from an offering slice that matches the
-// passed zone, capacityType, and other constraints
-func (ofs Offerings) Get(reqs scheduling.Requirements) (Offering, bool) {
-	return lo.Find(ofs, func(of Offering) bool {
-		return reqs.Compatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
-	})
-}
-
 // Available filters the available offerings from the returned offerings
 func (ofs Offerings) Available() Offerings {
 	return lo.Filter(ofs, func(o Offering, _ int) bool {
@@ -251,8 +246,18 @@ func (ofs Offerings) Available() Offerings {
 // Compatible returns the offerings based on the passed requirements
 func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
 	return lo.Filter(ofs, func(offering Offering, _ int) bool {
-		return reqs.Compatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels) == nil
+		return reqs.IsCompatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels)
 	})
+}
+
+// HasCompatible returns whether there is a compatible offering based on the passed requirements
+func (ofs Offerings) HasCompatible(reqs scheduling.Requirements) bool {
+	for _, of := range ofs {
+		if reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+			return true
+		}
+	}
+	return false
 }
 
 // Cheapest returns the cheapest offering from the returned offerings
@@ -267,6 +272,26 @@ func (ofs Offerings) MostExpensive() Offering {
 	return lo.MaxBy(ofs, func(a, b Offering) bool {
 		return a.Price > b.Price
 	})
+}
+
+// WorstLaunchPrice gets the worst-case launch price from the offerings that are offered
+// on an instance type. If the instance type has a spot offering available, then it uses the spot offering
+// to get the launch price; else, it uses the on-demand launch price
+func (ofs Offerings) WorstLaunchPrice(reqs scheduling.Requirements) float64 {
+	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
+	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
+		spotOfferings := ofs.Compatible(reqs).Compatible(SpotRequirement)
+		if len(spotOfferings) > 0 {
+			return spotOfferings.MostExpensive().Price
+		}
+	}
+	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeOnDemand) {
+		onDemandOfferings := ofs.Compatible(reqs).Compatible(OnDemandRequirement)
+		if len(onDemandOfferings) > 0 {
+			return onDemandOfferings.MostExpensive().Price
+		}
+	}
+	return math.MaxFloat64
 }
 
 // NodeClaimNotFoundError is an error type returned by CloudProviders when the reason for failure is NotFound

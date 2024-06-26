@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +42,15 @@ func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*v1.Node) (
 		}
 	}
 	return pods, nil
+}
+
+// GetNodeClaims grabs nodeClaim owner for the node
+func GetNodeClaims(ctx context.Context, node *v1.Node, kubeClient client.Client) ([]*v1beta1.NodeClaim, error) {
+	nodeClaimList := &v1beta1.NodeClaimList{}
+	if err := kubeClient.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
+		return nil, fmt.Errorf("listing nodeClaims, %w", err)
+	}
+	return lo.ToSlicePtr(nodeClaimList.Items), nil
 }
 
 // GetReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria

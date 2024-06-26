@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
@@ -40,7 +41,7 @@ func NewEmptyNodeConsolidation(consolidation consolidation) *EmptyNodeConsolidat
 // ComputeCommand generates a disruption command given candidates
 //
 //nolint:gocyclo
-func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1beta1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if c.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
@@ -52,7 +53,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
-		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonEmpty] == 0 {
 			// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 			constrainedByBudgets = true
 			continue
@@ -60,7 +61,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
 		empty = append(empty, candidate)
-		disruptionBudgetMapping[candidate.nodePool.Name]--
+		disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonEmpty]--
 	}
 	// none empty, so do nothing
 	if len(empty) == 0 {
@@ -86,7 +87,7 @@ func (c *EmptyNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	case <-c.clock.After(consolidationTTL):
 	}
 
-	v := NewValidation(c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder, c.queue)
+	v := NewValidation(c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder, c.queue, v1beta1.DisruptionReasonEmpty)
 	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
 	if err != nil {
 		if IsValidationError(err) {

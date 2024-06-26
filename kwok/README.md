@@ -47,7 +47,7 @@ spec:
     consolidationPolicy: WhenUnderutilized
     expireAfter: 720h # 30 * 24h = 720h
 ---
-apiVersion: kwok.karpenter.sh/v1alpha1
+apiVersion: karpenter.kwok.sh/v1alpha1
 kind: KWOKNodeClass
 metadata:
   name: default

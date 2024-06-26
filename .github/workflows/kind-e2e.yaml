@@ -1,0 +1,56 @@
+name: kind-e2e
+on:
+  # enable running this on merges + presubmits when the action has tests that it will execute
+  # push:
+  #   branches: [main]
+  # pull_request:
+  workflow_dispatch:
+jobs:
+  test-kind:
+    permissions:
+      issues: write
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
+    steps:
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+    - uses: ./.github/actions/install-deps
+      with:
+          k8sVersion: ${{ matrix.k8sVersion }}
+    - name: Kind Cluster
+      uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
+    - name: check kind cluster and taint nodes
+      shell: bash
+      run: |
+        kubectl config current-context
+        kubectl get nodes
+        kubectl taint nodes chart-testing-control-plane CriticalAddonsOnly:NoSchedule
+    - name: install prometheus 
+      uses: ./.github/actions/install-prometheus
+    - name: install pyroscope 
+      uses: ./.github/actions/install-pyroscope
+    - name: install kwok and controller
+      shell: bash
+      run: |
+        make toolchain
+        make install-kwok
+        KWOK_REPO=kind.local KIND_CLUSTER_NAME=chart-testing make apply-with-kind
+    - name: ping cluster
+      shell: bash
+      run: | 
+        kubectl get pods -n kube-system | grep karpenter 
+        kubectl get nodepools
+        kubectl get pods -A
+        kubectl describe nodes
+    - name: run test suites
+      shell: bash
+      run: | 
+        make e2etests
+    - name: cleanup 
+      shell: bash
+      run: | 
+        kubectl delete nodepools --all 
+        make delete
+        make uninstall-kwok
+        

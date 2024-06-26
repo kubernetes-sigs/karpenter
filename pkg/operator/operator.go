@@ -125,6 +125,11 @@ func NewOperator() (context.Context, *Operator) {
 		GracePeriod: 5 * time.Second,
 	})
 
+	// Logging
+	logger := zapr.NewLogger(logging.NewLogger(ctx, component))
+	log.SetLogger(logger)
+	klog.SetLogger(logger)
+
 	// Client Config
 	config := ctrl.GetConfigOrDie()
 	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(options.FromContext(ctx).KubeClientQPS), options.FromContext(ctx).KubeClientBurst)
@@ -132,11 +137,6 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
-
-	// Logging
-	logger := zapr.NewLogger(logging.NewLogger(ctx, component))
-	log.SetLogger(logger)
-	klog.SetLogger(logger)
 
 	log.FromContext(ctx).WithValues("version", Version).V(1).Info("discovered karpenter version")
 

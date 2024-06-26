@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -39,15 +38,13 @@ import (
 type PodController struct {
 	kubeClient  client.Client
 	provisioner *Provisioner
-	recorder    events.Recorder
 }
 
 // NewPodController constructs a controller instance
-func NewPodController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) *PodController {
+func NewPodController(kubeClient client.Client, provisioner *Provisioner) *PodController {
 	return &PodController{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
-		recorder:    recorder,
 	}
 }
 
@@ -78,15 +75,13 @@ func (c *PodController) Register(_ context.Context, m manager.Manager) error {
 type NodeController struct {
 	kubeClient  client.Client
 	provisioner *Provisioner
-	recorder    events.Recorder
 }
 
 // NewNodeController constructs a controller instance
-func NewNodeController(kubeClient client.Client, provisioner *Provisioner, recorder events.Recorder) *NodeController {
+func NewNodeController(kubeClient client.Client, provisioner *Provisioner) *NodeController {
 	return &NodeController{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
-		recorder:    recorder,
 	}
 }
 

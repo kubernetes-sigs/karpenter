@@ -58,8 +58,8 @@ func NewControllers(
 	return []controller.Controller{
 		p, evictionQueue, disruptionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
-		provisioning.NewPodController(kubeClient, p, recorder),
-		provisioning.NewNodeController(kubeClient, p, recorder),
+		provisioning.NewPodController(kubeClient, p),
+		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),

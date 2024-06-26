@@ -39,7 +39,7 @@ var (
 
 //go:generate controller-gen crd object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
 var (
-	//go:embed crds/kwok.karpenter.sh_kwoknodeclasses.yaml
+	//go:embed crds/karpenter.kwok.sh_kwoknodeclasses.yaml
 	KWOKNodeClassCRD []byte
 	CRDs             = []*v1.CustomResourceDefinition{
 		lo.Must(functional.Unmarshal[v1.CustomResourceDefinition](KWOKNodeClassCRD)),

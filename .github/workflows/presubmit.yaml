@@ -13,9 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
         matrix:
-          k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x"]
+          k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
     steps:
-    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4.1.6
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
     - uses: ./.github/actions/install-deps
       with:
         k8sVersion: ${{ matrix.k8sVersion }}
@@ -24,7 +24,7 @@ jobs:
     - run: K8S_VERSION=${{ matrix.k8sVersion }} make presubmit
     - name: Send coverage
       # should only send converage once https://docs.coveralls.io/parallel-builds
-      if: matrix.k8sVersion == '1.29.x'
+      if: matrix.k8sVersion == '1.30.x'
       env:
         COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: goveralls -coverprofile=coverage.out -service=github
