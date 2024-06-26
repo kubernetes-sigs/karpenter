@@ -30,12 +30,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -472,24 +470,6 @@ var _ = Describe("Drift", func() {
 	})
 
 	Context("Drift", func() {
-		It("should ignore drifted nodes if the feature flag is disabled", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{Drift: lo.ToPtr(false)}}))
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
-			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
-
-			// Expect to not create or delete more nodeclaims
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, nodeClaim)
-		})
 		It("should continue to the next drifted node if the first cannot reschedule all pods", func() {
 			pod := test.Pod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{
@@ -569,27 +549,6 @@ var _ = Describe("Drift", func() {
 		It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation", func() {
 			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
-
-			ExpectSingletonReconciled(ctx, disruptionController)
-
-			// Expect to not create or delete more nodeclaims
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, nodeClaim)
-		})
-		It("should ignore nodes that have pods with the karpenter.sh/do-not-evict annotation", func() {
-			pod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						v1alpha5.DoNotEvictPodAnnotationKey: "true",
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
-			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
