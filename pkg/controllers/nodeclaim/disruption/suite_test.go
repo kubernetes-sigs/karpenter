@@ -115,7 +115,7 @@ var _ = Describe("Disruption", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).IsTrue()).To(BeTrue())
 	})
-	FIt("should remove multiple disruption conditions simultaneously", func() {
+	It("should remove multiple disruption conditions simultaneously", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
 
