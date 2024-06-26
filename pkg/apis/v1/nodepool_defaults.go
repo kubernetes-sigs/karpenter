@@ -14,8 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha5
+package v1
 
-const (
-	Group = "karpenter.sh"
+import (
+	"context"
 )
+
+// SetDefaults for the NodePool
+func (in *NodePool) SetDefaults(_ context.Context) {}

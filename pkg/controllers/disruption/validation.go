@@ -26,7 +26,6 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha5"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
@@ -149,10 +148,6 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (v *Validation) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	// TODO Remove checking do-not-consolidate as part of v1
-	if c.Annotations()[v1alpha5.DoNotConsolidateNodeAnnotationKey] == "true" {
-		return false
-	}
 	return c.nodePool.Spec.Disruption.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
 }
 
