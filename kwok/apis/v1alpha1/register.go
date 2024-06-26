@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	Group = "kwok.karpenter.sh"
+	Group = "karpenter.kwok.sh"
 )
 
 var (

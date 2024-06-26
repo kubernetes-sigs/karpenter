@@ -62,7 +62,7 @@ func (e *Expiration) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1beta1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).LastTransitionTime.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).LastTransitionTime.Time)
@@ -78,10 +78,11 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonExpired] > 0 {
 			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name]--
+			disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonExpired]--
 		}
+
 	}
 	// Disrupt all empty expired candidates, as they require no scheduling simulations.
 	// Return empty scheduling results since no empty nodes should be rescheduling any pods.
@@ -95,7 +96,7 @@ func (e *Expiration) ComputeCommand(ctx context.Context, disruptionBudgetMapping
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since expiration commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonExpired] == 0 {
 			continue
 		}
 		// Check if we need to create any NodeClaims.

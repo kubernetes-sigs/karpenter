@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -124,6 +125,17 @@ func (n *NodeClaim) FinalizeScheduling() {
 	// We need nodes to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
 	// of the node as it will be displayed in error messages
 	delete(n.Requirements, v1.LabelHostname)
+}
+
+func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling.Requirements, maxPrice float64) (*NodeClaim, error) {
+	n.InstanceTypeOptions = lo.Filter(n.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) bool {
+		launchPrice := it.Offerings.Available().WorstLaunchPrice(reqs)
+		return launchPrice < maxPrice
+	})
+	if _, err := n.InstanceTypeOptions.SatisfiesMinValues(reqs); err != nil {
+		return nil, err
+	}
+	return n, nil
 }
 
 func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string {
@@ -244,8 +256,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)
 		itFits := fits(it, requests)
-		// TODO: change Get() on offerings to be closer to the implementation of Any() on requirements
-		_, itHasOffering := it.Offerings.Available().Get(requirements)
+		itHasOffering := it.Offerings.Available().HasCompatible(requirements)
 
 		// track if any single instance type met a single criteria
 		results.requirementsMet = results.requirementsMet || itCompat
@@ -263,6 +274,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 			results.remaining = append(results.remaining, it)
 		}
 	}
+
 	if requirements.HasMinValues() {
 		// We don't care about the minimum number of instance types that meet our requirements here, we only care if they meet our requirements.
 		_, results.minValuesIncompatibleErr = results.remaining.SatisfiesMinValues(requirements)

@@ -1,0 +1,77 @@
+/*
+Copyright The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package disruption
+
+import (
+	"context"
+	"math"
+	"strconv"
+
+	"github.com/samber/lo"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
+	"knative.dev/pkg/logging"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+)
+
+// lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the ExpireAfter
+// is non-zero, we use it to scale down the disruption costs of candidates that are going to expire.  Just after creation, the
+// disruption cost is highest, and it approaches zero as the node ages towards its expiration time.
+func LifetimeRemaining(clock clock.Clock, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) float64 {
+	remaining := 1.0
+	if nodePool.Spec.Disruption.ExpireAfter.Duration != nil {
+		ageInSeconds := clock.Since(nodeClaim.CreationTimestamp.Time).Seconds()
+		totalLifetimeSeconds := nodePool.Spec.Disruption.ExpireAfter.Duration.Seconds()
+		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
+		remaining = lo.Clamp(lifetimeRemainingSeconds/totalLifetimeSeconds, 0.0, 1.0)
+	}
+	return remaining
+}
+
+// EvictionCost returns the disruption cost computed for evicting the given pod.
+func EvictionCost(ctx context.Context, p *v1.Pod) float64 {
+	cost := 1.0
+	podDeletionCostStr, ok := p.Annotations[v1.PodDeletionCost]
+	if ok {
+		podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
+		if err != nil {
+			logging.FromContext(ctx).Errorf("parsing %s=%s from pod %s, %s",
+				v1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p), err)
+		} else {
+			// the pod deletion disruptionCost is in [-2147483647, 2147483647]
+			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
+			cost += podDeletionCost / math.Pow(2, 27.0)
+		}
+	}
+	// the scheduling priority is in [-2147483648, 1000000000]
+	if p.Spec.Priority != nil {
+		cost += float64(*p.Spec.Priority) / math.Pow(2, 25)
+	}
+
+	// overall we clamp the pod cost to the range [-10.0, 10.0] with the default being 1.0
+	return lo.Clamp(cost, -10.0, 10.0)
+}
+
+func ReschedulingCost(ctx context.Context, pods []*v1.Pod) float64 {
+	cost := 0.0
+	for _, p := range pods {
+		cost += EvictionCost(ctx, p)
+	}
+	return cost
+}

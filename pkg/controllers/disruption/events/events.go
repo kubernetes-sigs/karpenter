@@ -102,22 +102,36 @@ func Unconsolidatable(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string
 
 // Blocked is an event that informs the user that a NodeClaim/Node combination is blocked on deprovisioning
 // due to the state of the NodeClaim/Node or due to some state of the pods that are scheduled to the NodeClaim/Node
-func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {
-	return []events.Event{
-		{
+func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) (evs []events.Event) {
+	if node != nil {
+		evs = append(evs, events.Event{
 			InvolvedObject: node,
 			Type:           v1.EventTypeNormal,
 			Reason:         "DisruptionBlocked",
 			Message:        fmt.Sprintf("Cannot disrupt Node: %s", reason),
 			DedupeValues:   []string{string(node.UID)},
-		},
-		{
+		})
+	}
+	if nodeClaim != nil {
+		evs = append(evs, events.Event{
 			InvolvedObject: nodeClaim,
 			Type:           v1.EventTypeNormal,
 			Reason:         "DisruptionBlocked",
 			Message:        fmt.Sprintf("Cannot disrupt NodeClaim: %s", reason),
 			DedupeValues:   []string{string(nodeClaim.UID)},
-		},
+		})
+	}
+	return evs
+}
+
+func NodePoolBlockedForDisruptionReason(nodePool *v1beta1.NodePool, reason v1beta1.DisruptionReason) events.Event {
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           v1.EventTypeNormal,
+		Reason:         "DisruptionBlocked",
+		Message:        fmt.Sprintf("No allowed disruptions for disruption reason %s due to blocking budget", reason),
+		DedupeValues:   []string{string(nodePool.UID), string(reason)},
+		DedupeTimeout:  1 * time.Minute,
 	}
 }
 
