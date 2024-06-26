@@ -39,12 +39,20 @@ var (
 	familyDelim = regexp.MustCompile(`[.-]`)
 )
 
+// Wrap cloudprovider.Offerings with NodeSelectorRequirements for post-json processing translation
+type KWOKOfferings []KWOKOffering
+
+type KWOKOffering struct {
+	cloudprovider.Offering
+	Requirements []v1.NodeSelectorRequirement
+}
+
 type InstanceTypeOptions struct {
-	Name             string                  `json:"name"`
-	Offerings        cloudprovider.Offerings `json:"offerings"`
-	Architecture     string                  `json:"architecture"`
-	OperatingSystems []v1.OSName             `json:"operatingSystems"`
-	Resources        v1.ResourceList         `json:"resources"`
+	Name             string          `json:"name"`
+	Offerings        KWOKOfferings   `json:"offerings"`
+	Architecture     string          `json:"architecture"`
+	OperatingSystems []v1.OSName     `json:"operatingSystems"`
+	Resources        v1.ResourceList `json:"resources"`
 
 	// These are used for setting default requirements, they should not be used
 	// for setting arbitrary node labels.  Set the labels on the created NodePool for
@@ -114,7 +122,6 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 	}
 
 	opts.instanceTypeLabels = map[string]string{
-		v1alpha1.InstanceTypeLabelKey:   opts.Name,
 		v1alpha1.InstanceSizeLabelKey:   parseSizeFromType(opts.Name, cpu),
 		v1alpha1.InstanceFamilyLabelKey: parseFamilyFromType(opts.Name),
 		v1alpha1.InstanceCPULabelKey:    cpu,
@@ -137,16 +144,25 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	osNames := lo.Map(options.OperatingSystems, func(os v1.OSName, _ int) string { return string(os) })
 
+	zones := lo.Uniq(lo.Flatten(lo.Map(options.Offerings, func(o KWOKOffering, _ int) []string {
+		req, _ := lo.Find(o.Requirements, func(req v1.NodeSelectorRequirement) bool {
+			return req.Key == v1.LabelTopologyZone
+		})
+		return req.Values
+	})))
+	capacityTypes := lo.Uniq(lo.Flatten(lo.Map(options.Offerings, func(o KWOKOffering, _ int) []string {
+		req, _ := lo.Find(o.Requirements, func(req v1.NodeSelectorRequirement) bool {
+			return req.Key == v1beta1.CapacityTypeLabelKey
+		})
+		return req.Values
+	})))
+
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, osNames...),
-		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
-			return o.Requirements.Get(v1.LabelTopologyZone).Any()
-		})...),
-		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
-			return o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
-		})...),
+		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, zones...),
+		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, capacityTypes...),
 		scheduling.NewRequirement(v1alpha1.InstanceSizeLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceSizeLabelKey]),
 		scheduling.NewRequirement(v1alpha1.InstanceFamilyLabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceFamilyLabelKey]),
 		scheduling.NewRequirement(v1alpha1.InstanceCPULabelKey, v1.NodeSelectorOpIn, options.instanceTypeLabels[v1alpha1.InstanceCPULabelKey]),
@@ -156,8 +172,16 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	return &cloudprovider.InstanceType{
 		Name:         options.Name,
 		Requirements: requirements,
-		Offerings:    options.Offerings,
-		Capacity:     options.Resources,
+		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) cloudprovider.Offering {
+			return cloudprovider.Offering{
+				Requirements: scheduling.NewRequirements(lo.Map(off.Requirements, func(req v1.NodeSelectorRequirement, _ int) *scheduling.Requirement {
+					return scheduling.NewRequirement(req.Key, req.Operator, req.Values...)
+				})...),
+				Price:     off.Offering.Price,
+				Available: off.Offering.Available,
+			}
+		}),
+		Capacity: options.Resources,
 		Overhead: &cloudprovider.InstanceTypeOverhead{
 			KubeReserved: v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("100m"),

@@ -36,8 +36,20 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
+		--set serviceMonitor.enabled=true \
 		--set-string controller.env[0].name=ENABLE_PROFILING \
-		--set-string controller.env[0].value=true
+		--set-string controller.env[0].value=true 
+
+e2etests: ## Run the e2e suite against your local cluster
+	cd test && go test \
+		-count 1 \
+		-timeout 30m \
+		-v \
+		./suites/$(shell echo $(TEST_SUITE) | tr A-Z a-z)/... \
+		--ginkgo.focus="${FOCUS}" \
+		--ginkgo.timeout=30m \
+		--ginkgo.grace-period=5m \
+		--ginkgo.vv	
 
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
@@ -55,7 +67,7 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 
 test: ## Run tests
-	go test ./... \
+	go test ./pkg/... \
 		-race \
 		-timeout 15m \
 		--ginkgo.focus="${FOCUS}" \

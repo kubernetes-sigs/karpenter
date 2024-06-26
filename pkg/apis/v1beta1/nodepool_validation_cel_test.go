@@ -229,7 +229,45 @@ var _ = Describe("CEL/Validation", func() {
 			}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
+		DescribeTable("should succeed when creating a budget with valid reasons", func(reason DisruptionReason) {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				Reasons:  []DisruptionReason{reason},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		},
+			Entry("Drifted", DisruptionReasonDrifted),
+			Entry("Underutilized", DisruptionReasonUnderutilized),
+			Entry("Expired", DisruptionReasonExpired),
+			Entry("Empty", DisruptionReasonEmpty),
+		)
+
+		DescribeTable("should fail when creating a budget with invalid reasons", func(reason string) {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				Reasons:  []DisruptionReason{DisruptionReason(reason)},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		},
+			Entry("invalid reason", "invalid"),
+			Entry("empty reason", ""),
+		)
+
+		It("should allow setting multiple reasons", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				Reasons:  []DisruptionReason{DisruptionReasonExpired, DisruptionReasonEmpty},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
 	})
+
 	Context("KubeletConfiguration", func() {
 		It("should succeed on kubeReserved with valid keys", func() {
 			nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{

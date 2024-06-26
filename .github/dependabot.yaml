@@ -45,3 +45,19 @@ updates:
       action-deps:
         patterns:
           - '*'
+  - package-ecosystem: github-actions
+    directory: .github/actions/install-prometheus
+    schedule:
+      interval: weekly
+    groups:
+      action-deps:
+        patterns:
+          - '*'
+  - package-ecosystem: github-actions
+    directory: .github/actions/install-pyroscope
+    schedule:
+      interval: weekly
+    groups:
+      action-deps:
+        patterns:
+          - '*'
