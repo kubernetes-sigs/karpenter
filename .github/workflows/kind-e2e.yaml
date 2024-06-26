@@ -54,6 +54,8 @@ jobs:
       with:
         repository: nathangeology/karpenter_evaluate
         path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
+        ref: "9556f85e7392c03206ef745efceb93c3d0ba6069"
+        fetch-depth: 0
     - name: install KPI report dependencies
       shell: bash
       run: |
@@ -64,13 +66,17 @@ jobs:
     - name: run test suites
       shell: bash
       run: |
-        e2e_test_output=$(make e2etests | tail -n 50)
-        export e2e_test_output
-        line=$(echo "$e2e_test_output" | grep "Printed CSV TO")
-        directory=$(echo "$line" | sed -E 's|.*Printed CSV TO (/tmp/[0-9]+).*|\1|')
-        TEMP_DIR="$directory"
-        export TEMP_DIR
-        echo "The KPI milestones data is in $TEMP_DIR"
+        OUTPUT_DIR=mktmp -d 
+        export OUTPUT_DIR
+        make e2etests
+        #        e2e_test_output=$(make e2etests | tail -n 50)
+        #        
+        #        export e2e_test_output
+        #        line=$(echo "$e2e_test_output" | grep "Printed CSV TO")
+        #        directory=$(echo "$line" | sed -E 's|.*Printed CSV TO (/tmp/[0-9]+).*|\1|')
+        #        TEMP_DIR="$directory"
+        #        export TEMP_DIR
+        echo "The KPI milestones data is in $OUTPUT_DIR"
         echo "run KPIs here"
         python ./karpenter_eval/main.py
     - name: cleanup 
