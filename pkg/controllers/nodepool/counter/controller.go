@@ -18,8 +18,10 @@ package counter
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
@@ -68,6 +70,15 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 	stored := nodePool.DeepCopy()
 	// Determine resource usage and update nodepool.status.resources
 	nodePool.Status.Resources = c.resourceCountsFor(v1beta1.NodePoolLabelKey, nodePool.Name)
+	nodeCount := lo.CountBy(c.cluster.Nodes(), func(n *state.StateNode) bool {
+		return n.Labels()[v1beta1.NodePoolLabelKey] == nodePool.Name
+	})
+	// Only display node count if nodes are owned by the nodepool
+	if nodeCount != 0 {
+		nodePool.Status.Resources = resources.MergeInto(nodePool.Status.Resources, v1.ResourceList{
+			v1.ResourceName("nodes"): resource.MustParse(fmt.Sprintf("%d", nodeCount)),
+		})
+	}
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)

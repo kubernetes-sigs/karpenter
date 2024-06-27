@@ -20,8 +20,25 @@ spec:
         - jsonPath: .spec.template.spec.nodeClassRef.name
           name: NodeClass
           type: string
+        - jsonPath: .status.resources.nodes
+          name: Nodes
+          type: string
+        - jsonPath: .status.conditions[?(@.type=="Ready")].status
+          name: Ready
+          type: string
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
         - jsonPath: .spec.weight
           name: Weight
+          priority: 1
+          type: integer
+        - jsonPath: .status.resources.cpu
+          name: CPU
+          priority: 1
+          type: string
+        - jsonPath: .status.resources.memory
+          name: Memory
           priority: 1
           type: string
       name: v1
