@@ -53,8 +53,7 @@ var _ = Describe("Expiration", func() {
 			fakeClock.Step(60 * time.Second)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).IsTrue()).To(BeTrue())
+			ExpectNotFound(ctx, env.Client, nodeClaim)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted", map[string]string{
 				"type":     "expiration",
@@ -63,39 +62,49 @@ var _ = Describe("Expiration", func() {
 			Expect(found).To(BeTrue())
 			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
 		})
+		It("should fire a karpenter_nodeclaims_terminated metric when expired", func() {
+			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+			nodeClaim.Labels[v1beta1.CapacityTypeLabelKey] = v1beta1.CapacityTypeSpot
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+			// step forward to make the node expired
+			fakeClock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated", map[string]string{
+				"reason":        "expiration",
+				"nodepool":      nodePool.Name,
+				"capacity_type": nodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
+		})
 	})
-	It("should remove the status condition from the NodeClaims when expiration is disabled", func() {
+	It("should not remove the NodeClaims when expiration is disabled", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
-		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired)).To(BeNil())
 	})
-	It("should mark NodeClaims as expired", func() {
+	It("should remove nodeclaims that are expired", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).IsTrue()).To(BeTrue())
+		// with forceful termination, when we see a nodeclaim meets the conditions for expiration
+		// we should remove it
+		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
-	It("should remove the status condition from non-expired NodeClaims", func() {
+	It("should not remove non-expired NodeClaims", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
-		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired)).To(BeNil())
 	})
-	It("should mark NodeClaims as expired if the nodeClaim is expired but the node isn't", func() {
+	It("should delete NodeClaims if the nodeClaim is expired but the node isn't", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
@@ -104,8 +113,7 @@ var _ = Describe("Expiration", func() {
 		ExpectApplied(ctx, env.Client, node) // node shouldn't be expired, but nodeClaim will be
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeExpired).IsTrue()).To(BeTrue())
+		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should return the requeue interval for the time between now and when the nodeClaim expires", func() {
 		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
