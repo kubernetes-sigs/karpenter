@@ -17,15 +17,21 @@ limitations under the License.
 package v1
 
 import (
+	"github.com/samber/lo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
 )
 
 const (
 	Group              = "karpenter.sh"
 	CompatabilityGroup = "compatibility." + Group
 )
+
+func init() {
+	lo.Must0(SchemeBuilder.AddToScheme(scheme.Scheme))
+}
 
 var (
 	SchemeGroupVersion = schema.GroupVersion{Group: Group, Version: "v1"}

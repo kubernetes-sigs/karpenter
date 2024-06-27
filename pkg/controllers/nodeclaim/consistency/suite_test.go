@@ -38,10 +38,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
+	"k8s.io/client-go/kubernetes/scheme"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 

@@ -27,9 +27,10 @@ import (
 
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
+	"k8s.io/client-go/kubernetes/scheme"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )

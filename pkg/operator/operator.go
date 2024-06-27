@@ -29,6 +29,7 @@ import (
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/prometheus/client_golang/prometheus"
 	coordinationv1 "k8s.io/api/coordination/v1"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	"knative.dev/pkg/changeset"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -61,7 +62,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/webhooks"
 )
 

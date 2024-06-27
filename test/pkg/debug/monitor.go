@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
+	"k8s.io/client-go/kubernetes/scheme"
 )
 
 type Monitor struct {
