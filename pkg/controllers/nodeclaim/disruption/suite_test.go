@@ -38,7 +38,6 @@ import (
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -59,7 +58,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
 		return c.IndexField(ctx, &v1.Node{}, "spec.providerID", func(obj client.Object) []string {
 			return []string{obj.(*v1.Node).Spec.ProviderID}
 		})
