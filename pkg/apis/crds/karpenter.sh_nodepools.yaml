@@ -191,7 +191,7 @@ spec:
                               rule: self.all(x, x != "kubernetes.io/hostname")
                       type: object
                     spec:
-                      description: NodeClaimTemplateSpec describes the desired shared fields between NodeClaimTemplate and NodeClaimSpec
+                      description: NodeClaimSpec describes the desired state of the NodeClaim
                       properties:
                         kubelet:
                           description: |-
@@ -505,7 +505,7 @@ spec:
             - spec
           type: object
       served: true
-      storage: true
+      storage: false
       subresources:
         status: {}
     - additionalPrinterColumns:
@@ -1025,6 +1025,6 @@ spec:
             - spec
           type: object
       served: true
-      storage: false
+      storage: true
       subresources:
         status: {}

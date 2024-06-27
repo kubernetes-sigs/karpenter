@@ -46,17 +46,15 @@ var _ = Describe("Validation", func() {
 		nodeClaim = &NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
 			Spec: NodeClaimSpec{
-				NodeClaimTemplateSpec: NodeClaimTemplateSpec{
-					NodeClassRef: &NodeClassReference{
-						Kind: "NodeClaim",
-						Name: "default",
-					},
-					Requirements: []NodeSelectorRequirementWithMinValues{
-						{
-							NodeSelectorRequirement: v1.NodeSelectorRequirement{
-								Key:      CapacityTypeLabelKey,
-								Operator: v1.NodeSelectorOpExists,
-							},
+				NodeClassRef: &NodeClassReference{
+					Kind: "NodeClaim",
+					Name: "default",
+				},
+				Requirements: []NodeSelectorRequirementWithMinValues{
+					{
+						NodeSelectorRequirement: v1.NodeSelectorRequirement{
+							Key:      CapacityTypeLabelKey,
+							Operator: v1.NodeSelectorOpExists,
 						},
 					},
 				},

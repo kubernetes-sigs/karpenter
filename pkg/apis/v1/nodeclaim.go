@@ -22,8 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// NodeClaimTemplateSpec describes the desired shared fields between NodeClaimTemplate and NodeClaimSpec
-type NodeClaimTemplateSpec struct {
+// NodeClaimSpec describes the desired state of the NodeClaim
+type NodeClaimSpec struct {
 	// Taints will be applied to the NodeClaim's node.
 	// +optional
 	Taints []v1.Taint `json:"taints,omitempty"`
@@ -40,6 +40,9 @@ type NodeClaimTemplateSpec struct {
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
 	Requirements []NodeSelectorRequirementWithMinValues `json:"requirements" hash:"ignore"`
+	// Resources models the resource requirements for the NodeClaim to launch
+	// +optional
+	Resources ResourceRequirements `json:"resources,omitempty" hash:"ignore"`
 	// Kubelet defines args to be used when configuring kubelet on provisioned nodes.
 	// They are a subset of the upstream types, recognizing not all options may be supported.
 	// Wherever possible, the types and names should reflect the upstream kubelet types.
@@ -50,14 +53,6 @@ type NodeClaimTemplateSpec struct {
 	// NodeClassRef is a reference to an object that defines provider specific configuration
 	// +required
 	NodeClassRef *NodeClassReference `json:"nodeClassRef"`
-}
-
-// NodeClaimSpec describes the desired state of the NodeClaim
-type NodeClaimSpec struct {
-	NodeClaimTemplateSpec `json:",inline"`
-	// Resources models the resource requirements for the NodeClaim to launch
-	// +optional
-	Resources ResourceRequirements `json:"resources,omitempty" hash:"ignore"`
 }
 
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
@@ -168,7 +163,6 @@ type Provider = runtime.RawExtension
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=nodeclaims,scope=Cluster,categories=karpenter
 // +kubebuilder:subresource:status
-// +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".metadata.labels.node\\.kubernetes\\.io/instance-type",description=""
 // +kubebuilder:printcolumn:name="Zone",type="string",JSONPath=".metadata.labels.topology\\.kubernetes\\.io/zone",description=""
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.nodeName",description=""

@@ -75,7 +75,7 @@ func (in *NodeClaim) Validate(_ context.Context) (errs *apis.FieldError) {
 	)
 }
 
-func (in *NodeClaimTemplateSpec) validate() (errs *apis.FieldError) {
+func (in *NodeClaimSpec) validate() (errs *apis.FieldError) {
 	return errs.Also(
 		in.validateTaints(),
 		in.validateRequirements(),
@@ -88,14 +88,14 @@ type taintKeyEffect struct {
 	Effect   v1.TaintEffect
 }
 
-func (in *NodeClaimTemplateSpec) validateTaints() (errs *apis.FieldError) {
+func (in *NodeClaimSpec) validateTaints() (errs *apis.FieldError) {
 	existing := map[taintKeyEffect]struct{}{}
 	errs = errs.Also(in.validateTaintsField(in.Taints, existing, "taints"))
 	errs = errs.Also(in.validateTaintsField(in.StartupTaints, existing, "startupTaints"))
 	return errs
 }
 
-func (in *NodeClaimTemplateSpec) validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}, fieldName string) *apis.FieldError {
+func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}, fieldName string) *apis.FieldError {
 	var errs *apis.FieldError
 	for i, taint := range taints {
 		// Validate OwnerKey
@@ -132,7 +132,7 @@ func (in *NodeClaimTemplateSpec) validateTaintsField(taints []v1.Taint, existing
 // This function is used by the NodeClaim validation webhook to verify the nodepool requirements.
 // When this function is called, the nodepool's requirements do not include the requirements from labels.
 // NodeClaim requirements only support well known labels.
-func (in *NodeClaimTemplateSpec) validateRequirements() (errs *apis.FieldError) {
+func (in *NodeClaimSpec) validateRequirements() (errs *apis.FieldError) {
 	for i, requirement := range in.Requirements {
 		if err := ValidateRequirement(requirement); err != nil {
 			errs = errs.Also(apis.ErrInvalidArrayValue(err, "requirements", i))
