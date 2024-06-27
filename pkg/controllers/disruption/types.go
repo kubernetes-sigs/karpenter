@@ -50,6 +50,7 @@ type Method interface {
 	Type() string
 	Class() string
 	ConsolidationType() string
+	EvictionReason(nodeClaim *v1.NodeClaim) string
 }
 
 type CandidateFilter func(context.Context, *Candidate) bool

@@ -119,3 +119,7 @@ func (c *EmptyNodeConsolidation) Class() string {
 func (c *EmptyNodeConsolidation) ConsolidationType() string {
 	return "empty"
 }
+
+func (c *EmptyNodeConsolidation) EvictionReason(nodeClaim *v1.NodeClaim) string {
+	return fmt.Sprintf("node %s was %s node consolidated", nodeClaim.Status.NodeName, c.ConsolidationType())
+}

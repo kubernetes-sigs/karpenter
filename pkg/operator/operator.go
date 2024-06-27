@@ -26,6 +26,8 @@ import (
 	"sync"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -200,6 +202,9 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
 		return []string{o.(*v1.NodeClaim).Status.ProviderID}
 	}), "failed to setup nodeclaim provider id indexer")
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "status.nodeName", func(o client.Object) []string {
+		return []string{o.(*v1beta1.NodeClaim).Status.NodeName}
+	}), "failed to setup nodeclaim nodeName indexer")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.group", func(o client.Object) []string {
 		return []string{o.(*v1.NodeClaim).Spec.NodeClassRef.Group}
 	}), "failed to setup nodeclaim nodeclassref apiversion indexer")

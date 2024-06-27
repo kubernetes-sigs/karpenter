@@ -225,3 +225,7 @@ func (m *MultiNodeConsolidation) Class() string {
 func (m *MultiNodeConsolidation) ConsolidationType() string {
 	return "multi"
 }
+
+func (m *MultiNodeConsolidation) EvictionReason(nodeClaim *v1.NodeClaim) string {
+	return fmt.Sprintf("node %s was %s node consolidated", nodeClaim.Status.NodeName, m.ConsolidationType())
+}
