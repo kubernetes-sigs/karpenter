@@ -51,7 +51,7 @@ Karpenter needs to stabalize a set of metrics, status conditions, and events tha
 
 **Category:** Breaking
 
-Karpenter wants to expand the usage of the `karpenter.sh/disruption=disrupting:NoSchedule` taint that it currently leverages to cordon nodes during disruption, to also taint nodes with a `karpenter.sh/disruption-candidate:NoSchedule` taint. By tainting nodes when they become candidates (past expiry, drifted, etc.), we ensure that we will launch new nodes when we get more pods that join the cluster, reducing the chance that we will continue to get `karpenter.sh/do-not-disrupt` pods that continue to schedule to the same node.
+Karpenter wants to expand the usage of the `karpenter.sh/disruption=disrupting:NoSchedule` taint that it currently leverages to cordon nodes during disruption, to also taint nodes with a `karpenter.sh/disruption=candidate:NoSchedule` taint. By tainting nodes when they become candidates (past expiry, drifted, etc.), we ensure that we will launch new nodes when we get more pods that join the cluster, reducing the chance that we will continue to get `karpenter.sh/do-not-disrupt` pods that continue to schedule to the same node.
 
 #### Tasks
 
@@ -120,7 +120,7 @@ Users have asked that we make this a configurable field so that they can tweak w
 
 #### Tasks
 
-- [ ] Design and implement a `spec.consolidateAfter` field for the v1 API, reworking our synchronous wait to ensure that waiting for nodes that haven’t reached the end of their `consolidateAfter` timeframe doesn’t block other disruption evaluation
+- [ ] Design and implement a `spec.consolidateAfter` field for the v1 NodePool API, reworking our synchronous wait to ensure that waiting for nodes that haven’t reached the end of their `consolidateAfter` timeframe doesn’t block other disruption evaluation
 
 ### Define SemVer Versioning Policy for `kubernetes-sigs/karpenter` Library
 

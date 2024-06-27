@@ -90,7 +90,6 @@ Defaults are unchanged in the v1 API version but are included in the API proposa
 `disruption.budgets` : `{"nodes": "10%"}`
 `disruption.expireAfter`: `30d/720h`
 `disruption.consolidationPolicy`: `WhenUnderutilized`
-`disruption.consolidateAfter`: `15s`
 
 ### Printer Columns
 
@@ -269,7 +268,7 @@ status:
 #### Current
 
 ```
-➜  karpenter git:(main) ✗ kubectl get nodeclaims -A -o wide 
+➜  karpenter git:(main) ✗ kubectl get nodeclaims -o wide 
 NAME            TYPE         ZONE         NODE                                            READY   AGE    CAPACITY   NODEPOOL   NODECLASS
 default-7lh6k   c6gn.large   us-west-2b   ip-192-168-183-234.us-west-2.compute.internal   True    2d7h   spot       default    default
 default-97v9h   c6gn.large   us-west-2b   ip-192-168-71-87.us-west-2.compute.internal     True    2d7h   spot       default    default
@@ -314,7 +313,7 @@ default-v5qfb   c7gd.large   spot           us-west-2a   ip-192-168-58-94.us-wes
 
 Karpenter currently doesn’t enforce immutability on NodeClaims in v1beta1, though we implicitly assume that users should not be acting against these objects after creation, as the NodeClaim lifecycle controller won’t react to any change after the initial instance launch.
 
-Karpenter can make every `spec` field immutable on the NodeClaim after its initial creation. This will be enforced through CEL validation, where you can perform a check like `[self == oldSelf](https://kubernetes.io/docs/reference/using-api/cel/#language-overview)` to enforce that the fields cannot have changed after the initial apply. Users who are not on K8s 1.25+ that supports CEL will get the same validation enforced by validating webhooks.
+Karpenter can make every `spec` field immutable on the NodeClaim after its initial creation. This will be enforced through CEL validation, where you can perform a check like [`self == oldSelf`](https://kubernetes.io/docs/reference/using-api/cel/#language-overview)` to enforce that the fields cannot have changed after the initial apply. Users who are not on K8s 1.25+ that supports CEL will get the same validation enforced by validating webhooks.
 
 ## EC2NodeClass API [AWS CloudProvider]
 
