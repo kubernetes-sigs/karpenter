@@ -61,7 +61,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/webhooks"
 )
 
@@ -147,7 +146,6 @@ func NewOperator() (context.Context, *Operator) {
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:       system.Namespace(),
 		LeaderElectionReleaseOnCancel: true,
-		Scheme:                        scheme.Scheme,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},

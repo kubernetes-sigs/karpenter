@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -189,9 +190,10 @@ func AllNodesForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1bet
 }
 
 func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.Node {
+	gvk := object.GVK(nodeClaim)
 	node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
-		APIVersion:         v1beta1.SchemeGroupVersion.String(),
-		Kind:               "NodeClaim",
+		APIVersion:         gvk.GroupVersion().String(),
+		Kind:               gvk.Kind,
 		Name:               nodeClaim.Name,
 		UID:                nodeClaim.UID,
 		BlockOwnerDeletion: lo.ToPtr(true),

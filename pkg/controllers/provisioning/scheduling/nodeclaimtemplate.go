@@ -19,6 +19,7 @@ package scheduling
 import (
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -62,6 +63,7 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 		return i.Name
 	})...))
 
+	gvk := object.GVK(nodePool)
 	nc := &v1beta1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("%s-", i.NodePoolName),
@@ -72,8 +74,8 @@ func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1beta1.NodePool) *v1beta1.Nod
 			Labels: i.Labels,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion:         v1beta1.SchemeGroupVersion.String(),
-					Kind:               "NodePool",
+					APIVersion:         gvk.GroupVersion().String(),
+					Kind:               gvk.Kind,
 					Name:               nodePool.Name,
 					UID:                nodePool.UID,
 					BlockOwnerDeletion: lo.ToPtr(true),
