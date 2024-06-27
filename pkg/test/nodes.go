@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -57,7 +56,7 @@ func Node(overrides ...NodeOptions) *v1.Node {
 		ObjectMeta: ObjectMeta(options.ObjectMeta),
 		Spec: v1.NodeSpec{
 			Unschedulable: options.Unschedulable,
-			Taints:        options.Taints,
+			Taints:        append(options.Taints, v1beta1.UnregisteredNoExecuteTaint),
 			ProviderID:    options.ProviderID,
 		},
 		Status: v1.NodeStatus{
@@ -69,9 +68,6 @@ func Node(overrides ...NodeOptions) *v1.Node {
 }
 
 func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
-	taints := lo.Filter(nodeClaim.Spec.StartupTaints, func(t v1.Taint, _ int) bool {
-		return !t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
-	})
 	return Node(
 		NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -79,7 +75,7 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 				Annotations: nodeClaim.Annotations,
 				Finalizers:  nodeClaim.Finalizers,
 			},
-			Taints:      append(nodeClaim.Spec.Taints, taints...),
+			Taints:      nodeClaim.Spec.Taints,
 			Capacity:    nodeClaim.Status.Capacity,
 			Allocatable: nodeClaim.Status.Allocatable,
 			ProviderID:  nodeClaim.Status.ProviderID,

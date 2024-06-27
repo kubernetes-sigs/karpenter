@@ -48,7 +48,6 @@ func NodeClaim(overrides ...v1beta1.NodeClaim) *v1beta1.NodeClaim {
 	if override.Spec.Requirements == nil {
 		override.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{}
 	}
-	override.Spec.StartupTaints = append(override.Spec.StartupTaints, v1beta1.UnregisteredNoExecuteTaint)
 	return &v1beta1.NodeClaim{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
 		Spec:       override.Spec,

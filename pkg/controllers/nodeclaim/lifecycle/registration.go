@@ -61,9 +61,14 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for nodeclaim, %w", err)
 	}
+	if _, hasStartupTaint := lo.Find(node.Spec.Taints, func(t v1.Taint) bool {
+		return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
+	}); !hasStartupTaint {
+		return reconcile.Result{}, fmt.Errorf("missing required startup taint, %s", v1beta1.UnregisteredTaintKey)
+	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
+		return reconcile.Result{Requeue: true}, nil
 	}
 	log.FromContext(ctx).Info("registered nodeclaim")
 	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
@@ -80,10 +85,6 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 
 func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClaim, node *v1.Node) error {
 	stored := node.DeepCopy()
-	// Strip the resource version off the original node. This ensures the patch will fail with a conflict if the node
-	// had been updated between the original GET and the PATCH. This is necessary because .spec.taints does not specify
-	// a patchMergeKey and patchStrategy. Ref: https://github.com/kubernetes/kubernetes/pull/113136
-	stored.ResourceVersion = ""
 	controllerutil.AddFinalizer(node, v1beta1.TerminationFinalizer)
 
 	node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
@@ -93,34 +94,17 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClai
 	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.Taints)
 	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.StartupTaints)
 	// Remove karpenter.sh/unregistered taint
-	taints, err := isolateKarpenterStartupTaint(node.Spec.Taints)
-	if err != nil {
-		return fmt.Errorf("missing required startup taint: %w", err)
-	}
+	taints := lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+		return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
+	})
 	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels, map[string]string{
 		v1beta1.NodeRegisteredLabelKey: "true",
 	})
 	node.Spec.Taints = taints
 	if !equality.Semantic.DeepEqual(stored, node) {
-		if err := r.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
-			return fmt.Errorf("syncing node labels, %w", err)
+		if err := r.kubeClient.Update(ctx, node); err != nil {
+			return fmt.Errorf("syncing node, %w", err)
 		}
 	}
 	return nil
-}
-
-func isolateKarpenterStartupTaint(ts []v1.Taint) ([]v1.Taint, error) {
-	hasStartupTaint := false
-	taints := []v1.Taint{}
-	for _, taint := range ts {
-		if taint.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint) {
-			hasStartupTaint = true
-		} else {
-			taints = append(taints, taint)
-		}
-	}
-	if !hasStartupTaint {
-		return taints, fmt.Errorf("%s not found", &v1beta1.UnregisteredNoExecuteTaint)
-	}
-	return taints, nil
 }
