@@ -360,7 +360,7 @@ spec:
                 - requirements
               type: object
               x-kubernetes-validations:
-                - message: immutable field changed
+                - message: spec is immutable
                   rule: self == oldSelf
             status:
               description: NodeClaimStatus defines the observed state of NodeClaim
@@ -455,7 +455,7 @@ spec:
             - spec
           type: object
       served: true
-      storage: true
+      storage: false
       subresources:
         status: {}
     - additionalPrinterColumns:
@@ -897,6 +897,6 @@ spec:
             - spec
           type: object
       served: true
-      storage: false
+      storage: true
       subresources:
         status: {}

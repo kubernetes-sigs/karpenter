@@ -163,7 +163,6 @@ type Provider = runtime.RawExtension
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=nodeclaims,scope=Cluster,categories=karpenter
 // +kubebuilder:subresource:status
-// +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".metadata.labels.node\\.kubernetes\\.io/instance-type",description=""
 // +kubebuilder:printcolumn:name="Zone",type="string",JSONPath=".metadata.labels.topology\\.kubernetes\\.io/zone",description=""
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.nodeName",description=""
@@ -176,7 +175,7 @@ type NodeClaim struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="immutable field changed"
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable"
 	// +required
 	Spec   NodeClaimSpec   `json:"spec"`
 	Status NodeClaimStatus `json:"status,omitempty"`
