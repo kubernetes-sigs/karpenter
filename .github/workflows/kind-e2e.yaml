@@ -69,7 +69,7 @@ jobs:
       run: |
         OUTPUT_DIR=$(mktemp -d)
         export OUTPUT_DIR
-        make e2etests || true  # run KPIs even when some tests fail??
+        make e2etests
         python ./karpenter_eval/main.py
     - name: cleanup 
       shell: bash
