@@ -20,6 +20,9 @@ spec:
         - jsonPath: .metadata.labels.node\.kubernetes\.io/instance-type
           name: Type
           type: string
+        - jsonPath: .metadata.labels.karpenter\.sh/capacity-type
+          name: Capacity
+          type: string
         - jsonPath: .metadata.labels.topology\.kubernetes\.io/zone
           name: Zone
           type: string
@@ -32,8 +35,8 @@ spec:
         - jsonPath: .metadata.creationTimestamp
           name: Age
           type: date
-        - jsonPath: .metadata.labels.karpenter\.sh/capacity-type
-          name: Capacity
+        - jsonPath: .status.providerID
+          name: ID
           priority: 1
           type: string
         - jsonPath: .metadata.labels.karpenter\.sh/nodepool
