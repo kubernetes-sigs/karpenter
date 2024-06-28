@@ -453,7 +453,7 @@ func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Nod
 		// Remove any of the known ephemeral taints to make the Node ready
 		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(taint v1.Taint, _ int) bool {
 			_, found := lo.Find(pscheduling.KnownEphemeralTaints, func(t v1.Taint) bool {
-				return t.MatchTaint(&taint)
+				return t.MatchTaint(&taint) && !t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
 			})
 			return found
 		})
