@@ -59,9 +59,10 @@ jobs:
     - name: install KPI report dependencies
       shell: bash
       run: |
-        pip install awswrangler
-        pip install tabulate
-        pip install prometheus-api-client
+        pip install pandas==2.2.2
+        pip install pyarrow==16.1.0 
+        pip install tabulate==0.9.0
+        pip install prometheus-api-client==0.5.5
         pip install ./karpenter_eval/
     - name: run test suites
       shell: bash
