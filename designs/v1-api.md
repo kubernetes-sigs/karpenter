@@ -108,9 +108,9 @@ fallback  fallback
 
 ```
 ➜  karpenter git:(main) ✗ kubectl get nodepools -o wide
-NAME      NODECLASS  NODES  READY  AGE   WEIGHT  CPU%  MEMORY%
-default   default    4      True   2d7h  100     5.8%  99%
-fallback  default    100    True   2d7h          20%   20%
+NAME      NODECLASS  NODES  READY  AGE   WEIGHT  CPU  MEMORY
+default   default    4      True   2d7h  100     10  160Gi
+fallback  default    100    True   2d7h          5   30Gi
 ```
 
 **Standard Columns**
@@ -124,8 +124,8 @@ fallback  default    100    True   2d7h          20%   20%
 **Wide Columns (-o wide)**
 
 1. Weight - Viewing the NodePools that will be evaluated first should be easily observable but may not be immediately useful to all users, particularly if the NodePools are named in a way that already indicate their ordering e.g. suffixed with fallback
-2. CPU% - The capacity of the CPU for all nodes provisioned by this NodePool as a percentage of its limits
-3. Memory% - The capacity of the memory for all nodes provisioned by this NodePool as a percentage of its limits
+2. CPU - The sum of the capacity of the CPU for all nodes provisioned by this NodePool
+3. Memory - The sum of the capacity of the memory for all nodes provisioned by this NodePool
 
 ### Changes to the API
 
@@ -460,14 +460,13 @@ default   2d8h
 
 ```
 ➜  karpenter git:(main) ✗ k get ec2nodeclasses -o wide 
-NAME     BOOTSTRAP  ROLE                            READY  AGE  
-default  AL2        KarpenterNodeRole-test-cluster  True   2d8h   
+NAME     READY  AGE    ROLE 
+default  True   2d8h   KarpenterNodeRole-test-cluster
 ```
 
 **Standard Columns**
 
 1. Name
-2. Bootstrap - Bootstrap is a field that allows users to quickly categorize which bootstrap script mode their instances will be getting.
 3. Ready - EC2NodeClasses now have status conditions that inform the user whether the EC2NodeClass has resolved all of its data and is “ready” to be used by a NodePool. This readiness should be easily viewable by users.
 4. Age
 
