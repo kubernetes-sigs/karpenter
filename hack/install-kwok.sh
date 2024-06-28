@@ -73,7 +73,6 @@ cat <<EOF > "${SUB_LET_DIR}/kustomization.yaml"
   - name: registry.k8s.io/kwok/kwok
     newTag: "${KWOK_LATEST_RELEASE}"
   resources:
-#  - ./metrics-resource.yaml
   - ./../base
   nameSuffix: -${let}
   patches:

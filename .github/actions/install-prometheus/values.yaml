@@ -46,12 +46,6 @@ prometheus:
         operator: Exists
     serviceMonitorSelector: { }
     serviceMonitorNamespaceSelector: { }
-      #    serviceMonitorSelector:
-      #      matchLabels:
-      #        scrape: enabled
-      #    serviceMonitorNamespaceSelector:
-      #      matchLabels:
-      #        scrape: enabled
     additionalScrapeConfigs:
       - job_name: serviceMonitor/kube-system/karpenter/0
         honor_timestamps: true
