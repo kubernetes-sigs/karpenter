@@ -30,7 +30,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -223,7 +222,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	nodePoolList.OrderByWeight()
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
-	domains := map[string]sets.Set[string]{}
+	domainGroups := map[string]scheduler.TopologyDomainGroup{}
 	for _, nodePool := range nodePoolList.Items {
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, lo.ToPtr(nodePool))
@@ -239,6 +238,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			continue
 		}
 		instanceTypes[nodePool.Name] = append(instanceTypes[nodePool.Name], instanceTypeOptions...)
+		nodePoolTaints := nodePool.Spec.Template.Spec.Taints
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
@@ -248,15 +248,12 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
 			requirements.Add(instanceType.Requirements.Values()...)
 
-			for key, requirement := range requirements {
-				// This code used to execute a Union between domains[key] and requirement.Values().
-				// The downside of this is that Union is immutable and takes a copy of the set it is executed upon.
-				// This resulted in a lot of memory pressure on the heap and poor performance
-				// https://github.com/aws/karpenter/issues/3565
-				if domains[key] == nil {
-					domains[key] = sets.New(requirement.Values()...)
-				} else {
-					domains[key].Insert(requirement.Values()...)
+			for topologyKey, requirement := range requirements {
+				if _, ok := domainGroups[topologyKey]; !ok {
+					domainGroups[topologyKey] = scheduler.NewTopologyDomainGroup()
+				}
+				for _, domain := range requirement.Values() {
+					domainGroups[topologyKey].Insert(domain, nodePoolTaints...)
 				}
 			}
 		}
@@ -265,11 +262,11 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
 		for key, requirement := range requirements {
 			if requirement.Operator() == v1.NodeSelectorOpIn {
-				// The following is a performance optimisation, for the explanation see the comment above
-				if domains[key] == nil {
-					domains[key] = sets.New(requirement.Values()...)
-				} else {
-					domains[key].Insert(requirement.Values()...)
+				if _, ok := domainGroups[key]; !ok {
+					domainGroups[key] = scheduler.NewTopologyDomainGroup()
+				}
+				for _, value := range requirement.Values() {
+					domainGroups[key].Insert(value, nodePoolTaints...)
 				}
 			}
 		}
@@ -279,7 +276,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	pods = p.injectVolumeTopologyRequirements(ctx, pods)
 
 	// Calculate cluster topology
-	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, domains, pods)
+	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, domainGroups, pods)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}
