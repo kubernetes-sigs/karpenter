@@ -78,8 +78,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
 		methods: []Method{
-			// Expire any NodeClaims that must be deleted, allowing their pods to potentially land on currently
-			NewExpiration(clk, kubeClient, cluster, provisioner, recorder),
 			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 			NewDrift(kubeClient, cluster, provisioner, recorder),
 			// Delete any remaining empty NodeClaims as there is zero cost in terms of disruption.  Emptiness and
@@ -167,7 +165,6 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
-
 	// Determine the disruption action
 	cmd, schedulingResults, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
@@ -181,7 +178,6 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if err := c.executeCommand(ctx, disruption, cmd, schedulingResults); err != nil {
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
-
 	return true, nil
 }
 
@@ -296,7 +292,7 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	var buf bytes.Buffer
 	for _, np := range nodePoolList.Items {
 		// Use a dummy value of 100 since we only care if this errors.
-		if _, err := np.GetAllowedDisruptions(ctx, c.clock, 100); err != nil {
+		if _, err := np.GetAllowedDisruptionsByReason(ctx, c.clock, 100); err != nil {
 			fmt.Fprintf(&buf, "invalid disruption budgets in nodepool %s, %s", np.Name, err)
 		}
 	}

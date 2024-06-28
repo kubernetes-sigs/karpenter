@@ -255,7 +255,7 @@ spec:
                       - key
                       - operator
                     type: object
-                  maxItems: 30
+                  maxItems: 100
                   type: array
                   x-kubernetes-validations:
                     - message: requirements with operator 'In' must have a value defined
@@ -452,7 +452,7 @@ spec:
             - spec
           type: object
       served: true
-      storage: true
+      storage: false
       subresources:
         status: {}
     - additionalPrinterColumns:
@@ -694,7 +694,7 @@ spec:
                       - key
                       - operator
                     type: object
-                  maxItems: 30
+                  maxItems: 100
                   type: array
                   x-kubernetes-validations:
                     - message: requirements with operator 'In' must have a value defined
@@ -894,6 +894,6 @@ spec:
             - spec
           type: object
       served: true
-      storage: false
+      storage: true
       subresources:
         status: {}

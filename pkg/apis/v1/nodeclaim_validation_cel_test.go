@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/test"
+
 	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -213,6 +215,14 @@ var _ = Describe("Validation", func() {
 				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"insance-type-1"}}, MinValues: lo.ToPtr(2)},
 			}
 			Expect(nodeClaim.Validate(ctx)).ToNot(Succeed())
+		})
+		It("should error when requirements is greater than 100", func() {
+			var req []NodeSelectorRequirementWithMinValues
+			for i := 0; i < 101; i++ {
+				req = append(req, NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: test.RandomName(), Operator: v1.NodeSelectorOpIn, Values: []string{test.RandomName()}}})
+			}
+			nodeClaim.Spec.Requirements = req
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
 		})
 	})
 	Context("Kubelet", func() {

@@ -46,11 +46,11 @@ import (
 func NewControllers(
 	clock clock.Clock,
 	kubeClient client.Client,
-	cluster *state.Cluster,
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
 
+	cluster := state.NewCluster(clock, kubeClient, cloudProvider)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
@@ -58,8 +58,8 @@ func NewControllers(
 	return []controller.Controller{
 		p, evictionQueue, disruptionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
-		provisioning.NewPodController(kubeClient, p, recorder),
-		provisioning.NewNodeController(kubeClient, p, recorder),
+		provisioning.NewPodController(kubeClient, p),
+		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),

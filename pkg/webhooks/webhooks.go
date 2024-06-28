@@ -51,8 +51,8 @@ const component = "webhook"
 
 var (
 	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
-		v1beta1.SchemeGroupVersion.WithKind("NodePool"):  &v1beta1.NodePool{},
-		v1beta1.SchemeGroupVersion.WithKind("NodeClaim"): &v1beta1.NodeClaim{},
+		{Group: "karpenter.sh", Version: "v1beta1", Kind: "NodePool"}:  &v1beta1.NodePool{},
+		{Group: "karpenter.sh", Version: "v1beta1", Kind: "NodeClaim"}: &v1beta1.NodeClaim{},
 	}
 )
 

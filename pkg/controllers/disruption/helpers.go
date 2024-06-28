@@ -20,13 +20,13 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 
 	"github.com/samber/lo"
 
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -43,7 +43,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
@@ -143,58 +142,6 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 	return len(rhsNames.Intersection(lhsNames)) == len(lhsNames)
 }
 
-// GetPodEvictionCost returns the disruption cost computed for evicting the given pod.
-func GetPodEvictionCost(ctx context.Context, p *v1.Pod) float64 {
-	cost := 1.0
-	podDeletionCostStr, ok := p.Annotations[v1.PodDeletionCost]
-	if ok {
-		podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
-		if err != nil {
-			log.FromContext(ctx).Error(err, fmt.Sprintf("failed parsing %s=%s from pod %s", v1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p)))
-		} else {
-			// the pod deletion disruptionCost is in [-2147483647, 2147483647]
-			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
-			cost += podDeletionCost / math.Pow(2, 27.0)
-		}
-	}
-	// the scheduling priority is in [-2147483648, 1000000000]
-	if p.Spec.Priority != nil {
-		cost += float64(*p.Spec.Priority) / math.Pow(2, 25)
-	}
-
-	// overall we clamp the pod cost to the range [-10.0, 10.0] with the default being 1.0
-	return clamp(-10.0, cost, 10.0)
-}
-
-// filterByPrice returns the instanceTypes that are lower priced than the current candidate.
-// The minValues requirement is checked again after filterByPrice as it may result in more constrained InstanceTypeOptions for a NodeClaim.
-// If the result of the filtering means that minValues can't be satisfied, we return an error.
-func filterByPrice(options []*cloudprovider.InstanceType, reqs scheduling.Requirements, price float64) ([]*cloudprovider.InstanceType, error) {
-	var res cloudprovider.InstanceTypes
-	for _, it := range options {
-		launchPrice := worstLaunchPrice(it.Offerings.Available(), reqs)
-		if launchPrice < price {
-			res = append(res, it)
-		}
-	}
-	if reqs.HasMinValues() {
-		// We would have already filtered the invalid NodeClaim not meeting the minimum requirements in simulated scheduling results.
-		// Here the instanceTypeOptions changed again based on the price and requires re-validation.
-		if _, err := res.SatisfiesMinValues(reqs); err != nil {
-			return nil, fmt.Errorf("validating minValues, %w", err)
-		}
-	}
-	return res, nil
-}
-
-func disruptionCost(ctx context.Context, pods []*v1.Pod) float64 {
-	cost := 0.0
-	for _, p := range pods {
-		cost += GetPodEvictionCost(ctx, p)
-	}
-	return cost
-}
-
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, queue *orchestration.Queue,
@@ -203,7 +150,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, err
 	}
-	pdbs, err := NewPDBLimits(ctx, clk, kubeClient)
+	pdbs, err := pdb.NewLimits(ctx, clk, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
@@ -213,62 +160,6 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	})
 	// Filter only the valid candidates that we should disrupt
 	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
-}
-
-// BuildDisruptionBudgets will return a map for nodePoolName -> numAllowedDisruptions and an error
-func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, recorder events.Recorder) (map[string]int, error) {
-	nodePoolList := &v1beta1.NodePoolList{}
-	if err := kubeClient.List(ctx, nodePoolList); err != nil {
-		return nil, fmt.Errorf("listing node pools, %w", err)
-	}
-	numNodes := map[string]int{}
-	deleting := map[string]int{}
-	disruptionBudgetMapping := map[string]int{}
-	// We need to get all the nodes in the cluster
-	// Get each current active number of nodes per nodePool
-	// Get the max disruptions for each nodePool
-	// Get the number of deleting nodes for each of those nodePools
-	// Find the difference to know how much left we can disrupt
-	nodes := cluster.Nodes()
-	for _, node := range nodes {
-		// We only consider nodes that we own and are initialized towards the total.
-		// If a node is launched/registered, but not initialized, pods aren't scheduled
-		// to the node, and these are treated as unhealthy until they're cleaned up.
-		// This prevents odd roundup cases with percentages where replacement nodes that
-		// aren't initialized could be counted towards the total, resulting in more disruptions
-		// to active nodes than desired, where Karpenter should wait for these nodes to be
-		// healthy before continuing.
-		if !node.Managed() || !node.Initialized() {
-			continue
-		}
-		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
-		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
-		// 1. Has a NotReady conditiion
-		// 2. Is marked as deleting
-		if cond := nodeutils.GetCondition(node.Node, v1.NodeReady); cond.Status != v1.ConditionTrue || node.MarkedForDeletion() {
-			deleting[nodePool]++
-		}
-		numNodes[nodePool]++
-	}
-
-	for i := range nodePoolList.Items {
-		nodePool := nodePoolList.Items[i]
-		disruptions := nodePool.MustGetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
-		// Subtract the allowed number of disruptions from the number of already deleting nodes.
-		// Floor the value since the number of deleting nodes can exceed the number of allowed disruptions.
-		// Allowing this value to be negative breaks assumptions in the code used to calculate how
-		// many nodes can be disrupted.
-		allowedDisruptions := lo.Clamp(disruptions-deleting[nodePool.Name], 0, math.MaxInt32)
-		disruptionBudgetMapping[nodePool.Name] = allowedDisruptions
-		// If the nodepool is fully blocked, emit an event
-		if allowedDisruptions == 0 {
-			recorder.Publish(disruptionevents.NodePoolBlocked(lo.ToPtr(nodePool)))
-		}
-		BudgetsAllowedDisruptionsGauge.With(map[string]string{
-			metrics.NodePoolLabel: nodePool.Name,
-		}).Set(float64(allowedDisruptions))
-	}
-	return disruptionBudgetMapping, nil
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
@@ -301,42 +192,71 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 	return nodePoolMap, nodePoolToInstanceTypesMap, nil
 }
 
+// BuildDisruptionBudgets prepares our disruption budget mapping. The disruption budget maps each disruption reason to the number of allowed disruptions.
+// We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are NotReady and already being deleted by that disruption reason.
+//
+//nolint:gocyclo
+func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, recorder events.Recorder) (map[string]map[v1beta1.DisruptionReason]int, error) {
+	disruptionBudgetMapping := map[string]map[v1beta1.DisruptionReason]int{}
+	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
+	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
+	for _, node := range cluster.Nodes() {
+		// We only consider nodes that we own and are initialized towards the total.
+		// If a node is launched/registered, but not initialized, pods aren't scheduled
+		// to the node, and these are treated as unhealthy until they're cleaned up.
+		// This prevents odd roundup cases with percentages where replacement nodes that
+		// aren't initialized could be counted towards the total, resulting in more disruptions
+		// to active nodes than desired, where Karpenter should wait for these nodes to be
+		// healthy before continuing.
+		if !node.Managed() || !node.Initialized() {
+			continue
+		}
+
+		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
+		numNodes[nodePool]++
+
+		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
+		// 1. Has a NotReady conditiion
+		// 2. Is marked as disrupting
+		if cond := nodeutils.GetCondition(node.Node, v1.NodeReady); cond.Status != v1.ConditionTrue || node.MarkedForDeletion() {
+			disrupting[nodePool]++
+		}
+	}
+	nodePoolList := &v1beta1.NodePoolList{}
+	if err := kubeClient.List(ctx, nodePoolList); err != nil {
+		return nil, fmt.Errorf("listing node pools, %w", err)
+	}
+	for _, nodePool := range nodePoolList.Items {
+		minDisruptionsByReason := nodePool.MustGetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
+		allowedDisruptionsTotal := 0
+
+		disruptionBudgetMapping[nodePool.Name] = map[v1beta1.DisruptionReason]int{}
+		for reason, minDisruptions := range minDisruptionsByReason {
+			// Subtract the allowed number of disruptions from the number of already disrupting nodes.
+			// Floor the value since the number of disrupting nodes can exceed the number of allowed disruptions.
+			// Allowing this value to be negative breaks assumptions in the code used to calculate how many nodes can be disrupted.
+			allowedDisruptions := lo.Clamp(minDisruptions-disrupting[nodePool.Name], 0, math.MaxInt32)
+			disruptionBudgetMapping[nodePool.Name][reason] = allowedDisruptions
+
+			allowedDisruptionsTotal += allowedDisruptions
+			BudgetsAllowedDisruptionsGauge.With(map[string]string{
+				metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
+			}).Set(float64(allowedDisruptions))
+			if allowedDisruptions == 0 {
+				recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(lo.ToPtr(nodePool), reason))
+			}
+		}
+		if allowedDisruptionsTotal == 0 {
+			recorder.Publish(disruptionevents.NodePoolBlocked(lo.ToPtr(nodePool)))
+		}
+	}
+	return disruptionBudgetMapping, nil
+}
+
 // mapCandidates maps the list of proposed candidates with the current state
 func mapCandidates(proposed, current []*Candidate) []*Candidate {
 	proposedNames := sets.NewString(lo.Map(proposed, func(c *Candidate, i int) string { return c.Name() })...)
 	return lo.Filter(current, func(c *Candidate, _ int) bool {
 		return proposedNames.Has(c.Name())
 	})
-}
-
-// worstLaunchPrice gets the worst-case launch price from the offerings that are offered
-// on an instance type. If the instance type has a spot offering available, then it uses the spot offering
-// to get the launch price; else, it uses the on-demand launch price
-func worstLaunchPrice(ofs cloudprovider.Offerings, reqs scheduling.Requirements) float64 {
-	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
-		spotOfferings := ofs.Compatible(reqs).Compatible(
-			scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot)))
-		if len(spotOfferings) > 0 {
-			return spotOfferings.MostExpensive().Price
-		}
-	}
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeOnDemand) {
-		onDemandOfferings := ofs.Compatible(reqs).Compatible(
-			scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeOnDemand)))
-		if len(onDemandOfferings) > 0 {
-			return onDemandOfferings.MostExpensive().Price
-		}
-	}
-	return math.MaxFloat64
-}
-
-func clamp(min, val, max float64) float64 {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
 }

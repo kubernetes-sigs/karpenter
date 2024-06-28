@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package disruption
+package pdb
 
 import (
 	"context"
@@ -29,20 +29,11 @@ import (
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-// PDBLimits is used to evaluate if evicting a list of pods is possible.
-type PDBLimits struct {
-	ctx        context.Context
-	clk        clock.Clock
-	kubeClient client.Client
-	pdbs       []*pdbItem
-}
+// Limits is used to evaluate if evicting a list of pods is possible.
+type Limits []*pdbItem
 
-func NewPDBLimits(ctx context.Context, clk clock.Clock, kubeClient client.Client) (*PDBLimits, error) {
-	ps := &PDBLimits{
-		ctx:        ctx,
-		clk:        clk,
-		kubeClient: kubeClient,
-	}
+func NewLimits(ctx context.Context, clk clock.Clock, kubeClient client.Client) (Limits, error) {
+	pdbs := []*pdbItem{}
 
 	var pdbList policyv1.PodDisruptionBudgetList
 	if err := kubeClient.List(ctx, &pdbList); err != nil {
@@ -53,23 +44,23 @@ func NewPDBLimits(ctx context.Context, clk clock.Clock, kubeClient client.Client
 		if err != nil {
 			return nil, err
 		}
-		ps.pdbs = append(ps.pdbs, pi)
+		pdbs = append(pdbs, pi)
 	}
 
-	return ps, nil
+	return pdbs, nil
 }
 
 // CanEvictPods returns true if every pod in the list is evictable. They may not all be evictable simultaneously, but
 // for every PDB that controls the pods at least one pod can be evicted.
 // nolint:gocyclo
-func (s *PDBLimits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
+func (l Limits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	for _, pod := range pods {
 		// If the pod isn't eligible for being evicted, then a fully blocking PDB doesn't matter
 		// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
 		if !podutil.IsEvictable(pod) {
 			continue
 		}
-		for _, pdb := range s.pdbs {
+		for _, pdb := range l {
 			if pdb.key.Namespace == pod.ObjectMeta.Namespace {
 				if pdb.selector.Matches(labels.Set(pod.Labels)) {
 

@@ -277,7 +277,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:       cmd.method,
 				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1beta1.NodePoolLabelKey],
-				metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
+				metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(cmd.candidates[i].Node.Labels, v1beta1.CapacityTypeLabelKey),
 			}).Inc()
 		}
 	}

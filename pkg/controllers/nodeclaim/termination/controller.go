@@ -21,6 +21,12 @@ import (
 	"fmt"
 	"time"
 
+	"knative.dev/pkg/logging"
+
+	"sigs.k8s.io/karpenter/pkg/utils/termination"
+
+	"sigs.k8s.io/karpenter/pkg/metrics"
+
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -93,10 +99,27 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	if len(nodes) > 0 {
 		return reconcile.Result{}, nil
 	}
+	var isInstanceTerminated bool
+	// We can expect ProviderID to be empty when there is a failure while launching the nodeClaim
 	if nodeClaim.Status.ProviderID != "" {
-		if err = c.cloudProvider.Delete(ctx, nodeClaim); cloudprovider.IgnoreNodeClaimNotFoundError(err) != nil {
-			return reconcile.Result{}, fmt.Errorf("terminating cloudprovider instance, %w", err)
+		isInstanceTerminated, err = termination.EnsureTerminated(ctx, c.kubeClient, nodeClaim, c.cloudProvider)
+		if err != nil {
+			// 404 = the nodeClaim no longer exists
+			if errors.IsNotFound(err) {
+				return reconcile.Result{}, nil
+			}
+			// 409 - The nodeClaim exists, but its status has already been modified
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, fmt.Errorf("ensuring instance termination, %w", err)
 		}
+		if !isInstanceTerminated {
+			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		InstanceTerminationDuration.With(map[string]string{
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeTerminating).LastTransitionTime.Time).Seconds())
 	}
 	controllerutil.RemoveFinalizer(nodeClaim, v1beta1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
@@ -110,6 +133,10 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
 		log.FromContext(ctx).Info("deleted nodeclaim")
+		NodeClaimTerminationDuration.With(map[string]string{
+			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
+		logging.FromContext(ctx).Infof("deleted nodeclaim")
 	}
 	return reconcile.Result{}, nil
 }

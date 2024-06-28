@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 // PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
@@ -189,42 +189,11 @@ func AllNodesForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1bet
 	return lo.ToSlicePtr(nodeList.Items), nil
 }
 
-// NewFromNode converts a node into a pseudo-NodeClaim using known values from the node
-// Deprecated: This NodeClaim generator function can be removed when v1beta1 migration has completed.
-func NewFromNode(node *v1.Node) *v1beta1.NodeClaim {
-	nc := &v1beta1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        node.Name,
-			Annotations: node.Annotations,
-			Labels:      node.Labels,
-			Finalizers:  []string{v1beta1.TerminationFinalizer},
-		},
-		Spec: v1beta1.NodeClaimSpec{
-			Taints:       node.Spec.Taints,
-			Requirements: scheduling.NewLabelRequirements(node.Labels).NodeSelectorRequirements(),
-			Resources: v1beta1.ResourceRequirements{
-				Requests: node.Status.Allocatable,
-			},
-		},
-		Status: v1beta1.NodeClaimStatus{
-			NodeName:    node.Name,
-			ProviderID:  node.Spec.ProviderID,
-			Capacity:    node.Status.Capacity,
-			Allocatable: node.Status.Allocatable,
-		},
-	}
-	if _, ok := node.Labels[v1beta1.NodeInitializedLabelKey]; ok {
-		nc.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
-	}
-	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
-	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
-	return nc
-}
-
 func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.Node {
+	gvk := object.GVK(nodeClaim)
 	node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
-		APIVersion:         v1beta1.SchemeGroupVersion.String(),
-		Kind:               "NodeClaim",
+		APIVersion:         gvk.GroupVersion().String(),
+		Kind:               gvk.Kind,
 		Name:               nodeClaim.Name,
 		UID:                nodeClaim.UID,
 		BlockOwnerDeletion: lo.ToPtr(true),

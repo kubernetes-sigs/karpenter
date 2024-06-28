@@ -18,6 +18,7 @@ package test
 
 import (
 	"fmt"
+	"math/rand"
 
 	"github.com/imdario/mergo"
 	"github.com/samber/lo"
@@ -320,4 +321,115 @@ func buildNodeAffinity(nodeRequirements []v1.NodeSelectorRequirement, nodePrefer
 		}
 	}
 	return nodeAffinity
+}
+
+func MakePodAntiAffinityPodOptions(key string) PodOptions {
+	// all of these pods have anti-affinity to each other
+	labels := map[string]string{
+		"app": "nginx",
+	}
+	return PodOptions{
+		ObjectMeta: metav1.ObjectMeta{Labels: lo.Assign(labels, map[string]string{DiscoveryLabel: "owned"})},
+		PodAntiRequirements: []v1.PodAffinityTerm{
+			{
+				LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+				TopologyKey:   key,
+			},
+		},
+		ResourceRequirements: v1.ResourceRequirements{
+			Requests: v1.ResourceList{
+				v1.ResourceCPU:    RandomCPU(),
+				v1.ResourceMemory: RandomMemory(),
+			},
+		}}
+}
+func MakePodAffinityPodOptions(key string) PodOptions {
+	affinityLabels := RandomAffinityLabels()
+	return PodOptions{
+		ObjectMeta: metav1.ObjectMeta{Labels: lo.Assign(affinityLabels, map[string]string{DiscoveryLabel: "owned"})},
+		PodRequirements: []v1.PodAffinityTerm{
+			{
+				LabelSelector: &metav1.LabelSelector{MatchLabels: affinityLabels},
+				TopologyKey:   key,
+			},
+		},
+		ResourceRequirements: v1.ResourceRequirements{
+			Requests: v1.ResourceList{
+				v1.ResourceCPU:    RandomCPU(),
+				v1.ResourceMemory: RandomMemory(),
+			},
+		}}
+}
+
+func MakeTopologySpreadPodOptions(key string) PodOptions {
+	return PodOptions{
+		ObjectMeta: metav1.ObjectMeta{Labels: lo.Assign(RandomLabels(), map[string]string{DiscoveryLabel: "owned"})},
+		TopologySpreadConstraints: []v1.TopologySpreadConstraint{
+			{
+				MaxSkew:           1,
+				TopologyKey:       key,
+				WhenUnsatisfiable: v1.DoNotSchedule,
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: RandomLabels(),
+				},
+			},
+		},
+		ResourceRequirements: v1.ResourceRequirements{
+			Requests: v1.ResourceList{
+				v1.ResourceCPU:    RandomCPU(),
+				v1.ResourceMemory: RandomMemory(),
+			},
+		}}
+}
+
+func MakeGenericPodOptions() PodOptions {
+	return PodOptions{
+		ObjectMeta: metav1.ObjectMeta{Labels: lo.Assign(RandomLabels(), map[string]string{DiscoveryLabel: "owned"})},
+		ResourceRequirements: v1.ResourceRequirements{
+			Requests: v1.ResourceList{
+				v1.ResourceCPU:    RandomCPU(),
+				v1.ResourceMemory: RandomMemory(),
+			},
+		}}
+}
+
+func MakeDiversePodOptions() []PodOptions {
+	var pods []PodOptions
+	pods = append(pods, MakeGenericPodOptions())
+	pods = append(pods, MakeTopologySpreadPodOptions(v1.LabelTopologyZone))
+	pods = append(pods, MakeTopologySpreadPodOptions(v1.LabelHostname))
+	pods = append(pods, MakePodAffinityPodOptions(v1.LabelHostname))
+	pods = append(pods, MakePodAffinityPodOptions(v1.LabelTopologyZone))
+	pods = append(pods, MakePodAntiAffinityPodOptions(v1.LabelHostname))
+	return pods
+}
+
+func RandomAffinityLabels() map[string]string {
+	return map[string]string{
+		"my-affinity": RandomLabelValue(),
+	}
+}
+
+func RandomLabels() map[string]string {
+	return map[string]string{
+		"my-label": RandomLabelValue(),
+	}
+}
+
+//nolint:gosec
+var r = rand.New(rand.NewSource(42))
+
+func RandomLabelValue() string {
+	labelValues := []string{"a", "b", "c", "d", "e", "f", "g"}
+	return labelValues[r.Intn(len(labelValues))]
+}
+
+func RandomMemory() resource.Quantity {
+	mem := []int{100, 256, 512, 1024, 2048, 4096}
+	return resource.MustParse(fmt.Sprintf("%dMi", mem[r.Intn(len(mem))]))
+}
+
+func RandomCPU() resource.Quantity {
+	cpu := []int{100, 250, 500, 1000, 1500}
+	return resource.MustParse(fmt.Sprintf("%dm", cpu[r.Intn(len(cpu))]))
 }

@@ -1,0 +1,52 @@
+prometheusOperator:
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+  admissionWebhooks:
+    patch:
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+prometheus-node-exporter:
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+nodeExporter:
+  enabled: false
+kube-state-metrics:
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+grafana:
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+alertmanager:
+  alertmanagerSpec:
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+kubelet:
+  serviceMonitor:
+    # Enable CAdvisor metrics (this is enabled by default but explicitly specified for clarity)
+    # https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/templates/exporters/kubelet/servicemonitor.yaml#L41
+    cAdvisor: true
+    # Disable probes scrape endpoint
+    # https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/templates/exporters/kubelet/servicemonitor.yaml#L68
+    probes: false
+    # Disable resource scrape endpoint
+    # https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/templates/exporters/kubelet/servicemonitor.yaml#L95
+    resource: false
+    additionalLabels:
+      scrape: enabled
+prometheus:
+  prometheusSpec:
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+    serviceMonitorSelector:
+      matchLabels:
+        scrape: enabled
+    serviceMonitorNamespaceSelector:
+      matchLabels:
+        scrape: enabled

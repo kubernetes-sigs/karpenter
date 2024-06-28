@@ -26,15 +26,14 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -51,7 +50,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...))
 })
 
 var _ = AfterSuite(func() {
@@ -110,26 +109,6 @@ var _ = Describe("NodeClaimUtils", func() {
 				v1.ResourceEphemeralStorage: resource.MustParse("95Gi"),
 			},
 		})
-	})
-	It("should convert a Node to a NodeClaim", func() {
-		nodeClaim := nodeclaimutil.NewFromNode(node)
-		for k, v := range node.Annotations {
-			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(k, v))
-		}
-		for k, v := range node.Labels {
-			Expect(nodeClaim.Labels).To(HaveKeyWithValue(k, v))
-		}
-		Expect(lo.Contains(nodeClaim.Finalizers, v1beta1.TerminationFinalizer)).To(BeTrue())
-		Expect(nodeClaim.Spec.Taints).To(Equal(node.Spec.Taints))
-		Expect(nodeClaim.Spec.Requirements).To(ContainElements(scheduling.NewLabelRequirements(node.Labels).NodeSelectorRequirements()))
-		Expect(nodeClaim.Spec.Resources.Requests).To(Equal(node.Status.Allocatable))
-		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
-		Expect(nodeClaim.Status.ProviderID).To(Equal(node.Spec.ProviderID))
-		Expect(nodeClaim.Status.Capacity).To(Equal(node.Status.Capacity))
-		Expect(nodeClaim.Status.Allocatable).To(Equal(node.Status.Allocatable))
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
 	})
 	It("should update the owner for a Node to a NodeClaim", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{

@@ -168,6 +168,10 @@ var AllowUndefinedWellKnownLabels = func(options CompatibilityOptions) Compatibi
 	return options
 }
 
+func (r Requirements) IsCompatible(requirements Requirements, options ...functional.Option[CompatibilityOptions]) bool {
+	return r.Compatible(requirements, options...) == nil
+}
+
 // Compatible ensures the provided requirements can loosely be met.
 func (r Requirements) Compatible(requirements Requirements, options ...functional.Option[CompatibilityOptions]) (errs error) {
 	opts := functional.ResolveOptions(options...)

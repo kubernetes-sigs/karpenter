@@ -61,7 +61,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/webhooks"
 )
 
@@ -124,6 +123,11 @@ func NewOperator() (context.Context, *Operator) {
 		GracePeriod: 5 * time.Second,
 	})
 
+	// Logging
+	logger := zapr.NewLogger(logging.NewLogger(ctx, component))
+	log.SetLogger(logger)
+	klog.SetLogger(logger)
+
 	// Client Config
 	config := ctrl.GetConfigOrDie()
 	config.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(float32(options.FromContext(ctx).KubeClientQPS), options.FromContext(ctx).KubeClientBurst)
@@ -131,11 +135,6 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
-
-	// Logging
-	logger := zapr.NewLogger(logging.NewLogger(ctx, component))
-	log.SetLogger(logger)
-	klog.SetLogger(logger)
 
 	log.FromContext(ctx).WithValues("version", Version).V(1).Info("discovered karpenter version")
 
@@ -147,7 +146,6 @@ func NewOperator() (context.Context, *Operator) {
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:       system.Namespace(),
 		LeaderElectionReleaseOnCancel: true,
-		Scheme:                        scheme.Scheme,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},

@@ -17,6 +17,7 @@ limitations under the License.
 package v1beta1_test
 
 import (
+	"context"
 	"math"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ var _ = Describe("Budgets", func() {
 	var nodePool *NodePool
 	var budgets []Budget
 	var fakeClock *clock.FakeClock
+	var ctx = context.Background()
 
 	BeforeEach(func() {
 		// Set the time to the middle of the year of 2000, the best year ever
@@ -51,13 +53,35 @@ var _ = Describe("Budgets", func() {
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				Nodes:    "10%",
+				Nodes:    "100%",
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				Nodes:    "100%",
+				Reasons: []DisruptionReason{
+					DisruptionReasonDrifted,
+					DisruptionReasonUnderutilized,
+				},
+				Nodes:    "15",
 				Schedule: lo.ToPtr("* * * * *"),
+				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+			},
+			{
+				Reasons: []DisruptionReason{
+					DisruptionReasonDrifted,
+				},
+				Nodes:    "5",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+			},
+			{
+				Reasons: []DisruptionReason{
+					DisruptionReasonUnderutilized,
+					DisruptionReasonDrifted,
+					DisruptionReasonEmpty,
+				},
+				Nodes:    "0",
+				Schedule: lo.ToPtr("@weekly"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 		}
@@ -70,32 +94,78 @@ var _ = Describe("Budgets", func() {
 			},
 		}
 	})
-	Context("MustGetAllowedDisruptions", func() {
-		It("should return the min allowedDisruptions", func() {
-			min := nodePool.MustGetAllowedDisruptions(ctx, fakeClock, 100)
-			Expect(min).To(BeNumerically("==", 10))
+
+	Context("GetAllowedDisruptionsByReason", func() {
+		It("should return 0 for all reasons if a budget is active for all reasons", func() {
+			budgets[5].Schedule = lo.ToPtr("* * * * *")
+			budgets[5].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
+
+			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
+			Expect(err).To(BeNil())
+			Expect(disruptionsByReason[DisruptionReasonUnderutilized]).To(Equal(0))
+			Expect(disruptionsByReason[DisruptionReasonDrifted]).To(Equal(0))
+			Expect(disruptionsByReason[DisruptionReasonEmpty]).To(Equal(0))
 		})
-		It("should return the min allowedDisruptions, ignoring inactive crons", func() {
-			// Make the first and third budgets inactive
-			budgets[0].Schedule = lo.ToPtr("@yearly")
-			budgets[2].Schedule = lo.ToPtr("@yearly")
-			min := nodePool.MustGetAllowedDisruptions(ctx, fakeClock, 100)
-			Expect(min).To(BeNumerically("==", 100))
+
+		It("should return MaxInt32 for all reasons when there are no active budgets", func() {
+			for i := range budgets {
+				budgets[i].Schedule = lo.ToPtr("@yearly")
+				budgets[i].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
+			}
+			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
+			Expect(err).To(BeNil())
+
+			// All budgets should have unbounded disruptions when inactive
+			for _, disruptions := range disruptionsByReason {
+				Expect(disruptions).To(Equal(math.MaxInt32))
+			}
 		})
-		It("should return MaxInt32 if all crons are inactive", func() {
-			budgets[0].Schedule = lo.ToPtr("@yearly")
-			budgets[1].Schedule = lo.ToPtr("@yearly")
-			budgets[2].Schedule = lo.ToPtr("@yearly")
+
+		It("should ignore reason-defined budgets when inactive", func() {
 			budgets[3].Schedule = lo.ToPtr("@yearly")
-			min := nodePool.MustGetAllowedDisruptions(ctx, fakeClock, 100)
-			Expect(min).To(BeNumerically("==", math.MaxInt32))
+			budgets[4].Schedule = lo.ToPtr("@yearly")
+			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
+			Expect(err).To(BeNil())
+			for _, disruptions := range disruptionsByReason {
+				Expect(disruptions).To(Equal(10))
+			}
 		})
-		It("should return zero values if a schedule is invalid", func() {
-			budgets[0].Schedule = lo.ToPtr("@wrongly")
-			min := nodePool.MustGetAllowedDisruptions(ctx, fakeClock, 100)
-			Expect(min).To(BeNumerically("==", 0))
+
+		It("should return the budget for all disruption reasons when undefined", func() {
+			nodePool.Spec.Disruption.Budgets = budgets[:1]
+			Expect(len(nodePool.Spec.Disruption.Budgets)).To(Equal(1))
+			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
+			Expect(err).To(BeNil())
+			Expect(len(budgets[0].Reasons)).To(Equal(0))
+			for _, disruptions := range disruptionsByReason {
+				Expect(disruptions).To(Equal(10))
+			}
 		})
+
+		It("should get the minimum budget for each reason", func() {
+
+			nodePool.Spec.Disruption.Budgets = append(nodePool.Spec.Disruption.Budgets,
+				[]Budget{
+					{
+						Schedule: lo.ToPtr("* * * * *"),
+						Nodes:    "4",
+						Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
+						Reasons: []DisruptionReason{
+							DisruptionReasonEmpty,
+						},
+					},
+				}...)
+			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
+			Expect(err).To(BeNil())
+
+			Expect(disruptionsByReason[DisruptionReasonEmpty]).To(Equal(4))
+			Expect(disruptionsByReason[DisruptionReasonDrifted]).To(Equal(5))
+			// The budget where reason == nil overrides the budget with a specified reason
+			Expect(disruptionsByReason[DisruptionReasonUnderutilized]).To(Equal(10))
+		})
+
 	})
+
 	Context("AllowedDisruptions", func() {
 		It("should return zero values if a schedule is invalid", func() {
 			budgets[0].Schedule = lo.ToPtr("@wrongly")
@@ -124,9 +194,10 @@ var _ = Describe("Budgets", func() {
 		It("should return the string value when a budget is active", func() {
 			val, err := budgets[2].GetAllowedDisruptions(fakeClock, 100)
 			Expect(err).To(Succeed())
-			Expect(val).To(BeNumerically("==", 10))
+			Expect(val).To(BeNumerically("==", 100))
 		})
 	})
+
 	Context("IsActive", func() {
 		It("should always consider a schedule and time in UTC", func() {
 			// Set the time to start of June 2000 in a time zone 1 hour ahead of UTC

@@ -19,3 +19,21 @@ limitations under the License.
 // +k8s:defaulter-gen=TypeMeta
 // +groupName=karpenter.sh
 package v1 // doc.go is discovered by codegen
+
+import (
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
+
+	"sigs.k8s.io/karpenter/pkg/apis"
+)
+
+func init() {
+	gv := schema.GroupVersion{Group: apis.Group, Version: "v1"}
+	v1.AddToGroupVersion(scheme.Scheme, gv)
+	scheme.Scheme.AddKnownTypes(gv,
+		&NodePool{},
+		&NodePoolList{},
+		&NodeClaim{},
+		&NodeClaimList{})
+}
