@@ -67,7 +67,8 @@ jobs:
     - name: run test suites
       shell: bash
       run: |
-        export OUTPUT_DIR=$(mktemp -d) 
+        OUTPUT_DIR=$(mktemp -d)
+        export OUTPUT_DIR
         make e2etests
         python ./karpenter_eval/main.py
     - name: cleanup 
