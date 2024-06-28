@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
+
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -158,9 +160,9 @@ func (env *Environment) DefaultNodeClass() *v1alpha1.KWOKNodeClass {
 func (env *Environment) DefaultNodePool(nodeClass *v1alpha1.KWOKNodeClass) *v1beta1.NodePool {
 	nodePool := test.NodePool()
 	nodePool.Spec.Template.Spec.NodeClassRef = &v1beta1.NodeClassReference{
-		Name:       "default",
-		Kind:       "KWOKNodeClass",
-		APIVersion: v1alpha1.SchemeGroupVersion.Version,
+		Name:       nodeClass.Name,
+		Kind:       object.GVK(nodeClass).Kind,
+		APIVersion: object.GVK(nodeClass).GroupVersion().String(),
 	}
 	nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 		{
