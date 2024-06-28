@@ -132,7 +132,6 @@ var _ = Context("Scheduling", func() {
 								},
 							},
 						},
-						StartupTaints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 					},
 				},
 			},
