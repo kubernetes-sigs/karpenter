@@ -175,6 +175,7 @@ type NodeClaim struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable"
 	// +required
 	Spec   NodeClaimSpec   `json:"spec"`
 	Status NodeClaimStatus `json:"status,omitempty"`
