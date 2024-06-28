@@ -102,7 +102,7 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClai
 	})
 	node.Spec.Taints = taints
 	if !equality.Semantic.DeepEqual(stored, node) {
-		if err := r.kubeClient.Update(ctx, node); err != nil {
+		if err := r.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
 			return fmt.Errorf("syncing node, %w", err)
 		}
 	}

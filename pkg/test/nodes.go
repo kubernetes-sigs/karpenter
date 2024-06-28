@@ -75,7 +75,7 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 				Annotations: nodeClaim.Annotations,
 				Finalizers:  nodeClaim.Finalizers,
 			},
-			Taints:      nodeClaim.Spec.Taints,
+			Taints:      append(nodeClaim.Spec.Taints, nodeClaim.Spec.StartupTaints...),
 			Capacity:    nodeClaim.Status.Capacity,
 			Allocatable: nodeClaim.Status.Allocatable,
 			ProviderID:  nodeClaim.Status.ProviderID,
