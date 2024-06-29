@@ -21,20 +21,12 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-
-	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
-var (
-	// Builder includes all types within the apis package
-	Builder = runtime.NewSchemeBuilder(
-		v1alpha1.SchemeBuilder.AddToScheme,
-	)
-	// AddToScheme may be used to add all resources defined in the project to a Scheme
-	AddToScheme = Builder.AddToScheme
+const (
+	Group = "karpenter.kwok.sh"
 )
 
 //go:generate controller-gen crd object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
