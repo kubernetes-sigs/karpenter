@@ -51,11 +51,16 @@ Karpenter needs to stabalize a set of metrics, status conditions, and events tha
 
 **Category:** Breaking
 
-Karpenter wants to expand the usage of the `karpenter.sh/disruption=disrupting:NoSchedule` taint that it currently leverages to cordon nodes during disruption, to also taint nodes with a `karpenter.sh/disruption=candidate:NoSchedule` taint. By tainting nodes when they become candidates (past expiry, drifted, etc.), we ensure that we will launch new nodes when we get more pods that join the cluster, reducing the chance that we will continue to get `karpenter.sh/do-not-disrupt` pods that continue to schedule to the same node.
+Karpenter currently applies the `karpenter.sh/disruption=disrupting:NoSchedule` taint to cordon nodes during disruption. Karpenter will expand upon it's tainting behaior, in addition to updating the current cordon taint to match the format of new taints. The following taints will be used:
+
+|Taint|Description|
+|karpenter.sh/disruption:NoSchedule|Added to any node disrupted by Karpenter. This is either added before the drain begins for forceful disruption, or before the pre-spin of replacement nodes beings for voluntary disruption|
+|karpenter.sh/candidate:PreferNoSchedule|Added to all voluntary disruption candidates (consolidation / drift) to reduce the chance of pods scheduling to soon to be disrupted nodes|
+|karpenter.sh/unregistered:NoExecute|Added to the nodes on startup and removed once all user defined labels and taints have propagated to the node|
 
 #### Tasks
 
-- [ ] Design and implement candidate tainting logic for NodeClaims that are past expiry, drifted, empty, etc.
+- [ ] Design and implement candidate tainting logic for NodeClaims that are drifted, empty, underutilized, etc.
 - [ ] Re-design the `karpenter.sh/disruption` taint to not differ only by value (`karpenter.sh/disruption=candidate` and `karpenter.sh/disruption=disrupting` ) but to be completely different taints so that the taints can have separate controllers managing them
 - [ ] Add the `karpenter.sh/unregistered` taint to nodes on startup to prevent pods from scheduling to the nodes while Karpenter hasn’t propagated the labels down to the nodes yet
 
