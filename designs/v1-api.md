@@ -101,7 +101,7 @@ Defaults are unchanged in the v1 API version but are included in the API proposa
 ➜  karpenter git:(main) ✗ kubectl get nodepools -o wide
 NAME      NODECLASS   WEIGHT
 default   default     100
-fallback  fallback    
+fallback  fallback
 ```
 
 #### Proposed
@@ -201,7 +201,7 @@ kind: NodeClaim
 metadata:
   name: default
 spec:
-  nodeClassRef: 
+  nodeClassRef:
     group: karpenter.k8s.aws # Updated since only a single version will be served
     kind: EC2NodeClass
     name: default
@@ -216,7 +216,7 @@ spec:
       operator: In
       values: ["c", "m", "r"]
       minValues: 2
-  resources: 
+  resources:
     requests:
       cpu: "20"
       memory: "8192Mi"
@@ -268,7 +268,7 @@ status:
 #### Current
 
 ```
-➜  karpenter git:(main) ✗ kubectl get nodeclaims -o wide 
+➜  karpenter git:(main) ✗ kubectl get nodeclaims -o wide
 NAME            TYPE         ZONE         NODE                                            READY   AGE    CAPACITY   NODEPOOL   NODECLASS
 default-7lh6k   c6gn.large   us-west-2b   ip-192-168-183-234.us-west-2.compute.internal   True    2d7h   spot       default    default
 default-97v9h   c6gn.large   us-west-2b   ip-192-168-71-87.us-west-2.compute.internal     True    2d7h   spot       default    default
@@ -280,7 +280,7 @@ default-v5qfb   c7gd.large   us-west-2a   ip-192-168-58-94.us-west-2.compute.int
 #### Proposed
 
 ```
-➜  karpenter git:(main) ✗ kubectl get nodeclaims -A -o wide 
+➜  karpenter git:(main) ✗ kubectl get nodeclaims -A -o wide
 NAME            TYPE         CAPACITY       ZONE         NODE                                            READY   AGE    ID                                      NODEPOOL  NODECLASS
 default-7lh6k   c6gn.large   spot           us-west-2b   ip-192-168-183-234.us-west-2.compute.internal   True    2d7h   aws:///us-west-2b/i-053c6b324e29d2275   default   default
 default-97v9h   c6gn.large   spot           us-west-2b   ip-192-168-71-87.us-west-2.compute.internal     True    2d7h   aws:///us-west-2a/i-053c6b324e29d2275   default   default
@@ -351,17 +351,17 @@ spec:
    imageGCLowThresholdPercent: 80
    cpuCFSQuota: true
    clusterDNS: ["10.0.1.100"]
-  bootstrapMode: Bottlerocket
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: "${CLUSTER_NAME}"
     - id: subnet-09fa4a0a8f233a921
   securityGroupSelectorTerms:
     - tags:
-        karpenter.sh/discovery: "${CLUSTER_NAME}" 
+        karpenter.sh/discovery: "${CLUSTER_NAME}"
     - name: my-security-group
     - id: sg-063d7acfb4b06c82c
   amiSelectorTerms:
+    - alias: al2023@v20240625
     - tags:
         karpenter.sh/discovery: "${CLUSTER_NAME}"
     - name: my-ami
@@ -451,7 +451,7 @@ status:
 #### Current
 
 ```
-➜  karpenter git:(main) ✗ k get ec2nodeclasses -o wide 
+➜  karpenter git:(main) ✗ k get ec2nodeclasses -o wide
 NAME      AGE
 default   2d8h
 ```
@@ -459,8 +459,8 @@ default   2d8h
 #### Proposed
 
 ```
-➜  karpenter git:(main) ✗ k get ec2nodeclasses -o wide 
-NAME     READY  AGE    ROLE 
+➜  karpenter git:(main) ✗ k get ec2nodeclasses -o wide
+NAME     READY  AGE    ROLE
 default  True   2d8h   KarpenterNodeRole-test-cluster
 ```
 
@@ -480,7 +480,7 @@ default  True   2d8h   KarpenterNodeRole-test-cluster
 
 Defining the complete set of status condition types that we will include on v1 launch is **out of scope** of this document and will be defined with more granularly in Karpenter’s Observability design. Minimally for v1, we will add a `Ready` condition so that we can determine whether a EC2NodeClass can be used by a NodePool during scheduling. More robustly, we will define status conditions that ensure that each required “concept” that’s needed for an instance launch is resolved e.g. InstanceProfile resolved, Subnet resolved, Security Groups resolved, etc.
 
-#### Require AMISelectorTerms and Change `amiFamily` to `bootstrapMode`
+#### Require AMISelectorTerms and Drop `amiFamily`
 
 **Category:** Stability, Breaking
 
@@ -488,7 +488,7 @@ When specifying AMIFamily with no AMISelectorTerms, users are currently configur
 
 This works well in pre-prod environments where it’s nice to get auto-upgraded to the latest version for testing but is extremely risky in production environments. [Karpenter now recommends to users to pin AMIs in their production environments](https://karpenter.sh/docs/tasks/managing-amis/#option-1-manage-how-amis-are-tested-and-rolled-out:~:text=The%20safest%20way%2C%20and%20the%20one%20we%20recommend%2C%20for%20ensuring%20that%20a%20new%20AMI%20doesn%E2%80%99t%20break%20your%20workloads%20is%20to%20test%20it%20before%20putting%20it%20into%20production); however, it’s still possible to be caught by surprise today that Karpenter has this behavior when you deploy a EC2NodeClass and NodePool with an AMIFamily. Most notably, this is different from eksctl and MNG, where they will get the latest AMI when you first deploy the node group, but will pin it at the point that you add it.
 
-We no longer want to deal with potential confusion around whether nodes will get rolled or not when using an AMIFamily with no `amiSelectorTerms`. Users will still be able to set `bootstrapMode` to prescribe userData that they want auto-injected by Karpenter, but it will no longer cause a default AMI to be selected. Instead, users will be required to set `amiSelectorTerms` to pin to an AMI.
+We no longer want to deal with potential confusion around whether nodes will get rolled or not when using an AMIFamily with no `amiSelectorTerms`. Instead, `amiSelectorTerms` will now be required and a new term type, `alias`, will be introduced which allows users to select an EKS optimized AMI. Each alias consists of an AMI family and a version. Users can set the version to `latest` to continue to get automatic upgrades, or pin to a specific version.
 
 #### Moving `spec.template.spec.kubelet` into the NodeClass
 
