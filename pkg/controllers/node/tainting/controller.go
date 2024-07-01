@@ -41,7 +41,6 @@ var (
 	// conditionToTaintsMap maps condition values which can be present on the node to a set of taints that should be added in response
 	conditionsForCandidateTaint = sets.New(
 		v1beta1.ConditionTypeDrifted,
-		v1beta1.ConditionTypeExpired,
 		v1beta1.ConditionTypeEmpty,
 	)
 )

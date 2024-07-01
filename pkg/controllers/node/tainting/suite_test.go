@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/tainting"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -49,7 +48,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
 	taintingController = tainting.NewController(env.Client)
 })
 
@@ -62,7 +61,6 @@ var _ = Describe("Tainting", func() {
 	var nodeClaim *v1beta1.NodeClaim
 	var disruptionConditions = []string{
 		v1beta1.ConditionTypeEmpty,
-		v1beta1.ConditionTypeExpired,
 		v1beta1.ConditionTypeDrifted,
 	}
 

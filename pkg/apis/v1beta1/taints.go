@@ -26,7 +26,7 @@ import (
 const (
 	DisruptionTaintKey             = apis.Group + "/disruption"
 	DisruptingNoScheduleTaintValue = "disrupting"
-	DisruptionCandidateTaintKey    = Group + "/candidate"
+	DisruptionCandidateTaintKey    = apis.Group + "/candidate"
 )
 
 var (
