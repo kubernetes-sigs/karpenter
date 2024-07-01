@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
@@ -31,7 +32,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,6 +47,14 @@ type Controller struct {
 	kubeClient client.Client
 	cluster    *state.Cluster
 }
+
+var WellKnownResource = sets.New(
+	v1.ResourceCPU,
+	v1.ResourceMemory,
+	v1.ResourcePods,
+	v1.ResourceEphemeralStorage,
+	v1.ResourceName("nodes"),
+)
 
 // NewController is a constructor
 func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
@@ -78,8 +86,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 }
 
 func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.ResourceList {
-	var res v1.ResourceList
+	res := v1.ResourceList{}
 	nodeCount := 0
+	for name := range WellKnownResource {
+		res[name] = resource.MustParse("0")
+	}
 	// Record all resources provisioned by the nodepools, we look at the cluster state nodes as their capacity
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our nodepool
 	// status immediately upon node creation instead of waiting for the node to become ready.
@@ -95,11 +106,8 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.R
 		}
 		return true
 	})
-	// Only display node count if nodes are owned by the nodepool
-	if nodeCount != 0 {
-		res[v1.ResourceName("nodes")] = resource.MustParse(fmt.Sprintf("%d", nodeCount))
-	}
-	return functional.FilterMap(res, func(_ v1.ResourceName, v resource.Quantity) bool { return !v.IsZero() })
+	res[v1.ResourceName("nodes")] = resource.MustParse(fmt.Sprintf("%d", nodeCount))
+	return res
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
