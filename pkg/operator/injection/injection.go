@@ -77,11 +77,11 @@ func GetClient(ctx context.Context) client.Client {
 	return c.(client.Client)
 }
 
-func NodeClassToContext(ctx context.Context, opts []schema.GroupVersionKind) context.Context {
+func WithNodeClasses(ctx context.Context, opts []schema.GroupVersionKind) context.Context {
 	return context.WithValue(ctx, nodeClassKey, opts)
 }
 
-func NodeClassFromContext(ctx context.Context) []schema.GroupVersionKind {
+func GetNodeClasses(ctx context.Context) []schema.GroupVersionKind {
 	retval := ctx.Value(nodeClassKey)
 	if retval == nil {
 		// This is a developer error if this happens, so we should panic

@@ -54,11 +54,12 @@ const component = "webhook"
 
 var (
 	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
-		v1beta1.SchemeGroupVersion.WithKind("NodePool"):  &v1beta1.NodePool{},
-		v1beta1.SchemeGroupVersion.WithKind("NodeClaim"): &v1beta1.NodeClaim{},
+		{Group: "karpenter.sh", Version: "v1beta1", Kind: "NodePool"}:  &v1beta1.NodePool{},
+		{Group: "karpenter.sh", Version: "v1beta1", Kind: "NodeClaim"}: &v1beta1.NodeClaim{},
 	}
+	// Remove conversion webhooks once v1.1.0, and v1beta1 APIs are droped
 	ConversionResource = map[schema.GroupKind]conversion.GroupKindConversion{
-		{Group: v1.SchemeGroupVersion.Group, Kind: "NodePool"}: {
+		{Group: "karpenter.sh", Kind: "NodePool"}: {
 			DefinitionName: "nodepools.karpenter.sh",
 			HubVersion:     "v1",
 			Zygotes: map[string]conversion.ConvertibleObject{
@@ -66,7 +67,7 @@ var (
 				"v1beta1": &v1beta1.NodePool{},
 			},
 		},
-		{Group: v1.SchemeGroupVersion.Group, Kind: "NodeClaim"}: {
+		{Group: "karpenter.sh", Kind: "NodeClaim"}: {
 			DefinitionName: "nodeclaims.karpenter.sh",
 			HubVersion:     "v1",
 			Zygotes: map[string]conversion.ConvertibleObject{
@@ -98,12 +99,12 @@ func NewCRDValidationWebhook(ctx context.Context, _ configmap.Watcher) *controll
 }
 
 func NewCRDConversionWebhook(ctx context.Context, _ configmap.Watcher) *controller.Impl {
-	nodeclassCtx := injection.NodeClassFromContext(ctx)
+	nodeclassCtx := injection.GetNodeClasses(ctx)
 	return conversion.NewConversionController(ctx,
 		"/conversion/karpenter.sh",
 		ConversionResource,
 		func(ctx context.Context) context.Context {
-			return injection.NodeClassToContext(ctx, nodeclassCtx)
+			return injection.WithNodeClasses(ctx, nodeclassCtx)
 		},
 	)
 }

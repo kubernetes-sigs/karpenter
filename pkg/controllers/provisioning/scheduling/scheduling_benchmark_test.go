@@ -167,7 +167,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 
 	client := fakecr.NewFakeClient()
 	pods := makeDiversePods(podCount)
-	cluster = state.NewCluster(&clock.RealClock{}, client, cloudProvider)
+	cluster = state.NewCluster(&clock.RealClock{}, client)
 	domains := map[string]sets.Set[string]{}
 	topology, err := scheduling.NewTopology(ctx, client, cluster, domains, pods)
 	if err != nil {

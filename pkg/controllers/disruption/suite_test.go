@@ -48,7 +48,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -81,11 +80,11 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(coreapis.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(coreapis.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
@@ -279,9 +278,9 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "3"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 
-		// Mark all nodeclaims as expired
+		// Mark all nodeclaims as drifted
 		for _, nc := range nodeClaims {
-			nc.StatusConditions().SetTrue(v1beta1.ConditionTypeExpired)
+			nc.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, nc)
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
 		}

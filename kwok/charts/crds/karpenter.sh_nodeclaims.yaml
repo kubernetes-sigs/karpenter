@@ -20,6 +20,9 @@ spec:
         - jsonPath: .metadata.labels.node\.kubernetes\.io/instance-type
           name: Type
           type: string
+        - jsonPath: .metadata.labels.karpenter\.sh/capacity-type
+          name: Capacity
+          type: string
         - jsonPath: .metadata.labels.topology\.kubernetes\.io/zone
           name: Zone
           type: string
@@ -32,8 +35,8 @@ spec:
         - jsonPath: .metadata.creationTimestamp
           name: Age
           type: date
-        - jsonPath: .metadata.labels.karpenter\.sh/capacity-type
-          name: Capacity
+        - jsonPath: .status.providerID
+          name: ID
           priority: 1
           type: string
         - jsonPath: .metadata.labels.karpenter\.sh/nodepool
@@ -82,6 +85,8 @@ spec:
                       description: 'Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names'
                       type: string
                   required:
+                    - group
+                    - kind
                     - name
                   type: object
                 requirements:
@@ -248,7 +253,7 @@ spec:
                 - requirements
               type: object
               x-kubernetes-validations:
-                - message: immutable field changed
+                - message: spec is immutable
                   rule: self == oldSelf
             status:
               description: NodeClaimStatus defines the observed state of NodeClaim

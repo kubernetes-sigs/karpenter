@@ -18,7 +18,6 @@ package v1
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/samber/lo"
@@ -37,11 +36,7 @@ func (in *NodePool) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	v1beta1NP.UID = in.UID
 	v1beta1NP.Labels = in.Labels
 	v1beta1NP.Annotations = in.Annotations
-
-	err := in.Spec.convertTo(ctx, &v1beta1NP.Spec, in.Annotations[V1Beta1KubeletConfiguration])
-	if err != nil {
-		return err
-	}
+	in.Spec.convertTo(ctx, &v1beta1NP.Spec)
 
 	// Convert v1 status
 	v1beta1NP.Status.Resources = in.Status.Resources
@@ -54,11 +49,11 @@ func (in *NodePool) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	return nil
 }
 
-func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec, v1beta1KubeletAnnotation string) error {
+func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) {
 	v1beta1np.Weight = in.Weight
 	v1beta1np.Limits = v1beta1.Limits(in.Limits)
 	in.Disruption.convertTo(&v1beta1np.Disruption)
-	return in.Template.convertTo(ctx, &v1beta1np.Template, v1beta1KubeletAnnotation)
+	in.Template.convertTo(ctx, &v1beta1np.Template)
 }
 
 func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
@@ -74,7 +69,7 @@ func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
 	})
 }
 
-func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate, v1beta1KubeletAnnotation string) error {
+func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate) {
 	v1beta1np.Annotations = in.Annotations
 	v1beta1np.Labels = in.Labels
 	v1beta1np.Spec.Taints = in.Spec.Taints
@@ -91,7 +86,7 @@ func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.N
 	})
 
 	if in.Spec.NodeClassRef != nil {
-		nodeclass, found := lo.Find(injection.NodeClassFromContext(ctx), func(nc schema.GroupVersionKind) bool {
+		nodeclass, found := lo.Find(injection.GetNodeClasses(ctx), func(nc schema.GroupVersionKind) bool {
 			return nc.Kind == in.Spec.NodeClassRef.Kind && nc.Group == in.Spec.NodeClassRef.Group
 		})
 		v1beta1np.Spec.NodeClassRef = &v1beta1.NodeClassReference{
@@ -100,16 +95,8 @@ func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.N
 			APIVersion: lo.Ternary(found, nodeclass.GroupVersion().String(), ""),
 		}
 	}
-	if v1beta1KubeletAnnotation != "" {
-		kubelet := &v1beta1.KubeletConfiguration{}
-		err := json.Unmarshal([]byte(v1beta1KubeletAnnotation), kubelet)
-		if err != nil {
-			return err
-		}
-		v1beta1np.Spec.Kubelet = kubelet
-	}
 
-	return nil
+	// Need to implement Kubelet Conversion
 }
 
 // Convert v1beta1 NodePool to V1 NodePool
@@ -123,23 +110,19 @@ func (in *NodePool) ConvertFrom(ctx context.Context, v1beta1np apis.Convertible)
 	// Convert v1beta1 status
 	in.Status.Resources = v1beta1NP.Status.Resources
 
-	v1beta1kubelet, err := in.Spec.convertFrom(ctx, &v1beta1NP.Spec)
-	if err != nil {
-		return err
-	}
+	in.Spec.convertFrom(ctx, &v1beta1NP.Spec)
 	in.Annotations = lo.Assign(in.Annotations, map[string]string{
-		V1Beta1KubeletConfiguration:      v1beta1kubelet,
 		NodePoolHashVersion:              in.Hash(),
 		NodePoolHashVersionAnnotationKey: NodePoolHashVersion,
 	})
 	return nil
 }
 
-func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) (string, error) {
+func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) {
 	in.Weight = v1beta1np.Weight
 	in.Limits = Limits(v1beta1np.Limits)
 	in.Disruption.convertFrom(&v1beta1np.Disruption)
-	return in.Template.convertFrom(ctx, &v1beta1np.Template)
+	in.Template.convertFrom(ctx, &v1beta1np.Template)
 }
 
 func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
@@ -155,7 +138,7 @@ func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
 	})
 }
 
-func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate) (v1beta1kubelet string, err error) {
+func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate) {
 	in.Annotations = v1beta1np.Annotations
 	in.Labels = v1beta1np.Labels
 	in.Spec.Taints = v1beta1np.Spec.Taints
@@ -171,7 +154,7 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 		}
 	})
 
-	nodeclasses := injection.NodeClassFromContext(ctx)
+	nodeclasses := injection.GetNodeClasses(ctx)
 	if v1beta1np.Spec.NodeClassRef != nil {
 		in.Spec.NodeClassRef = &NodeClassReference{
 			Name:  v1beta1np.Spec.NodeClassRef.Name,
@@ -180,6 +163,5 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 		}
 	}
 
-	kubeletJSON, err := json.Marshal(v1beta1np.Spec.Kubelet)
-	return string(kubeletJSON), err
+	// Need to implement Kubelet Conversion
 }

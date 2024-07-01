@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -62,9 +61,9 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
-	env = test.NewEnvironment(scheme.Scheme, test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...))
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cluster)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	nodePoolInformerController = informer.NewNodePoolController(env.Client, cluster)

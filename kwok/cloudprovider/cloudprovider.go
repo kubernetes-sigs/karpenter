@@ -23,6 +23,8 @@ import (
 	"math/rand"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/object"
+
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -123,13 +125,7 @@ func (c CloudProvider) Name() string {
 }
 
 func (c CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
-	return []schema.GroupVersionKind{
-		{
-			Group:   v1alpha1.SchemeGroupVersion.Group,
-			Version: v1alpha1.SchemeGroupVersion.Version,
-			Kind:    "KWOKNodeClass",
-		},
-	}
+	return []schema.GroupVersionKind{object.GVK(&v1alpha1.KWOKNodeClass{})}
 }
 
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {

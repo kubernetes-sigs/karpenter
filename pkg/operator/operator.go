@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/controller"
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/klog/v2"
@@ -62,7 +63,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/operator/scheme"
 	"sigs.k8s.io/karpenter/pkg/webhooks"
 )
 
@@ -88,6 +88,8 @@ var Version = "unspecified"
 
 func init() {
 	crmetrics.Registry.MustRegister(BuildInfo)
+	opmetrics.RegisterClientMetrics(crmetrics.Registry)
+
 	BuildInfo.WithLabelValues(Version, runtime.Version(), runtime.GOARCH, changeset.Get()).Set(1)
 }
 
@@ -148,7 +150,6 @@ func NewOperator() (context.Context, *Operator) {
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:       system.Namespace(),
 		LeaderElectionReleaseOnCancel: true,
-		Scheme:                        scheme.Scheme,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},
@@ -248,7 +249,7 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 		go func() {
 			defer wg.Done()
 			// Taking the first supported NodeClass to be the default NodeClass
-			ctx = injection.NodeClassToContext(ctx, cp.GetSupportedNodeClasses())
+			ctx = injection.WithNodeClasses(ctx, cp.GetSupportedNodeClasses())
 			ctx = injection.WithClient(ctx, o.GetClient())
 			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()

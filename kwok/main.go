@@ -21,7 +21,6 @@ import (
 
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator"
 )
 
@@ -37,7 +36,6 @@ func main() {
 		WithControllers(ctx, controllers.NewControllers(
 			op.Clock,
 			op.GetClient(),
-			state.NewCluster(op.Clock, op.GetClient(), cloudProvider),
 			op.EventRecorder,
 			cloudProvider,
 		)...).Start(ctx, cloudProvider)

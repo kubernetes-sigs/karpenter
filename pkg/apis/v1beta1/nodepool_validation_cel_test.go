@@ -238,10 +238,9 @@ var _ = Describe("CEL/Validation", func() {
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		},
-			Entry("Drifted", DisruptionReasonDrifted),
-			Entry("Underutilized", DisruptionReasonUnderutilized),
-			Entry("Expired", DisruptionReasonExpired),
-			Entry("Empty", DisruptionReasonEmpty),
+			Entry("should allow disruption reason drifted", DisruptionReasonDrifted),
+			Entry("should allow disruption reason underutilized", DisruptionReasonUnderutilized),
+			Entry("should allow disruption reason empty", DisruptionReasonEmpty),
 		)
 
 		DescribeTable("should fail when creating a budget with invalid reasons", func(reason string) {
@@ -253,8 +252,9 @@ var _ = Describe("CEL/Validation", func() {
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		},
-			Entry("invalid reason", "invalid"),
-			Entry("empty reason", ""),
+			Entry("should not allow invalid reason", "invalid"),
+			Entry("should not allow expired disruption reason", "expired"),
+			Entry("should not allow empty reason", ""),
 		)
 
 		It("should allow setting multiple reasons", func() {
@@ -262,7 +262,7 @@ var _ = Describe("CEL/Validation", func() {
 				Nodes:    "10",
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
-				Reasons:  []DisruptionReason{DisruptionReasonExpired, DisruptionReasonEmpty},
+				Reasons:  []DisruptionReason{DisruptionReasonDrifted, DisruptionReasonEmpty},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})

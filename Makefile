@@ -94,6 +94,7 @@ licenses: download ## Verifies dependency licenses
 verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
 	go generate ./...
+	hack/mutation/nodepool.sh
 	hack/validation/kubelet.sh
 	hack/validation/taint.sh
 	hack/validation/requirements.sh

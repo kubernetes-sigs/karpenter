@@ -79,7 +79,6 @@ var _ = Describe("Budgets", func() {
 					DisruptionReasonUnderutilized,
 					DisruptionReasonDrifted,
 					DisruptionReasonEmpty,
-					DisruptionReasonExpired,
 				},
 				Nodes:    "0",
 				Schedule: lo.ToPtr("@weekly"),
@@ -106,7 +105,6 @@ var _ = Describe("Budgets", func() {
 			Expect(disruptionsByReason[DisruptionReasonUnderutilized]).To(Equal(0))
 			Expect(disruptionsByReason[DisruptionReasonDrifted]).To(Equal(0))
 			Expect(disruptionsByReason[DisruptionReasonEmpty]).To(Equal(0))
-			Expect(disruptionsByReason[DisruptionReasonExpired]).To(Equal(0))
 		})
 
 		It("should return MaxInt32 for all reasons when there are no active budgets", func() {
@@ -150,14 +148,6 @@ var _ = Describe("Budgets", func() {
 				[]Budget{
 					{
 						Schedule: lo.ToPtr("* * * * *"),
-						Nodes:    "3",
-						Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
-						Reasons: []DisruptionReason{
-							DisruptionReasonExpired,
-						},
-					},
-					{
-						Schedule: lo.ToPtr("* * * * *"),
 						Nodes:    "4",
 						Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 						Reasons: []DisruptionReason{
@@ -168,7 +158,6 @@ var _ = Describe("Budgets", func() {
 			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
 			Expect(err).To(BeNil())
 
-			Expect(disruptionsByReason[DisruptionReasonExpired]).To(Equal(3))
 			Expect(disruptionsByReason[DisruptionReasonEmpty]).To(Equal(4))
 			Expect(disruptionsByReason[DisruptionReasonDrifted]).To(Equal(5))
 			// The budget where reason == nil overrides the budget with a specified reason

@@ -18,7 +18,6 @@ package v1
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/samber/lo"
@@ -43,20 +42,18 @@ func (in *NodeClaim) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	if err != nil {
 		return err
 	}
-	v1beta1NC.Annotations = lo.Assign(v1beta1NC.Annotations, map[string]string{
+	temp := map[string]string{
 		NodePoolHashAnnotationKey:        v1OwnerNodePool.Annotations[NodePoolHashAnnotationKey],
 		NodePoolHashVersionAnnotationKey: v1OwnerNodePool.Annotations[NodePoolHashVersionAnnotationKey],
-	})
-
-	err = in.Spec.convertTo(ctx, &v1beta1NC.Spec, in.Annotations[V1Beta1KubeletConfiguration])
-	if err != nil {
-		return err
 	}
+	v1beta1NC.Annotations = lo.Assign(v1beta1NC.Annotations, temp)
+
+	in.Spec.convertTo(ctx, &v1beta1NC.Spec)
 	in.Status.convertTo((&v1beta1NC.Status))
 	return nil
 }
 
-func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec, v1beta1KubeletAnnotation string) error {
+func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec) {
 	v1beta1nc.Taints = in.Taints
 	v1beta1nc.StartupTaints = in.StartupTaints
 	v1beta1nc.Resources = v1beta1.ResourceRequirements(in.Resources)
@@ -72,7 +69,7 @@ func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeC
 	})
 
 	if in.NodeClassRef != nil {
-		nodeclass, found := lo.Find(injection.NodeClassFromContext(ctx), func(nc schema.GroupVersionKind) bool {
+		nodeclass, found := lo.Find(injection.GetNodeClasses(ctx), func(nc schema.GroupVersionKind) bool {
 			return nc.Kind == in.NodeClassRef.Kind && nc.Group == in.NodeClassRef.Group
 		})
 		v1beta1nc.NodeClassRef = &v1beta1.NodeClassReference{
@@ -81,17 +78,8 @@ func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeC
 			APIVersion: lo.Ternary(found, nodeclass.GroupVersion().String(), ""),
 		}
 	}
-	if v1beta1KubeletAnnotation != "" {
-		kubelet := &v1beta1.KubeletConfiguration{}
-		err := json.Unmarshal([]byte(v1beta1KubeletAnnotation), kubelet)
-		if err != nil {
-			return err
-		}
-		v1beta1nc.Kubelet = kubelet
-	}
 
-	return nil
-
+	// Need to implement Kubelet Conversion
 }
 
 func (in *NodeClaimStatus) convertTo(v1beta1nc *v1beta1.NodeClaimStatus) {
@@ -110,17 +98,13 @@ func (in *NodeClaim) ConvertFrom(ctx context.Context, from apis.Convertible) err
 	in.Labels = v1beta1NC.Labels
 	in.Annotations = v1beta1NC.Annotations
 
-	v1beta1kubelet, err := in.Spec.convertFrom(ctx, &v1beta1NC.Spec)
-	if err != nil {
-		return err
-	}
+	in.Spec.convertFrom(ctx, &v1beta1NC.Spec)
 	// Updating the drift hash on the nodeclaim
 	v1beta1OwnerNodePool, err := getV1Beta1NodePoolDriftHash(ctx, v1beta1NC)
 	if err != nil {
 		return err
 	}
 	in.Annotations = lo.Assign(in.Annotations, map[string]string{
-		V1Beta1KubeletConfiguration:      v1beta1kubelet,
 		NodePoolHashAnnotationKey:        v1beta1OwnerNodePool.Annotations[v1beta1.NodePoolHashAnnotationKey],
 		NodePoolHashVersionAnnotationKey: v1beta1OwnerNodePool.Annotations[v1beta1.NodePoolHashVersionAnnotationKey],
 	})
@@ -129,7 +113,7 @@ func (in *NodeClaim) ConvertFrom(ctx context.Context, from apis.Convertible) err
 	return nil
 }
 
-func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec) (string, error) {
+func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec) {
 	in.Taints = v1beta1nc.Taints
 	in.StartupTaints = v1beta1nc.StartupTaints
 	in.Resources = ResourceRequirements(v1beta1nc.Resources)
@@ -144,7 +128,7 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 		}
 	})
 
-	nodeclasses := injection.NodeClassFromContext(ctx)
+	nodeclasses := injection.GetNodeClasses(ctx)
 	if v1beta1nc.NodeClassRef != nil {
 		in.NodeClassRef = &NodeClassReference{
 			Name:  v1beta1nc.NodeClassRef.Name,
@@ -153,8 +137,7 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 		}
 	}
 
-	kubeletJSON, err := json.Marshal(v1beta1nc.Kubelet)
-	return string(kubeletJSON), err
+	// Need to implement Kubelet Conversion
 }
 
 func (in *NodeClaimStatus) convertFrom(v1beta1nc *v1beta1.NodeClaimStatus) {

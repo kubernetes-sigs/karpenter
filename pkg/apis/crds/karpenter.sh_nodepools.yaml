@@ -191,7 +191,7 @@ spec:
                               rule: self.all(x, x != "kubernetes.io/hostname")
                       type: object
                     spec:
-                      description: NodeClaimTemplateSpec describes the desired shared fields between NodeClaimTemplate and NodeClaimSpec
+                      description: NodeClaimSpec describes the desired state of the NodeClaim
                       properties:
                         nodeClassRef:
                           description: NodeClassRef is a reference to an object that defines provider specific configuration
@@ -206,6 +206,8 @@ spec:
                               description: 'Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names'
                               type: string
                           required:
+                            - group
+                            - kind
                             - name
                           type: object
                         requirements:
@@ -476,12 +478,11 @@ spec:
                             description: |-
                               Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
                               Otherwise, this will apply to each reason defined.
-                              allowed reasons are underutilized, expired, empty, and drifted.
+                              allowed reasons are underutilized, empty, and drifted.
                             items:
                               description: DisruptionReason defines valid reasons for disruption budgets.
                               enum:
                                 - underutilized
-                                - expired
                                 - empty
                                 - drifted
                               type: string

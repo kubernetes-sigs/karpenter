@@ -25,18 +25,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
+
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/onsi/gomega"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 
-	kwokapis "sigs.k8s.io/karpenter/kwok/apis"
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
@@ -47,7 +47,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/operator"
 )
@@ -112,12 +111,7 @@ func NewConfig() *rest.Config {
 }
 
 func NewClient(ctx context.Context, config *rest.Config) client.Client {
-	scheme := runtime.NewScheme()
-	lo.Must0(clientgoscheme.AddToScheme(scheme))
-	lo.Must0(apis.AddToScheme(scheme))
-	lo.Must0(kwokapis.AddToScheme(scheme))
-
-	cache := lo.Must(cache.New(config, cache.Options{Scheme: scheme}))
+	cache := lo.Must(cache.New(config, cache.Options{Scheme: scheme.Scheme}))
 	lo.Must0(cache.IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		pod := o.(*v1.Pod)
 		return []string{pod.Spec.NodeName}
@@ -144,7 +138,7 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 		})
 	}))
 
-	c := lo.Must(client.New(config, client.Options{Scheme: scheme, Cache: &client.CacheOptions{Reader: cache}}))
+	c := lo.Must(client.New(config, client.Options{Scheme: scheme.Scheme, Cache: &client.CacheOptions{Reader: cache}}))
 
 	go func() {
 		lo.Must0(cache.Start(ctx))
@@ -166,9 +160,9 @@ func (env *Environment) DefaultNodeClass() *v1alpha1.KWOKNodeClass {
 func (env *Environment) DefaultNodePool(nodeClass *v1alpha1.KWOKNodeClass) *v1beta1.NodePool {
 	nodePool := test.NodePool()
 	nodePool.Spec.Template.Spec.NodeClassRef = &v1beta1.NodeClassReference{
-		Name:       "default",
-		Kind:       "KWOKNodeClass",
-		APIVersion: v1alpha1.SchemeGroupVersion.Version,
+		Name:       nodeClass.Name,
+		Kind:       object.GVK(nodeClass).Kind,
+		APIVersion: object.GVK(nodeClass).GroupVersion().String(),
 	}
 	nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 		{

@@ -25,9 +25,9 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"knative.dev/pkg/system"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -77,13 +77,13 @@ func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	}
 }
 
-func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[EnvironmentOptions]) *Environment {
+func NewEnvironment(options ...functional.Option[EnvironmentOptions]) *Environment {
 	opts := functional.ResolveOptions(options...)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	os.Setenv(system.NamespaceEnvKey, "default")
 	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.29.x"), ".x", ".0", -1))
-	environment := envtest.Environment{Scheme: scheme, CRDs: opts.crds}
+	environment := envtest.Environment{Scheme: scheme.Scheme, CRDs: opts.crds}
 	if version.Minor() >= 21 {
 		// PodAffinityNamespaceSelector is used for label selectors in pod affinities.  If the feature-gate is turned off,
 		// the api-server just clears out the label selector so we never see it.  If we turn it on, the label selectors
@@ -103,7 +103,7 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 	// We use a modified client if we need field indexers
 	var c client.Client
 	if len(opts.fieldIndexers) > 0 {
-		cache := lo.Must(cache.New(environment.Config, cache.Options{Scheme: scheme}))
+		cache := lo.Must(cache.New(environment.Config, cache.Options{Scheme: scheme.Scheme}))
 		for _, index := range opts.fieldIndexers {
 			lo.Must0(index(cache))
 		}
@@ -112,7 +112,7 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 			return []string{pod.Spec.NodeName}
 		}))
 		c = &CacheSyncingClient{
-			Client: lo.Must(client.New(environment.Config, client.Options{Scheme: scheme, Cache: &client.CacheOptions{Reader: cache}})),
+			Client: lo.Must(client.New(environment.Config, client.Options{Scheme: scheme.Scheme, Cache: &client.CacheOptions{Reader: cache}})),
 		}
 		go func() {
 			lo.Must0(cache.Start(ctx))
@@ -121,7 +121,7 @@ func NewEnvironment(scheme *runtime.Scheme, options ...functional.Option[Environ
 			log.Fatalf("cache failed to sync")
 		}
 	} else {
-		c = lo.Must(client.New(environment.Config, client.Options{Scheme: scheme}))
+		c = lo.Must(client.New(environment.Config, client.Options{Scheme: scheme.Scheme}))
 	}
 	return &Environment{
 		Environment:         environment,
