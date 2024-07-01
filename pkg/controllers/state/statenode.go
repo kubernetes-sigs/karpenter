@@ -292,10 +292,14 @@ func (in *StateNode) Taints() []v1.Taint {
 	}
 	// Add an in-memory NoSchedule taint for all eventual disruption candidates. This ensures that we don't consider
 	// these nodes as candidates for pending pods being rescheduled from other disruption candidates.
+	eventualDisruptionCandidateTaint := v1.Taint{
+		Key:    v1beta1.DisruptionCandidateTaintKey,
+		Effect: v1.TaintEffectNoSchedule,
+	}
 	if in.EventualDisruptionCandidate() && !lo.ContainsBy(taints, func(t v1.Taint) bool {
-		return t.MatchTaint(&v1beta1.DisruptionCandidateNoScheduleTaint)
+		return t.MatchTaint(&eventualDisruptionCandidateTaint)
 	}) {
-		taints = append(taints, v1beta1.DisruptionCandidateNoScheduleTaint)
+		taints = append(taints, eventualDisruptionCandidateTaint)
 	}
 	return taints
 }

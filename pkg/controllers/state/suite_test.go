@@ -1627,7 +1627,10 @@ var _ = Describe("Taints", func() {
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			stateNode = ExpectStateNodeExists(cluster, node)
 			Expect(stateNode.Taints()).To(HaveLen(1))
-			Expect(stateNode.Taints()).To(ContainElement(v1beta1.DisruptionCandidateNoScheduleTaint))
+			Expect(stateNode.Taints()).To(ContainElement(v1.Taint{
+				Key: v1beta1.DisruptionCandidateTaintKey,
+				Effect: v1.TaintEffectNoSchedule,
+			}))
 
 			// After we remove the drifited status condition, the node is no longer an eventual disruption candidate
 			// and the taint should no longer be added in-memory.
