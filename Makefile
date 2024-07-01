@@ -49,7 +49,7 @@ e2etests: ## Run the e2e suite against your local cluster
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.timeout=30m \
 		--ginkgo.grace-period=5m \
-		--ginkgo.vv	
+		--ginkgo.vv
 
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
@@ -94,6 +94,7 @@ licenses: download ## Verifies dependency licenses
 verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
 	go generate ./...
+	hack/mutation/nodepool.sh
 	hack/validation/kubelet.sh
 	hack/validation/taint.sh
 	hack/validation/requirements.sh

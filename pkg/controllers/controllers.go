@@ -50,7 +50,7 @@ func NewControllers(
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
 
-	cluster := state.NewCluster(clock, kubeClient, cloudProvider)
+	cluster := state.NewCluster(clock, kubeClient)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
