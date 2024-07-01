@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -47,7 +46,6 @@ import (
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
 	kubeClient                client.Client
-	cloudProvider             cloudprovider.CloudProvider
 	clock                     clock.Clock
 	mu                        sync.RWMutex
 	nodes                     map[string]*StateNode           // provider id -> cached node
@@ -66,11 +64,10 @@ type Cluster struct {
 	antiAffinityPods sync.Map // pod namespaced name -> *v1.Pod of pods that have required anti affinities
 }
 
-func NewCluster(clk clock.Clock, client client.Client, cp cloudprovider.CloudProvider) *Cluster {
+func NewCluster(clk clock.Clock, client client.Client) *Cluster {
 	return &Cluster{
 		clock:                     clk,
 		kubeClient:                client,
-		cloudProvider:             cp,
 		nodes:                     map[string]*StateNode{},
 		bindings:                  map[types.NamespacedName]string{},
 		daemonSetPods:             sync.Map{},

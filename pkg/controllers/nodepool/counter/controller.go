@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
@@ -70,15 +69,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 	stored := nodePool.DeepCopy()
 	// Determine resource usage and update nodepool.status.resources
 	nodePool.Status.Resources = c.resourceCountsFor(v1beta1.NodePoolLabelKey, nodePool.Name)
-	nodeCount := lo.CountBy(c.cluster.Nodes(), func(n *state.StateNode) bool {
-		return n.Labels()[v1beta1.NodePoolLabelKey] == nodePool.Name
-	})
-	// Only display node count if nodes are owned by the nodepool
-	if nodeCount != 0 {
-		nodePool.Status.Resources = resources.MergeInto(nodePool.Status.Resources, v1.ResourceList{
-			v1.ResourceName("nodes"): resource.MustParse(fmt.Sprintf("%d", nodeCount)),
-		})
-	}
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -89,6 +79,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 
 func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.ResourceList {
 	var res v1.ResourceList
+	nodeCount := 0
 	// Record all resources provisioned by the nodepools, we look at the cluster state nodes as their capacity
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our nodepool
 	// status immediately upon node creation instead of waiting for the node to become ready.
@@ -100,9 +91,14 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.R
 		}
 		if n.Labels()[ownerLabel] == ownerName {
 			res = resources.MergeInto(res, n.Capacity())
+			nodeCount += 1
 		}
 		return true
 	})
+	// Only display node count if nodes are owned by the nodepool
+	if nodeCount != 0 {
+		res[v1.ResourceName("nodes")] = resource.MustParse(fmt.Sprintf("%d", nodeCount))
+	}
 	return functional.FilterMap(res, func(_ v1.ResourceName, v resource.Quantity) bool { return !v.IsZero() })
 }
 

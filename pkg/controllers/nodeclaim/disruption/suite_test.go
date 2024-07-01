@@ -65,7 +65,7 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
-	cluster = state.NewCluster(fakeClock, env.Client, cp)
+	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cluster, cp)
 })
 

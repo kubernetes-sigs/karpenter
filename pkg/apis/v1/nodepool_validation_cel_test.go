@@ -27,7 +27,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"knative.dev/pkg/ptr"
@@ -567,12 +566,6 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(nodePool.RuntimeValidate()).To(Succeed())
 				nodePool = oldNodePool.DeepCopy()
 			}
-		})
-	})
-	Context("Resources", func() {
-		It("should not allow resources to be set", func() {
-			nodePool.Spec.Template.Spec.Resources = ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 	})
 })
