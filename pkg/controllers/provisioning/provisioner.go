@@ -179,46 +179,34 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 
 // consolidationWarnings potentially writes logs warning about possible unexpected interactions
 // between scheduling constraints and consolidation
-// nolint:gocyclo
 func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*v1.Pod) {
-	// We keep track of exemplars which have the same generate name so that we print unique pods to start
-	// and then print the rest of the pods at the end
-	antiAffinityExemplars, topologySpreadExemplars := map[string]client.ObjectKey{}, map[string]client.ObjectKey{} // "{namespace}/{metadata.generateName}" -> pod key
-	var antiAffinityRemainingPods, topologySpreadRemainingPods []client.ObjectKey
-
 	// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
 	// unexpectedly with consolidation, so we warn once per hour when we see these pods.
-	for _, po := range pods {
-		exemplarKey := fmt.Sprintf("%s/%s", po.Namespace, po.GenerateName)
+	antiAffinityPods := lo.FilterMap(pods, func(po *v1.Pod, _ int) (client.ObjectKey, bool) {
 		if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
 			if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
 				if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
-					if _, ok := antiAffinityExemplars[exemplarKey]; !ok {
-						antiAffinityExemplars[exemplarKey] = client.ObjectKeyFromObject(po)
-					} else {
-						antiAffinityRemainingPods = append(antiAffinityRemainingPods, client.ObjectKeyFromObject(po))
-					}
+					return client.ObjectKeyFromObject(po), true
 				}
 			}
 		}
+		return client.ObjectKey{}, false
+	})
+	topologySpreadPods := lo.FilterMap(pods, func(po *v1.Pod, _ int) (client.ObjectKey, bool) {
 		for _, tsc := range po.Spec.TopologySpreadConstraints {
 			if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
 				if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
-					if _, ok := topologySpreadExemplars[exemplarKey]; !ok {
-						topologySpreadExemplars[exemplarKey] = client.ObjectKeyFromObject(po)
-					} else {
-						topologySpreadRemainingPods = append(topologySpreadRemainingPods, client.ObjectKeyFromObject(po))
-					}
+					return client.ObjectKeyFromObject(po), true
 				}
 			}
 		}
-	}
+		return client.ObjectKey{}, false
+	})
 	// We reduce the amount of logging that we do per-pod by grouping log lines like this together
-	// We order the exemplars ahead of the remaining pods so that we make sure that we print unique pods first
-	if antiAffinityPods := append(lo.Values(antiAffinityExemplars), antiAffinityRemainingPods...); len(antiAffinityPods) > 0 {
+	if len(antiAffinityPods) > 0 {
 		log.FromContext(ctx).WithValues("pods", pretty.Slice(antiAffinityPods, 10)).Info("pod(s) have a preferred Anti-Affinity which can prevent consolidation")
 	}
-	if topologySpreadPods := append(lo.Values(topologySpreadExemplars), topologySpreadRemainingPods...); len(topologySpreadPods) > 0 {
+	if len(topologySpreadPods) > 0 {
 		log.FromContext(ctx).WithValues("pods", pretty.Slice(topologySpreadPods, 10)).Info("pod(s) have a preferred TopologySpreadConstraint which can prevent consolidation")
 	}
 }
