@@ -217,7 +217,7 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.
 
-	ret[v1alpha1.KwokPartitionLabelKey] = lo.Sample(KwokPartitions)
+	ret[v1alpha1.KwokPartitionLabelKey] = lo.Sample(kwokPartitions)
 	ret[v1beta1.CapacityTypeLabelKey] = offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
 	ret[v1.LabelTopologyZone] = offering.Requirements.Get(v1.LabelTopologyZone).Any()
 	ret[v1.LabelHostname] = nodeClaim.Name

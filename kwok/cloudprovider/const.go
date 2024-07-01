@@ -20,8 +20,4 @@ const (
 	kwokProviderPrefix = "kwok://"
 )
 
-// Hard coded Kwok values
-var (
-	KwokPartitions = []string{"partition-a", "partition-b", "partition-c", "partition-d", "partition-e",
-		"partition-f", "partition-g", "partition-h", "partition-i", "partition-j"}
-)
+var kwokPartitions = []string{"a"}
