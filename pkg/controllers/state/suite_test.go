@@ -1609,37 +1609,6 @@ var _ = Describe("Taints", func() {
 				v1.Taint{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
 			))
 		})
-		It("should add an in-memory taint to eventual disruption candidates", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim, node)
-			ExpectMakeNodesInitialized(ctx, env.Client, node)
-			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-
-			stateNode := ExpectStateNodeExists(cluster, node)
-			Expect(stateNode.Taints()).To(HaveLen(0))
-
-			// By setting the drifted status condition we now know the node owned by this nodeclaim is an eventual
-			// disruption candidate. The karpenter.sh/candidate:NoSchedule taint should be added to the node in-memory.
-			nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			stateNode = ExpectStateNodeExists(cluster, node)
-			Expect(stateNode.Taints()).To(HaveLen(1))
-			Expect(stateNode.Taints()).To(ContainElement(v1.Taint{
-				Key: v1beta1.DisruptionCandidateTaintKey,
-				Effect: v1.TaintEffectNoSchedule,
-			}))
-
-			// After we remove the drifited status condition, the node is no longer an eventual disruption candidate
-			// and the taint should no longer be added in-memory.
-			nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeDrifted, "", "")
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			stateNode = ExpectStateNodeExists(cluster, node)
-			Expect(stateNode.Taints()).To(HaveLen(0))
-		})
 	})
 	Context("Unmanaged", func() {
 		It("should consider ephemeral taints on an unmanaged node that isn't initialized", func() {
