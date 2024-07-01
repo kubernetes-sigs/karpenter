@@ -46,7 +46,7 @@ var _ = Describe("Registration", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
@@ -66,7 +66,7 @@ var _ = Describe("Registration", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
@@ -85,7 +85,7 @@ var _ = Describe("Registration", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
@@ -103,7 +103,7 @@ var _ = Describe("Registration", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		Expect(node.Spec.Taints).To(ContainElement(v1beta1.UnregisteredNoExecuteTaint))
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -127,7 +127,7 @@ var _ = Describe("Registration", func() {
 		Expect(nodeClaim.Labels).To(HaveKeyWithValue("custom-label", "custom-value"))
 		Expect(nodeClaim.Labels).To(HaveKeyWithValue("other-custom-label", "other-custom-value"))
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
@@ -155,7 +155,7 @@ var _ = Describe("Registration", func() {
 		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1beta1.DoNotDisruptAnnotationKey, "true"))
 		Expect(nodeClaim.Annotations).To(HaveKeyWithValue("my-custom-annotation", "my-custom-value"))
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
@@ -203,7 +203,7 @@ var _ = Describe("Registration", func() {
 			},
 		))
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
@@ -271,7 +271,7 @@ var _ = Describe("Registration", func() {
 			},
 		))
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
@@ -325,7 +325,7 @@ var _ = Describe("Registration", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)

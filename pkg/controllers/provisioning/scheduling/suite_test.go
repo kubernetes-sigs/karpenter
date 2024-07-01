@@ -2070,7 +2070,7 @@ var _ = Context("Scheduling", func() {
 				ExpectDeleted(ctx, env.Client, initialPod)
 				// startup taint + node not ready taint = 2
 				// note that this node is not post registration so the unregistered taint is present
-				Expect(node1.Spec.Taints).To(HaveLen(3))
+				Expect(node1.Spec.Taints).To(HaveLen(2))
 				Expect(node1.Spec.Taints).To(ContainElement(v1.Taint{
 					Key:    "foo.com/taint",
 					Value:  "tainted",

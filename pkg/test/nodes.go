@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -56,7 +57,7 @@ func Node(overrides ...NodeOptions) *v1.Node {
 		ObjectMeta: ObjectMeta(options.ObjectMeta),
 		Spec: v1.NodeSpec{
 			Unschedulable: options.Unschedulable,
-			Taints:        append(options.Taints, v1beta1.UnregisteredNoExecuteTaint),
+			Taints:        options.Taints,
 			ProviderID:    options.ProviderID,
 		},
 		Status: v1.NodeStatus{
@@ -67,7 +68,14 @@ func Node(overrides ...NodeOptions) *v1.Node {
 	}
 }
 
+// this check is done for tests that assume the nodeclaim is past registration but will not go through reconciliation
 func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
+	taints := lo.Reject(nodeClaim.Spec.StartupTaints, func(t v1.Taint, _ int) bool {
+		return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
+	})
+	if nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsFalse() {
+		taints = append(taints, v1beta1.UnregisteredNoExecuteTaint)
+	}
 	return Node(
 		NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -75,7 +83,7 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 				Annotations: nodeClaim.Annotations,
 				Finalizers:  nodeClaim.Finalizers,
 			},
-			Taints:      append(nodeClaim.Spec.Taints, nodeClaim.Spec.StartupTaints...),
+			Taints:      append(nodeClaim.Spec.Taints, taints...),
 			Capacity:    nodeClaim.Status.Capacity,
 			Allocatable: nodeClaim.Status.Allocatable,
 			ProviderID:  nodeClaim.Status.ProviderID,

@@ -95,6 +95,13 @@ var _ = Describe("Consolidation", func() {
 		})
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(true)}}))
 	})
+	AfterEach(func() {
+		nodePool = &v1beta1.NodePool{}
+		nodeClaim = &v1beta1.NodeClaim{}
+		spotNodeClaim = &v1beta1.NodeClaim{}
+		node = &v1.Node{}
+		spotNode = &v1.Node{}
+	})
 	Context("Events", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmpty", func() {
 			pod := test.Pod()

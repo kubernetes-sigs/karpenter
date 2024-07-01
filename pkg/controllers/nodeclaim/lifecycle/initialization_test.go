@@ -38,6 +38,9 @@ var _ = Describe("Initialization", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
+	AfterEach(func() {
+		nodePool = test.NodePool()
+	})
 	It("should consider the nodeClaim initialized when all initialization conditions are met", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -61,6 +64,7 @@ var _ = Describe("Initialization", func() {
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
+			Taints:     []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
@@ -122,6 +126,7 @@ var _ = Describe("Initialization", func() {
 				v1.ResourceMemory: resource.MustParse("80Mi"),
 				v1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
@@ -165,6 +170,7 @@ var _ = Describe("Initialization", func() {
 				v1.ResourcePods:   resource.MustParse("110"),
 			},
 			ReadyStatus: v1.ConditionFalse,
+			Taints:      []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -213,6 +219,7 @@ var _ = Describe("Initialization", func() {
 				v1.ResourceMemory: resource.MustParse("80Mi"),
 				v1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
@@ -263,6 +270,7 @@ var _ = Describe("Initialization", func() {
 				v1.ResourceMemory: resource.MustParse("80Mi"),
 				v1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
@@ -330,6 +338,7 @@ var _ = Describe("Initialization", func() {
 				v1.ResourceMemory: resource.MustParse("80Mi"),
 				v1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
@@ -401,6 +410,7 @@ var _ = Describe("Initialization", func() {
 				v1.ResourceMemory: resource.MustParse("80Mi"),
 				v1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
@@ -480,6 +490,7 @@ var _ = Describe("Initialization", func() {
 					Effect: v1.TaintEffectNoSchedule,
 					Value:  "true",
 				},
+				v1beta1.UnregisteredNoExecuteTaint,
 			},
 		})
 		ExpectApplied(ctx, env.Client, node)
@@ -549,6 +560,7 @@ var _ = Describe("Initialization", func() {
 					Effect: v1.TaintEffectNoSchedule,
 					Value:  "true",
 				},
+				v1beta1.UnregisteredNoExecuteTaint,
 			},
 		})
 		ExpectApplied(ctx, env.Client, node)
