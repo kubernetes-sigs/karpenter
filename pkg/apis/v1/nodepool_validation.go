@@ -17,14 +17,13 @@ limitations under the License.
 package v1
 
 import (
-	"context"
+	"errors"
 	"fmt"
 
-	"github.com/robfig/cron/v3"
-	"github.com/samber/lo"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	apivalidation "k8s.io/apimachinery/pkg/api/validation"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
-	"knative.dev/pkg/apis"
 )
 
 func (in *NodePool) SupportedVerbs() []admissionregistrationv1.OperationType {
@@ -34,90 +33,69 @@ func (in *NodePool) SupportedVerbs() []admissionregistrationv1.OperationType {
 	}
 }
 
-func (in *NodePool) Validate(_ context.Context) (errs *apis.FieldError) {
-	return errs.Also(
-		apis.ValidateObjectMetadata(in).ViaField("metadata"),
-		in.Spec.validate().ViaField("spec"),
-	)
-}
-
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
-func (in *NodePool) RuntimeValidate() (errs *apis.FieldError) {
-	return errs.Also(
-		in.Spec.Template.validateLabels().ViaField("spec.template.metadata"),
-		in.Spec.Template.Spec.validateTaints().ViaField("spec.template.spec"),
-		in.Spec.Template.Spec.validateRequirements().ViaField("spec.template.spec"),
-		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist().ViaField("spec.template.spec"),
+func (in *NodePool) RuntimeValidate() error {
+	return errors.Join(
+		in.Spec.Template.validateLabels(),
+		in.Spec.Template.Spec.validateTaints(),
+		in.Spec.Template.Spec.validateRequirements(),
+		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(),
+		ValidateObjectMetadata(in),
 	)
 }
 
-func (in *NodePoolSpec) validate() (errs *apis.FieldError) {
-	return errs.Also(
-		in.Template.validate().ViaField("template"),
-		in.Disruption.validate().ViaField("deprovisioning"),
-	)
-}
-
-func (in *NodeClaimTemplate) validate() (errs *apis.FieldError) {
-	return errs.Also(
-		in.validateLabels().ViaField("metadata"),
-		in.validateRequirementsNodePoolKeyDoesNotExist().ViaField("spec.requirements"),
-		in.Spec.validate().ViaField("spec"),
-	)
-}
-
-func (in *NodeClaimTemplate) validateLabels() (errs *apis.FieldError) {
+func (in *NodeClaimTemplate) validateLabels() error {
+	var errs error
 	for key, value := range in.Labels {
 		if key == NodePoolLabelKey {
-			errs = errs.Also(apis.ErrInvalidKeyName(key, "labels", "restricted"))
+			errs = errors.Join(errs, fmt.Errorf("invalid label key name %s, key is restricted", key))
 		}
 		for _, err := range validation.IsQualifiedName(key) {
-			errs = errs.Also(apis.ErrInvalidKeyName(key, "labels", err))
+			errs = errors.Join(errs, fmt.Errorf("invalid label key name %s, %v", key, err))
 		}
 		for _, err := range validation.IsValidLabelValue(value) {
-			errs = errs.Also(apis.ErrInvalidValue(fmt.Sprintf("%s, %s", value, err), fmt.Sprintf("labels[%s]", key)))
+			errs = errors.Join(errs, fmt.Errorf("invalid label value %s, for key name %s, %v", value, key, err))
 		}
 		if err := IsRestrictedLabel(key); err != nil {
-			errs = errs.Also(apis.ErrInvalidKeyName(key, "labels", err.Error()))
+			errs = errors.Join(errs, fmt.Errorf("invalid label key name %s, %w", key, err))
 		}
 	}
 	return errs
 }
 
-func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs *apis.FieldError) {
-	for i, requirement := range in.Spec.Requirements {
+func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() error {
+	var errs error
+	for _, requirement := range in.Spec.Requirements {
 		if requirement.Key == NodePoolLabelKey {
-			errs = errs.Also(apis.ErrInvalidArrayValue(fmt.Sprintf("%s is restricted", requirement.Key), "requirements", i))
+			errs = errors.Join(errs, fmt.Errorf("invalid requirement key: %s", requirement.Key))
 		}
 	}
 	return errs
 }
 
-//nolint:gocyclo
-func (in *Disruption) validate() (errs *apis.FieldError) {
-	if in.ConsolidateAfter != nil && in.ConsolidateAfter.Duration != nil && in.ConsolidationPolicy == ConsolidationPolicyWhenUnderutilized {
-		return errs.Also(apis.ErrGeneric("consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized"))
-	}
-	if in.ConsolidateAfter == nil && in.ConsolidationPolicy == ConsolidationPolicyWhenEmpty {
-		return errs.Also(apis.ErrGeneric("consolidateAfter must be specified with consolidationPolicy=WhenEmpty"))
-	}
-	for i := range in.Budgets {
-		budget := in.Budgets[i]
-		if err := budget.validate(); err != nil {
-			errs = errs.Also(err.ViaIndex(i).ViaField("budget"))
-		}
-	}
-	return errs
-}
+func ValidateObjectMetadata(meta metav1.Object) error {
+	name := meta.GetName()
+	generateName := meta.GetGenerateName()
 
-func (in *Budget) validate() (errs *apis.FieldError) {
-	if (in.Schedule != nil && in.Duration == nil) || (in.Schedule == nil && in.Duration != nil) {
-		return apis.ErrGeneric("schedule and duration must be specified together")
-	}
-	if in.Schedule != nil {
-		if _, err := cron.ParseStandard(lo.FromPtr(in.Schedule)); err != nil {
-			return apis.ErrInvalidValue(in.Schedule, "schedule", fmt.Sprintf("invalid schedule %s", err))
+	if generateName != "" {
+		msgs := apivalidation.NameIsDNS1035Label(generateName, true)
+
+		if len(msgs) > 0 {
+			return fmt.Errorf("not a DNS 1035 label prefix: %v", msgs)
 		}
 	}
-	return errs
+
+	if name != "" {
+		msgs := apivalidation.NameIsDNS1035Label(name, false)
+
+		if len(msgs) > 0 {
+			return fmt.Errorf("not a DNS 1035 label prefix: %v", msgs)
+		}
+	}
+
+	if generateName == "" && name == "" {
+		return fmt.Errorf("name or generateName is required")
+	}
+
+	return nil
 }
