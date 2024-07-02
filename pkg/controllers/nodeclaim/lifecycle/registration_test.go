@@ -105,7 +105,6 @@ var _ = Describe("Registration", func() {
 
 		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
-		Expect(node.Spec.Taints).To(ContainElement(v1beta1.UnregisteredNoExecuteTaint))
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeRegisteredLabelKey, "true"))

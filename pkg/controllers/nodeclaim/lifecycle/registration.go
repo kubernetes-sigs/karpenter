@@ -68,7 +68,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
-		return reconcile.Result{Requeue: true}, err
+		return reconcile.Result{}, err
 	}
 	log.FromContext(ctx).Info("registered nodeclaim")
 	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
@@ -94,13 +94,12 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClai
 	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.Taints)
 	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.StartupTaints)
 	// Remove karpenter.sh/unregistered taint
-	taints := lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
 		return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
 	})
 	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels, map[string]string{
 		v1beta1.NodeRegisteredLabelKey: "true",
 	})
-	node.Spec.Taints = taints
 	if !equality.Semantic.DeepEqual(stored, node) {
 		if err := r.kubeClient.Update(ctx, node); err != nil {
 			return fmt.Errorf("syncing node, %w", err)
