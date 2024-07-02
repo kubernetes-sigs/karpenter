@@ -73,7 +73,8 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 	taints := lo.Reject(nodeClaim.Spec.StartupTaints, func(t v1.Taint, _ int) bool {
 		return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
 	})
-	if nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsFalse() {
+	if nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsFalse() &&
+		nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsFalse() {
 		taints = append(taints, v1beta1.UnregisteredNoExecuteTaint)
 	}
 	return Node(
