@@ -72,11 +72,11 @@ var _ = Describe("Emptiness", func() {
 		})
 		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 	})
-	AfterEach(func() {
-		nodePool = &v1beta1.NodePool{}
-		nodeClaim = &v1beta1.NodeClaim{}
-		node = &v1.Node{}
-	})
+	// AfterEach(func() {
+	// 	nodePool = &v1beta1.NodePool{}
+	// 	nodeClaim = &v1beta1.NodeClaim{}
+	// 	node = &v1.Node{}
+	// })
 	Context("Events", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenUnderutilized", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
