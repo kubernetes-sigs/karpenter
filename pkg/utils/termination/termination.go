@@ -22,21 +22,21 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
-// EnsureTerminated is a helper function that takes a v1beta1.NodeClaim and calls cloudProvider.Delete() if status condition
+// EnsureTerminated is a helper function that takes a v1.NodeClaim and calls cloudProvider.Delete() if status condition
 // on nodeClaim is not terminating. If it is terminating then it will call cloudProvider.Get() to check if the instance
 // is terminated or not. It will return an error and a boolean that indicates if the instance is terminated or not. We simply return
 // conflict or a NotFound error if we encounter it while updating the status on nodeClaim.
-func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1beta1.NodeClaim, cloudProvider cloudprovider.CloudProvider) (terminated bool, err error) {
+func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1.NodeClaim, cloudProvider cloudprovider.CloudProvider) (terminated bool, err error) {
 	// Check if the status condition on nodeClaim is Terminating
-	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeTerminating).IsTrue() {
+	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue() {
 		// If not then call Delete on cloudProvider to trigger termination and always requeue reconciliation
 		if err := cloudProvider.Delete(ctx, nodeClaim); err != nil {
 			if cloudprovider.IsNodeClaimNotFoundError(err) {
-				nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeTerminating)
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeTerminating)
 				// We call Update() here rather than Patch() because patching a list with a JSON merge patch
 				// can cause races due to the fact that it fully replaces the list on a change
 				// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
@@ -49,7 +49,7 @@ func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1beta1.N
 			return false, fmt.Errorf("terminating cloudprovider instance, %w", err)
 		}
 
-		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeTerminating)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeTerminating)
 		// We call Update() here rather than Patch() because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
 		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732

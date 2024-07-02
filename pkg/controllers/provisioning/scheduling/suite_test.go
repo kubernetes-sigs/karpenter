@@ -28,7 +28,7 @@ import (
 
 	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -43,7 +43,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -117,18 +117,18 @@ var _ = AfterEach(func() {
 })
 
 var _ = Context("Scheduling", func() {
-	var nodePool *v1beta1.NodePool
+	var nodePool *v1.NodePool
 	BeforeEach(func() {
-		nodePool = test.NodePool(v1beta1.NodePool{
-			Spec: v1beta1.NodePoolSpec{
-				Template: v1beta1.NodeClaimTemplate{
-					Spec: v1beta1.NodeClaimSpec{
-						Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
+		nodePool = test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Template: v1.NodeClaimTemplate{
+					Spec: v1.NodeClaimSpec{
+						Requirements: []v1.NodeSelectorRequirementWithMinValues{
 							{
-								NodeSelectorRequirement: v1.NodeSelectorRequirement{
-									Key:      v1beta1.CapacityTypeLabelKey,
-									Operator: v1.NodeSelectorOpIn,
-									Values:   []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand},
+								NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+									Key:      v1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand},
 								},
 							},
 						},
@@ -169,8 +169,8 @@ var _ = Context("Scheduling", func() {
 				nodePool.Spec.Template.Labels = map[string]string{"test-key": "test-value"}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -181,8 +181,8 @@ var _ = Context("Scheduling", func() {
 				nodePool.Spec.Template.Labels = map[string]string{"test-key": "test-value"}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"another-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"another-value"}},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -191,49 +191,49 @@ var _ = Context("Scheduling", func() {
 		})
 		Context("Well Known Labels", func() {
 			It("should use NodePool constraints", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should use node selectors", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-2"}},
+					test.PodOptions{NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should not schedule nodes with a hostname selector", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeSelector: map[string]string{v1.LabelHostname: "red-node"}},
+					test.PodOptions{NodeSelector: map[string]string{corev1.LabelHostname: "red-node"}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should not schedule the pod if nodeselector unknown", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "unknown"}},
+					test.PodOptions{NodeSelector: map[string]string{corev1.LabelTopologyZone: "unknown"}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should not schedule if node selector outside of NodePool constraints", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-2"}},
+					test.PodOptions{NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
@@ -241,17 +241,17 @@ var _ = Context("Scheduling", func() {
 			It("should schedule compatible requirements with Operator=In", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
 			})
 			It("should schedule compatible requirements with Operator=Gt", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: fake.IntegerInstanceLabelKey, Operator: v1.NodeSelectorOpGt, Values: []string{"8"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: fake.IntegerInstanceLabelKey, Operator: corev1.NodeSelectorOpGt, Values: []string{"8"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -259,8 +259,8 @@ var _ = Context("Scheduling", func() {
 				Expect(node.Labels).To(HaveKeyWithValue(fake.IntegerInstanceLabelKey, "16"))
 			})
 			It("should schedule compatible requirements with Operator=Lt", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: fake.IntegerInstanceLabelKey, Operator: v1.NodeSelectorOpLt, Values: []string{"8"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: fake.IntegerInstanceLabelKey, Operator: corev1.NodeSelectorOpLt, Values: []string{"8"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -270,8 +270,8 @@ var _ = Context("Scheduling", func() {
 			It("should not schedule incompatible preferences and requirements with Operator=In", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"unknown"}},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -280,20 +280,20 @@ var _ = Context("Scheduling", func() {
 			It("should schedule compatible requirements with Operator=NotIn", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "unknown"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "unknown"}},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
 			})
 			It("should not schedule incompatible preferences and requirements with Operator=NotIn", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}},
 						}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -303,24 +303,24 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2", "unknown"}}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2", "unknown"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should schedule incompatible preferences and requirements with Operator=In", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"unknown"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -330,24 +330,24 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-3"}}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-3"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should schedule incompatible preferences and requirements with Operator=NotIn", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -357,48 +357,48 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-3"},
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
 			})
 			It("should combine multidimensional node selectors, preferences and requirements", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
 						NodeSelector: map[string]string{
-							v1.LabelTopologyZone:       "test-zone-3",
-							v1.LabelInstanceTypeStable: "arm-instance-type",
+							corev1.LabelTopologyZone:       "test-zone-3",
+							corev1.LabelInstanceTypeStable: "arm-instance-type",
 						},
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-3"}},
-							{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"default-instance-type", "arm-instance-type"}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-3"}},
+							{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"default-instance-type", "arm-instance-type"}},
 						},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"unknown"}},
-							{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpNotIn, Values: []string{"unknown"}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"unknown"}},
+							{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"unknown"}},
 						},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, "arm-instance-type"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "arm-instance-type"))
 			})
 		})
 		Context("Constraints Validation", func() {
 			It("should not schedule pods that have node selectors with restricted labels", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
-				for label := range v1beta1.RestrictedLabels {
+				for label := range v1.RestrictedLabels {
 					pod := test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: label, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 						}})
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					ExpectNotScheduled(ctx, env.Client, pod)
@@ -406,23 +406,23 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should not schedule pods that have node selectors with restricted domains", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1beta1.RestrictedLabelDomains {
+				for domain := range v1.RestrictedLabelDomains {
 					pod := test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 						}})
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					ExpectNotScheduled(ctx, env.Client, pod)
 				}
 			})
 			It("should schedule pods that have node selectors with label in restricted domains exceptions list", func() {
-				var requirements []v1beta1.NodeSelectorRequirementWithMinValues
-				for domain := range v1beta1.LabelDomainExceptions {
-					requirements = append(requirements, v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}})
+				var requirements []v1.NodeSelectorRequirementWithMinValues
+				for domain := range v1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}})
 				}
 				nodePool.Spec.Template.Spec.Requirements = requirements
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1beta1.LabelDomainExceptions {
+				for domain := range v1.LabelDomainExceptions {
 					pod := test.UnschedulablePod()
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
@@ -430,13 +430,13 @@ var _ = Context("Scheduling", func() {
 				}
 			})
 			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
-				var requirements []v1beta1.NodeSelectorRequirementWithMinValues
-				for domain := range v1beta1.LabelDomainExceptions {
-					requirements = append(requirements, v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}})
+				var requirements []v1.NodeSelectorRequirementWithMinValues
+				for domain := range v1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}})
 				}
 				nodePool.Spec.Template.Spec.Requirements = requirements
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1beta1.LabelDomainExceptions {
+				for domain := range v1.LabelDomainExceptions {
 					pod := test.UnschedulablePod()
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
@@ -444,17 +444,17 @@ var _ = Context("Scheduling", func() {
 				}
 			})
 			It("should schedule pods that have node selectors with label in wellknown label list", func() {
-				schedulable := []*v1.Pod{
+				schedulable := []*corev1.Pod{
 					// Constrained by zone
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-1"}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-1"}}),
 					// Constrained by instanceType
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelInstanceTypeStable: "default-instance-type"}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "default-instance-type"}}),
 					// Constrained by architecture
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelArchStable: "arm64"}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{corev1.LabelArchStable: "arm64"}}),
 					// Constrained by operatingSystem
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Linux)}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{corev1.LabelOSStable: string(corev1.Linux)}}),
 					// Constrained by capacity type
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1beta1.CapacityTypeLabelKey: "spot"}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.CapacityTypeLabelKey: "spot"}}),
 				}
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, schedulable...)
@@ -467,8 +467,8 @@ var _ = Context("Scheduling", func() {
 			It("should not schedule pods that have node selectors with In operator and undefined key", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
@@ -476,8 +476,8 @@ var _ = Context("Scheduling", func() {
 			It("should schedule pods that have node selectors with NotIn operator and undefined key", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
@@ -486,8 +486,8 @@ var _ = Context("Scheduling", func() {
 			It("should not schedule pods that have node selectors with Exists operator and undefined key", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpExists},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpExists},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
@@ -495,16 +495,16 @@ var _ = Context("Scheduling", func() {
 			It("should schedule pods that with DoesNotExists operator and undefined key", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpDoesNotExist},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpDoesNotExist},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).ToNot(HaveKey("test-key"))
 			})
 			It("should schedule unconstrained pods that don't have matching node selectors", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -512,86 +512,86 @@ var _ = Context("Scheduling", func() {
 				Expect(node.Labels).To(HaveKeyWithValue("test-key", "test-value"))
 			})
 			It("should schedule pods that have node selectors with matching value and In operator", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue("test-key", "test-value"))
 			})
 			It("should not schedule pods that have node selectors with matching value and NotIn operator", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should schedule the pod with Exists operator and defined key", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpExists},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpExists},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectScheduled(ctx, env.Client, pod)
 			})
 			It("should not schedule the pod with DoesNotExists operator and defined key", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpDoesNotExist},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpDoesNotExist},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should not schedule pods that have node selectors with different value and In operator", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"another-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"another-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should schedule pods that have node selectors with different value and NotIn operator", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"another-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"another-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue("test-key", "test-value"))
 			})
 			It("should schedule compatible pods to the same node", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
-				pods := []*v1.Pod{
+				pods := []*corev1.Pod{
 					test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
+						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}},
 						}}),
-					test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"another-value"}},
+					test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"another-value"}},
 					}}),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -602,16 +602,16 @@ var _ = Context("Scheduling", func() {
 				Expect(node1.Name).To(Equal(node2.Name))
 			})
 			It("should schedule incompatible pods to the different node", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
-				pods := []*v1.Pod{
+				pods := []*corev1.Pod{
 					test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
+						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}},
 						}}),
-					test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"another-value"}},
+					test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"another-value"}},
 					}}),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -625,9 +625,9 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"non-existent-zone"}},
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpExists},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"non-existent-zone"}},
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpExists},
 						}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
@@ -635,49 +635,49 @@ var _ = Context("Scheduling", func() {
 		})
 		Context("Well Known Labels", func() {
 			It("should use NodePool constraints", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should use node selectors", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-2"}},
+					test.PodOptions{NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should not schedule nodes with a hostname selector", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeSelector: map[string]string{v1.LabelHostname: "red-node"}},
+					test.PodOptions{NodeSelector: map[string]string{corev1.LabelHostname: "red-node"}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should not schedule the pod if nodeselector unknown", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "unknown"}},
+					test.PodOptions{NodeSelector: map[string]string{corev1.LabelTopologyZone: "unknown"}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should not schedule if node selector outside of NodePool constraints", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-2"}},
+					test.PodOptions{NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
@@ -685,17 +685,17 @@ var _ = Context("Scheduling", func() {
 			It("should schedule compatible requirements with Operator=In", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
 			})
 			It("should schedule compatible requirements with Operator=Gt", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: fake.IntegerInstanceLabelKey, Operator: v1.NodeSelectorOpGt, Values: []string{"8"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: fake.IntegerInstanceLabelKey, Operator: corev1.NodeSelectorOpGt, Values: []string{"8"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -703,8 +703,8 @@ var _ = Context("Scheduling", func() {
 				Expect(node.Labels).To(HaveKeyWithValue(fake.IntegerInstanceLabelKey, "16"))
 			})
 			It("should schedule compatible requirements with Operator=Lt", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: fake.IntegerInstanceLabelKey, Operator: v1.NodeSelectorOpLt, Values: []string{"8"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: fake.IntegerInstanceLabelKey, Operator: corev1.NodeSelectorOpLt, Values: []string{"8"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -714,8 +714,8 @@ var _ = Context("Scheduling", func() {
 			It("should not schedule incompatible preferences and requirements with Operator=In", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"unknown"}},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -724,20 +724,20 @@ var _ = Context("Scheduling", func() {
 			It("should schedule compatible requirements with Operator=NotIn", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "unknown"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "unknown"}},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
 			})
 			It("should not schedule incompatible preferences and requirements with Operator=NotIn", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}},
 						}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -747,24 +747,24 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2", "unknown"}}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2", "unknown"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should schedule incompatible preferences and requirements with Operator=In", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"unknown"}}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"unknown"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -774,24 +774,24 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-3"}}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-3"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should schedule incompatible preferences and requirements with Operator=NotIn", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3", "unknown"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -801,48 +801,48 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-3"},
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
+						NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2", "test-zone-3"}}},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
 			})
 			It("should combine multidimensional node selectors, preferences and requirements", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
 						NodeSelector: map[string]string{
-							v1.LabelTopologyZone:       "test-zone-3",
-							v1.LabelInstanceTypeStable: "arm-instance-type",
+							corev1.LabelTopologyZone:       "test-zone-3",
+							corev1.LabelInstanceTypeStable: "arm-instance-type",
 						},
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-3"}},
-							{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"default-instance-type", "arm-instance-type"}},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-3"}},
+							{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"default-instance-type", "arm-instance-type"}},
 						},
-						NodePreferences: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"unknown"}},
-							{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpNotIn, Values: []string{"unknown"}},
+						NodePreferences: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"unknown"}},
+							{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"unknown"}},
 						},
 					},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, "arm-instance-type"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "arm-instance-type"))
 			})
 		})
 		Context("Constraints Validation", func() {
 			It("should not schedule pods that have node selectors with restricted labels", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
-				for label := range v1beta1.RestrictedLabels {
+				for label := range v1.RestrictedLabels {
 					pod := test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: label, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 						}})
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					ExpectNotScheduled(ctx, env.Client, pod)
@@ -850,23 +850,23 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should not schedule pods that have node selectors with restricted domains", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1beta1.RestrictedLabelDomains {
+				for domain := range v1.RestrictedLabelDomains {
 					pod := test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}},
+						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 						}})
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					ExpectNotScheduled(ctx, env.Client, pod)
 				}
 			})
 			It("should schedule pods that have node selectors with label in restricted domains exceptions list", func() {
-				var requirements []v1beta1.NodeSelectorRequirementWithMinValues
-				for domain := range v1beta1.LabelDomainExceptions {
-					requirements = append(requirements, v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}})
+				var requirements []v1.NodeSelectorRequirementWithMinValues
+				for domain := range v1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}})
 				}
 				nodePool.Spec.Template.Spec.Requirements = requirements
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1beta1.LabelDomainExceptions {
+				for domain := range v1.LabelDomainExceptions {
 					pod := test.UnschedulablePod()
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
@@ -874,13 +874,13 @@ var _ = Context("Scheduling", func() {
 				}
 			})
 			It("should schedule pods that have node selectors with label in subdomain from restricted domains exceptions list", func() {
-				var requirements []v1beta1.NodeSelectorRequirementWithMinValues
-				for domain := range v1beta1.LabelDomainExceptions {
-					requirements = append(requirements, v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}})
+				var requirements []v1.NodeSelectorRequirementWithMinValues
+				for domain := range v1.LabelDomainExceptions {
+					requirements = append(requirements, v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "subdomain." + domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}})
 				}
 				nodePool.Spec.Template.Spec.Requirements = requirements
 				ExpectApplied(ctx, env.Client, nodePool)
-				for domain := range v1beta1.LabelDomainExceptions {
+				for domain := range v1.LabelDomainExceptions {
 					pod := test.UnschedulablePod()
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
@@ -888,17 +888,17 @@ var _ = Context("Scheduling", func() {
 				}
 			})
 			It("should schedule pods that have node selectors with label in wellknown label list", func() {
-				schedulable := []*v1.Pod{
+				schedulable := []*corev1.Pod{
 					// Constrained by zone
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-1"}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-1"}}),
 					// Constrained by instanceType
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelInstanceTypeStable: "default-instance-type"}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "default-instance-type"}}),
 					// Constrained by architecture
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelArchStable: "arm64"}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{corev1.LabelArchStable: "arm64"}}),
 					// Constrained by operatingSystem
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Linux)}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{corev1.LabelOSStable: string(corev1.Linux)}}),
 					// Constrained by capacity type
-					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1beta1.CapacityTypeLabelKey: "spot"}}),
+					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.CapacityTypeLabelKey: "spot"}}),
 				}
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, schedulable...)
@@ -911,8 +911,8 @@ var _ = Context("Scheduling", func() {
 			It("should not schedule pods that have node selectors with In operator and undefined key", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
@@ -920,8 +920,8 @@ var _ = Context("Scheduling", func() {
 			It("should schedule pods that have node selectors with NotIn operator and undefined key", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
@@ -930,8 +930,8 @@ var _ = Context("Scheduling", func() {
 			It("should not schedule pods that have node selectors with Exists operator and undefined key", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpExists},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpExists},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
@@ -939,16 +939,16 @@ var _ = Context("Scheduling", func() {
 			It("should schedule pods that with DoesNotExists operator and undefined key", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpDoesNotExist},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpDoesNotExist},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).ToNot(HaveKey("test-key"))
 			})
 			It("should schedule unconstrained pods that don't have matching node selectors", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -956,86 +956,86 @@ var _ = Context("Scheduling", func() {
 				Expect(node.Labels).To(HaveKeyWithValue("test-key", "test-value"))
 			})
 			It("should schedule pods that have node selectors with matching value and In operator", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue("test-key", "test-value"))
 			})
 			It("should not schedule pods that have node selectors with matching value and NotIn operator", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should schedule the pod with Exists operator and defined key", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpExists},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpExists},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectScheduled(ctx, env.Client, pod)
 			})
 			It("should not schedule the pod with DoesNotExists operator and defined key", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpDoesNotExist},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpDoesNotExist},
 					}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should not schedule pods that have node selectors with different value and In operator", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"another-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"another-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should schedule pods that have node selectors with different value and NotIn operator", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
-					test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"another-value"}},
+					test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"another-value"}},
 					}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue("test-key", "test-value"))
 			})
 			It("should schedule compatible pods to the same node", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
-				pods := []*v1.Pod{
+				pods := []*corev1.Pod{
 					test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
+						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}},
 						}}),
-					test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-						{Key: "test-key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"another-value"}},
+					test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"another-value"}},
 					}}),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -1046,17 +1046,17 @@ var _ = Context("Scheduling", func() {
 				Expect(node1.Name).To(Equal(node2.Name))
 			})
 			It("should schedule incompatible pods to the different node", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value", "another-value"}}}}
 				ExpectApplied(ctx, env.Client, nodePool)
-				pods := []*v1.Pod{
+				pods := []*corev1.Pod{
 					test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"test-value"}},
+						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}},
 						}}),
 					test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: "test-key", Operator: v1.NodeSelectorOpIn, Values: []string{"another-value"}},
+						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"another-value"}},
 						}}),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -1070,9 +1070,9 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
-						NodeRequirements: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"non-existent-zone"}},
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpExists},
+						NodeRequirements: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"non-existent-zone"}},
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpExists},
 						}},
 				)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -1084,14 +1084,14 @@ var _ = Context("Scheduling", func() {
 	Describe("Preferential Fallback", func() {
 		Context("Required", func() {
 			It("should not relax the final term", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}},
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"default-instance-type"}}},
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}},
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"default-instance-type"}}},
 				}
 				pod := test.UnschedulablePod()
-				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{
-					{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}}, // Should not be relaxed
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{MatchExpressions: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}}, // Should not be relaxed
 					}},
 				}}}}
 				// Don't relax
@@ -1101,39 +1101,39 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should relax multiple terms", func() {
 				pod := test.UnschedulablePod()
-				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{
-					{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{MatchExpressions: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}},
 					}},
-					{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
+					{MatchExpressions: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}},
 					}},
-					{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+					{MatchExpressions: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
 					}},
-					{MatchExpressions: []v1.NodeSelectorRequirement{
-						{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}, // OR operator, never get to this one
+					{MatchExpressions: []corev1.NodeSelectorRequirement{
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}}, // OR operator, never get to this one
 					}},
 				}}}}
 				// Success
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-1"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-1"))
 			})
 		})
 		Context("Preferred", func() {
 			It("should relax all terms", func() {
 				pod := test.UnschedulablePod()
-				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
 					{
-						Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
+						Weight: 1, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}},
 						}},
 					},
 					{
-						Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
+						Weight: 1, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}},
 						}},
 					},
 				}}}
@@ -1143,23 +1143,23 @@ var _ = Context("Scheduling", func() {
 				ExpectScheduled(ctx, env.Client, pod)
 			})
 			It("should relax to use lighter weights", func() {
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
-					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}
 				pod := test.UnschedulablePod()
-				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
 					{
-						Weight: 100, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
+						Weight: 100, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
 						}},
 					},
 					{
-						Weight: 50, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-2"}},
+						Weight: 50, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}},
 						}},
 					},
 					{
-						Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{ // OR operator, never get to this one
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+						Weight: 1, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{ // OR operator, never get to this one
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
 						}},
 					},
 				}}}
@@ -1167,20 +1167,20 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-2"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should schedule even if preference is conflicting with requirement", func() {
 				pod := test.UnschedulablePod()
-				pod.Spec.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
 					{
-						Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"test-zone-3"}},
+						Weight: 1, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-3"}},
 						}},
 					},
 				},
-					RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{
-						{MatchExpressions: []v1.NodeSelectorRequirement{
-							{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test-zone-3"}}, // Should not be relaxed
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+						{MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-3"}}, // Should not be relaxed
 						}},
 					}},
 				}}
@@ -1188,12 +1188,12 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelTopologyZone, "test-zone-3"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
 			})
 			It("should schedule even if preference requirements are conflicting", func() {
-				pod := test.UnschedulablePod(test.PodOptions{NodePreferences: []v1.NodeSelectorRequirement{
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"invalid"}},
-					{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpNotIn, Values: []string{"invalid"}},
+				pod := test.UnschedulablePod(test.PodOptions{NodePreferences: []corev1.NodeSelectorRequirement{
+					{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}},
+					{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"invalid"}},
 				}})
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -1206,32 +1206,32 @@ var _ = Context("Scheduling", func() {
 		It("should not schedule if requesting more resources than any instance type has", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("512"),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("512"),
 					}},
 			})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should launch pods with different archs on different instances", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelArchStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1beta1.ArchitectureArm64, v1beta1.ArchitectureAmd64},
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
 					},
 				},
 			}
 			nodeNames := sets.NewString()
 			ExpectApplied(ctx, env.Client, nodePool)
-			pods := []*v1.Pod{
+			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
-					NodeSelector: map[string]string{v1.LabelArchStable: v1beta1.ArchitectureAmd64},
+					NodeSelector: map[string]string{corev1.LabelArchStable: v1.ArchitectureAmd64},
 				}),
 				test.UnschedulablePod(test.PodOptions{
-					NodeSelector: map[string]string{v1.LabelArchStable: v1beta1.ArchitectureArm64},
+					NodeSelector: map[string]string{corev1.LabelArchStable: v1.ArchitectureArm64},
 				}),
 			}
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -1242,21 +1242,21 @@ var _ = Context("Scheduling", func() {
 			Expect(nodeNames.Len()).To(Equal(2))
 		})
 		It("should exclude instance types that are not supported by the pod constraints (node affinity/instance type)", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelArchStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1beta1.ArchitectureAmd64},
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{v1.ArchitectureAmd64},
 					},
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(test.PodOptions{
-				NodeRequirements: []v1.NodeSelectorRequirement{
+				NodeRequirements: []corev1.NodeSelectorRequirement{
 					{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpIn,
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
 						Values:   []string{"arm-instance-type"},
 					},
 				}})
@@ -1265,21 +1265,21 @@ var _ = Context("Scheduling", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should exclude instance types that are not supported by the pod constraints (node affinity/operating system)", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelArchStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1beta1.ArchitectureAmd64},
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{v1.ArchitectureAmd64},
 					},
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(test.PodOptions{
-				NodeRequirements: []v1.NodeSelectorRequirement{
+				NodeRequirements: []corev1.NodeSelectorRequirement{
 					{
-						Key:      v1.LabelOSStable,
-						Operator: v1.NodeSelectorOpIn,
+						Key:      corev1.LabelOSStable,
+						Operator: corev1.NodeSelectorOpIn,
 						Values:   []string{"ios"},
 					},
 				}})
@@ -1289,40 +1289,40 @@ var _ = Context("Scheduling", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should exclude instance types that are not supported by the provider constraints (arch)", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelArchStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1beta1.ArchitectureAmd64},
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{v1.ArchitectureAmd64},
 					},
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
-			pod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("14")}}})
+			pod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("14")}}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			// only the ARM instance has enough CPU, but it's not allowed per the nodePool
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should launch pods with different operating systems on different instances", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelArchStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1beta1.ArchitectureArm64, v1beta1.ArchitectureAmd64},
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
 					},
 				},
 			}
 			nodeNames := sets.NewString()
 			ExpectApplied(ctx, env.Client, nodePool)
-			pods := []*v1.Pod{
+			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
-					NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Linux)},
+					NodeSelector: map[string]string{corev1.LabelOSStable: string(corev1.Linux)},
 				}),
 				test.UnschedulablePod(test.PodOptions{
-					NodeSelector: map[string]string{v1.LabelOSStable: string(v1.Windows)},
+					NodeSelector: map[string]string{corev1.LabelOSStable: string(corev1.Windows)},
 				}),
 			}
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -1333,23 +1333,23 @@ var _ = Context("Scheduling", func() {
 			Expect(nodeNames.Len()).To(Equal(2))
 		})
 		It("should launch pods with different instance type node selectors on different instances", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelArchStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1beta1.ArchitectureArm64, v1beta1.ArchitectureAmd64},
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
 					},
 				},
 			}
 			nodeNames := sets.NewString()
 			ExpectApplied(ctx, env.Client, nodePool)
-			pods := []*v1.Pod{
+			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
-					NodeSelector: map[string]string{v1.LabelInstanceType: "small-instance-type"},
+					NodeSelector: map[string]string{corev1.LabelInstanceType: "small-instance-type"},
 				}),
 				test.UnschedulablePod(test.PodOptions{
-					NodeSelector: map[string]string{v1.LabelInstanceTypeStable: "default-instance-type"},
+					NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "default-instance-type"},
 				}),
 			}
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -1360,23 +1360,23 @@ var _ = Context("Scheduling", func() {
 			Expect(nodeNames.Len()).To(Equal(2))
 		})
 		It("should launch pods with different zone selectors on different instances", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelArchStable,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1beta1.ArchitectureArm64, v1beta1.ArchitectureAmd64},
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{v1.ArchitectureArm64, v1.ArchitectureAmd64},
 					},
 				},
 			}
 			nodeNames := sets.NewString()
 			ExpectApplied(ctx, env.Client, nodePool)
-			pods := []*v1.Pod{
+			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
-					NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-1"},
+					NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-1"},
 				}),
 				test.UnschedulablePod(test.PodOptions{
-					NodeSelector: map[string]string{v1.LabelTopologyZone: "test-zone-2"},
+					NodeSelector: map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
 				}),
 			}
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -1395,16 +1395,16 @@ var _ = Context("Scheduling", func() {
 
 			nodeNames := sets.NewString()
 			ExpectApplied(ctx, env.Client, nodePool)
-			pods := []*v1.Pod{
+			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
-					ResourceRequirements: v1.ResourceRequirements{
-						Limits: v1.ResourceList{fakeGPU1: resource.MustParse("1")},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{fakeGPU1: resource.MustParse("1")},
 					},
 				}),
 				// Should pack onto a different instance since no instance type has both GPUs
 				test.UnschedulablePod(test.PodOptions{
-					ResourceRequirements: v1.ResourceRequirements{
-						Limits: v1.ResourceList{fakeGPU2: resource.MustParse("1")},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{fakeGPU2: resource.MustParse("1")},
 					},
 				}),
 			}
@@ -1424,8 +1424,8 @@ var _ = Context("Scheduling", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Limits: v1.ResourceList{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
 						fakeGPU1: resource.MustParse("1"),
 						fakeGPU2: resource.MustParse("1")},
 				},
@@ -1437,27 +1437,27 @@ var _ = Context("Scheduling", func() {
 			It("should filter instance types that match labels", func() {
 				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
 				ExpectApplied(ctx, env.Client, nodePool)
-				pods := []*v1.Pod{
+				pods := []*corev1.Pod{
 					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{fake.LabelInstanceSize: "large"}}),
 					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{fake.LabelInstanceSize: "small"}}),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 				node := ExpectScheduled(ctx, env.Client, pods[0])
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, "fake-it-4"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "fake-it-4"))
 				node = ExpectScheduled(ctx, env.Client, pods[1])
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, "fake-it-0"))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "fake-it-0"))
 			})
 			It("should not schedule with incompatible labels", func() {
 				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
 				ExpectApplied(ctx, env.Client, nodePool)
-				pods := []*v1.Pod{
+				pods := []*corev1.Pod{
 					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{
-						fake.LabelInstanceSize:     "large",
-						v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+						fake.LabelInstanceSize:         "large",
+						corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 					}}),
 					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{
-						fake.LabelInstanceSize:     "small",
-						v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[4].Name,
+						fake.LabelInstanceSize:         "small",
+						corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[4].Name,
 					}}),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -1467,21 +1467,21 @@ var _ = Context("Scheduling", func() {
 			It("should schedule optional labels", func() {
 				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
 				ExpectApplied(ctx, env.Client, nodePool)
-				pod := test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
+				pod := test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 					// Only some instance types have this key
-					{Key: fake.ExoticInstanceLabelKey, Operator: v1.NodeSelectorOpExists},
+					{Key: fake.ExoticInstanceLabelKey, Operator: corev1.NodeSelectorOpExists},
 				}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKey(fake.ExoticInstanceLabelKey))
-				Expect(node.Labels).To(HaveKeyWithValue(v1.LabelInstanceTypeStable, cloudProvider.InstanceTypes[4].Name))
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, cloudProvider.InstanceTypes[4].Name))
 			})
 			It("should schedule without optional labels if disallowed", func() {
 				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
 				ExpectApplied(ctx, env.Client, test.NodePool())
-				pod := test.UnschedulablePod(test.PodOptions{NodeRequirements: []v1.NodeSelectorRequirement{
+				pod := test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 					// Only some instance types have this key
-					{Key: fake.ExoticInstanceLabelKey, Operator: v1.NodeSelectorOpDoesNotExist},
+					{Key: fake.ExoticInstanceLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist},
 				}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
@@ -1494,33 +1494,33 @@ var _ = Context("Scheduling", func() {
 		It("should schedule a small pod on the smallest instance", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
-				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("100M"),
+				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("100M"),
 					},
 				}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 		})
 		It("should schedule a small pod on the smallest possible instance type", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
-				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("2000M"),
+				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("2000M"),
 					},
 				}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 		})
 		It("should take pod runtime class into consideration", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
-				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("1"),
+				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("1"),
 					},
 				}})
 			// the pod has overhead of 2 CPUs
@@ -1530,8 +1530,8 @@ var _ = Context("Scheduling", func() {
 				},
 				Handler: "default",
 				Overhead: &nodev1.Overhead{
-					PodFixed: v1.ResourceList{
-						v1.ResourceCPU: resource.MustParse("2"),
+					PodFixed: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("2"),
 					},
 				},
 			}
@@ -1541,14 +1541,14 @@ var _ = Context("Scheduling", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			// overhead of 2 + request of 1 = at least 3 CPUs, so it won't fit on small-instance-type which it otherwise
 			// would
-			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("default-instance-type"))
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("default-instance-type"))
 		})
 		It("should schedule multiple small pods on the smallest possible instance type", func() {
 			opts := test.PodOptions{
-				Conditions: []v1.PodCondition{{Type: v1.PodScheduled, Reason: v1.PodReasonUnschedulable, Status: v1.ConditionFalse}},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("10M"),
+				Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse}},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("10M"),
 					},
 				}}
 			pods := test.Pods(5, opts)
@@ -1558,17 +1558,17 @@ var _ = Context("Scheduling", func() {
 			for _, p := range pods {
 				node := ExpectScheduled(ctx, env.Client, p)
 				nodeNames.Insert(node.Name)
-				Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 			}
 			Expect(nodeNames).To(HaveLen(1))
 		})
 		It("should create new nodes when a node is at capacity", func() {
 			opts := test.PodOptions{
-				NodeSelector: map[string]string{v1.LabelArchStable: "amd64"},
-				Conditions:   []v1.PodCondition{{Type: v1.PodScheduled, Reason: v1.PodReasonUnschedulable, Status: v1.ConditionFalse}},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("1.8G"),
+				NodeSelector: map[string]string{corev1.LabelArchStable: "amd64"},
+				Conditions:   []corev1.PodCondition{{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse}},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("1.8G"),
 					},
 				}}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1578,25 +1578,25 @@ var _ = Context("Scheduling", func() {
 			for _, p := range pods {
 				node := ExpectScheduled(ctx, env.Client, p)
 				nodeNames.Insert(node.Name)
-				Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("default-instance-type"))
+				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("default-instance-type"))
 			}
 			Expect(nodeNames).To(HaveLen(20))
 		})
 		It("should pack small and large pods together", func() {
 			largeOpts := test.PodOptions{
-				NodeSelector: map[string]string{v1.LabelArchStable: "amd64"},
-				Conditions:   []v1.PodCondition{{Type: v1.PodScheduled, Reason: v1.PodReasonUnschedulable, Status: v1.ConditionFalse}},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("1.8G"),
+				NodeSelector: map[string]string{corev1.LabelArchStable: "amd64"},
+				Conditions:   []corev1.PodCondition{{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse}},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("1.8G"),
 					},
 				}}
 			smallOpts := test.PodOptions{
-				NodeSelector: map[string]string{v1.LabelArchStable: "amd64"},
-				Conditions:   []v1.PodCondition{{Type: v1.PodScheduled, Reason: v1.PodReasonUnschedulable, Status: v1.ConditionFalse}},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("400M"),
+				NodeSelector: map[string]string{corev1.LabelArchStable: "amd64"},
+				Conditions:   []corev1.PodCondition{{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse}},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("400M"),
 					},
 				}}
 
@@ -1610,23 +1610,23 @@ var _ = Context("Scheduling", func() {
 			for _, p := range provPods {
 				node := ExpectScheduled(ctx, env.Client, p)
 				nodeNames.Insert(node.Name)
-				Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("default-instance-type"))
+				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("default-instance-type"))
 			}
 			Expect(nodeNames).To(HaveLen(20))
 		})
 		It("should pack nodes tightly", func() {
 			cloudProvider.InstanceTypes = fake.InstanceTypes(5)
-			var nodes []*v1.Node
+			var nodes []*corev1.Node
 			ExpectApplied(ctx, env.Client, nodePool)
-			pods := []*v1.Pod{
+			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.5")},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4.5")},
 					},
 				}),
 				test.UnschedulablePod(test.PodOptions{
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
 					},
 				}),
 			}
@@ -1638,14 +1638,14 @@ var _ = Context("Scheduling", func() {
 			Expect(nodes).To(HaveLen(2))
 			// the first pod consumes nearly all CPU of the largest instance type with no room for the second pod, the
 			// second pod is much smaller in terms of resources and should get a smaller node
-			Expect(nodes[0].Labels[v1.LabelInstanceTypeStable]).ToNot(Equal(nodes[1].Labels[v1.LabelInstanceTypeStable]))
+			Expect(nodes[0].Labels[corev1.LabelInstanceTypeStable]).ToNot(Equal(nodes[1].Labels[corev1.LabelInstanceTypeStable]))
 		})
 		It("should handle zero-quantity resource requests", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{"foo.com/weird-resources": resource.MustParse("0")},
-					Limits:   v1.ResourceList{"foo.com/weird-resources": resource.MustParse("0")},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{"foo.com/weird-resources": resource.MustParse("0")},
+					Limits:   corev1.ResourceList{"foo.com/weird-resources": resource.MustParse("0")},
 				},
 			})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -1655,9 +1655,9 @@ var _ = Context("Scheduling", func() {
 		It("should not schedule pods that exceed every instance type's capacity", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
-				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("2Ti"),
+				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("2Ti"),
 					},
 				}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -1665,12 +1665,12 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should create new nodes when a node is at capacity due to pod limits per node", func() {
 			opts := test.PodOptions{
-				NodeSelector: map[string]string{v1.LabelArchStable: "amd64"},
-				Conditions:   []v1.PodCondition{{Type: v1.PodScheduled, Reason: v1.PodReasonUnschedulable, Status: v1.ConditionFalse}},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("1m"),
-						v1.ResourceCPU:    resource.MustParse("1m"),
+				NodeSelector: map[string]string{corev1.LabelArchStable: "amd64"},
+				Conditions:   []corev1.PodCondition{{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse}},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("1m"),
+						corev1.ResourceCPU:    resource.MustParse("1m"),
 					},
 				}}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1681,26 +1681,26 @@ var _ = Context("Scheduling", func() {
 			for _, p := range pods {
 				node := ExpectScheduled(ctx, env.Client, p)
 				nodeNames.Insert(node.Name)
-				Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 			}
 			Expect(nodeNames).To(HaveLen(5))
 		})
 		It("should take into account initContainer resource requests when binpacking", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
-				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("1Gi"),
-						v1.ResourceCPU:    resource.MustParse("1"),
+				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
+						corev1.ResourceCPU:    resource.MustParse("1"),
 					},
 				},
-					InitContainers: []v1.Container{
+					InitContainers: []corev1.Container{
 						{
-							Resources: v1.ResourceRequirements{
+							Resources: corev1.ResourceRequirements{
 
-								Requests: map[v1.ResourceName]resource.Quantity{
-									v1.ResourceMemory: resource.MustParse("1Gi"),
-									v1.ResourceCPU:    resource.MustParse("2"),
+								Requests: map[corev1.ResourceName]resource.Quantity{
+									corev1.ResourceMemory: resource.MustParse("1Gi"),
+									corev1.ResourceCPU:    resource.MustParse("2"),
 								},
 							},
 						},
@@ -1708,23 +1708,23 @@ var _ = Context("Scheduling", func() {
 				})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("default-instance-type"))
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("default-instance-type"))
 		})
 		It("should not schedule pods when initContainer resource requests are greater than available instance types", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
-				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("1Gi"),
-						v1.ResourceCPU:    resource.MustParse("1"),
+				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
+						corev1.ResourceCPU:    resource.MustParse("1"),
 					},
 				},
-					InitContainers: []v1.Container{{
-						Resources: v1.ResourceRequirements{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{
 
-							Requests: map[v1.ResourceName]resource.Quantity{
-								v1.ResourceMemory: resource.MustParse("1Ti"),
-								v1.ResourceCPU:    resource.MustParse("2"),
+							Requests: map[corev1.ResourceName]resource.Quantity{
+								corev1.ResourceMemory: resource.MustParse("1Ti"),
+								corev1.ResourceCPU:    resource.MustParse("2"),
 							},
 						},
 					}},
@@ -1738,15 +1738,15 @@ var _ = Context("Scheduling", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "medium",
-					Resources: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("2Gi"),
+					Resources: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					},
 					Offerings: []cloudprovider.Offering{
 						{
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
-								v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
-								v1.LabelTopologyZone:         "test-zone-1a",
+								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+								corev1.LabelTopologyZone: "test-zone-1a",
 							}),
 							Price:     3.00,
 							Available: true,
@@ -1755,15 +1755,15 @@ var _ = Context("Scheduling", func() {
 				}),
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "small",
-					Resources: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("1"),
-						v1.ResourceMemory: resource.MustParse("1Gi"),
+					Resources: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
 					},
 					Offerings: []cloudprovider.Offering{
 						{
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
-								v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
-								v1.LabelTopologyZone:         "test-zone-1a",
+								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+								corev1.LabelTopologyZone: "test-zone-1a",
 							}),
 							Price:     2.00,
 							Available: true,
@@ -1772,15 +1772,15 @@ var _ = Context("Scheduling", func() {
 				}),
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "large",
-					Resources: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("4"),
-						v1.ResourceMemory: resource.MustParse("4Gi"),
+					Resources: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("4"),
+						corev1.ResourceMemory: resource.MustParse("4Gi"),
 					},
 					Offerings: []cloudprovider.Offering{
 						{
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
-								v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
-								v1.LabelTopologyZone:         "test-zone-1a",
+								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+								corev1.LabelTopologyZone: "test-zone-1a",
 							}),
 							Price:     1.00,
 							Available: true,
@@ -1790,28 +1790,28 @@ var _ = Context("Scheduling", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
-				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Limits: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:    resource.MustParse("1m"),
-						v1.ResourceMemory: resource.MustParse("1Mi"),
+				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Limits: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:    resource.MustParse("1m"),
+						corev1.ResourceMemory: resource.MustParse("1Mi"),
 					},
 				}},
 			)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
 			// large is the cheapest, so we should pick it, but the other two types are also valid options
-			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("large"))
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("large"))
 			// all three options should be passed to the cloud provider
-			possibleInstanceType := sets.NewString(pscheduling.NewNodeSelectorRequirementsWithMinValues(cloudProvider.CreateCalls[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Values()...)
+			possibleInstanceType := sets.NewString(pscheduling.NewNodeSelectorRequirementsWithMinValues(cloudProvider.CreateCalls[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Values()...)
 			Expect(possibleInstanceType).To(Equal(sets.NewString("small", "medium", "large")))
 		})
 	})
 
 	Describe("In-Flight Nodes", func() {
 		It("should not launch a second node if there is an in-flight node that can support the pod", func() {
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			}}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1827,14 +1827,14 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should not launch a second node if there is an in-flight node that can support the pod (node selectors)", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
-			initialPod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			initialPod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			},
-				NodeRequirements: []v1.NodeSelectorRequirement{{
-					Key:      v1.LabelTopologyZone,
-					Operator: v1.NodeSelectorOpIn,
+				NodeRequirements: []corev1.NodeSelectorRequirement{{
+					Key:      corev1.LabelTopologyZone,
+					Operator: corev1.NodeSelectorOpIn,
 					Values:   []string{"test-zone-2"},
 				}}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
@@ -1842,14 +1842,14 @@ var _ = Context("Scheduling", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 			// the node gets created in test-zone-2
-			secondPod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			secondPod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			},
-				NodeRequirements: []v1.NodeSelectorRequirement{{
-					Key:      v1.LabelTopologyZone,
-					Operator: v1.NodeSelectorOpIn,
+				NodeRequirements: []corev1.NodeSelectorRequirement{{
+					Key:      corev1.LabelTopologyZone,
+					Operator: corev1.NodeSelectorOpIn,
 					Values:   []string{"test-zone-1", "test-zone-2"},
 				}}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
@@ -1859,14 +1859,14 @@ var _ = Context("Scheduling", func() {
 			Expect(node1.Name).To(Equal(node2.Name))
 
 			// the node gets created in test-zone-2
-			thirdPod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			thirdPod := test.UnschedulablePod(test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			},
-				NodeRequirements: []v1.NodeSelectorRequirement{{
-					Key:      v1.LabelTopologyZone,
-					Operator: v1.NodeSelectorOpIn,
+				NodeRequirements: []corev1.NodeSelectorRequirement{{
+					Key:      corev1.LabelTopologyZone,
+					Operator: corev1.NodeSelectorOpIn,
 					Values:   []string{"test-zone-1", "test-zone-3"},
 				}}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, thirdPod)
@@ -1876,9 +1876,9 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should launch a second node if a pod won't fit on the existingNodes node", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1001m"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1001m"),
 				},
 			}}
 			initialPod := test.UnschedulablePod(opts)
@@ -1887,7 +1887,7 @@ var _ = Context("Scheduling", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 			// the node will have 2000m CPU, so these two pods can't both fit on it
-			opts.ResourceRequirements.Limits[v1.ResourceCPU] = resource.MustParse("1")
+			opts.ResourceRequirements.Limits[corev1.ResourceCPU] = resource.MustParse("1")
 			secondPod := test.UnschedulablePod(opts)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
 			node2 := ExpectScheduled(ctx, env.Client, secondPod)
@@ -1895,9 +1895,9 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should launch a second node if a pod isn't compatible with the existingNodes node (node selector)", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			}}
 			initialPod := test.UnschedulablePod(opts)
@@ -1905,15 +1905,15 @@ var _ = Context("Scheduling", func() {
 			node1 := ExpectScheduled(ctx, env.Client, initialPod)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
-			secondPod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.LabelArchStable: "arm64"}})
+			secondPod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{corev1.LabelArchStable: "arm64"}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
 			node2 := ExpectScheduled(ctx, env.Client, secondPod)
 			Expect(node1.Name).ToNot(Equal(node2.Name))
 		})
 		It("should launch a second node if an in-flight node is terminating", func() {
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			}}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1939,9 +1939,9 @@ var _ = Context("Scheduling", func() {
 		Context("Topology", func() {
 			It("should balance pods across zones with in-flight nodes", func() {
 				labels := map[string]string{"foo": "bar"}
-				topology := []v1.TopologySpreadConstraint{{
-					TopologyKey:       v1.LabelTopologyZone,
-					WhenUnsatisfiable: v1.DoNotSchedule,
+				topology := []corev1.TopologySpreadConstraint{{
+					TopologyKey:       corev1.LabelTopologyZone,
+					WhenUnsatisfiable: corev1.DoNotSchedule,
 					LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 					MaxSkew:           1,
 				}}
@@ -1952,7 +1952,7 @@ var _ = Context("Scheduling", func() {
 				ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 2))
 
 				// reconcile our nodes with the cluster state so they'll show up as in-flight
-				var nodeList v1.NodeList
+				var nodeList corev1.NodeList
 				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 				for _, node := range nodeList.Items {
 					ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKey{Name: node.Name})
@@ -1970,9 +1970,9 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should balance pods across hostnames with in-flight nodes", func() {
 				labels := map[string]string{"foo": "bar"}
-				topology := []v1.TopologySpreadConstraint{{
-					TopologyKey:       v1.LabelHostname,
-					WhenUnsatisfiable: v1.DoNotSchedule,
+				topology := []corev1.TopologySpreadConstraint{{
+					TopologyKey:       corev1.LabelHostname,
+					WhenUnsatisfiable: corev1.DoNotSchedule,
 					LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 					MaxSkew:           1,
 				}}
@@ -1983,7 +1983,7 @@ var _ = Context("Scheduling", func() {
 				ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 1, 1, 1))
 
 				// reconcile our nodes with the cluster state so they'll show up as in-flight
-				var nodeList v1.NodeList
+				var nodeList corev1.NodeList
 				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 				for _, node := range nodeList.Items {
 					ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKey{Name: node.Name})
@@ -1997,9 +1997,9 @@ var _ = Context("Scheduling", func() {
 		})
 		Context("Taints", func() {
 			It("should assume pod will schedule to a tainted node with no taints", func() {
-				opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Limits: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("8"),
+				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Limits: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("8"),
 					},
 				}}
 				ExpectApplied(ctx, env.Client, nodePool)
@@ -2019,9 +2019,9 @@ var _ = Context("Scheduling", func() {
 				Expect(node1.Name).To(Equal(node2.Name))
 			})
 			It("should not assume pod will schedule to a tainted node", func() {
-				opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Limits: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("8"),
+				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Limits: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("8"),
 					},
 				}}
 				ExpectApplied(ctx, env.Client, nodePool)
@@ -2031,16 +2031,16 @@ var _ = Context("Scheduling", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
-				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
+				nodeClaim1.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
+				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1.NodeInitializedLabelKey: "true"})
 
 				// delete the pod so that the node is empty
 				ExpectDeleted(ctx, env.Client, initialPod)
 				// and taint it
-				node1.Spec.Taints = append(node1.Spec.Taints, v1.Taint{
+				node1.Spec.Taints = append(node1.Spec.Taints, corev1.Taint{
 					Key:    "foo.com/taint",
 					Value:  "tainted",
-					Effect: v1.TaintEffectNoSchedule,
+					Effect: corev1.TaintEffectNoSchedule,
 				})
 				ExpectApplied(ctx, env.Client, nodeClaim1, node1)
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -2051,15 +2051,15 @@ var _ = Context("Scheduling", func() {
 				Expect(node1.Name).ToNot(Equal(node2.Name))
 			})
 			It("should assume pod will schedule to a tainted node with a custom startup taint", func() {
-				opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Limits: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("8"),
+				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Limits: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("8"),
 					},
 				}}
-				nodePool.Spec.Template.Spec.StartupTaints = append(nodePool.Spec.Template.Spec.StartupTaints, v1.Taint{
+				nodePool.Spec.Template.Spec.StartupTaints = append(nodePool.Spec.Template.Spec.StartupTaints, corev1.Taint{
 					Key:    "foo.com/taint",
 					Value:  "tainted",
-					Effect: v1.TaintEffectNoSchedule,
+					Effect: corev1.TaintEffectNoSchedule,
 				})
 				ExpectApplied(ctx, env.Client, nodePool)
 				initialPod := test.UnschedulablePod(opts)
@@ -2070,10 +2070,10 @@ var _ = Context("Scheduling", func() {
 				ExpectDeleted(ctx, env.Client, initialPod)
 				// startup taint + node not ready taint = 2
 				Expect(node1.Spec.Taints).To(HaveLen(2))
-				Expect(node1.Spec.Taints).To(ContainElement(v1.Taint{
+				Expect(node1.Spec.Taints).To(ContainElement(corev1.Taint{
 					Key:    "foo.com/taint",
 					Value:  "tainted",
-					Effect: v1.TaintEffectNoSchedule,
+					Effect: corev1.TaintEffectNoSchedule,
 				}))
 				ExpectApplied(ctx, env.Client, node1)
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -2084,8 +2084,8 @@ var _ = Context("Scheduling", func() {
 				Expect(node1.Name).To(Equal(node2.Name))
 			})
 			It("should not assume pod will schedule to a node with startup taints after initialization", func() {
-				startupTaint := v1.Taint{Key: "ignore-me", Value: "nothing-to-see-here", Effect: v1.TaintEffectNoSchedule}
-				nodePool.Spec.Template.Spec.StartupTaints = []v1.Taint{startupTaint}
+				startupTaint := corev1.Taint{Key: "ignore-me", Value: "nothing-to-see-here", Effect: corev1.TaintEffectNoSchedule}
+				nodePool.Spec.Template.Spec.StartupTaints = []corev1.Taint{startupTaint}
 				ExpectApplied(ctx, env.Client, nodePool)
 				initialPod := test.UnschedulablePod()
 				bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
@@ -2099,11 +2099,11 @@ var _ = Context("Scheduling", func() {
 
 				nodeClaim1 := bindings.Get(initialPod).NodeClaim
 				node1 := bindings.Get(initialPod).Node
-				nodeClaim1.StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
-				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1beta1.NodeInitializedLabelKey: "true"})
+				nodeClaim1.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
+				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1.NodeInitializedLabelKey: "true"})
 
-				node1.Spec.Taints = []v1.Taint{startupTaint}
-				node1.Status.Capacity = v1.ResourceList{v1.ResourcePods: resource.MustParse("10")}
+				node1.Spec.Taints = []corev1.Taint{startupTaint}
+				node1.Status.Capacity = corev1.ResourceList{corev1.ResourcePods: resource.MustParse("10")}
 				ExpectApplied(ctx, env.Client, nodeClaim1, node1)
 
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -2115,8 +2115,8 @@ var _ = Context("Scheduling", func() {
 				Expect(node1.Name).ToNot(Equal(node2.Name))
 			})
 			It("should consider a tainted NotReady node as in-flight even if initialized", func() {
-				opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("10m")},
+				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("10m")},
 				}}
 				ExpectApplied(ctx, env.Client, nodePool)
 
@@ -2126,11 +2126,11 @@ var _ = Context("Scheduling", func() {
 				node1 := ExpectScheduled(ctx, env.Client, pod)
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 				// Mark Initialized
-				node1.Labels[v1beta1.NodeInitializedLabelKey] = "true"
-				node1.Spec.Taints = []v1.Taint{
-					{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-					{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-					{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+				node1.Labels[v1.NodeInitializedLabelKey] = "true"
+				node1.Spec.Taints = []corev1.Taint{
+					{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+					{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
+					{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 				}
 				ExpectApplied(ctx, env.Client, node1)
 				// Schedule to In Flight NodeClaim
@@ -2146,17 +2146,17 @@ var _ = Context("Scheduling", func() {
 			It("should track daemonset usage separately so we know how many DS resources are remaining to be scheduled", func() {
 				ds := test.DaemonSet(
 					test.DaemonSetOptions{PodOptions: test.PodOptions{
-						ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
-							v1.ResourceCPU:    resource.MustParse("1"),
-							v1.ResourceMemory: resource.MustParse("1Gi")}},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("1Gi")}},
 					}},
 				)
 				ExpectApplied(ctx, env.Client, nodePool, ds)
 				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(ds), ds)).To(Succeed())
 
-				opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Limits: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("8"),
+				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Limits: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("8"),
 					},
 				}}
 				initialPod := test.UnschedulablePod(opts)
@@ -2165,14 +2165,14 @@ var _ = Context("Scheduling", func() {
 
 				// create our daemonset pod and manually bind it to the node
 				dsPod := test.UnschedulablePod(test.PodOptions{
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:    resource.MustParse("1"),
-							v1.ResourceMemory: resource.MustParse("2Gi"),
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("2Gi"),
 						}},
 				})
 				dsPod.OwnerReferences = append(dsPod.OwnerReferences, metav1.OwnerReference{
-					APIVersion:         "apps/v1",
+					APIVersion:         "apps/corev1",
 					Kind:               "DaemonSet",
 					Name:               ds.Name,
 					UID:                ds.UID,
@@ -2205,9 +2205,9 @@ var _ = Context("Scheduling", func() {
 					return true
 				})
 
-				opts = test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Limits: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("14.9"),
+				opts = test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Limits: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("14.9"),
 					},
 				}}
 				// this pod should schedule on the existingNodes node as the daemonset pod has already bound, meaning that the
@@ -2223,22 +2223,22 @@ var _ = Context("Scheduling", func() {
 						NodeSelector: map[string]string{
 							"my-node-label": "value",
 						},
-						ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
-							v1.ResourceCPU:    resource.MustParse("1"),
-							v1.ResourceMemory: resource.MustParse("1Gi")}},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("1Gi")}},
 					}},
 				)
 				ds2 := test.DaemonSet(
 					test.DaemonSetOptions{PodOptions: test.PodOptions{
-						ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
-							v1.ResourceCPU: resource.MustParse("1m"),
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1m"),
 						}}}})
 				ExpectApplied(ctx, env.Client, nodePool, ds1, ds2)
 				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(ds1), ds1)).To(Succeed())
 
-				opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Limits: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("8"),
+				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Limits: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("8"),
 					},
 				}}
 				initialPod := test.UnschedulablePod(opts)
@@ -2253,14 +2253,14 @@ var _ = Context("Scheduling", func() {
 					NodeSelector: map[string]string{
 						"my-node-label": "value",
 					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:    resource.MustParse("1"),
-							v1.ResourceMemory: resource.MustParse("2Gi"),
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("2Gi"),
 						}},
 				})
 				dsPod.OwnerReferences = append(dsPod.OwnerReferences, metav1.OwnerReference{
-					APIVersion:         "apps/v1",
+					APIVersion:         "apps/corev1",
 					Kind:               "DaemonSet",
 					Name:               ds1.Name,
 					UID:                ds1.UID,
@@ -2293,9 +2293,9 @@ var _ = Context("Scheduling", func() {
 					return true
 				})
 
-				opts = test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Limits: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("15.5"),
+				opts = test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Limits: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("15.5"),
 					},
 				}}
 				// This pod should not schedule on the inflight node as it requires more CPU than we have.  This verifies
@@ -2315,16 +2315,16 @@ var _ = Context("Scheduling", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "medium",
-					Resources: v1.ResourceList{
+					Resources: corev1.ResourceList{
 						// enough CPU for four pods + a bit of overhead
-						v1.ResourceCPU:  resource.MustParse("4.25"),
-						v1.ResourcePods: resource.MustParse("4"),
+						corev1.ResourceCPU:  resource.MustParse("4.25"),
+						corev1.ResourcePods: resource.MustParse("4"),
 					},
 				}),
 			}
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1"),
 				},
 			}}
 
@@ -2353,21 +2353,21 @@ var _ = Context("Scheduling", func() {
 			Expect(nodesWithCPUFree).To(BeNumerically("<=", 1))
 		})
 		It("should not launch a second node if there is an in-flight node that can support the pod (#2011)", func() {
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(opts)
 			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			var nodes v1.NodeList
+			var nodes corev1.NodeList
 			Expect(env.Client.List(ctx, &nodes)).To(Succeed())
 			Expect(nodes.Items).To(HaveLen(1))
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(&nodes.Items[0]))
 
-			pod.Status.Conditions = []v1.PodCondition{{Type: v1.PodScheduled, Reason: v1.PodReasonUnschedulable, Status: v1.ConditionFalse}}
+			pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse}}
 			ExpectApplied(ctx, env.Client, pod)
 			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(env.Client.List(ctx, &nodes)).To(Succeed())
@@ -2377,15 +2377,15 @@ var _ = Context("Scheduling", func() {
 		It("should order initialized nodes for scheduling uninitialized nodes when all other nodes are inflight", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
-			var nodeClaims []*v1beta1.NodeClaim
-			var node *v1.Node
+			var nodeClaims []*v1.NodeClaim
+			var node *corev1.Node
 			//nolint:gosec
 			elem := rand.Intn(100) // The nodeclaim/node that will be marked as initialized
 			for i := 0; i < 100; i++ {
-				nc := test.NodeClaim(v1beta1.NodeClaim{
+				nc := test.NodeClaim(v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey: nodePool.Name,
+							v1.NodePoolLabelKey: nodePool.Name,
 						},
 					},
 				})
@@ -2419,22 +2419,22 @@ var _ = Context("Scheduling", func() {
 	Describe("Existing Nodes", func() {
 		It("should schedule a pod to an existing node unowned by Karpenter", func() {
 			node := test.Node(test.NodeOptions{
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("10"),
-					v1.ResourceMemory: resource.MustParse("10Gi"),
-					v1.ResourcePods:   resource.MustParse("110"),
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("10"),
+					corev1.ResourceMemory: resource.MustParse("10Gi"),
+					corev1.ResourcePods:   resource.MustParse("110"),
 				},
 			})
 			ExpectApplied(ctx, env.Client, node)
 			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			}}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -2445,22 +2445,22 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should schedule multiple pods to an existing node unowned by Karpenter", func() {
 			node := test.Node(test.NodeOptions{
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("10"),
-					v1.ResourceMemory: resource.MustParse("100Gi"),
-					v1.ResourcePods:   resource.MustParse("110"),
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("10"),
+					corev1.ResourceMemory: resource.MustParse("100Gi"),
+					corev1.ResourcePods:   resource.MustParse("110"),
 				},
 			})
 			ExpectApplied(ctx, env.Client, node)
 			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			}}
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -2475,13 +2475,13 @@ var _ = Context("Scheduling", func() {
 		It("should order initialized nodes for scheduling uninitialized nodes", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
-			var nodeClaims []*v1beta1.NodeClaim
-			var nodes []*v1.Node
+			var nodeClaims []*v1.NodeClaim
+			var nodes []*corev1.Node
 			for i := 0; i < 100; i++ {
-				nc := test.NodeClaim(v1beta1.NodeClaim{
+				nc := test.NodeClaim(v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey: nodePool.Name,
+							v1.NodePoolLabelKey: nodePool.Name,
 						},
 					},
 				})
@@ -2506,12 +2506,12 @@ var _ = Context("Scheduling", func() {
 			Expect(scheduledNode.Name).To(Equal(nodes[elem].Name))
 		})
 		It("should consider a pod incompatible with an existing node but compatible with NodePool", func() {
-			nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("10"),
-						v1.ResourceMemory: resource.MustParse("10Gi"),
-						v1.ResourcePods:   resource.MustParse("110"),
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+				Status: v1.NodeClaimStatus{
+					Allocatable: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10"),
+						corev1.ResourceMemory: resource.MustParse("10Gi"),
+						corev1.ResourcePods:   resource.MustParse("110"),
 					},
 				},
 			})
@@ -2523,10 +2523,10 @@ var _ = Context("Scheduling", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
 			pod := test.UnschedulablePod(test.PodOptions{
-				NodeRequirements: []v1.NodeSelectorRequirement{
+				NodeRequirements: []corev1.NodeSelectorRequirement{
 					{
-						Key:      v1.LabelTopologyZone,
-						Operator: v1.NodeSelectorOpIn,
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
 						Values:   []string{"test-zone-1"},
 					},
 				},
@@ -2540,26 +2540,26 @@ var _ = Context("Scheduling", func() {
 		})
 		Context("Daemonsets", func() {
 			It("should not subtract daemonset overhead that is not strictly compatible with an existing node", func() {
-				nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: v1.ResourceList{
-							v1.ResourceCPU:    resource.MustParse("1"),
-							v1.ResourceMemory: resource.MustParse("1Gi"),
-							v1.ResourcePods:   resource.MustParse("110"),
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					Status: v1.NodeClaimStatus{
+						Allocatable: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("1Gi"),
+							corev1.ResourcePods:   resource.MustParse("110"),
 						},
 					},
 				})
 				// This DaemonSet is not compatible with the existing NodeClaim/Node
 				ds := test.DaemonSet(
 					test.DaemonSetOptions{PodOptions: test.PodOptions{
-						ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
-							v1.ResourceCPU:    resource.MustParse("100"),
-							v1.ResourceMemory: resource.MustParse("100Gi")},
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("100"),
+							corev1.ResourceMemory: resource.MustParse("100Gi")},
 						},
-						NodeRequirements: []v1.NodeSelectorRequirement{
+						NodeRequirements: []corev1.NodeSelectorRequirement{
 							{
-								Key:      v1.LabelTopologyZone,
-								Operator: v1.NodeSelectorOpIn,
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
 								Values:   []string{"test-zone-1"},
 							},
 						},
@@ -2573,9 +2573,9 @@ var _ = Context("Scheduling", func() {
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
 				pod := test.UnschedulablePod(test.PodOptions{
-					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("1"),
-						v1.ResourceMemory: resource.MustParse("1Gi")},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi")},
 					},
 				})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -2585,9 +2585,9 @@ var _ = Context("Scheduling", func() {
 				// Add another pod and expect that pod not to schedule against a nodePool since we will model the DS against the nodePool
 				// In this case, the DS overhead will take over the entire capacity for every "theoretical node" so we can't schedule a new pod to any new Node
 				pod2 := test.UnschedulablePod(test.PodOptions{
-					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("1"),
-						v1.ResourceMemory: resource.MustParse("1Gi")},
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi")},
 					},
 				})
 				ExpectApplied(ctx, env.Client, nodePool)
@@ -2599,13 +2599,13 @@ var _ = Context("Scheduling", func() {
 
 	Describe("No Pre-Binding", func() {
 		It("should not bind pods to nodes", func() {
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("10m"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("10m"),
 				},
 			}}
 
-			var nodeList v1.NodeList
+			var nodeList corev1.NodeList
 			// shouldn't have any nodes
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			Expect(nodeList.Items).To(HaveLen(0))
@@ -2630,14 +2630,14 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should handle resource zeroing of extended resources by kubelet", func() {
 			// Issue #1459
-			opts := test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-				Limits: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:          resource.MustParse("10m"),
+			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+				Limits: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU:      resource.MustParse("10m"),
 					fake.ResourceGPUVendorA: resource.MustParse("1"),
 				},
 			}}
 
-			var nodeList v1.NodeList
+			var nodeList corev1.NodeList
 			// shouldn't have any nodes
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			Expect(nodeList.Items).To(HaveLen(0))
@@ -2653,10 +2653,10 @@ var _ = Context("Scheduling", func() {
 			node1 := &nodeList.Items[0]
 
 			// simulate kubelet zeroing out the extended resources on the node at startup
-			node1.Status.Capacity = map[v1.ResourceName]resource.Quantity{
+			node1.Status.Capacity = map[corev1.ResourceName]resource.Quantity{
 				fake.ResourceGPUVendorA: resource.MustParse("0"),
 			}
-			node1.Status.Allocatable = map[v1.ResourceName]resource.Quantity{
+			node1.Status.Allocatable = map[corev1.ResourceName]resource.Quantity{
 				fake.ResourceGPUVendorB: resource.MustParse("0"),
 			}
 
@@ -2678,16 +2678,16 @@ var _ = Context("Scheduling", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: affLabels,
 				},
-				PodRequirements: []v1.PodAffinityTerm{{
+				PodRequirements: []corev1.PodAffinityTerm{{
 					LabelSelector: &metav1.LabelSelector{
 						MatchLabels: affLabels,
 					},
-					TopologyKey: v1.LabelTopologyZone,
+					TopologyKey: corev1.LabelTopologyZone,
 				}},
 			}, 2)
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, pods[0])
-			var nodeList v1.NodeList
+			var nodeList corev1.NodeList
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			for i := range nodeList.Items {
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(&nodeList.Items[i]))
@@ -2707,9 +2707,9 @@ var _ = Context("Scheduling", func() {
 				fake.NewInstanceType(
 					fake.InstanceTypeOptions{
 						Name: "instance-type",
-						Resources: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("1024"),
-							v1.ResourcePods: resource.MustParse("1024"),
+						Resources: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("1024"),
+							corev1.ResourcePods: resource.MustParse("1024"),
 						},
 					}),
 			}
@@ -2745,7 +2745,7 @@ var _ = Context("Scheduling", func() {
 				Zones:       []string{"test-zone-1"}})
 			ExpectApplied(ctx, env.Client, sc)
 
-			var pods []*v1.Pod
+			var pods []*corev1.Pod
 			for i := 0; i < 6; i++ {
 				pvcA := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 					StorageClassName: lo.ToPtr("my-storage-class"),
@@ -2761,7 +2761,7 @@ var _ = Context("Scheduling", func() {
 				}))
 			}
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-			var nodeList v1.NodeList
+			var nodeList corev1.NodeList
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			// we need to create a new node as the in-flight one can only contain 5 pods due to the CSINode volume limit
 			Expect(nodeList.Items).To(HaveLen(2))
@@ -2807,7 +2807,7 @@ var _ = Context("Scheduling", func() {
 			})
 			ExpectApplied(ctx, env.Client, pv, pvc)
 
-			var pods []*v1.Pod
+			var pods []*corev1.Pod
 			for i := 0; i < 100; i++ {
 				pods = append(pods, test.UnschedulablePod(test.PodOptions{
 					PersistentVolumeClaims: []string{pvc.Name},
@@ -2815,7 +2815,7 @@ var _ = Context("Scheduling", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-			var nodeList v1.NodeList
+			var nodeList corev1.NodeList
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			// 100 of the same PVC should all be schedulable on the same node
 			Expect(nodeList.Items).To(HaveLen(1))
@@ -2831,7 +2831,7 @@ var _ = Context("Scheduling", func() {
 				ObjectMeta:       metav1.ObjectMeta{Name: "my-volume"},
 				StorageClassName: "nfs",
 				Zones:            []string{"test-zone-1"}})
-			pv.Spec.NFS = &v1.NFSVolumeSource{
+			pv.Spec.NFS = &corev1.NFSVolumeSource{
 				Server: "fake.server",
 				Path:   "/some/path",
 			}
@@ -2844,7 +2844,7 @@ var _ = Context("Scheduling", func() {
 			})
 			ExpectApplied(ctx, env.Client, pv, pvc)
 
-			var pods []*v1.Pod
+			var pods []*corev1.Pod
 			for i := 0; i < 5; i++ {
 				pods = append(pods, test.UnschedulablePod(test.PodOptions{
 					PersistentVolumeClaims: []string{pvc.Name, pvc.Name},
@@ -2853,7 +2853,7 @@ var _ = Context("Scheduling", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 
-			var nodeList v1.NodeList
+			var nodeList corev1.NodeList
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			// 5 of the same PVC should all be schedulable on the same node
 			Expect(nodeList.Items).To(HaveLen(1))
@@ -2880,19 +2880,19 @@ var _ = Context("Scheduling", func() {
 			initialPod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has a specified storage class, so it should use the one specified
 			volumeName := "tmp-ephemeral"
-			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
+			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
-				VolumeSource: v1.VolumeSource{
-					Ephemeral: &v1.EphemeralVolumeSource{
-						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-							Spec: v1.PersistentVolumeClaimSpec{
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
 								StorageClassName: lo.ToPtr(sc.Name),
-								AccessModes: []v1.PersistentVolumeAccessMode{
-									v1.ReadWriteOnce,
+								AccessModes: []corev1.PersistentVolumeAccessMode{
+									corev1.ReadWriteOnce,
 								},
-								Resources: v1.VolumeResourceRequirements{
-									Requests: v1.ResourceList{
-										v1.ResourceStorage: resource.MustParse("1Gi"),
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse("1Gi"),
 									},
 								},
 							},
@@ -2938,19 +2938,19 @@ var _ = Context("Scheduling", func() {
 
 			pod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has a specified storage class, so it should use the one specified
-			pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
-				VolumeSource: v1.VolumeSource{
-					Ephemeral: &v1.EphemeralVolumeSource{
-						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-							Spec: v1.PersistentVolumeClaimSpec{
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
 								StorageClassName: lo.ToPtr(sc.Name),
-								AccessModes: []v1.PersistentVolumeAccessMode{
-									v1.ReadWriteOnce,
+								AccessModes: []corev1.PersistentVolumeAccessMode{
+									corev1.ReadWriteOnce,
 								},
-								Resources: v1.VolumeResourceRequirements{
-									Requests: v1.ResourceList{
-										v1.ResourceStorage: resource.MustParse("1Gi"),
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse("1Gi"),
 									},
 								},
 							},
@@ -2985,18 +2985,18 @@ var _ = Context("Scheduling", func() {
 			initialPod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
 			volumeName := "tmp-ephemeral"
-			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
+			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
-				VolumeSource: v1.VolumeSource{
-					Ephemeral: &v1.EphemeralVolumeSource{
-						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-							Spec: v1.PersistentVolumeClaimSpec{
-								AccessModes: []v1.PersistentVolumeAccessMode{
-									v1.ReadWriteOnce,
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
+								AccessModes: []corev1.PersistentVolumeAccessMode{
+									corev1.ReadWriteOnce,
 								},
-								Resources: v1.VolumeResourceRequirements{
-									Requests: v1.ResourceList{
-										v1.ResourceStorage: resource.MustParse("1Gi"),
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse("1Gi"),
 									},
 								},
 							},
@@ -3034,18 +3034,18 @@ var _ = Context("Scheduling", func() {
 
 			pod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
-			pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
-				VolumeSource: v1.VolumeSource{
-					Ephemeral: &v1.EphemeralVolumeSource{
-						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-							Spec: v1.PersistentVolumeClaimSpec{
-								AccessModes: []v1.PersistentVolumeAccessMode{
-									v1.ReadWriteOnce,
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
+								AccessModes: []corev1.PersistentVolumeAccessMode{
+									corev1.ReadWriteOnce,
 								},
-								Resources: v1.VolumeResourceRequirements{
-									Requests: v1.ResourceList{
-										v1.ResourceStorage: resource.MustParse("1Gi"),
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse("1Gi"),
 									},
 								},
 							},
@@ -3097,18 +3097,18 @@ var _ = Context("Scheduling", func() {
 			volumeName := "tmp-ephemeral"
 			initialPod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
-			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
+			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
-				VolumeSource: v1.VolumeSource{
-					Ephemeral: &v1.EphemeralVolumeSource{
-						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-							Spec: v1.PersistentVolumeClaimSpec{
-								AccessModes: []v1.PersistentVolumeAccessMode{
-									v1.ReadWriteOnce,
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
+								AccessModes: []corev1.PersistentVolumeAccessMode{
+									corev1.ReadWriteOnce,
 								},
-								Resources: v1.VolumeResourceRequirements{
-									Requests: v1.ResourceList{
-										v1.ResourceStorage: resource.MustParse("1Gi"),
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse("1Gi"),
 									},
 								},
 							},
@@ -3153,18 +3153,18 @@ var _ = Context("Scheduling", func() {
 
 			pod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
-			pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
-				VolumeSource: v1.VolumeSource{
-					Ephemeral: &v1.EphemeralVolumeSource{
-						VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-							Spec: v1.PersistentVolumeClaimSpec{
-								AccessModes: []v1.PersistentVolumeAccessMode{
-									v1.ReadWriteOnce,
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
+								AccessModes: []corev1.PersistentVolumeAccessMode{
+									corev1.ReadWriteOnce,
 								},
-								Resources: v1.VolumeResourceRequirements{
-									Requests: v1.ResourceList{
-										v1.ResourceStorage: resource.MustParse("1Gi"),
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse("1Gi"),
 									},
 								},
 							},
@@ -3189,19 +3189,19 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				volumeName := "tmp-ephemeral"
 				pod := test.UnschedulablePod(test.PodOptions{})
-				pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+				pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 					Name: volumeName,
-					VolumeSource: v1.VolumeSource{
-						Ephemeral: &v1.EphemeralVolumeSource{
-							VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-								Spec: v1.PersistentVolumeClaimSpec{
+					VolumeSource: corev1.VolumeSource{
+						Ephemeral: &corev1.EphemeralVolumeSource{
+							VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+								Spec: corev1.PersistentVolumeClaimSpec{
 									StorageClassName: lo.ToPtr(storageClassName),
-									AccessModes: []v1.PersistentVolumeAccessMode{
-										v1.ReadWriteOnce,
+									AccessModes: []corev1.PersistentVolumeAccessMode{
+										corev1.ReadWriteOnce,
 									},
-									Resources: v1.VolumeResourceRequirements{
-										Requests: v1.ResourceList{
-											v1.ResourceStorage: resource.MustParse("1Gi"),
+									Resources: corev1.VolumeResourceRequirements{
+										Requests: corev1.ResourceList{
+											corev1.ResourceStorage: resource.MustParse("1Gi"),
 										},
 									},
 								},
@@ -3227,7 +3227,7 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool, pvc, pv)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
-				var nodeList v1.NodeList
+				var nodeList corev1.NodeList
 				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 				// no nodes should be created as the storage class doesn't eixst
 				Expect(nodeList.Items).To(HaveLen(1))
@@ -3240,19 +3240,19 @@ var _ = Context("Scheduling", func() {
 			func(storageClassName string) {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(test.PodOptions{})
-				pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+				pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 					Name: "tmp-ephemeral",
-					VolumeSource: v1.VolumeSource{
-						Ephemeral: &v1.EphemeralVolumeSource{
-							VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-								Spec: v1.PersistentVolumeClaimSpec{
+					VolumeSource: corev1.VolumeSource{
+						Ephemeral: &corev1.EphemeralVolumeSource{
+							VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+								Spec: corev1.PersistentVolumeClaimSpec{
 									StorageClassName: lo.ToPtr(storageClassName),
-									AccessModes: []v1.PersistentVolumeAccessMode{
-										v1.ReadWriteOnce,
+									AccessModes: []corev1.PersistentVolumeAccessMode{
+										corev1.ReadWriteOnce,
 									},
-									Resources: v1.VolumeResourceRequirements{
-										Requests: v1.ResourceList{
-											v1.ResourceStorage: resource.MustParse("1Gi"),
+									Resources: corev1.VolumeResourceRequirements{
+										Requests: corev1.ResourceList{
+											corev1.ResourceStorage: resource.MustParse("1Gi"),
 										},
 									},
 								},
@@ -3263,7 +3263,7 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
-				var nodeList v1.NodeList
+				var nodeList corev1.NodeList
 				Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 				// no nodes should be created as the storage class doesn't eixst
 				Expect(nodeList.Items).To(HaveLen(0))
@@ -3346,18 +3346,18 @@ var _ = Context("Scheduling", func() {
 				initialPod := test.UnschedulablePod(test.PodOptions{})
 				// Pod has an ephemeral volume claim that references the in-tree storage provider
 				volumeName := "tmp-ephemeral"
-				initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, v1.Volume{
+				initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, corev1.Volume{
 					Name: volumeName,
-					VolumeSource: v1.VolumeSource{
-						Ephemeral: &v1.EphemeralVolumeSource{
-							VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-								Spec: v1.PersistentVolumeClaimSpec{
-									AccessModes: []v1.PersistentVolumeAccessMode{
-										v1.ReadWriteOnce,
+					VolumeSource: corev1.VolumeSource{
+						Ephemeral: &corev1.EphemeralVolumeSource{
+							VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+								Spec: corev1.PersistentVolumeClaimSpec{
+									AccessModes: []corev1.PersistentVolumeAccessMode{
+										corev1.ReadWriteOnce,
 									},
-									Resources: v1.VolumeResourceRequirements{
-										Requests: v1.ResourceList{
-											v1.ResourceStorage: resource.MustParse("1Gi"),
+									Resources: corev1.VolumeResourceRequirements{
+										Requests: corev1.ResourceList{
+											corev1.ResourceStorage: resource.MustParse("1Gi"),
 										},
 									},
 									StorageClassName: lo.ToPtr(sc.Name),
@@ -3396,18 +3396,18 @@ var _ = Context("Scheduling", func() {
 
 				pod := test.UnschedulablePod(test.PodOptions{})
 				// Pod has an ephemeral volume claim that reference the in-tree storage provider
-				pod.Spec.Volumes = append(pod.Spec.Volumes, v1.Volume{
+				pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 					Name: volumeName,
-					VolumeSource: v1.VolumeSource{
-						Ephemeral: &v1.EphemeralVolumeSource{
-							VolumeClaimTemplate: &v1.PersistentVolumeClaimTemplate{
-								Spec: v1.PersistentVolumeClaimSpec{
-									AccessModes: []v1.PersistentVolumeAccessMode{
-										v1.ReadWriteOnce,
+					VolumeSource: corev1.VolumeSource{
+						Ephemeral: &corev1.EphemeralVolumeSource{
+							VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+								Spec: corev1.PersistentVolumeClaimSpec{
+									AccessModes: []corev1.PersistentVolumeAccessMode{
+										corev1.ReadWriteOnce,
 									},
-									Resources: v1.VolumeResourceRequirements{
-										Requests: v1.ResourceList{
-											v1.ResourceStorage: resource.MustParse("1Gi"),
+									Resources: corev1.VolumeResourceRequirements{
+										Requests: corev1.ResourceList{
+											corev1.ResourceStorage: resource.MustParse("1Gi"),
 										},
 									},
 									StorageClassName: lo.ToPtr(sc.Name),
@@ -3435,14 +3435,14 @@ var _ = Context("Scheduling", func() {
 		It("should re-schedule pods from a deleting node when pods are active", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
-				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("100M"),
+				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("100M"),
 					},
 				}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 
 			// Mark for deletion so that we consider all pods on this node for reschedulability
 			cluster.MarkForDeletion(node.Spec.ProviderID)
@@ -3455,20 +3455,20 @@ var _ = Context("Scheduling", func() {
 
 			// Expect both nodes to be of the same size to schedule the pod once it gets re-created
 			for _, n := range nodes {
-				Expect(n.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+				Expect(n.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 			}
 		})
 		It("should not re-schedule pods from a deleting node when pods are not active", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
-				test.PodOptions{ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceMemory: resource.MustParse("100M"),
+				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceMemory: resource.MustParse("100M"),
 					},
 				}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 
 			// Mark for deletion so that we consider all pods on this node for reschedulability
 			cluster.MarkForDeletion(node.Spec.ProviderID)
@@ -3494,7 +3494,7 @@ var _ = Context("Scheduling", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
 							{
-								APIVersion:         "apps/v1",
+								APIVersion:         "apps/corev1",
 								Kind:               "DaemonSet",
 								Name:               ds.Name,
 								UID:                ds.UID,
@@ -3503,24 +3503,24 @@ var _ = Context("Scheduling", func() {
 							},
 						},
 					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceMemory: resource.MustParse("100M"),
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceMemory: resource.MustParse("100M"),
 						},
 					},
 				},
 			)
-			nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   "small-instance-type",
-						v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand,
-						v1.LabelTopologyZone:         "test-zone-1a",
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: "small-instance-type",
+						v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone:       "test-zone-1a",
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
@@ -3551,7 +3551,7 @@ var _ = Context("Scheduling", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
 							{
-								APIVersion:         "apps/v1",
+								APIVersion:         "apps/corev1",
 								Kind:               "ReplicaSet",
 								Name:               rs.Name,
 								UID:                rs.UID,
@@ -3560,16 +3560,16 @@ var _ = Context("Scheduling", func() {
 							},
 						},
 					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceMemory: resource.MustParse("100M"),
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceMemory: resource.MustParse("100M"),
 						},
 					},
 				},
 			)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 
 			// Mark for deletion so that we consider all pods on this node for reschedulability
 			cluster.MarkForDeletion(node.Spec.ProviderID)
@@ -3595,7 +3595,7 @@ var _ = Context("Scheduling", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
 							{
-								APIVersion:         "apps/v1",
+								APIVersion:         "apps/corev1",
 								Kind:               "StatefulSet",
 								Name:               ss.Name,
 								UID:                ss.UID,
@@ -3604,16 +3604,16 @@ var _ = Context("Scheduling", func() {
 							},
 						},
 					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceMemory: resource.MustParse("100M"),
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceMemory: resource.MustParse("100M"),
 						},
 					},
 				},
 			)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 
 			// Mark for deletion so that we consider all pods on this node for reschedulability
 			cluster.MarkForDeletion(node.Spec.ProviderID)
@@ -3630,7 +3630,7 @@ var _ = Context("Scheduling", func() {
 
 			// Expect both nodes to be of the same size to schedule the pod once it gets re-created
 			for _, n := range nodes {
-				Expect(n.Labels[v1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+				Expect(n.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 			}
 		})
 	})
@@ -3647,10 +3647,10 @@ var _ = Context("Scheduling", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
 				},
-				PodAntiRequirements: []v1.PodAffinityTerm{
+				PodAntiRequirements: []corev1.PodAffinityTerm{
 					{
 						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
-						TopologyKey:   v1.LabelHostname,
+						TopologyKey:   corev1.LabelHostname,
 					},
 				},
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
@@ -3682,10 +3682,10 @@ var _ = Context("Scheduling", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
 				},
-				PodAntiRequirements: []v1.PodAffinityTerm{
+				PodAntiRequirements: []corev1.PodAffinityTerm{
 					{
 						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
-						TopologyKey:   v1.LabelHostname,
+						TopologyKey:   corev1.LabelHostname,
 					},
 				},
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
@@ -3703,15 +3703,15 @@ var _ = Context("Scheduling", func() {
 })
 
 // nolint:gocyclo
-func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, constraint *v1.TopologySpreadConstraint) Assertion {
+func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, constraint *corev1.TopologySpreadConstraint) Assertion {
 	GinkgoHelper()
-	nodes := &v1.NodeList{}
+	nodes := &corev1.NodeList{}
 	Expect(c.List(ctx, nodes)).To(Succeed())
-	pods := &v1.PodList{}
+	pods := &corev1.PodList{}
 	Expect(c.List(ctx, pods, scheduling.TopologyListOptions(namespace, constraint.LabelSelector))).To(Succeed())
 	skew := map[string]int{}
 
-	nodeMap := map[string]*v1.Node{}
+	nodeMap := map[string]*corev1.Node{}
 	for i, node := range nodes.Items {
 		nodeMap[node.Name] = &nodes.Items[i]
 	}
@@ -3722,15 +3722,15 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 		}
 		node := nodeMap[pod.Spec.NodeName]
 		if pod.Spec.NodeName == node.Name {
-			if constraint.TopologyKey == v1.LabelHostname {
+			if constraint.TopologyKey == corev1.LabelHostname {
 				skew[node.Name]++ // Check node name since hostname labels aren't applied
 			}
-			if constraint.TopologyKey == v1.LabelTopologyZone {
+			if constraint.TopologyKey == corev1.LabelTopologyZone {
 				if key, ok := node.Labels[constraint.TopologyKey]; ok {
 					skew[key]++
 				}
 			}
-			if constraint.TopologyKey == v1beta1.CapacityTypeLabelKey {
+			if constraint.TopologyKey == v1.CapacityTypeLabelKey {
 				if key, ok := node.Labels[constraint.TopologyKey]; ok {
 					skew[key]++
 				}
@@ -3752,7 +3752,7 @@ func ExpectMaxSkew(ctx context.Context, c client.Client, namespace string, const
 }
 
 func ExpectDeleteAllUnscheduledPods(ctx2 context.Context, c client.Client) {
-	var pods v1.PodList
+	var pods corev1.PodList
 	Expect(c.List(ctx2, &pods)).To(Succeed())
 	for i := range pods.Items {
 		if pods.Items[i].Spec.NodeName == "" {
@@ -3763,10 +3763,10 @@ func ExpectDeleteAllUnscheduledPods(ctx2 context.Context, c client.Client) {
 
 // Functions below this line are used for the instance type selection testing
 // -----------
-func supportedInstanceTypes(nodeClaim *v1beta1.NodeClaim) (res []*cloudprovider.InstanceType) {
+func supportedInstanceTypes(nodeClaim *v1.NodeClaim) (res []*cloudprovider.InstanceType) {
 	reqs := pscheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	return lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
-		return reqs.Get(v1.LabelInstanceTypeStable).Has(i.Name)
+		return reqs.Get(corev1.LabelInstanceTypeStable).Has(i.Name)
 	})
 }
 
@@ -3800,7 +3800,7 @@ func ExpectInstancesWithOffering(instanceTypes []*cloudprovider.InstanceType, ca
 	for _, it := range instanceTypes {
 		matched := false
 		for _, offering := range it.Offerings {
-			if offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == capacityType && offering.Requirements.Get(v1.LabelTopologyZone).Any() == zone {
+			if offering.Requirements.Get(v1.CapacityTypeLabelKey).Any() == capacityType && offering.Requirements.Get(corev1.LabelTopologyZone).Any() == zone {
 				matched = true
 			}
 		}
@@ -3811,26 +3811,26 @@ func ExpectInstancesWithOffering(instanceTypes []*cloudprovider.InstanceType, ca
 func ExpectInstancesWithLabel(instanceTypes []*cloudprovider.InstanceType, label string, value string) {
 	for _, it := range instanceTypes {
 		switch label {
-		case v1.LabelArchStable:
-			Expect(it.Requirements.Get(v1.LabelArchStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an arch of %s", value))
-		case v1.LabelOSStable:
-			Expect(it.Requirements.Get(v1.LabelOSStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an OS of %s", value))
-		case v1.LabelTopologyZone:
+		case corev1.LabelArchStable:
+			Expect(it.Requirements.Get(corev1.LabelArchStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an arch of %s", value))
+		case corev1.LabelOSStable:
+			Expect(it.Requirements.Get(corev1.LabelOSStable).Has(value)).To(BeTrue(), fmt.Sprintf("expected to find an OS of %s", value))
+		case corev1.LabelTopologyZone:
 			{
 				matched := false
 				for _, offering := range it.Offerings {
-					if offering.Requirements.Get(v1.LabelTopologyZone).Any() == value {
+					if offering.Requirements.Get(corev1.LabelTopologyZone).Any() == value {
 						matched = true
 						break
 					}
 				}
 				Expect(matched).To(BeTrue(), fmt.Sprintf("expected to find zone %s in an offering", value))
 			}
-		case v1beta1.CapacityTypeLabelKey:
+		case v1.CapacityTypeLabelKey:
 			{
 				matched := false
 				for _, offering := range it.Offerings {
-					if offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == value {
+					if offering.Requirements.Get(v1.CapacityTypeLabelKey).Any() == value {
 						matched = true
 						break
 					}

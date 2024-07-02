@@ -23,7 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -33,7 +33,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -62,21 +62,21 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("NodeClaimUtils", func() {
-	var node *v1.Node
+	var node *corev1.Node
 	BeforeEach(func() {
 		node = test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelTopologyZone:            "test-zone-1",
-					v1.LabelTopologyRegion:          "test-region",
-					"test-label-key":                "test-label-value",
-					"test-label-key2":               "test-label-value2",
-					v1beta1.NodeRegisteredLabelKey:  "true",
-					v1beta1.NodeInitializedLabelKey: "true",
-					v1beta1.NodePoolLabelKey:        "default",
-					v1beta1.CapacityTypeLabelKey:    v1beta1.CapacityTypeOnDemand,
-					v1.LabelOSStable:                "linux",
-					v1.LabelInstanceTypeStable:      "test-instance-type",
+					corev1.LabelTopologyZone:       "test-zone-1",
+					corev1.LabelTopologyRegion:     "test-region",
+					"test-label-key":               "test-label-value",
+					"test-label-key2":              "test-label-value2",
+					v1.NodeRegisteredLabelKey:      "true",
+					v1.NodeInitializedLabelKey:     "true",
+					v1.NodePoolLabelKey:            "default",
+					v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+					corev1.LabelOSStable:           "linux",
+					corev1.LabelInstanceTypeStable: "test-instance-type",
 				},
 				Annotations: map[string]string{
 					"test-annotation-key":        "test-annotation-value",
@@ -84,39 +84,39 @@ var _ = Describe("NodeClaimUtils", func() {
 					"node-custom-annotation-key": "node-custom-annotation-value",
 				},
 			},
-			ReadyStatus: v1.ConditionTrue,
-			Taints: []v1.Taint{
+			ReadyStatus: corev1.ConditionTrue,
+			Taints: []corev1.Taint{
 				{
 					Key:    "test-taint-key",
-					Effect: v1.TaintEffectNoSchedule,
+					Effect: corev1.TaintEffectNoSchedule,
 					Value:  "test-taint-value",
 				},
 				{
 					Key:    "test-taint-key2",
-					Effect: v1.TaintEffectNoExecute,
+					Effect: corev1.TaintEffectNoExecute,
 					Value:  "test-taint-value2",
 				},
 			},
 			ProviderID: test.RandomProviderID(),
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("10"),
-				v1.ResourceMemory:           resource.MustParse("10Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:              resource.MustParse("10"),
+				corev1.ResourceMemory:           resource.MustParse("10Mi"),
+				corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:              resource.MustParse("8"),
-				v1.ResourceMemory:           resource.MustParse("8Mi"),
-				v1.ResourceEphemeralStorage: resource.MustParse("95Gi"),
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:              resource.MustParse("8"),
+				corev1.ResourceMemory:           resource.MustParse("8Mi"),
+				corev1.ResourceEphemeralStorage: resource.MustParse("95Gi"),
 			},
 		})
 	})
 	It("should update the owner for a Node to a NodeClaim", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			Spec: v1.NodeClaimSpec{
+				NodeClassRef: &v1.NodeClassReference{
+					Kind:  "NodeClassRef",
+					Group: "test.cloudprovider",
+					Name:  "default",
 				},
 			},
 		})

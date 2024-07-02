@@ -24,78 +24,78 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 var _ = Describe("Requirement", func() {
 	// Requirements created without minValues
-	exists := NewRequirement("key", v1.NodeSelectorOpExists)
-	doesNotExist := NewRequirement("key", v1.NodeSelectorOpDoesNotExist)
-	inA := NewRequirement("key", v1.NodeSelectorOpIn, "A")
-	inB := NewRequirement("key", v1.NodeSelectorOpIn, "B")
-	inAB := NewRequirement("key", v1.NodeSelectorOpIn, "A", "B")
-	notInA := NewRequirement("key", v1.NodeSelectorOpNotIn, "A")
-	in1 := NewRequirement("key", v1.NodeSelectorOpIn, "1")
-	in9 := NewRequirement("key", v1.NodeSelectorOpIn, "9")
-	in19 := NewRequirement("key", v1.NodeSelectorOpIn, "1", "9")
-	notIn12 := NewRequirement("key", v1.NodeSelectorOpNotIn, "1", "2")
-	greaterThan1 := NewRequirement("key", v1.NodeSelectorOpGt, "1")
-	greaterThan9 := NewRequirement("key", v1.NodeSelectorOpGt, "9")
-	lessThan1 := NewRequirement("key", v1.NodeSelectorOpLt, "1")
-	lessThan9 := NewRequirement("key", v1.NodeSelectorOpLt, "9")
+	exists := NewRequirement("key", corev1.NodeSelectorOpExists)
+	doesNotExist := NewRequirement("key", corev1.NodeSelectorOpDoesNotExist)
+	inA := NewRequirement("key", corev1.NodeSelectorOpIn, "A")
+	inB := NewRequirement("key", corev1.NodeSelectorOpIn, "B")
+	inAB := NewRequirement("key", corev1.NodeSelectorOpIn, "A", "B")
+	notInA := NewRequirement("key", corev1.NodeSelectorOpNotIn, "A")
+	in1 := NewRequirement("key", corev1.NodeSelectorOpIn, "1")
+	in9 := NewRequirement("key", corev1.NodeSelectorOpIn, "9")
+	in19 := NewRequirement("key", corev1.NodeSelectorOpIn, "1", "9")
+	notIn12 := NewRequirement("key", corev1.NodeSelectorOpNotIn, "1", "2")
+	greaterThan1 := NewRequirement("key", corev1.NodeSelectorOpGt, "1")
+	greaterThan9 := NewRequirement("key", corev1.NodeSelectorOpGt, "9")
+	lessThan1 := NewRequirement("key", corev1.NodeSelectorOpLt, "1")
+	lessThan9 := NewRequirement("key", corev1.NodeSelectorOpLt, "9")
 
 	// Requirements created with minValues flexibility
-	existsOperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpExists, lo.ToPtr(1))
-	doesNotExistOperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpDoesNotExist, lo.ToPtr(1))
-	inAOperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpIn, lo.ToPtr(1), "A")
-	inBOperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpIn, lo.ToPtr(1), "B")
-	inABOperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpIn, lo.ToPtr(2), "A", "B")
-	notInAOperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpNotIn, lo.ToPtr(1), "A")
-	in1OperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpIn, lo.ToPtr(1), "1")
-	in9OperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpIn, lo.ToPtr(1), "9")
-	in19OperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpIn, lo.ToPtr(2), "1", "9")
-	notIn12OperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpNotIn, lo.ToPtr(2), "1", "2")
-	greaterThan1OperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpGt, lo.ToPtr(1), "1")
-	greaterThan9OperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpGt, lo.ToPtr(1), "9")
-	lessThan1OperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpLt, lo.ToPtr(1), "1")
-	lessThan9OperatorWithFlexibility := NewRequirementWithFlexibility("key", v1.NodeSelectorOpLt, lo.ToPtr(1), "9")
+	existsOperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpExists, lo.ToPtr(1))
+	doesNotExistOperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpDoesNotExist, lo.ToPtr(1))
+	inAOperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpIn, lo.ToPtr(1), "A")
+	inBOperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpIn, lo.ToPtr(1), "B")
+	inABOperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpIn, lo.ToPtr(2), "A", "B")
+	notInAOperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpNotIn, lo.ToPtr(1), "A")
+	in1OperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpIn, lo.ToPtr(1), "1")
+	in9OperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpIn, lo.ToPtr(1), "9")
+	in19OperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpIn, lo.ToPtr(2), "1", "9")
+	notIn12OperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpNotIn, lo.ToPtr(2), "1", "2")
+	greaterThan1OperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpGt, lo.ToPtr(1), "1")
+	greaterThan9OperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpGt, lo.ToPtr(1), "9")
+	lessThan1OperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpLt, lo.ToPtr(1), "1")
+	lessThan9OperatorWithFlexibility := NewRequirementWithFlexibility("key", corev1.NodeSelectorOpLt, lo.ToPtr(1), "9")
 
 	Context("NewRequirements", func() {
 		It("should normalize labels", func() {
 			nodeSelector := map[string]string{
-				v1.LabelFailureDomainBetaZone:   "test",
-				v1.LabelFailureDomainBetaRegion: "test",
-				"beta.kubernetes.io/arch":       "test",
-				"beta.kubernetes.io/os":         "test",
-				v1.LabelInstanceType:            "test",
+				corev1.LabelFailureDomainBetaZone:   "test",
+				corev1.LabelFailureDomainBetaRegion: "test",
+				"beta.kubernetes.io/arch":           "test",
+				"beta.kubernetes.io/os":             "test",
+				corev1.LabelInstanceType:            "test",
 			}
-			requirements := lo.MapToSlice(nodeSelector, func(key string, value string) v1.NodeSelectorRequirement {
-				return v1.NodeSelectorRequirement{Key: key, Operator: v1.NodeSelectorOpIn, Values: []string{value}}
+			requirements := lo.MapToSlice(nodeSelector, func(key string, value string) corev1.NodeSelectorRequirement {
+				return corev1.NodeSelectorRequirement{Key: key, Operator: corev1.NodeSelectorOpIn, Values: []string{value}}
 			})
 			for _, r := range []Requirements{
 				NewLabelRequirements(nodeSelector),
 				NewNodeSelectorRequirements(requirements...),
-				NewPodRequirements(&v1.Pod{
-					Spec: v1.PodSpec{
+				NewPodRequirements(&corev1.Pod{
+					Spec: corev1.PodSpec{
 						NodeSelector: nodeSelector,
-						Affinity: &v1.Affinity{
-							NodeAffinity: &v1.NodeAffinity{
-								RequiredDuringSchedulingIgnoredDuringExecution:  &v1.NodeSelector{NodeSelectorTerms: []v1.NodeSelectorTerm{{MatchExpressions: requirements}}},
-								PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{{Weight: 1, Preference: v1.NodeSelectorTerm{MatchExpressions: requirements}}},
+						Affinity: &corev1.Affinity{
+							NodeAffinity: &corev1.NodeAffinity{
+								RequiredDuringSchedulingIgnoredDuringExecution:  &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{MatchExpressions: requirements}}},
+								PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{{Weight: 1, Preference: corev1.NodeSelectorTerm{MatchExpressions: requirements}}},
 							},
 						},
 					},
 				}),
 			} {
 				Expect(sets.List(r.Keys())).To(ConsistOf(
-					v1.LabelArchStable,
-					v1.LabelOSStable,
-					v1.LabelInstanceTypeStable,
-					v1.LabelTopologyRegion,
-					v1.LabelTopologyZone,
+					corev1.LabelArchStable,
+					corev1.LabelOSStable,
+					corev1.LabelInstanceTypeStable,
+					corev1.LabelTopologyRegion,
+					corev1.LabelTopologyZone,
 				))
 			}
 		})
@@ -830,24 +830,24 @@ var _ = Describe("Requirement", func() {
 	})
 	Context("Operator", func() {
 		DescribeTable("should return the right operator",
-			func(requirement *Requirement, expectedOperator v1.NodeSelectorOperator) {
+			func(requirement *Requirement, expectedOperator corev1.NodeSelectorOperator) {
 				Expect(requirement.Operator()).To(Equal(expectedOperator))
 			},
 
-			Entry(nil, exists, v1.NodeSelectorOpExists),
-			Entry(nil, doesNotExist, v1.NodeSelectorOpDoesNotExist),
-			Entry(nil, inA, v1.NodeSelectorOpIn),
-			Entry(nil, inB, v1.NodeSelectorOpIn),
-			Entry(nil, inAB, v1.NodeSelectorOpIn),
-			Entry(nil, notInA, v1.NodeSelectorOpNotIn),
-			Entry(nil, in1, v1.NodeSelectorOpIn),
-			Entry(nil, in9, v1.NodeSelectorOpIn),
-			Entry(nil, in19, v1.NodeSelectorOpIn),
-			Entry(nil, notIn12, v1.NodeSelectorOpNotIn),
-			Entry(nil, greaterThan1, v1.NodeSelectorOpExists),
-			Entry(nil, greaterThan9, v1.NodeSelectorOpExists),
-			Entry(nil, lessThan1, v1.NodeSelectorOpExists),
-			Entry(nil, lessThan9, v1.NodeSelectorOpExists),
+			Entry(nil, exists, corev1.NodeSelectorOpExists),
+			Entry(nil, doesNotExist, corev1.NodeSelectorOpDoesNotExist),
+			Entry(nil, inA, corev1.NodeSelectorOpIn),
+			Entry(nil, inB, corev1.NodeSelectorOpIn),
+			Entry(nil, inAB, corev1.NodeSelectorOpIn),
+			Entry(nil, notInA, corev1.NodeSelectorOpNotIn),
+			Entry(nil, in1, corev1.NodeSelectorOpIn),
+			Entry(nil, in9, corev1.NodeSelectorOpIn),
+			Entry(nil, in19, corev1.NodeSelectorOpIn),
+			Entry(nil, notIn12, corev1.NodeSelectorOpNotIn),
+			Entry(nil, greaterThan1, corev1.NodeSelectorOpExists),
+			Entry(nil, greaterThan9, corev1.NodeSelectorOpExists),
+			Entry(nil, lessThan1, corev1.NodeSelectorOpExists),
+			Entry(nil, lessThan9, corev1.NodeSelectorOpExists),
 		)
 	})
 	Context("Len", func() {
@@ -915,38 +915,38 @@ var _ = Describe("Requirement", func() {
 	})
 	Context("NodeSelectorRequirements Conversion", func() {
 		DescribeTable("should return the expected NodeSelectorRequirement",
-			func(requirement v1beta1.NodeSelectorRequirementWithMinValues, expectedRequirement v1beta1.NodeSelectorRequirementWithMinValues) {
+			func(requirement v1.NodeSelectorRequirementWithMinValues, expectedRequirement v1.NodeSelectorRequirementWithMinValues) {
 				Expect(requirement).To(Equal(expectedRequirement))
 			},
-			Entry(nil, exists.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpExists}}),
-			Entry(nil, doesNotExist.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpDoesNotExist}}),
-			Entry(nil, inA.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}}}),
-			Entry(nil, inB.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}}}),
-			Entry(nil, inAB.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}}}),
-			Entry(nil, notInA.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}}}),
-			Entry(nil, in1.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}}}),
-			Entry(nil, in9.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}}}),
-			Entry(nil, in19.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}}}),
-			Entry(nil, notIn12.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}}),
-			Entry(nil, greaterThan1.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}}),
-			Entry(nil, greaterThan9.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}}}),
-			Entry(nil, lessThan1.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}}),
-			Entry(nil, lessThan9.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}}}),
+			Entry(nil, exists.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpExists}}),
+			Entry(nil, doesNotExist.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpDoesNotExist}}),
+			Entry(nil, inA.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"A"}}}),
+			Entry(nil, inB.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"B"}}}),
+			Entry(nil, inAB.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"A", "B"}}}),
+			Entry(nil, notInA.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"A"}}}),
+			Entry(nil, in1.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"1"}}}),
+			Entry(nil, in9.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"9"}}}),
+			Entry(nil, in19.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"1", "9"}}}),
+			Entry(nil, notIn12.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}}),
+			Entry(nil, greaterThan1.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}}),
+			Entry(nil, greaterThan9.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpGt, Values: []string{"9"}}}),
+			Entry(nil, lessThan1.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}}}),
+			Entry(nil, lessThan9.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpLt, Values: []string{"9"}}}),
 
-			Entry(nil, existsOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpExists}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, doesNotExistOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpDoesNotExist}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, inAOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, inBOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"B"}}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, inABOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"A", "B"}}, MinValues: lo.ToPtr(2)}),
-			Entry(nil, notInAOperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, in1OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, in9OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, in19OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpIn, Values: []string{"1", "9"}}, MinValues: lo.ToPtr(2)}),
-			Entry(nil, notIn12OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}, MinValues: lo.ToPtr(2)}),
-			Entry(nil, greaterThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, greaterThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpGt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, lessThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, lessThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1beta1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "key", Operator: v1.NodeSelectorOpLt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, existsOperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpExists}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, doesNotExistOperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpDoesNotExist}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, inAOperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, inBOperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"B"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, inABOperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"A", "B"}}, MinValues: lo.ToPtr(2)}),
+			Entry(nil, notInAOperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"A"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, in1OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, in9OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, in19OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"1", "9"}}, MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}, MinValues: lo.ToPtr(2)}),
+			Entry(nil, greaterThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, greaterThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpGt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, lessThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, lessThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "key", Operator: corev1.NodeSelectorOpLt, Values: []string{"9"}}, MinValues: lo.ToPtr(1)}),
 		)
 
 	})

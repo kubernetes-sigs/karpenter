@@ -24,7 +24,7 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,7 +34,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -158,7 +158,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
-	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]v1.ResourceList{
+	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]corev1.ResourceList{
 		overheadGaugeVec:       resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
 		podRequestsGaugeVec:    resources.Subtract(n.PodRequests(), n.DaemonSetRequests()),
 		podLimitsGaugeVec:      resources.Subtract(n.PodLimits(), n.DaemonSetLimits()),
@@ -169,7 +169,7 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 		for resourceName, quantity := range resourceList {
 			res = append(res, &metrics.StoreMetric{
 				GaugeVec: gaugeVec,
-				Value:    lo.Ternary(resourceName == v1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
+				Value:    lo.Ternary(resourceName == corev1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
 				Labels:   getNodeLabels(n.Node, strings.ReplaceAll(strings.ToLower(string(resourceName)), "-", "_")),
 			})
 		}
@@ -177,7 +177,7 @@ func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 	return res
 }
 
-func getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
+func getNodeLabels(node *corev1.Node, resourceTypeName string) prometheus.Labels {
 	metricLabels := prometheus.Labels{}
 	metricLabels[resourceType] = resourceTypeName
 	metricLabels[nodeName] = node.Name
@@ -192,7 +192,7 @@ func getNodeLabels(node *v1.Node, resourceTypeName string) prometheus.Labels {
 
 func getWellKnownLabels() map[string]string {
 	labels := make(map[string]string)
-	for wellKnownLabel := range v1beta1.WellKnownLabels {
+	for wellKnownLabel := range v1.WellKnownLabels {
 		if parts := strings.Split(wellKnownLabel, "/"); len(parts) == 2 {
 			label := parts[1]
 			// Reformat label names to be consistent with Prometheus naming conventions (snake_case)

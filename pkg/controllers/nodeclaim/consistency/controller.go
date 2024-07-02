@@ -24,7 +24,7 @@ import (
 
 	"github.com/patrickmn/go-cache"
 	"github.com/prometheus/client_golang/prometheus"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,7 +35,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -53,7 +53,7 @@ type Issue string
 type Check interface {
 	// Check performs the consistency check, this should return a list of slice discovered, or an empty
 	// slice if no issues were found
-	Check(context.Context, *v1.Node, *v1beta1.NodeClaim) ([]Issue, error)
+	Check(context.Context, *corev1.Node, *v1.NodeClaim) ([]Issue, error)
 }
 
 // scanPeriod is how often we inspect and report issues that are found.
@@ -72,7 +72,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.consistency")
 
 	if nodeClaim.Status.ProviderID == "" {
@@ -112,9 +112,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.consistency").
-		For(&v1beta1.NodeClaim{}).
+		For(&v1.NodeClaim{}).
 		Watches(
-			&v1.Node{},
+			&corev1.Node{},
 			nodeclaimutil.NodeEventHandler(c.kubeClient),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).

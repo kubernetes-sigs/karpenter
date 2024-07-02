@@ -30,7 +30,7 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/onsi/gomega"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -47,7 +47,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
 )
 
@@ -112,27 +112,27 @@ func NewConfig() *rest.Config {
 
 func NewClient(ctx context.Context, config *rest.Config) client.Client {
 	cache := lo.Must(cache.New(config, cache.Options{Scheme: scheme.Scheme}))
-	lo.Must0(cache.IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
-		pod := o.(*v1.Pod)
+	lo.Must0(cache.IndexField(ctx, &corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
+		pod := o.(*corev1.Pod)
 		return []string{pod.Spec.NodeName}
 	}))
-	lo.Must0(cache.IndexField(ctx, &v1.Event{}, "involvedObject.kind", func(o client.Object) []string {
-		evt := o.(*v1.Event)
+	lo.Must0(cache.IndexField(ctx, &corev1.Event{}, "involvedObject.kind", func(o client.Object) []string {
+		evt := o.(*corev1.Event)
 		return []string{evt.InvolvedObject.Kind}
 	}))
-	lo.Must0(cache.IndexField(ctx, &v1.Node{}, "spec.unschedulable", func(o client.Object) []string {
-		node := o.(*v1.Node)
+	lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.unschedulable", func(o client.Object) []string {
+		node := o.(*corev1.Node)
 		return []string{strconv.FormatBool(node.Spec.Unschedulable)}
 	}))
-	lo.Must0(cache.IndexField(ctx, &v1.Node{}, "spec.taints[*].karpenter.sh/disruption", func(o client.Object) []string {
-		node := o.(*v1.Node)
-		t, _ := lo.Find(node.Spec.Taints, func(t v1.Taint) bool {
-			return t.Key == v1beta1.DisruptionTaintKey
+	lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.taints[*].karpenter.sh/disruption", func(o client.Object) []string {
+		node := o.(*corev1.Node)
+		t, _ := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
+			return t.Key == v1.DisruptionTaintKey
 		})
 		return []string{t.Value}
 	}))
-	lo.Must0(cache.IndexField(ctx, &v1beta1.NodeClaim{}, "status.conditions[*].type", func(o client.Object) []string {
-		nodeClaim := o.(*v1beta1.NodeClaim)
+	lo.Must0(cache.IndexField(ctx, &v1.NodeClaim{}, "status.conditions[*].type", func(o client.Object) []string {
+		nodeClaim := o.(*v1.NodeClaim)
 		return lo.Map(nodeClaim.Status.Conditions, func(c status.Condition, _ int) string {
 			return c.Type
 		})
@@ -157,34 +157,34 @@ func (env *Environment) DefaultNodeClass() *v1alpha1.KWOKNodeClass {
 	}
 }
 
-func (env *Environment) DefaultNodePool(nodeClass *v1alpha1.KWOKNodeClass) *v1beta1.NodePool {
+func (env *Environment) DefaultNodePool(nodeClass *v1alpha1.KWOKNodeClass) *v1.NodePool {
 	nodePool := test.NodePool()
-	nodePool.Spec.Template.Spec.NodeClassRef = &v1beta1.NodeClassReference{
-		Name:       nodeClass.Name,
-		Kind:       object.GVK(nodeClass).Kind,
-		APIVersion: object.GVK(nodeClass).GroupVersion().String(),
+	nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
+		Name:  nodeClass.Name,
+		Kind:  object.GVK(nodeClass).Kind,
+		Group: object.GVK(nodeClass).Group,
 	}
-	nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+	nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 		{
-			NodeSelectorRequirement: v1.NodeSelectorRequirement{
-				Key:      v1.LabelOSStable,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{string(v1.Linux)},
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+				Key:      corev1.LabelOSStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{string(corev1.Linux)},
 			},
 		},
 		{
-			NodeSelectorRequirement: v1.NodeSelectorRequirement{
-				Key:      v1beta1.CapacityTypeLabelKey,
-				Operator: v1.NodeSelectorOpIn,
-				Values:   []string{v1beta1.CapacityTypeOnDemand},
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeOnDemand},
 			},
 		},
 	}
-	nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{}
+	nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{}
 	nodePool.Spec.Disruption.ExpireAfter.Duration = nil
-	nodePool.Spec.Limits = v1beta1.Limits(v1.ResourceList{
-		v1.ResourceCPU:    resource.MustParse("1000"),
-		v1.ResourceMemory: resource.MustParse("1000Gi"),
+	nodePool.Spec.Limits = v1.Limits(corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("1000"),
+		corev1.ResourceMemory: resource.MustParse("1000Gi"),
 	})
 	return nodePool
 }

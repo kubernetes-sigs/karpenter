@@ -29,14 +29,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	corev1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 var (
-	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot))
-	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeOnDemand))
+	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(corev1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, corev1.CapacityTypeSpot))
+	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(corev1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, corev1.CapacityTypeOnDemand))
 )
 
 type DriftReason string
@@ -45,21 +45,21 @@ type DriftReason string
 type CloudProvider interface {
 	// Create launches a NodeClaim with the given resource requests and requirements and returns a hydrated
 	// NodeClaim back with resolved NodeClaim labels for the launched NodeClaim
-	Create(context.Context, *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error)
+	Create(context.Context, *corev1.NodeClaim) (*corev1.NodeClaim, error)
 	// Delete removes a NodeClaim from the cloudprovider by its provider id
-	Delete(context.Context, *v1beta1.NodeClaim) error
+	Delete(context.Context, *corev1.NodeClaim) error
 	// Get retrieves a NodeClaim from the cloudprovider by its provider id
-	Get(context.Context, string) (*v1beta1.NodeClaim, error)
+	Get(context.Context, string) (*corev1.NodeClaim, error)
 	// List retrieves all NodeClaims from the cloudprovider
-	List(context.Context) ([]*v1beta1.NodeClaim, error)
+	List(context.Context) ([]*corev1.NodeClaim, error)
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
 	// Availability of types or zone may vary by nodepool or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
-	GetInstanceTypes(context.Context, *v1beta1.NodePool) ([]*InstanceType, error)
+	GetInstanceTypes(context.Context, *corev1.NodePool) ([]*InstanceType, error)
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
-	IsDrifted(context.Context, *v1beta1.NodeClaim) (DriftReason, error)
+	IsDrifted(context.Context, *corev1.NodeClaim) (DriftReason, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
 	// GetSupportedNodeClass returns the group, version, and kind of the CloudProvider NodeClass
@@ -225,7 +225,7 @@ func (i InstanceTypeOverhead) Total() v1.ResourceList {
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
 // these properties are captured with labels in Requirements.
-// Requirements are required to contain the keys v1beta1.CapacityTypeLabelKey and v1.LabelTopologyZone
+// Requirements are required to contain the keys v.CapacityTypeLabelKey and v1.LabelTopologyZone
 type Offering struct {
 	Requirements scheduling.Requirements
 	Price        float64
@@ -279,13 +279,13 @@ func (ofs Offerings) MostExpensive() Offering {
 // to get the launch price; else, it uses the on-demand launch price
 func (ofs Offerings) WorstLaunchPrice(reqs scheduling.Requirements) float64 {
 	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
+	if reqs.Get(corev1.CapacityTypeLabelKey).Has(corev1.CapacityTypeSpot) {
 		spotOfferings := ofs.Compatible(reqs).Compatible(SpotRequirement)
 		if len(spotOfferings) > 0 {
 			return spotOfferings.MostExpensive().Price
 		}
 	}
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeOnDemand) {
+	if reqs.Get(corev1.CapacityTypeLabelKey).Has(corev1.CapacityTypeOnDemand) {
 		onDemandOfferings := ofs.Compatible(reqs).Compatible(OnDemandRequirement)
 		if len(onDemandOfferings) > 0 {
 			return onDemandOfferings.MostExpensive().Price

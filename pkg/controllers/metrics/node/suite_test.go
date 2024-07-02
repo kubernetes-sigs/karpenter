@@ -23,7 +23,7 @@ import (
 
 	clock "k8s.io/utils/clock/testing"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -77,10 +77,10 @@ var _ = AfterSuite(func() {
 
 var _ = Describe("Node Metrics", func() {
 	It("should update the allocatable metric", func() {
-		resources := v1.ResourceList{
-			v1.ResourcePods:   resource.MustParse("100"),
-			v1.ResourceCPU:    resource.MustParse("5000"),
-			v1.ResourceMemory: resource.MustParse("32Gi"),
+		resources := corev1.ResourceList{
+			corev1.ResourcePods:   resource.MustParse("100"),
+			corev1.ResourceCPU:    resource.MustParse("5000"),
+			corev1.ResourceMemory: resource.MustParse("32Gi"),
 		}
 
 		node := test.Node(test.NodeOptions{Allocatable: resources})
@@ -98,10 +98,10 @@ var _ = Describe("Node Metrics", func() {
 		}
 	})
 	It("should remove the node metric gauge when the node is deleted", func() {
-		resources := v1.ResourceList{
-			v1.ResourcePods:   resource.MustParse("100"),
-			v1.ResourceCPU:    resource.MustParse("5000"),
-			v1.ResourceMemory: resource.MustParse("32Gi"),
+		resources := corev1.ResourceList{
+			corev1.ResourcePods:   resource.MustParse("100"),
+			corev1.ResourceCPU:    resource.MustParse("5000"),
+			corev1.ResourceMemory: resource.MustParse("32Gi"),
 		}
 
 		node := test.Node(test.NodeOptions{Allocatable: resources})

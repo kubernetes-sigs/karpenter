@@ -23,30 +23,30 @@ import (
 
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// PodEventHandler is a watcher on v1.Pods that maps Pods to NodeClaim based on the node names
+// PodEventHandler is a watcher on corev1.Pods that maps Pods to NodeClaim based on the node names
 // and enqueues reconcile.Requests for the NodeClaims
 func PodEventHandler(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		if name := o.(*v1.Pod).Spec.NodeName; name != "" {
-			node := &v1.Node{}
+		if name := o.(*corev1.Pod).Spec.NodeName; name != "" {
+			node := &corev1.Node{}
 			if err := c.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
 				return []reconcile.Request{}
 			}
-			nodeClaimList := &v1beta1.NodeClaimList{}
+			nodeClaimList := &v1.NodeClaimList{}
 			if err := c.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
 				return []reconcile.Request{}
 			}
-			return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {
+			return lo.Map(nodeClaimList.Items, func(n v1.NodeClaim, _ int) reconcile.Request {
 				return reconcile.Request{
 					NamespacedName: client.ObjectKeyFromObject(&n),
 				}
@@ -56,16 +56,16 @@ func PodEventHandler(c client.Client) handler.EventHandler {
 	})
 }
 
-// NodeEventHandler is a watcher on v1.Node that maps Nodes to NodeClaims based on provider ids
+// NodeEventHandler is a watcher on corev1.Node that maps Nodes to NodeClaims based on provider ids
 // and enqueues reconcile.Requests for the NodeClaims
 func NodeEventHandler(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-		node := o.(*v1.Node)
-		nodeClaimList := &v1beta1.NodeClaimList{}
+		node := o.(*corev1.Node)
+		nodeClaimList := &v1.NodeClaimList{}
 		if err := c.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
 			return []reconcile.Request{}
 		}
-		return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {
+		return lo.Map(nodeClaimList.Items, func(n v1.NodeClaim, _ int) reconcile.Request {
 			return reconcile.Request{
 				NamespacedName: client.ObjectKeyFromObject(&n),
 			}
@@ -73,15 +73,15 @@ func NodeEventHandler(c client.Client) handler.EventHandler {
 	})
 }
 
-// NodePoolEventHandler is a watcher on v1beta1.NodeClaim that maps NodePool to NodeClaims based
-// on the v1beta1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
+// NodePoolEventHandler is a watcher on v1.NodeClaim that maps NodePool to NodeClaims based
+// on the v1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
 func NodePoolEventHandler(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		nodeClaimList := &v1beta1.NodeClaimList{}
-		if err := c.List(ctx, nodeClaimList, client.MatchingLabels(map[string]string{v1beta1.NodePoolLabelKey: o.GetName()})); err != nil {
+		nodeClaimList := &v1.NodeClaimList{}
+		if err := c.List(ctx, nodeClaimList, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: o.GetName()})); err != nil {
 			return requests
 		}
-		return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {
+		return lo.Map(nodeClaimList.Items, func(n v1.NodeClaim, _ int) reconcile.Request {
 			return reconcile.Request{
 				NamespacedName: client.ObjectKeyFromObject(&n),
 			}
@@ -89,11 +89,11 @@ func NodePoolEventHandler(c client.Client) handler.EventHandler {
 	})
 }
 
-// NodeClassEventHandler is a watcher on v1beta1.NodeClaim that maps NodeClass to NodeClaims based
+// NodeClassEventHandler is a watcher on v1.NodeClaim that maps NodeClass to NodeClaims based
 // on the nodeClassRef and enqueues reconcile.Requests for the NodeClaim
 func NodeClassEventHandler(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		nodeClaimList := &v1beta1.NodeClaimList{}
+		nodeClaimList := &v1.NodeClaimList{}
 		if err := c.List(ctx, nodeClaimList, client.MatchingFields{
 			"spec.nodeClassRef.apiVersion": o.GetObjectKind().GroupVersionKind().GroupVersion().String(),
 			"spec.nodeClassRef.kind":       o.GetObjectKind().GroupVersionKind().Kind,
@@ -101,7 +101,7 @@ func NodeClassEventHandler(c client.Client) handler.EventHandler {
 		}); err != nil {
 			return requests
 		}
-		return lo.Map(nodeClaimList.Items, func(n v1beta1.NodeClaim, _ int) reconcile.Request {
+		return lo.Map(nodeClaimList.Items, func(n v1.NodeClaim, _ int) reconcile.Request {
 			return reconcile.Request{
 				NamespacedName: client.ObjectKeyFromObject(&n),
 			}
@@ -109,7 +109,7 @@ func NodeClassEventHandler(c client.Client) handler.EventHandler {
 	})
 }
 
-// NodeNotFoundError is an error returned when no v1.Nodes are found matching the passed providerID
+// NodeNotFoundError is an error returned when no corev1.Nodes are found matching the passed providerID
 type NodeNotFoundError struct {
 	ProviderID string
 }
@@ -133,7 +133,7 @@ func IgnoreNodeNotFoundError(err error) error {
 	return nil
 }
 
-// DuplicateNodeError is an error returned when multiple v1.Nodes are found matching the passed providerID
+// DuplicateNodeError is an error returned when multiple corev1.Nodes are found matching the passed providerID
 type DuplicateNodeError struct {
 	ProviderID string
 }
@@ -157,11 +157,11 @@ func IgnoreDuplicateNodeError(err error) error {
 	return nil
 }
 
-// NodeForNodeClaim is a helper function that takes a v1beta1.NodeClaim and attempts to find the matching v1.Node by its providerID
+// NodeForNodeClaim is a helper function that takes a v1.NodeClaim and attempts to find the matching corev1.Node by its providerID
 // This function will return errors if:
-//  1. No v1.Nodes match the v1beta1.NodeClaim providerID
-//  2. Multiple v1.Nodes match the v1beta1.NodeClaim providerID
-func NodeForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
+//  1. No corev1.Nodes match the v1.NodeClaim providerID
+//  2. Multiple corev1.Nodes match the v1.NodeClaim providerID
+func NodeForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 	nodes, err := AllNodesForNodeClaim(ctx, c, nodeClaim)
 	if err != nil {
 		return nil, err
@@ -175,21 +175,21 @@ func NodeForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1beta1.N
 	return nodes[0], nil
 }
 
-// AllNodesForNodeClaim is a helper function that takes a v1beta1.NodeClaim and finds ALL matching v1.Nodes by their providerID
+// AllNodesForNodeClaim is a helper function that takes a v1.NodeClaim and finds ALL matching corev1.Nodes by their providerID
 // If the providerID is not resolved for a NodeClaim, then no Nodes will map to it
-func AllNodesForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1beta1.NodeClaim) ([]*v1.Node, error) {
+func AllNodesForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1.NodeClaim) ([]*corev1.Node, error) {
 	// NodeClaims that have no resolved providerID have no nodes mapped to them
 	if nodeClaim.Status.ProviderID == "" {
 		return nil, nil
 	}
-	nodeList := v1.NodeList{}
+	nodeList := corev1.NodeList{}
 	if err := c.List(ctx, &nodeList, client.MatchingFields{"spec.providerID": nodeClaim.Status.ProviderID}); err != nil {
 		return nil, fmt.Errorf("listing nodes, %w", err)
 	}
 	return lo.ToSlicePtr(nodeList.Items), nil
 }
 
-func UpdateNodeOwnerReferences(nodeClaim *v1beta1.NodeClaim, node *v1.Node) *v1.Node {
+func UpdateNodeOwnerReferences(nodeClaim *v1.NodeClaim, node *corev1.Node) *corev1.Node {
 	gvk := object.GVK(nodeClaim)
 	node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
 		APIVersion:         gvk.GroupVersion().String(),

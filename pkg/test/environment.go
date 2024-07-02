@@ -24,7 +24,7 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
@@ -49,12 +49,12 @@ type Environment struct {
 }
 
 type EnvironmentOptions struct {
-	crds          []*v1.CustomResourceDefinition
+	crds          []*apiextensionsv1.CustomResourceDefinition
 	fieldIndexers []func(cache.Cache) error
 }
 
 // WithCRDs registers the specified CRDs to the apiserver for use in testing
-func WithCRDs(crds ...*v1.CustomResourceDefinition) functional.Option[EnvironmentOptions] {
+func WithCRDs(crds ...*apiextensionsv1.CustomResourceDefinition) functional.Option[EnvironmentOptions] {
 	return func(o EnvironmentOptions) EnvironmentOptions {
 		o.crds = append(o.crds, crds...)
 		return o
@@ -71,8 +71,8 @@ func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) functional.Opti
 
 func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1beta1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1beta1.NodeClaim).Status.ProviderID}
+		return c.IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Status.ProviderID}
 		})
 	}
 }

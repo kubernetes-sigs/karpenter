@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -33,14 +33,14 @@ import (
 )
 
 var _ = Describe("Expiration", func() {
-	var nodePool *v1beta1.NodePool
-	var nodeClaim *v1beta1.NodeClaim
-	var node *v1.Node
+	var nodePool *v1.NodePool
+	var nodeClaim *v1.NodeClaim
+	var node *corev1.Node
 	BeforeEach(func() {
 		nodePool = test.NodePool()
-		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{v1beta1.NodePoolLabelKey: nodePool.Name},
+				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
 			},
 		})
 	})
@@ -64,7 +64,7 @@ var _ = Describe("Expiration", func() {
 		})
 		It("should fire a karpenter_nodeclaims_terminated metric when expired", func() {
 			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
-			nodeClaim.Labels[v1beta1.CapacityTypeLabelKey] = v1beta1.CapacityTypeSpot
+			nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeSpot
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 			// step forward to make the node expired
@@ -75,7 +75,7 @@ var _ = Describe("Expiration", func() {
 			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated", map[string]string{
 				"reason":        "expiration",
 				"nodepool":      nodePool.Name,
-				"capacity_type": nodeClaim.Labels[v1beta1.CapacityTypeLabelKey],
+				"capacity_type": nodeClaim.Labels[v1.CapacityTypeLabelKey],
 			})
 			Expect(found).To(BeTrue())
 			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))

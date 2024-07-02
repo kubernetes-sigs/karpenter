@@ -25,7 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
@@ -38,7 +38,7 @@ import (
 	nodeclaimtermination "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/termination"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
@@ -65,8 +65,8 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1.Node{}, "spec.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1.Node).Spec.ProviderID}
+		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Node).Spec.ProviderID}
 		})
 	}))
 	ctx = options.ToContext(ctx, test.Options())
@@ -86,26 +86,26 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("Termination", func() {
-	var nodePool *v1beta1.NodePool
-	var nodeClaim *v1beta1.NodeClaim
+	var nodePool *v1.NodePool
+	var nodeClaim *v1.NodeClaim
 
 	BeforeEach(func() {
 		nodePool = test.NodePool()
-		nodeClaim = test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim = test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 				Finalizers: []string{
-					v1beta1.TerminationFinalizer,
+					v1.TerminationFinalizer,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:          resource.MustParse("2"),
-						v1.ResourceMemory:       resource.MustParse("50Mi"),
-						v1.ResourcePods:         resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
 						fake.ResourceGPUVendorA: resource.MustParse("1"),
 					},
 				},
@@ -134,7 +134,7 @@ var _ = Describe("Termination", func() {
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // now all the nodes are gone so nodeClaim deletion continues
 		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
@@ -178,7 +178,7 @@ var _ = Describe("Termination", func() {
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // this will ensure that we call cloudProvider Get to check if the instance is still around
 		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
 	})
 	It("should delete multiple Nodes if multiple Nodes map to the NodeClaim", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -248,11 +248,11 @@ var _ = Describe("Termination", func() {
 	})
 	It("should not delete nodes without provider ids if the NodeClaim hasn't been launched yet", func() {
 		// Generate 10 nodes, none of which have a provider id
-		var nodes []*v1.Node
+		var nodes []*corev1.Node
 		for i := 0; i < 10; i++ {
 			nodes = append(nodes, test.Node())
 		}
-		ExpectApplied(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
+		ExpectApplied(ctx, env.Client, lo.Map(nodes, func(n *corev1.Node, _ int) client.Object { return n })...)
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 

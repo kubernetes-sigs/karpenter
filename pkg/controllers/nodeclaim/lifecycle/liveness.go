@@ -26,7 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -39,8 +39,8 @@ type Liveness struct {
 // If we don't see the node within this time, then we should delete the NodeClaim and try again
 const registrationTTL = time.Minute * 15
 
-func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
-	registered := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered)
+func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+	registered := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
 	if registered.IsTrue() {
 		return reconcile.Result{}, nil
 	}
@@ -58,8 +58,8 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) 
 	log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("terminating due to registration ttl")
 	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:       "liveness",
-		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1beta1.CapacityTypeLabelKey),
+		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1.CapacityTypeLabelKey),
 	}).Inc()
 
 	return reconcile.Result{}, nil

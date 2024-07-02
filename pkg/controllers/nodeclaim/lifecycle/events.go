@@ -19,26 +19,26 @@ package lifecycle
 import (
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
-func InsufficientCapacityErrorEvent(nodeClaim *v1beta1.NodeClaim, err error) events.Event {
+func InsufficientCapacityErrorEvent(nodeClaim *v1.NodeClaim, err error) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
-		Type:           v1.EventTypeWarning,
+		Type:           corev1.EventTypeWarning,
 		Reason:         "InsufficientCapacityError",
 		Message:        fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, truncateMessage(err.Error())),
 		DedupeValues:   []string{string(nodeClaim.UID)},
 	}
 }
 
-func NodeClassNotReadyEvent(nodeClaim *v1beta1.NodeClaim, err error) events.Event {
+func NodeClassNotReadyEvent(nodeClaim *v1.NodeClaim, err error) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
-		Type:           v1.EventTypeWarning,
+		Type:           corev1.EventTypeWarning,
 		Reason:         "NodeClassNotReady",
 		Message:        fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, truncateMessage(err.Error())),
 		DedupeValues:   []string{string(nodeClaim.UID)},

@@ -27,7 +27,7 @@ import (
 	"github.com/imdario/mergo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 const DiscoveryLabel = "testing/cluster"
@@ -58,8 +58,8 @@ func ObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
 	}, overrides...)
 }
 
-func TemplateObjectMeta(overrides ...v1beta1.ObjectMeta) v1beta1.ObjectMeta {
-	return MustMerge(v1beta1.ObjectMeta{
+func TemplateObjectMeta(overrides ...v1.ObjectMeta) v1.ObjectMeta {
+	return MustMerge(v1.ObjectMeta{
 		Labels: map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery
 	}, overrides...)
 }

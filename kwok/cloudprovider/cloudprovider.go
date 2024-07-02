@@ -27,7 +27,7 @@ import (
 
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
@@ -52,7 +52,7 @@ type CloudProvider struct {
 	instanceTypes []*cloudprovider.InstanceType
 }
 
-func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
+func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
 	// Create the Node because KwoK nodes don't have a kubelet, which is what Karpenter normally relies on to create the node.
 	node, err := c.toNode(nodeClaim)
 	if err != nil {
@@ -65,7 +65,7 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	return c.toNodeClaim(node)
 }
 
-func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1beta1.NodeClaim) error {
+func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		if errors.IsNotFound(err) {
 			return fmt.Errorf("deleting node, %w", cloudprovider.NewNodeClaimNotFoundError(err))
@@ -75,9 +75,9 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 	return nil
 }
 
-func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1beta1.NodeClaim, error) {
+func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1.NodeClaim, error) {
 	nodeName := strings.Replace(providerID, kwokProviderPrefix, "", -1)
-	node := &v1.Node{}
+	node := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 		if errors.IsNotFound(err) {
 			return nil, fmt.Errorf("finding node, %w", cloudprovider.NewNodeClaimNotFoundError(err))
@@ -90,12 +90,12 @@ func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1beta1.Nod
 	return c.toNodeClaim(node)
 }
 
-func (c CloudProvider) List(ctx context.Context) ([]*v1beta1.NodeClaim, error) {
-	nodeList := &v1.NodeList{}
+func (c CloudProvider) List(ctx context.Context) ([]*v1.NodeClaim, error) {
+	nodeList := &corev1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList); err != nil {
 		return nil, fmt.Errorf("listing nodes, %w", err)
 	}
-	var nodeClaims []*v1beta1.NodeClaim
+	var nodeClaims []*v1.NodeClaim
 	for i, node := range nodeList.Items {
 		if !strings.HasPrefix(node.Spec.ProviderID, kwokProviderPrefix) {
 			continue
@@ -111,12 +111,12 @@ func (c CloudProvider) List(ctx context.Context) ([]*v1beta1.NodeClaim, error) {
 }
 
 // Return the hard-coded instance types.
-func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
+func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	return c.instanceTypes, nil
 }
 
 // Return nothing since there's no cloud provider drift.
-func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (cloudprovider.DriftReason, error) {
+func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (cloudprovider.DriftReason, error) {
 	return "", nil
 }
 
@@ -138,14 +138,14 @@ func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.
 	return it, nil
 }
 
-func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
+func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 	newName := strings.Replace(namesgenerator.GetRandomName(0), "_", "-", -1)
 	//nolint
 	newName = fmt.Sprintf("%s-%d", newName, rand.Uint32())
 
 	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
-	req, found := lo.Find(nodeClaim.Spec.Requirements, func(req v1beta1.NodeSelectorRequirementWithMinValues) bool {
-		return req.Key == v1.LabelInstanceTypeStable
+	req, found := lo.Find(nodeClaim.Spec.Requirements, func(req v1.NodeSelectorRequirementWithMinValues) bool {
+		return req.Key == corev1.LabelInstanceTypeStable
 	})
 	if !found {
 		return nil, fmt.Errorf("instance type requirement not found")
@@ -170,24 +170,24 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 		}
 	}
 
-	return &v1.Node{
+	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        newName,
 			Labels:      addInstanceLabels(nodeClaim.Labels, instanceType, nodeClaim, cheapestOffering),
 			Annotations: addKwokAnnotation(nodeClaim.Annotations),
 		},
-		Spec: v1.NodeSpec{
+		Spec: corev1.NodeSpec{
 			ProviderID: kwokProviderPrefix + newName,
 		},
-		Status: v1.NodeStatus{
+		Status: corev1.NodeStatus{
 			Capacity:    instanceType.Capacity,
 			Allocatable: instanceType.Allocatable(),
-			Phase:       v1.NodePending,
+			Phase:       corev1.NodePending,
 		},
 	}, nil
 }
 
-func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1beta1.NodeClaim, offering *cloudprovider.Offering) map[string]string {
+func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1.NodeClaim, offering *cloudprovider.Offering) map[string]string {
 	ret := make(map[string]string, len(labels))
 	// start with labels on the nodeclaim
 	for k, v := range labels {
@@ -196,15 +196,15 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 
 	// add the derived nodeclaim requirement labels
 	for _, r := range nodeClaim.Spec.Requirements {
-		if len(r.Values) == 1 && r.Operator == v1.NodeSelectorOpIn {
+		if len(r.Values) == 1 && r.Operator == corev1.NodeSelectorOpIn {
 			ret[r.Key] = r.Values[0]
 		}
 	}
 
 	// ensure we have an instance type and then any instance type requirements
-	ret[v1.LabelInstanceTypeStable] = instanceType.Name
+	ret[corev1.LabelInstanceTypeStable] = instanceType.Name
 	for _, r := range instanceType.Requirements {
-		if r.Len() == 1 && r.Operator() == v1.NodeSelectorOpIn {
+		if r.Len() == 1 && r.Operator() == corev1.NodeSelectorOpIn {
 			ret[r.Key] = r.Values()[0]
 		}
 	}
@@ -214,9 +214,9 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 	// Randomly add each new node to one of the pre-created kwokPartitions.
 
 	ret[v1alpha1.KwokPartitionLabelKey] = lo.Sample(kwokPartitions)
-	ret[v1beta1.CapacityTypeLabelKey] = offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
-	ret[v1.LabelTopologyZone] = offering.Requirements.Get(v1.LabelTopologyZone).Any()
-	ret[v1.LabelHostname] = nodeClaim.Name
+	ret[v1.CapacityTypeLabelKey] = offering.Requirements.Get(v1.CapacityTypeLabelKey).Any()
+	ret[corev1.LabelTopologyZone] = offering.Requirements.Get(corev1.LabelTopologyZone).Any()
+	ret[corev1.LabelHostname] = nodeClaim.Name
 
 	ret[v1alpha1.KwokLabelKey] = v1alpha1.KwokLabelValue
 	return ret
@@ -231,22 +231,21 @@ func addKwokAnnotation(annotations map[string]string) map[string]string {
 	return ret
 }
 
-func (c CloudProvider) toNodeClaim(node *v1.Node) (*v1beta1.NodeClaim, error) {
-	return &v1beta1.NodeClaim{
+func (c CloudProvider) toNodeClaim(node *corev1.Node) (*v1.NodeClaim, error) {
+	return &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        node.Name,
 			Labels:      node.Labels,
 			Annotations: addKwokAnnotation(node.Annotations),
 		},
-		Spec: v1beta1.NodeClaimSpec{
+		Spec: v1.NodeClaimSpec{
 			Taints:        nil,
 			StartupTaints: nil,
 			Requirements:  nil,
-			Resources:     v1beta1.ResourceRequirements{},
-			Kubelet:       nil,
+			Resources:     v1.ResourceRequirements{},
 			NodeClassRef:  nil,
 		},
-		Status: v1beta1.NodeClaimStatus{
+		Status: v1.NodeClaimStatus{
 			NodeName:    node.Name,
 			ProviderID:  node.Spec.ProviderID,
 			Capacity:    node.Status.Capacity,

@@ -19,11 +19,11 @@ package lifecycle_test
 import (
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
 
@@ -33,24 +33,24 @@ import (
 )
 
 var _ = Describe("Liveness", func() {
-	var nodePool *v1beta1.NodePool
+	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
 	It("shouldn't delete the nodeClaim when the node has registered past the registration ttl", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:          resource.MustParse("2"),
-						v1.ResourceMemory:       resource.MustParse("50Mi"),
-						v1.ResourcePods:         resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
 						fake.ResourceGPUVendorA: resource.MustParse("1"),
 					},
 				},
@@ -69,18 +69,18 @@ var _ = Describe("Liveness", func() {
 		ExpectExists(ctx, env.Client, node)
 	})
 	It("should delete the nodeClaim when the Node hasn't registered past the registration ttl", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:          resource.MustParse("2"),
-						v1.ResourceMemory:       resource.MustParse("50Mi"),
-						v1.ResourcePods:         resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
 						fake.ResourceGPUVendorA: resource.MustParse("1"),
 					},
 				},
@@ -97,18 +97,18 @@ var _ = Describe("Liveness", func() {
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should delete the NodeClaim when the NodeClaim hasn't launched past the registration ttl", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:          resource.MustParse("2"),
-						v1.ResourceMemory:       resource.MustParse("50Mi"),
-						v1.ResourcePods:         resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
 						fake.ResourceGPUVendorA: resource.MustParse("1"),
 					},
 				},

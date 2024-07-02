@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"go.uber.org/multierr"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -34,7 +34,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
@@ -42,7 +42,7 @@ import (
 )
 
 type nodeClaimReconciler interface {
-	Reconcile(context.Context, *v1beta1.NodePool, *v1beta1.NodeClaim) (reconcile.Result, error)
+	Reconcile(context.Context, *v1.NodePool, *v1.NodeClaim) (reconcile.Result, error)
 }
 
 // Controller is a disruption controller that adds StatusConditions to nodeclaims when they meet certain disruption conditions
@@ -68,7 +68,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 }
 
 // Reconcile executes a control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.disruption")
 
 	if !nodeClaim.DeletionTimestamp.IsZero() {
@@ -76,11 +76,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	}
 
 	stored := nodeClaim.DeepCopy()
-	nodePoolName, ok := nodeClaim.Labels[v1beta1.NodePoolLabelKey]
+	nodePoolName, ok := nodeClaim.Labels[v1.NodePoolLabelKey]
 	if !ok {
 		return reconcile.Result{}, nil
 	}
-	nodePool := &v1beta1.NodePool{}
+	nodePool := &v1.NodePool{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
@@ -125,14 +125,14 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	}
 	return builder.
 		Named("nodeclaim.disruption").
-		For(&v1beta1.NodeClaim{}).
+		For(&v1.NodeClaim{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Watches(
-			&v1beta1.NodePool{},
+			&v1.NodePool{},
 			nodeclaimutil.NodePoolEventHandler(c.kubeClient),
 		).
 		Watches(
-			&v1.Pod{},
+			&corev1.Pod{},
 			nodeclaimutil.PodEventHandler(c.kubeClient),
 		).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

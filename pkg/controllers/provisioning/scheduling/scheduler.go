@@ -25,7 +25,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/klog/v2"
@@ -34,7 +34,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -44,9 +44,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-func NewScheduler(kubeClient client.Client, nodePools []*v1beta1.NodePool,
+func NewScheduler(kubeClient client.Client, nodePools []*v1.NodePool,
 	cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
-	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*v1.Pod,
+	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*corev1.Pod,
 	recorder events.Recorder) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
@@ -54,13 +54,13 @@ func NewScheduler(kubeClient client.Client, nodePools []*v1beta1.NodePool,
 	toleratePreferNoSchedule := false
 	for _, np := range nodePools {
 		for _, taint := range np.Spec.Template.Spec.Taints {
-			if taint.Effect == v1.TaintEffectPreferNoSchedule {
+			if taint.Effect == corev1.TaintEffectPreferNoSchedule {
 				toleratePreferNoSchedule = true
 			}
 		}
 	}
 
-	templates := lo.Map(nodePools, func(np *v1beta1.NodePool, _ int) *NodeClaimTemplate { return NewNodeClaimTemplate(np) })
+	templates := lo.Map(nodePools, func(np *v1.NodePool, _ int) *NodeClaimTemplate { return NewNodeClaimTemplate(np) })
 	s := &Scheduler{
 		id:                 uuid.NewUUID(),
 		kubeClient:         kubeClient,
@@ -71,7 +71,9 @@ func NewScheduler(kubeClient client.Client, nodePools []*v1beta1.NodePool,
 		daemonOverhead:     getDaemonOverhead(templates, daemonSetPods),
 		recorder:           recorder,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
-		remainingResources: lo.SliceToMap(nodePools, func(np *v1beta1.NodePool) (string, v1.ResourceList) { return np.Name, v1.ResourceList(np.Spec.Limits) }),
+		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
+			return np.Name, corev1.ResourceList(np.Spec.Limits)
+		}),
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
 	return s
@@ -82,9 +84,9 @@ type Scheduler struct {
 	newNodeClaims      []*NodeClaim
 	existingNodes      []*ExistingNode
 	nodeClaimTemplates []*NodeClaimTemplate
-	remainingResources map[string]v1.ResourceList               // (NodePool name) -> remaining resources for that NodePool
+	remainingResources map[string]corev1.ResourceList           // (NodePool name) -> remaining resources for that NodePool
 	instanceTypes      map[string][]*cloudprovider.InstanceType // (NodePool name) -> instance types for NodePool
-	daemonOverhead     map[*NodeClaimTemplate]v1.ResourceList
+	daemonOverhead     map[*NodeClaimTemplate]corev1.ResourceList
 	preferences        *Preferences
 	topology           *Topology
 	cluster            *state.Cluster
@@ -96,7 +98,7 @@ type Scheduler struct {
 type Results struct {
 	NewNodeClaims []*NodeClaim
 	ExistingNodes []*ExistingNode
-	PodErrors     map[*v1.Pod]error
+	PodErrors     map[*corev1.Pod]error
 }
 
 // Record sends eventing and log messages back for the results that were produced from a scheduling run
@@ -142,14 +144,14 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 // We don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we can't
 // schedule at all and don't want it to block consolidation.
 func (r Results) AllNonPendingPodsScheduled() bool {
-	return len(lo.OmitBy(r.PodErrors, func(p *v1.Pod, err error) bool {
+	return len(lo.OmitBy(r.PodErrors, func(p *corev1.Pod, err error) bool {
 		return pod.IsProvisionable(p)
 	})) == 0
 }
 
 // NonPendingPodSchedulingErrors creates a string that describes why pods wouldn't schedule that is suitable for presentation
 func (r Results) NonPendingPodSchedulingErrors() string {
-	errs := lo.OmitBy(r.PodErrors, func(p *v1.Pod, err error) bool {
+	errs := lo.OmitBy(r.PodErrors, func(p *corev1.Pod, err error) bool {
 		return pod.IsProvisionable(p)
 	})
 	if len(errs) == 0 {
@@ -192,7 +194,7 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 	return r
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
+func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	defer metrics.Measure(SimulationDurationSeconds.With(
 		prometheus.Labels{controllerLabel: injection.GetControllerName(ctx)},
 	))()
@@ -201,7 +203,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
 	// had 5xA pods and 5xB pods were they have a zonal topology spread, but A can only go in one zone and B in another.
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
-	errors := map[*v1.Pod]error{}
+	errors := map[*corev1.Pod]error{}
 	QueueDepth.DeletePartialMatch(prometheus.Labels{controllerLabel: injection.GetControllerName(ctx)}) // Reset the metric for the controller, so we don't keep old ids around
 	q := NewQueue(pods...)
 	for {
@@ -245,7 +247,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*v1.Pod) Results {
 	}
 }
 
-func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
+func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
 		if err := node.Add(ctx, s.kubeClient, pod); err == nil {
@@ -295,11 +297,11 @@ func (s *Scheduler) add(ctx context.Context, pod *v1.Pod) error {
 	return errs
 }
 
-func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, daemonSetPods []*v1.Pod) {
+func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, daemonSetPods []*corev1.Pod) {
 	// create our existing nodes
 	for _, node := range stateNodes {
 		// Calculate any daemonsets that should schedule to the inflight node
-		var daemons []*v1.Pod
+		var daemons []*corev1.Pod
 		for _, p := range daemonSetPods {
 			if err := scheduling.Taints(node.Taints()).Tolerates(p); err != nil {
 				continue
@@ -314,8 +316,8 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 		// We don't use the status field and instead recompute the remaining resources to ensure we have a consistent view
 		// of the cluster during scheduling.  Depending on how node creation falls out, this will also work for cases where
 		// we don't create NodeClaim resources.
-		if _, ok := s.remainingResources[node.Labels()[v1beta1.NodePoolLabelKey]]; ok {
-			s.remainingResources[node.Labels()[v1beta1.NodePoolLabelKey]] = resources.Subtract(s.remainingResources[node.Labels()[v1beta1.NodePoolLabelKey]], node.Capacity())
+		if _, ok := s.remainingResources[node.Labels()[v1.NodePoolLabelKey]]; ok {
+			s.remainingResources[node.Labels()[v1.NodePoolLabelKey]] = resources.Subtract(s.remainingResources[node.Labels()[v1.NodePoolLabelKey]], node.Capacity())
 		}
 	}
 	// Order the existing nodes for scheduling with initialized nodes first
@@ -332,11 +334,11 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 	})
 }
 
-func getDaemonOverhead(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*v1.Pod) map[*NodeClaimTemplate]v1.ResourceList {
-	overhead := map[*NodeClaimTemplate]v1.ResourceList{}
+func getDaemonOverhead(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]corev1.ResourceList {
+	overhead := map[*NodeClaimTemplate]corev1.ResourceList{}
 
 	for _, nodeClaimTemplate := range nodeClaimTemplates {
-		var daemons []*v1.Pod
+		var daemons []*corev1.Pod
 		for _, p := range daemonSetPods {
 			if err := scheduling.Taints(nodeClaimTemplate.Spec.Taints).Tolerates(p); err != nil {
 				continue
@@ -355,16 +357,16 @@ func getDaemonOverhead(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []
 // overshooting out, we need to pessimistically assume that if e.g. we request a 2, 4 or 8 CPU instance type
 // that the 8 CPU instance type is all that will be available.  This could cause a batch of pods to take multiple rounds
 // to schedule.
-func subtractMax(remaining v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) v1.ResourceList {
+func subtractMax(remaining corev1.ResourceList, instanceTypes []*cloudprovider.InstanceType) corev1.ResourceList {
 	// shouldn't occur, but to be safe
 	if len(instanceTypes) == 0 {
 		return remaining
 	}
-	var allInstanceResources []v1.ResourceList
+	var allInstanceResources []corev1.ResourceList
 	for _, it := range instanceTypes {
 		allInstanceResources = append(allInstanceResources, it.Capacity)
 	}
-	result := v1.ResourceList{}
+	result := corev1.ResourceList{}
 	itResources := resources.MaxResources(allInstanceResources...)
 	for k, v := range remaining {
 		cp := v.DeepCopy()
@@ -375,7 +377,7 @@ func subtractMax(remaining v1.ResourceList, instanceTypes []*cloudprovider.Insta
 }
 
 // filterByRemainingResources is used to filter out instance types that if launched would exceed the nodepool limits
-func filterByRemainingResources(instanceTypes []*cloudprovider.InstanceType, remaining v1.ResourceList) []*cloudprovider.InstanceType {
+func filterByRemainingResources(instanceTypes []*cloudprovider.InstanceType, remaining corev1.ResourceList) []*cloudprovider.InstanceType {
 	var filtered []*cloudprovider.InstanceType
 	for _, it := range instanceTypes {
 		itResources := it.Capacity

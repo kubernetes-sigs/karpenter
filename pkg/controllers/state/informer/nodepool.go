@@ -29,7 +29,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
@@ -46,7 +46,7 @@ func NewNodePoolController(kubeClient client.Client, cluster *state.Cluster) *No
 	}
 }
 
-func (c *NodePoolController) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
+func (c *NodePoolController) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "state.nodepool") //nolint:ineffassign,staticcheck
 
 	// Something changed in the NodePool so we should re-consider consolidation
@@ -57,7 +57,7 @@ func (c *NodePoolController) Reconcile(ctx context.Context, np *v1beta1.NodePool
 func (c *NodePoolController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.nodepool").
-		For(&v1beta1.NodePool{}).
+		For(&v1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}).

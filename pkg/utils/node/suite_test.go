@@ -24,13 +24,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	. "knative.dev/pkg/logging/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -58,15 +58,15 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("NodeUtils", func() {
-	var testNode *v1.Node
-	var nodeClaim *v1beta1.NodeClaim
+	var testNode *corev1.Node
+	var nodeClaim *v1.NodeClaim
 	BeforeEach(func() {
-		nodeClaim = test.NodeClaim(v1beta1.NodeClaim{
-			Spec: v1beta1.NodeClaimSpec{
-				NodeClassRef: &v1beta1.NodeClassReference{
-					Kind:       "NodeClassRef",
-					APIVersion: "test.cloudprovider/v1",
-					Name:       "default",
+		nodeClaim = test.NodeClaim(v1.NodeClaim{
+			Spec: v1.NodeClaimSpec{
+				NodeClassRef: &v1.NodeClassReference{
+					Kind:  "NodeClassRef",
+					Group: "test.cloudprovider",
+					Name:  "default",
 				},
 			},
 		})

@@ -23,24 +23,24 @@ import (
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 const (
-	LabelInstanceSize                       = "size"
-	ExoticInstanceLabelKey                  = "special"
-	IntegerInstanceLabelKey                 = "integer"
-	ResourceGPUVendorA      v1.ResourceName = "fake.com/vendor-a"
-	ResourceGPUVendorB      v1.ResourceName = "fake.com/vendor-b"
+	LabelInstanceSize                           = "size"
+	ExoticInstanceLabelKey                      = "special"
+	IntegerInstanceLabelKey                     = "integer"
+	ResourceGPUVendorA      corev1.ResourceName = "fake.com/vendor-a"
+	ResourceGPUVendorB      corev1.ResourceName = "fake.com/vendor-b"
 )
 
 func init() {
-	v1beta1.WellKnownLabels.Insert(
+	v1.WellKnownLabels.Insert(
 		LabelInstanceSize,
 		ExoticInstanceLabelKey,
 		IntegerInstanceLabelKey,
@@ -53,38 +53,38 @@ func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 
 func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq *scheduling.Requirement) *cloudprovider.InstanceType {
 	if options.Resources == nil {
-		options.Resources = map[v1.ResourceName]resource.Quantity{}
+		options.Resources = map[corev1.ResourceName]resource.Quantity{}
 	}
-	if r := options.Resources[v1.ResourceCPU]; r.IsZero() {
-		options.Resources[v1.ResourceCPU] = resource.MustParse("4")
+	if r := options.Resources[corev1.ResourceCPU]; r.IsZero() {
+		options.Resources[corev1.ResourceCPU] = resource.MustParse("4")
 	}
-	if r := options.Resources[v1.ResourceMemory]; r.IsZero() {
-		options.Resources[v1.ResourceMemory] = resource.MustParse("4Gi")
+	if r := options.Resources[corev1.ResourceMemory]; r.IsZero() {
+		options.Resources[corev1.ResourceMemory] = resource.MustParse("4Gi")
 	}
-	if r := options.Resources[v1.ResourcePods]; r.IsZero() {
-		options.Resources[v1.ResourcePods] = resource.MustParse("5")
+	if r := options.Resources[corev1.ResourcePods]; r.IsZero() {
+		options.Resources[corev1.ResourcePods] = resource.MustParse("5")
 	}
 	if len(options.Offerings) == 0 {
 		options.Offerings = []cloudprovider.Offering{
 			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1beta1.CapacityTypeLabelKey: "spot",
-				v1.LabelTopologyZone:         "test-zone-1",
+				v1.CapacityTypeLabelKey:  "spot",
+				corev1.LabelTopologyZone: "test-zone-1",
 			}), Price: PriceFromResources(options.Resources), Available: true},
 			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1beta1.CapacityTypeLabelKey: "spot",
-				v1.LabelTopologyZone:         "test-zone-2",
+				v1.CapacityTypeLabelKey:  "spot",
+				corev1.LabelTopologyZone: "test-zone-2",
 			}), Price: PriceFromResources(options.Resources), Available: true},
 			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1beta1.CapacityTypeLabelKey: "on-demand",
-				v1.LabelTopologyZone:         "test-zone-1",
+				v1.CapacityTypeLabelKey:  "on-demand",
+				corev1.LabelTopologyZone: "test-zone-1",
 			}), Price: PriceFromResources(options.Resources), Available: true},
 			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1beta1.CapacityTypeLabelKey: "on-demand",
-				v1.LabelTopologyZone:         "test-zone-2",
+				v1.CapacityTypeLabelKey:  "on-demand",
+				corev1.LabelTopologyZone: "test-zone-2",
 			}), Price: PriceFromResources(options.Resources), Available: true},
 			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1beta1.CapacityTypeLabelKey: "on-demand",
-				v1.LabelTopologyZone:         "test-zone-3",
+				v1.CapacityTypeLabelKey:  "on-demand",
+				corev1.LabelTopologyZone: "test-zone-3",
 			}), Price: PriceFromResources(options.Resources), Available: true},
 		}
 	}
@@ -92,21 +92,21 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 		options.Architecture = "amd64"
 	}
 	if options.OperatingSystems.Len() == 0 {
-		options.OperatingSystems = sets.New(string(v1.Linux), string(v1.Windows), "darwin")
+		options.OperatingSystems = sets.New(string(corev1.Linux), string(corev1.Windows), "darwin")
 	}
 	requirements := scheduling.NewRequirements(
-		scheduling.NewRequirement(v1.LabelInstanceTypeStable, v1.NodeSelectorOpIn, options.Name),
-		scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, options.Architecture),
-		scheduling.NewRequirement(v1.LabelOSStable, v1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
-		scheduling.NewRequirement(v1.LabelTopologyZone, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
-			return o.Requirements.Get(v1.LabelTopologyZone).Any()
+		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, options.Name),
+		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, options.Architecture),
+		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
+		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+			return o.Requirements.Get(corev1.LabelTopologyZone).Any()
 		})...),
-		scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
-			return o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
+		scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+			return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
 		})...),
-		scheduling.NewRequirement(LabelInstanceSize, v1.NodeSelectorOpDoesNotExist),
-		scheduling.NewRequirement(ExoticInstanceLabelKey, v1.NodeSelectorOpDoesNotExist),
-		scheduling.NewRequirement(IntegerInstanceLabelKey, v1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
+		scheduling.NewRequirement(LabelInstanceSize, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(ExoticInstanceLabelKey, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(IntegerInstanceLabelKey, corev1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
 	)
 	if customReq != nil {
 		requirements.Add(customReq)
@@ -125,9 +125,9 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 		Offerings:    options.Offerings,
 		Capacity:     options.Resources,
 		Overhead: &cloudprovider.InstanceTypeOverhead{
-			KubeReserved: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("100m"),
-				v1.ResourceMemory: resource.MustParse("10Mi"),
+			KubeReserved: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("100m"),
+				corev1.ResourceMemory: resource.MustParse("10Mi"),
 			},
 		},
 	}
@@ -139,24 +139,24 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 	for _, cpu := range []int{1, 2, 4, 8, 16, 32, 64} {
 		for _, mem := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
 			for _, zone := range []string{"test-zone-1", "test-zone-2", "test-zone-3"} {
-				for _, ct := range []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand} {
-					for _, os := range []sets.Set[string]{sets.New(string(v1.Linux)), sets.New(string(v1.Windows))} {
-						for _, arch := range []string{v1beta1.ArchitectureAmd64, v1beta1.ArchitectureArm64} {
+				for _, ct := range []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand} {
+					for _, os := range []sets.Set[string]{sets.New(string(corev1.Linux)), sets.New(string(corev1.Windows))} {
+						for _, arch := range []string{v1.ArchitectureAmd64, v1.ArchitectureArm64} {
 							opts := InstanceTypeOptions{
 								Name:             fmt.Sprintf("%d-cpu-%d-mem-%s-%s-%s-%s", cpu, mem, arch, strings.Join(sets.List(os), ","), zone, ct),
 								Architecture:     arch,
 								OperatingSystems: os,
-								Resources: v1.ResourceList{
-									v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
-									v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", mem)),
+								Resources: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
+									corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", mem)),
 								},
 							}
 							price := PriceFromResources(opts.Resources)
 							opts.Offerings = []cloudprovider.Offering{
 								{
 									Requirements: scheduling.NewLabelRequirements(map[string]string{
-										v1beta1.CapacityTypeLabelKey: ct,
-										v1.LabelTopologyZone:         zone,
+										v1.CapacityTypeLabelKey:  ct,
+										corev1.LabelTopologyZone: zone,
 									}),
 									Price:     price,
 									Available: true,
@@ -183,10 +183,10 @@ func InstanceTypes(total int) []*cloudprovider.InstanceType {
 	for i := 0; i < total; i++ {
 		instanceTypes = append(instanceTypes, NewInstanceType(InstanceTypeOptions{
 			Name: fmt.Sprintf("fake-it-%d", i),
-			Resources: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", i+1)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", (i+1)*2)),
-				v1.ResourcePods:   resource.MustParse(fmt.Sprintf("%d", (i+1)*10)),
+			Resources: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", i+1)),
+				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", (i+1)*2)),
+				corev1.ResourcePods:   resource.MustParse(fmt.Sprintf("%d", (i+1)*10)),
 			},
 		}))
 	}
@@ -198,16 +198,16 @@ type InstanceTypeOptions struct {
 	Offerings        cloudprovider.Offerings
 	Architecture     string
 	OperatingSystems sets.Set[string]
-	Resources        v1.ResourceList
+	Resources        corev1.ResourceList
 }
 
-func PriceFromResources(resources v1.ResourceList) float64 {
+func PriceFromResources(resources corev1.ResourceList) float64 {
 	price := 0.0
 	for k, v := range resources {
 		switch k {
-		case v1.ResourceCPU:
+		case corev1.ResourceCPU:
 			price += 0.1 * v.AsApproximateFloat64()
-		case v1.ResourceMemory:
+		case corev1.ResourceMemory:
 			price += 0.1 * v.AsApproximateFloat64() / (1e9)
 		case ResourceGPUVendorA, ResourceGPUVendorB:
 			price += 1.0

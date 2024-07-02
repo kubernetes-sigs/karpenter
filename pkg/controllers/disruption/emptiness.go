@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/events"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -50,7 +50,7 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	// If we don't have the "WhenEmpty" policy set, we should not do this method, but
 	// we should also not fire an event here to users since this can be confusing when the field on the NodePool
 	// is named "consolidationPolicy"
-	if c.nodePool.Spec.Disruption.ConsolidationPolicy != v1beta1.ConsolidationPolicyWhenEmpty {
+	if c.nodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyWhenEmpty {
 		return false
 	}
 	if c.nodePool.Spec.Disruption.ConsolidateAfter != nil && c.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
@@ -60,17 +60,17 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	if len(c.reschedulablePods) != 0 {
 		return false
 	}
-	return c.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue() &&
-		!e.clock.Now().Before(c.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).LastTransitionTime.Add(*c.nodePool.Spec.Disruption.ConsolidateAfter.Duration))
+	return c.NodeClaim.StatusConditions().Get(v1.ConditionTypeEmpty).IsTrue() &&
+		!e.clock.Now().Before(c.NodeClaim.StatusConditions().Get(v1.ConditionTypeEmpty).LastTransitionTime.Add(*c.nodePool.Spec.Disruption.ConsolidateAfter.Duration))
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping map[string]map[v1beta1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (e *Emptiness) ComputeCommand(_ context.Context, disruptionBudgetMapping map[string]map[v1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	return Command{
 		candidates: lo.Filter(candidates, func(c *Candidate, _ int) bool {
 			// Include candidate if disruptions are allowed for its nodepool.
-			if disruptionBudgetMapping[c.nodePool.Name][v1beta1.DisruptionReasonEmpty] > 0 {
-				disruptionBudgetMapping[c.nodePool.Name][v1beta1.DisruptionReasonEmpty]--
+			if disruptionBudgetMapping[c.nodePool.Name][v1.DisruptionReasonEmpty] > 0 {
+				disruptionBudgetMapping[c.nodePool.Name][v1.DisruptionReasonEmpty]--
 				return true
 			}
 			return false

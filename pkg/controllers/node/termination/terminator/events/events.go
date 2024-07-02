@@ -19,25 +19,25 @@ package events
 import (
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
-func EvictPod(pod *v1.Pod) events.Event {
+func EvictPod(pod *corev1.Pod) events.Event {
 	return events.Event{
 		InvolvedObject: pod,
-		Type:           v1.EventTypeNormal,
+		Type:           corev1.EventTypeNormal,
 		Reason:         "Evicted",
 		Message:        "Evicted pod",
 		DedupeValues:   []string{pod.Name},
 	}
 }
 
-func NodeFailedToDrain(node *v1.Node, err error) events.Event {
+func NodeFailedToDrain(node *corev1.Node, err error) events.Event {
 	return events.Event{
 		InvolvedObject: node,
-		Type:           v1.EventTypeWarning,
+		Type:           corev1.EventTypeWarning,
 		Reason:         "FailedDraining",
 		Message:        fmt.Sprintf("Failed to drain node, %s", err),
 		DedupeValues:   []string{node.Name},

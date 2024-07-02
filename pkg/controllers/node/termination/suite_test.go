@@ -29,14 +29,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -75,12 +75,12 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Termination", func() {
-	var node *v1.Node
-	var nodeClaim *v1beta1.NodeClaim
+	var node *corev1.Node
+	var nodeClaim *v1.NodeClaim
 
 	BeforeEach(func() {
-		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1beta1.TerminationFinalizer}}})
-		node.Labels[v1beta1.NodePoolLabelKey] = test.NodePool().Name
+		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+		node.Labels[v1.NodePoolLabelKey] = test.NodePool().Name
 		cloudProvider.CreatedNodeClaims[node.Spec.ProviderID] = nodeClaim
 	})
 
@@ -114,7 +114,7 @@ var _ = Describe("Termination", func() {
 			// The first reconciliation should trigger the Delete, and set the terminating status condition
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			nc := ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nc.StatusConditions().Get(v1beta1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
+			Expect(nc.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
 			ExpectNodeExists(ctx, env.Client, node.Name)
 
 			// The second reconciliation should call get, see the "instance" is terminated, and remove the node.
@@ -125,11 +125,11 @@ var _ = Describe("Termination", func() {
 		})
 		It("should not race if deleting nodes in parallel", func() {
 			const numNodes = 10
-			var nodes []*v1.Node
+			var nodes []*corev1.Node
 			for i := 0; i < numNodes; i++ {
 				node = test.Node(test.NodeOptions{
 					ObjectMeta: metav1.ObjectMeta{
-						Finalizers: []string{v1beta1.TerminationFinalizer},
+						Finalizers: []string{v1.TerminationFinalizer},
 					},
 				})
 				ExpectApplied(ctx, env.Client, node)
@@ -144,7 +144,7 @@ var _ = Describe("Termination", func() {
 				// this is enough to trip the race detector
 				for i := 0; i < numNodes; i++ {
 					wg.Add(1)
-					go func(node *v1.Node) {
+					go func(node *corev1.Node) {
 						defer GinkgoRecover()
 						defer wg.Done()
 						ExpectObjectReconciled(ctx, env.Client, terminationController, node)
@@ -152,7 +152,7 @@ var _ = Describe("Termination", func() {
 				}
 				wg.Wait()
 			}
-			ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *v1.Node, _ int) client.Object { return n })...)
+			ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *corev1.Node, _ int) client.Object { return n })...)
 		})
 		It("should exclude nodes from load balancers when terminating", func() {
 			labels := map[string]string{"foo": "bar"}
@@ -173,13 +173,13 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			Expect(node.Labels[v1.LabelNodeExcludeBalancers]).Should(Equal("karpenter"))
+			Expect(node.Labels[corev1.LabelNodeExcludeBalancers]).Should(Equal("karpenter"))
 		})
 		It("should not evict pods that tolerate karpenter disruption taint with equal operator", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podSkip := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []v1.Toleration{{Key: v1beta1.DisruptionTaintKey, Operator: v1.TolerationOpEqual, Effect: v1beta1.DisruptionNoScheduleTaint.Effect, Value: v1beta1.DisruptionNoScheduleTaint.Value}},
+				Tolerations: []corev1.Toleration{{Key: v1.DisruptionTaintKey, Operator: corev1.TolerationOpEqual, Effect: v1.DisruptionNoScheduleTaint.Effect, Value: v1.DisruptionNoScheduleTaint.Value}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podSkip)
@@ -209,7 +209,7 @@ var _ = Describe("Termination", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podSkip := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []v1.Toleration{{Key: v1beta1.DisruptionTaintKey, Operator: v1.TolerationOpExists, Effect: v1beta1.DisruptionNoScheduleTaint.Effect}},
+				Tolerations: []corev1.Toleration{{Key: v1.DisruptionTaintKey, Operator: corev1.TolerationOpExists, Effect: v1.DisruptionNoScheduleTaint.Effect}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podSkip)
@@ -240,7 +240,7 @@ var _ = Describe("Termination", func() {
 		It("should evict pods that tolerate the node.kubernetes.io/unschedulable taint", func() {
 			podEvict := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []v1.Toleration{{Key: v1.TaintNodeUnschedulable, Operator: v1.TolerationOpExists, Effect: v1.TaintEffectNoSchedule}},
+				Tolerations: []corev1.Toleration{{Key: corev1.TaintNodeUnschedulable, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict)
@@ -298,11 +298,11 @@ var _ = Describe("Termination", func() {
 		It("should delete nodes with terminal pods", func() {
 			podEvictPhaseSucceeded := test.Pod(test.PodOptions{
 				NodeName: node.Name,
-				Phase:    v1.PodSucceeded,
+				Phase:    corev1.PodSucceeded,
 			})
 			podEvictPhaseFailed := test.Pod(test.PodOptions{
 				NodeName: node.Name,
-				Phase:    v1.PodFailed,
+				Phase:    corev1.PodFailed,
 			})
 
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvictPhaseSucceeded, podEvictPhaseFailed)
@@ -328,7 +328,7 @@ var _ = Describe("Termination", func() {
 					Labels:          labelSelector,
 					OwnerReferences: defaultOwnerRefs,
 				},
-				Phase: v1.PodRunning,
+				Phase: corev1.PodRunning,
 			})
 
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podNoEvict, pdb)
@@ -366,7 +366,7 @@ var _ = Describe("Termination", func() {
 
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podDaemonEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "apps/v1",
+				APIVersion:         "apps/corev1",
 				Kind:               "DaemonSet",
 				Name:               daemonEvict.Name,
 				UID:                daemonEvict.UID,
@@ -376,7 +376,7 @@ var _ = Describe("Termination", func() {
 			podNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podDaemonNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "apps/v1",
+				APIVersion:         "apps/corev1",
 				Kind:               "DaemonSet",
 				Name:               daemonNodeCritical.Name,
 				UID:                daemonNodeCritical.UID,
@@ -384,7 +384,7 @@ var _ = Describe("Termination", func() {
 				BlockOwnerDeletion: lo.ToPtr(true),
 			}}}})
 			podDaemonClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "apps/v1",
+				APIVersion:         "apps/corev1",
 				Kind:               "DaemonSet",
 				Name:               daemonClusterCritical.Name,
 				UID:                daemonClusterCritical.UID,
@@ -491,7 +491,7 @@ var _ = Describe("Termination", func() {
 				NodeName: node.Name,
 				ObjectMeta: metav1.ObjectMeta{
 					OwnerReferences: []metav1.OwnerReference{{
-						APIVersion: "v1",
+						APIVersion: "corev1",
 						Kind:       "Node",
 						Name:       node.Name,
 						UID:        node.UID,
@@ -589,7 +589,7 @@ var _ = Describe("Termination", func() {
 			ExpectDeleted(ctx, env.Client, pods[1])
 
 			// Remove the node from created nodeclaims so that the cloud provider returns DNE
-			cloudProvider.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
+			cloudProvider.CreatedNodeClaims = map[string]*v1.NodeClaim{}
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -621,7 +621,7 @@ var _ = Describe("Termination", func() {
 			ExpectDeleted(ctx, env.Client, pods[1])
 
 			// Remove the node from created nodeclaims so that the cloud provider returns DNE
-			cloudProvider.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
+			cloudProvider.CreatedNodeClaims = map[string]*v1.NodeClaim{}
 
 			// Reconcile to try to delete the node, but don't succeed because the readiness condition
 			// of the node still won't let us delete it
@@ -685,7 +685,7 @@ var _ = Describe("Termination", func() {
 			// Re-create the pod and node, it should now have the same name, but a different UUID
 			node = test.Node(test.NodeOptions{
 				ObjectMeta: metav1.ObjectMeta{
-					Finalizers: []string{v1beta1.TerminationFinalizer},
+					Finalizers: []string{v1.TerminationFinalizer},
 				},
 			})
 			pod = test.Pod(test.PodOptions{
@@ -715,7 +715,7 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"nodepool": node.Labels[v1beta1.NodePoolLabelKey]})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(m.GetSummary().GetSampleCount()).To(BeNumerically("==", 1))
 		})
@@ -727,7 +727,7 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"nodepool": node.Labels[v1beta1.NodePoolLabelKey]})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
 		})
@@ -744,7 +744,7 @@ var _ = Describe("Termination", func() {
 				OwnerReferences: defaultOwnerRefs,
 				Labels:          labelSelector,
 			}})
-			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *v1.Pod, _ int) client.Object { return p })...)
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
 
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -756,11 +756,11 @@ var _ = Describe("Termination", func() {
 	})
 })
 
-func ExpectNodeWithNodeClaimDraining(c client.Client, nodeName string) *v1.Node {
+func ExpectNodeWithNodeClaimDraining(c client.Client, nodeName string) *corev1.Node {
 	GinkgoHelper()
 	node := ExpectNodeExists(ctx, c, nodeName)
-	Expect(node.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
-	Expect(lo.Contains(node.Finalizers, v1beta1.TerminationFinalizer)).To(BeTrue())
+	Expect(node.Spec.Taints).To(ContainElement(v1.DisruptionNoScheduleTaint))
+	Expect(lo.Contains(node.Finalizers, v1.TerminationFinalizer)).To(BeTrue())
 	Expect(node.DeletionTimestamp).ToNot(BeNil())
 	return node
 }

@@ -23,7 +23,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -45,7 +45,7 @@ var env *test.Environment
 var recorder *test.EventRecorder
 var queue *terminator.Queue
 var pdb *policyv1.PodDisruptionBudget
-var pod *v1.Pod
+var pod *corev1.Pod
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)

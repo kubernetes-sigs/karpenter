@@ -28,6 +28,7 @@ const (
 	ConditionTypeEmpty       = "Empty"
 	ConditionTypeDrifted     = "Drifted"
 	ConditionTypeExpired     = "Expired"
+	ConditionTypeTerminating = "Terminating"
 )
 
 // NodeClaimStatus defines the observed state of NodeClaim

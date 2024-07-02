@@ -24,7 +24,7 @@ import (
 	"k8s.io/api/core/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	apisv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -38,7 +38,7 @@ func (in *StateNode) DeepCopyInto(out *StateNode) {
 	}
 	if in.NodeClaim != nil {
 		in, out := &in.NodeClaim, &out.NodeClaim
-		*out = new(v1beta1.NodeClaim)
+		*out = new(apisv1.NodeClaim)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.daemonSetRequests != nil {

@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"golang.org/x/time/rate"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
@@ -46,7 +46,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -66,7 +66,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, n *v1beta1.NodeClaim) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, n *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.termination")
 
 	if !n.GetDeletionTimestamp().IsZero() {
@@ -76,10 +76,10 @@ func (c *Controller) Reconcile(ctx context.Context, n *v1beta1.NodeClaim) (recon
 }
 
 //nolint:gocyclo
-func (c *Controller) finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName), "provider-id", nodeClaim.Status.ProviderID))
 	stored := nodeClaim.DeepCopy()
-	if !controllerutil.ContainsFinalizer(nodeClaim, v1beta1.TerminationFinalizer) {
+	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
 	nodes, err := nodeclaimutil.AllNodesForNodeClaim(ctx, c.kubeClient, nodeClaim)
@@ -118,10 +118,10 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 		InstanceTerminationDuration.With(map[string]string{
-			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeTerminating).LastTransitionTime.Time).Seconds())
+			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
+		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).LastTransitionTime.Time).Seconds())
 	}
-	controllerutil.RemoveFinalizer(nodeClaim, v1beta1.TerminationFinalizer)
+	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 		// We call Update() here rather than Patch() because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
@@ -134,7 +134,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 		}
 		log.FromContext(ctx).Info("deleted nodeclaim")
 		NodeClaimTerminationDuration.With(map[string]string{
-			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
 		logging.FromContext(ctx).Infof("deleted nodeclaim")
 	}
@@ -148,10 +148,10 @@ func (*Controller) Name() string {
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.termination").
-		For(&v1beta1.NodeClaim{}).
+		For(&v1.NodeClaim{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Watches(
-			&v1.Node{},
+			&corev1.Node{},
 			nodeclaimutil.NodeEventHandler(c.kubeClient),
 			// Watch for node deletion events
 			builder.WithPredicates(predicate.Funcs{
