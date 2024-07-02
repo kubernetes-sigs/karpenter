@@ -114,11 +114,6 @@ var _ = Describe("Termination", func() {
 		nodeclaimtermination.InstanceTerminationDuration.Reset()
 
 	})
-	AfterEach(func() {
-		nodePool = &v1beta1.NodePool{}
-		nodeClaim = &v1beta1.NodeClaim{}
-
-	})
 	It("should delete the node and the CloudProvider NodeClaim when NodeClaim deletion is triggered", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
