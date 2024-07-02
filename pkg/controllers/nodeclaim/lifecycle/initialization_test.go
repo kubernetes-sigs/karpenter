@@ -39,7 +39,7 @@ var _ = Describe("Initialization", func() {
 		nodePool = test.NodePool()
 	})
 	AfterEach(func() {
-		nodePool = test.NodePool()
+		nodePool = &v1beta1.NodePool{}
 	})
 	It("should consider the nodeClaim initialized when all initialization conditions are met", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
