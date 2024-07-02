@@ -85,7 +85,7 @@ var (
 		CapacityTypeLabelKey,
 		v1.LabelWindowsBuild,
 	)
- 
+
 	// RestrictedLabels are labels that should not be used
 	// because they may interfere with the internal provisioning logic.
 	RestrictedLabels = sets.New(
