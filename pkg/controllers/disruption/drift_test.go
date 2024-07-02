@@ -76,11 +76,6 @@ var _ = Describe("Drift", func() {
 		})
 		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeDrifted)
 	})
-	// AfterEach(func() {
-	// 	nodePool = &v1beta1.NodePool{}
-	// 	nodeClaim = &v1beta1.NodeClaim{}
-	// 	node = &v1.Node{}
-	// })
 	Context("Metrics", func() {
 		var eligibleNodesLabels = map[string]string{
 			"method":             "drift",
