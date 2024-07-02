@@ -115,28 +115,8 @@ var _ = Describe("Termination", func() {
 
 	})
 	AfterEach(func() {
-		nodePool = test.NodePool()
-		nodeClaim = test.NodeClaim(v1beta1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
-				},
-				Finalizers: []string{
-					v1beta1.TerminationFinalizer,
-				},
-			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:          resource.MustParse("2"),
-						v1.ResourceMemory:       resource.MustParse("50Mi"),
-						v1.ResourcePods:         resource.MustParse("5"),
-						fake.ResourceGPUVendorA: resource.MustParse("1"),
-					},
-				},
-			},
-		})
-		nodeclaimtermination.InstanceTerminationDuration.Reset()
+		nodePool = &v1beta1.NodePool{}
+		nodeClaim = &v1beta1.NodeClaim{}
 
 	})
 	It("should delete the node and the CloudProvider NodeClaim when NodeClaim deletion is triggered", func() {
