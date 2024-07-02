@@ -24,7 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
@@ -48,13 +47,15 @@ type Controller struct {
 	cluster    *state.Cluster
 }
 
-var WellKnownResource = sets.New(
-	v1.ResourceCPU,
-	v1.ResourceMemory,
-	v1.ResourcePods,
-	v1.ResourceEphemeralStorage,
-	v1.ResourceName("nodes"),
-)
+var ResourceNode = v1.ResourceName("nodes")
+
+var BaseResources = v1.ResourceList{
+	v1.ResourceCPU:              resource.MustParse("0"),
+	v1.ResourceMemory:           resource.MustParse("0"),
+	v1.ResourcePods:             resource.MustParse("0"),
+	v1.ResourceEphemeralStorage: resource.MustParse("0"),
+	ResourceNode:                resource.MustParse("0"),
+}
 
 // NewController is a constructor
 func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
@@ -86,11 +87,8 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 }
 
 func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.ResourceList {
-	res := v1.ResourceList{}
+	res := BaseResources.DeepCopy()
 	nodeCount := 0
-	for name := range WellKnownResource {
-		res[name] = resource.MustParse("0")
-	}
 	// Record all resources provisioned by the nodepools, we look at the cluster state nodes as their capacity
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our nodepool
 	// status immediately upon node creation instead of waiting for the node to become ready.
@@ -106,7 +104,7 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) v1.R
 		}
 		return true
 	})
-	res[v1.ResourceName("nodes")] = resource.MustParse(fmt.Sprintf("%d", nodeCount))
+	res[ResourceNode] = resource.MustParse(fmt.Sprintf("%d", nodeCount))
 	return res
 }
 

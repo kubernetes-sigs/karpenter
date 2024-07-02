@@ -112,7 +112,7 @@ var _ = Describe("Counter", func() {
 				},
 			},
 		})
-		expected = resetResource()
+		expected = counter.BaseResources.DeepCopy()
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
@@ -155,7 +155,7 @@ var _ = Describe("Counter", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
-		expected = resetResource()
+		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
 		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
@@ -171,7 +171,7 @@ var _ = Describe("Counter", func() {
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
 		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
-		expected = resetResource()
+		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
 		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
@@ -200,11 +200,11 @@ var _ = Describe("Counter", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
-		expected = resetResource()
+		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, nodeClaim2.Status.Capacity)
 		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
-		expected = resetResource()
+		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node2.Status.Capacity)
 		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
@@ -217,10 +217,10 @@ var _ = Describe("Counter", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
-		expected := resources.MergeInto(expected, nodeClaim.Status.Capacity)
+		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
 		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
-		expected = resetResource()
+		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
 		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
@@ -231,15 +231,7 @@ var _ = Describe("Counter", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
-		expected = resetResource()
+		expected = counter.BaseResources.DeepCopy()
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 })
-
-func resetResource() v1.ResourceList {
-	res := v1.ResourceList{}
-	for name := range counter.WellKnownResource {
-		res[name] = resource.MustParse("0")
-	}
-	return res
-}
