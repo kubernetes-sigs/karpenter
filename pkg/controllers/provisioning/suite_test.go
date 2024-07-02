@@ -586,8 +586,8 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 	})
-	Context("Daemonsets and Node Overhead", func() {
-		It("should account for overhead", func() {
+	Context("Daemonsets", func() {
+		It("should account for daemonsets", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
@@ -601,11 +601,14 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
 
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
 			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
-		It("should account for overhead (with startup taint)", func() {
+		It("should account for daemonsets (with startup taint)", func() {
 			nodePool := test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
@@ -628,11 +631,14 @@ var _ = Describe("Provisioning", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
 
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
 			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
-		It("should not schedule if overhead is too large", func() {
+		It("should not schedule if daemonset overhead is too large", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10000"), v1.ResourceMemory: resource.MustParse("10000Gi")}},
@@ -678,6 +684,9 @@ var _ = Describe("Provisioning", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 
 			// We expect a smaller instance since the daemonset pod is smaller then daemonset spec
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
 			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
@@ -788,6 +797,10 @@ var _ = Describe("Provisioning", func() {
 			)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
 			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
@@ -806,6 +819,10 @@ var _ = Describe("Provisioning", func() {
 			)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
 			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("2")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
@@ -825,26 +842,18 @@ var _ = Describe("Provisioning", func() {
 			)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
 			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
-		It("should account for daemonset spec affinity", func() {
+		It("should remove daemonset node hostname affinity when considering daemonset schedulability", func() {
+			// We make two NodePools: one that can't schedule the DaemonSet due to no matching
+			// affinity and resource requests below the limits and the other that has room
 			nodePool := test.NodePool(v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Template: v1beta1.NodeClaimTemplate{
-						ObjectMeta: v1beta1.ObjectMeta{
-							Labels: map[string]string{
-								"foo": "voo",
-							},
-						},
-					},
-					Limits: v1beta1.Limits(v1.ResourceList{
-						v1.ResourceCPU: resource.MustParse("2"),
-					}),
-				},
-			})
-			nodePoolDaemonset := test.NodePool(v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Template: v1beta1.NodeClaimTemplate{
 						ObjectMeta: v1beta1.ObjectMeta{
@@ -855,7 +864,8 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			// Create a daemonset with large resource requests
+			// When simulating the daemon pod, we should use the pod representation for resource requests but remove the overridden
+			// hostname affinity and replace it with the daemonset representation
 			daemonset := test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					NodeRequirements: []v1.NodeSelectorRequirement{
@@ -868,8 +878,7 @@ var _ = Describe("Provisioning", func() {
 					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
 				}},
 			)
-			ExpectApplied(ctx, env.Client, nodePoolDaemonset, daemonset)
-			// Create the actual daemonSet pod with lower resource requests and expect to use the pod
+			ExpectApplied(ctx, env.Client, nodePool, daemonset)
 			daemonsetPod := test.UnschedulablePod(
 				test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
@@ -891,22 +900,153 @@ var _ = Describe("Provisioning", func() {
 							Values:   []string{"node-name"},
 						},
 					},
-					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")}},
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
 				})
 			ExpectApplied(ctx, env.Client, daemonsetPod)
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, daemonsetPod)
 			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
 			// Deploy pod
 			pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
 				NodeSelector: map[string]string{
-					"foo": "voo",
+					"foo": "bar",
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, pod)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			ExpectScheduled(ctx, env.Client, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should consider a daemonset schedulable with multiple node affinity terms", func() {
+			nodePool := test.NodePool(v1beta1.NodePool{
+				Spec: v1beta1.NodePoolSpec{
+					Template: v1beta1.NodeClaimTemplate{
+						ObjectMeta: v1beta1.ObjectMeta{
+							Labels: map[string]string{
+								"foo": "bar",
+							},
+						},
+					},
+				},
+			})
+			daemonSet := test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				}},
+			)
+			// Create a DaemonSet that has the second term that matches this NodePool
+			daemonSet.Spec.Template.Spec.Affinity = &v1.Affinity{
+				NodeAffinity: &v1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
+						NodeSelectorTerms: []v1.NodeSelectorTerm{
+							{
+								MatchExpressions: []v1.NodeSelectorRequirement{
+									{
+										Key:      "foo",
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{"voo"},
+									},
+								},
+							},
+							{
+								MatchExpressions: []v1.NodeSelectorRequirement{
+									{
+										Key:      "foo",
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{"bar"},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			ExpectApplied(ctx, env.Client, daemonSet, nodePool)
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should consider a daemonset schedulable with an incompatible node affinity preference", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					NodePreferences: []v1.NodeSelectorRequirement{
+						{
+							Key:      "node",
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{"invalid"},
+						},
+					},
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				}},
+			))
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should consider a daemonset schedulable with a PreferNoSchedule taint", func() {
+			ExpectApplied(ctx, env.Client,
+				test.NodePool(v1beta1.NodePool{
+					Spec: v1beta1.NodePoolSpec{
+						Template: v1beta1.NodeClaimTemplate{
+							Spec: v1beta1.NodeClaimSpec{
+								Taints: []v1.Taint{
+									{
+										Key:    "test",
+										Effect: v1.TaintEffectPreferNoSchedule,
+									},
+								},
+							},
+						},
+					},
+				}),
+				test.DaemonSet(
+					test.DaemonSetOptions{PodOptions: test.PodOptions{
+						ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+					}},
+				),
+			)
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			// We have multiple instance types that we can launch, one with 2Gi and one with 4Gi
+			// If we launch with 2Gi, this means the Daemon pod was respected
+			// If we launch with 4Gi, this means the daemon pod was respected
+			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
+			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
+			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
 	})
 	Context("Annotations", func() {
