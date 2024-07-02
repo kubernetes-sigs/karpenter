@@ -16,14 +16,17 @@ limitations under the License.
 
 package v1alpha1
 
-import "sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+import (
+	"sigs.k8s.io/karpenter/kwok/apis"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+)
 
 const (
 	// Labels that can be selected on and are propagated to the node
-	InstanceSizeLabelKey   = Group + "/instance-size"
-	InstanceFamilyLabelKey = Group + "/instance-family"
-	InstanceMemoryLabelKey = Group + "/instance-memory"
-	InstanceCPULabelKey    = Group + "/instance-cpu"
+	InstanceSizeLabelKey   = apis.Group + "/instance-size"
+	InstanceFamilyLabelKey = apis.Group + "/instance-family"
+	InstanceMemoryLabelKey = apis.Group + "/instance-memory"
+	InstanceCPULabelKey    = apis.Group + "/instance-cpu"
 
 	// Internal labels that are propagated to the node
 	KwokLabelKey          = "kwok.x-k8s.io/node"
@@ -33,7 +36,7 @@ const (
 )
 
 func init() {
-	v1beta1.RestrictedLabelDomains = v1beta1.RestrictedLabelDomains.Insert(Group)
+	v1beta1.RestrictedLabelDomains = v1beta1.RestrictedLabelDomains.Insert(apis.Group)
 	v1beta1.WellKnownLabels = v1beta1.WellKnownLabels.Insert(
 		InstanceSizeLabelKey,
 		InstanceFamilyLabelKey,

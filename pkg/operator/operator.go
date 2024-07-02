@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/controller"
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/klog/v2"
@@ -86,6 +87,8 @@ var Version = "unspecified"
 
 func init() {
 	crmetrics.Registry.MustRegister(BuildInfo)
+	opmetrics.RegisterClientMetrics(crmetrics.Registry)
+
 	BuildInfo.WithLabelValues(Version, runtime.Version(), runtime.GOARCH, changeset.Get()).Set(1)
 }
 

@@ -27,10 +27,8 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/ptr"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
@@ -108,7 +106,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("*"),
+				Schedule: lo.ToPtr("*"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -116,7 +114,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a schedule with less than 5 entries", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * "),
+				Schedule: lo.ToPtr("* * * * "),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -124,7 +122,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a negative duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -132,7 +130,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a seconds duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -158,7 +156,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
@@ -172,7 +170,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should succeed when creating a budget with both duration and cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -180,7 +178,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should succeed when creating a budget with hours and minutes in duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("2h20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -194,7 +192,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should succeed when creating a budget with special cased crons", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("@annually"),
+				Schedule: lo.ToPtr("@annually"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -203,12 +201,12 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("@annually"),
+					Schedule: lo.ToPtr("@annually"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("*"),
+					Schedule: lo.ToPtr("*"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -221,7 +219,7 @@ var _ = Describe("CEL/Validation", func() {
 				},
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("* * * * *"),
+					Schedule: lo.ToPtr("* * * * *"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{
@@ -230,268 +228,42 @@ var _ = Describe("CEL/Validation", func() {
 			}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
-	})
-	Context("KubeletConfiguration", func() {
-		It("should succeed on kubeReserved with valid keys", func() {
-			nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-				KubeReserved: map[string]string{
-					string(v1.ResourceCPU): "2",
-				},
-			}
+		DescribeTable("should succeed when creating a budget with valid reasons", func(reason DisruptionReason) {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				Reasons:  []DisruptionReason{reason},
+			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-		})
-		It("should succeed on systemReserved with valid keys", func() {
-			nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-				SystemReserved: map[string]string{
-					string(v1.ResourceCPU): "2",
-				},
-			}
+		},
+			Entry("should allow disruption reason drifted", DisruptionReasonDrifted),
+			Entry("should allow disruption reason underutilized", DisruptionReasonUnderutilized),
+			Entry("should allow disruption reason empty", DisruptionReasonEmpty),
+		)
+
+		DescribeTable("should fail when creating a budget with invalid reasons", func(reason string) {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				Reasons:  []DisruptionReason{DisruptionReason(reason)},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		},
+			Entry("should not allow invalid reason", "invalid"),
+			Entry("should not allow expired disruption reason", "expired"),
+			Entry("should not allow empty reason", ""),
+		)
+
+		It("should allow setting multiple reasons", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				Reasons:  []DisruptionReason{DisruptionReasonDrifted, DisruptionReasonEmpty},
+			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-		})
-		It("should fail on kubeReserved with invalid keys", func() {
-			nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-				KubeReserved: map[string]string{
-					string(v1.ResourcePods): "2",
-				},
-			}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		})
-		It("should fail on systemReserved with invalid keys", func() {
-			nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-				SystemReserved: map[string]string{
-					string(v1.ResourcePods): "2",
-				},
-			}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		})
-		Context("Eviction Signals", func() {
-			Context("Eviction Hard", func() {
-				It("should succeed on evictionHard with valid keys and values", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory.available":   "5%",
-							"nodefs.available":   "10%",
-							"nodefs.inodesFree":  "15%",
-							"imagefs.available":  "5%",
-							"imagefs.inodesFree": "5%",
-							"pid.available":      "5%",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-				})
-				It("should succeed on evictionHard with valid keys and values", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory.available":   "20Mi",
-							"nodefs.available":   "34G",
-							"nodefs.inodesFree":  "25M",
-							"imagefs.available":  "20Gi",
-							"imagefs.inodesFree": "39Gi",
-							"pid.available":      "20G",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-				})
-				It("should fail on evictionHard with invalid keys", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory": "5%",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-				})
-				It("should fail on invalid formatted percentage value in evictionHard", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory.available": "5%3",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-				})
-				It("should fail on invalid percentage value (too large) in evictionHard", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory.available": "110%",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-				})
-				It("should fail on invalid quantity value in evictionHard", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						EvictionHard: map[string]string{
-							"memory.available": "110GB",
-						},
-					}
-					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-				})
-			})
-		})
-		Context("Eviction Soft", func() {
-			It("should succeed on evictionSoft with valid keys and values", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available":   "5%",
-						"nodefs.available":   "10%",
-						"nodefs.inodesFree":  "15%",
-						"imagefs.available":  "5%",
-						"imagefs.inodesFree": "5%",
-						"pid.available":      "5%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available":   {Duration: time.Minute},
-						"nodefs.available":   {Duration: time.Second * 90},
-						"nodefs.inodesFree":  {Duration: time.Minute * 5},
-						"imagefs.available":  {Duration: time.Hour},
-						"imagefs.inodesFree": {Duration: time.Hour * 24},
-						"pid.available":      {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-			})
-			It("should succeed on evictionSoft with valid keys and values", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available":   "20Mi",
-						"nodefs.available":   "34G",
-						"nodefs.inodesFree":  "25M",
-						"imagefs.available":  "20Gi",
-						"imagefs.inodesFree": "39Gi",
-						"pid.available":      "20G",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available":   {Duration: time.Minute},
-						"nodefs.available":   {Duration: time.Second * 90},
-						"nodefs.inodesFree":  {Duration: time.Minute * 5},
-						"imagefs.available":  {Duration: time.Hour},
-						"imagefs.inodesFree": {Duration: time.Hour * 24},
-						"pid.available":      {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-			})
-			It("should fail on evictionSoft with invalid keys", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory": "5%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-			})
-			It("should fail on invalid formatted percentage value in evictionSoft", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available": "5%3",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-			})
-			It("should fail on invalid percentage value (too large) in evictionSoft", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available": "110%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-			})
-			It("should fail on invalid quantity value in evictionSoft", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available": "110GB",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-			})
-			It("should fail when eviction soft doesn't have matching grace period", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available": "200Mi",
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-			})
-		})
-		Context("GCThresholdPercent", func() {
-			Context("ImageGCHighThresholdPercent", func() {
-				It("should succeed on a imageGCHighThresholdPercent", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(10),
-					}
-					Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-				})
-				It("should fail when imageGCHighThresholdPercent is less than imageGCLowThresholdPercent", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(50),
-						ImageGCLowThresholdPercent:  ptr.Int32(60),
-					}
-					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-				})
-			})
-			Context("ImageGCLowThresholdPercent", func() {
-				It("should succeed on a imageGCLowThresholdPercent", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCLowThresholdPercent: ptr.Int32(10),
-					}
-					Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-				})
-				It("should fail when imageGCLowThresholdPercent is greather than imageGCHighThresheldPercent", func() {
-					nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-						ImageGCHighThresholdPercent: ptr.Int32(50),
-						ImageGCLowThresholdPercent:  ptr.Int32(60),
-					}
-					Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-				})
-			})
-		})
-		Context("Eviction Soft Grace Period", func() {
-			It("should succeed on evictionSoftGracePeriod with valid keys", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoft: map[string]string{
-						"memory.available":   "5%",
-						"nodefs.available":   "10%",
-						"nodefs.inodesFree":  "15%",
-						"imagefs.available":  "5%",
-						"imagefs.inodesFree": "5%",
-						"pid.available":      "5%",
-					},
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available":   {Duration: time.Minute},
-						"nodefs.available":   {Duration: time.Second * 90},
-						"nodefs.inodesFree":  {Duration: time.Minute * 5},
-						"imagefs.available":  {Duration: time.Hour},
-						"imagefs.inodesFree": {Duration: time.Hour * 24},
-						"pid.available":      {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-			})
-			It("should fail on evictionSoftGracePeriod with invalid keys", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-			})
-			It("should fail when eviction soft grace period doesn't have matching threshold", func() {
-				nodePool.Spec.Template.Spec.Kubelet = &KubeletConfiguration{
-					EvictionSoftGracePeriod: map[string]metav1.Duration{
-						"memory.available": {Duration: time.Minute},
-					},
-				}
-				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-			})
 		})
 	})
 	Context("Taints", func() {
@@ -830,12 +602,6 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(nodePool.RuntimeValidate()).To(Succeed())
 				nodePool = oldNodePool.DeepCopy()
 			}
-		})
-	})
-	Context("Resources", func() {
-		It("should not allow resources to be set", func() {
-			nodePool.Spec.Template.Spec.Resources = ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 	})
 })

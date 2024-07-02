@@ -15,6 +15,10 @@ jobs:
         k8sVersion: ["1.23.x", "1.24.x", "1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
     steps:
     - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+    - name: Set up Python 3.10
+      uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1
+      with:
+        python-version: "3.10"
     - uses: ./.github/actions/install-deps
       with:
           k8sVersion: ${{ matrix.k8sVersion }}
@@ -35,18 +39,38 @@ jobs:
       run: |
         make toolchain
         make install-kwok
-        KWOK_REPO=kind.local KIND_CLUSTER_NAME=chart-testing make apply-with-kind
+        export KWOK_REPO=kind.local
+        export KIND_CLUSTER_NAME=chart-testing
+        make apply-with-kind
     - name: ping cluster
       shell: bash
       run: | 
+        sleep 15
         kubectl get pods -n kube-system | grep karpenter 
         kubectl get nodepools
         kubectl get pods -A
         kubectl describe nodes
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        repository: nathangeology/karpenter_evaluate
+        path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
+        ref: "3f4cebb703bd136f5034c8b5bf3e6c32e97d1ae6"
+        fetch-depth: 0
+    - name: install KPI report dependencies
+      shell: bash
+      run: |
+        pip install pandas==2.2.2
+        pip install pyarrow==16.1.0 
+        pip install tabulate==0.9.0
+        pip install prometheus-api-client==0.5.5
+        pip install ./karpenter_eval/
     - name: run test suites
       shell: bash
-      run: | 
+      run: |
+        OUTPUT_DIR=$(mktemp -d)
+        export OUTPUT_DIR
         make e2etests
+        python ./karpenter_eval/main.py
     - name: cleanup 
       shell: bash
       run: | 

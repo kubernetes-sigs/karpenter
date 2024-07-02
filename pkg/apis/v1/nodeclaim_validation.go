@@ -20,17 +20,14 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"knative.dev/pkg/apis"
-	"knative.dev/pkg/ptr"
 )
 
 var (
@@ -79,7 +76,6 @@ func (in *NodeClaimSpec) validate() (errs *apis.FieldError) {
 	return errs.Also(
 		in.validateTaints(),
 		in.validateRequirements(),
-		in.Kubelet.validate().ViaField("kubeletConfiguration"),
 	)
 }
 
@@ -178,108 +174,5 @@ func ValidateRequirement(requirement NodeSelectorRequirementWithMinValues) error
 			}
 		}
 	}
-	return errs
-}
-
-func (in *KubeletConfiguration) validate() (errs *apis.FieldError) {
-	if in == nil {
-		return
-	}
-	return errs.Also(
-		validateEvictionThresholds(in.EvictionHard, "evictionHard"),
-		validateEvictionThresholds(in.EvictionSoft, "evictionSoft"),
-		validateReservedResources(in.KubeReserved, "kubeReserved"),
-		validateReservedResources(in.SystemReserved, "systemReserved"),
-		in.validateImageGCHighThresholdPercent(),
-		in.validateImageGCLowThresholdPercent(),
-		in.validateEvictionSoftGracePeriod(),
-		in.validateEvictionSoftPairs(),
-	)
-}
-
-func (in *KubeletConfiguration) validateEvictionSoftGracePeriod() (errs *apis.FieldError) {
-	for k := range in.EvictionSoftGracePeriod {
-		if !SupportedEvictionSignals.Has(k) {
-			errs = errs.Also(apis.ErrInvalidKeyName(k, "evictionSoftGracePeriod"))
-		}
-	}
-	return errs
-}
-
-func (in *KubeletConfiguration) validateEvictionSoftPairs() (errs *apis.FieldError) {
-	evictionSoftKeys := sets.New(lo.Keys(in.EvictionSoft)...)
-	evictionSoftGracePeriodKeys := sets.New(lo.Keys(in.EvictionSoftGracePeriod)...)
-
-	evictionSoftDiff := evictionSoftKeys.Difference(evictionSoftGracePeriodKeys)
-	for k := range evictionSoftDiff {
-		errs = errs.Also(apis.ErrInvalidKeyName(k, "evictionSoft", "OwnerKey does not have a matching evictionSoftGracePeriod"))
-	}
-	evictionSoftGracePeriodDiff := evictionSoftGracePeriodKeys.Difference(evictionSoftKeys)
-	for k := range evictionSoftGracePeriodDiff {
-		errs = errs.Also(apis.ErrInvalidKeyName(k, "evictionSoftGracePeriod", "OwnerKey does not have a matching evictionSoft threshold value"))
-	}
-	return errs
-}
-
-func validateReservedResources(m map[string]string, fieldName string) (errs *apis.FieldError) {
-	for k, v := range m {
-		if !SupportedReservedResources.Has(k) {
-			errs = errs.Also(apis.ErrInvalidKeyName(k, fieldName))
-		}
-		quantity, err := resource.ParseQuantity(v)
-		if err != nil {
-			errs = errs.Also(apis.ErrInvalidValue(v, fmt.Sprintf(`%s["%s"]`, fieldName, k), "Value must be a quantity value"))
-		}
-		if quantity.Value() < 0 {
-			errs = errs.Also(apis.ErrInvalidValue(v, fmt.Sprintf(`%s["%s"]`, fieldName, k), "Value cannot be a negative resource quantity"))
-		}
-	}
-	return errs
-}
-
-func validateEvictionThresholds(m map[string]string, fieldName string) (errs *apis.FieldError) {
-	if m == nil {
-		return
-	}
-	for k, v := range m {
-		if !SupportedEvictionSignals.Has(k) {
-			errs = errs.Also(apis.ErrInvalidKeyName(k, fieldName))
-		}
-		if strings.HasSuffix(v, "%") {
-			p, err := strconv.ParseFloat(strings.Trim(v, "%"), 64)
-			if err != nil {
-				errs = errs.Also(apis.ErrInvalidValue(v, fmt.Sprintf(`%s["%s"]`, fieldName, k), fmt.Sprintf("Value could not be parsed as a percentage value, %v", err.Error())))
-			}
-			if p < 0 {
-				errs = errs.Also(apis.ErrInvalidValue(v, fmt.Sprintf(`%s["%s"]`, fieldName, k), "Percentage values cannot be negative"))
-			}
-			if p > 100 {
-				errs = errs.Also(apis.ErrInvalidValue(v, fmt.Sprintf(`%s["%s"]`, fieldName, k), "Percentage values cannot be greater than 100"))
-			}
-		} else {
-			_, err := resource.ParseQuantity(v)
-			if err != nil {
-				errs = errs.Also(apis.ErrInvalidValue(v, fmt.Sprintf("%s[%s]", fieldName, k), fmt.Sprintf("Value could not be parsed as a resource quantity, %v", err.Error())))
-			}
-		}
-	}
-	return errs
-}
-
-// Validate validateImageGCHighThresholdPercent
-func (in *KubeletConfiguration) validateImageGCHighThresholdPercent() (errs *apis.FieldError) {
-	if in.ImageGCHighThresholdPercent != nil && ptr.Int32Value(in.ImageGCHighThresholdPercent) < ptr.Int32Value(in.ImageGCLowThresholdPercent) {
-		return errs.Also(apis.ErrInvalidValue("must be greater than imageGCLowThresholdPercent", "imageGCHighThresholdPercent"))
-	}
-
-	return errs
-}
-
-// Validate imageGCLowThresholdPercent
-func (in *KubeletConfiguration) validateImageGCLowThresholdPercent() (errs *apis.FieldError) {
-	if in.ImageGCHighThresholdPercent != nil && ptr.Int32Value(in.ImageGCLowThresholdPercent) > ptr.Int32Value(in.ImageGCHighThresholdPercent) {
-		return errs.Also(apis.ErrInvalidValue("must be less than imageGCHighThresholdPercent", "imageGCLowThresholdPercent"))
-	}
-
 	return errs
 }

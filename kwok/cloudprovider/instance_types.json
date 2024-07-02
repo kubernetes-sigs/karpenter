@@ -13128,7 +13128,7 @@
         "name": "c-48x-arm64-windows",
         "offerings": [
             {
-                "Price": 0.9121554505728001,
+                "Price": 0.9121554505728,
                 "Available": true,
                 "Requirements": [
                     {
@@ -13148,7 +13148,7 @@
                 ]
             },
             {
-                "Price": 1.3030792151040003,
+                "Price": 1.303079215104,
                 "Available": true,
                 "Requirements": [
                     {
@@ -13168,7 +13168,7 @@
                 ]
             },
             {
-                "Price": 0.9121554505728001,
+                "Price": 0.9121554505728,
                 "Available": true,
                 "Requirements": [
                     {
@@ -13188,7 +13188,7 @@
                 ]
             },
             {
-                "Price": 1.3030792151040003,
+                "Price": 1.303079215104,
                 "Available": true,
                 "Requirements": [
                     {
@@ -13208,7 +13208,7 @@
                 ]
             },
             {
-                "Price": 0.9121554505728001,
+                "Price": 0.9121554505728,
                 "Available": true,
                 "Requirements": [
                     {
@@ -13228,7 +13228,7 @@
                 ]
             },
             {
-                "Price": 1.3030792151040003,
+                "Price": 1.303079215104,
                 "Available": true,
                 "Requirements": [
                     {
@@ -13248,7 +13248,7 @@
                 ]
             },
             {
-                "Price": 0.9121554505728001,
+                "Price": 0.9121554505728,
                 "Available": true,
                 "Requirements": [
                     {
@@ -13268,7 +13268,7 @@
                 ]
             },
             {
-                "Price": 1.3030792151040003,
+                "Price": 1.303079215104,
                 "Available": true,
                 "Requirements": [
                     {
@@ -16978,7 +16978,7 @@
         "name": "c-96x-arm64-linux",
         "offerings": [
             {
-                "Price": 1.8243109011456,
+                "Price": 1.8243109011456002,
                 "Available": true,
                 "Requirements": [
                     {
@@ -16998,7 +16998,7 @@
                 ]
             },
             {
-                "Price": 2.606158430208,
+                "Price": 2.6061584302080005,
                 "Available": true,
                 "Requirements": [
                     {
@@ -17018,7 +17018,7 @@
                 ]
             },
             {
-                "Price": 1.8243109011456,
+                "Price": 1.8243109011456002,
                 "Available": true,
                 "Requirements": [
                     {
@@ -17038,7 +17038,7 @@
                 ]
             },
             {
-                "Price": 2.606158430208,
+                "Price": 2.6061584302080005,
                 "Available": true,
                 "Requirements": [
                     {
@@ -17058,7 +17058,7 @@
                 ]
             },
             {
-                "Price": 1.8243109011456,
+                "Price": 1.8243109011456002,
                 "Available": true,
                 "Requirements": [
                     {
@@ -17078,7 +17078,7 @@
                 ]
             },
             {
-                "Price": 2.606158430208,
+                "Price": 2.6061584302080005,
                 "Available": true,
                 "Requirements": [
                     {
@@ -17098,7 +17098,7 @@
                 ]
             },
             {
-                "Price": 1.8243109011456,
+                "Price": 1.8243109011456002,
                 "Available": true,
                 "Requirements": [
                     {
@@ -17118,7 +17118,7 @@
                 ]
             },
             {
-                "Price": 2.606158430208,
+                "Price": 2.6061584302080005,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21003,7 +21003,7 @@
         "name": "c-192x-amd64-linux",
         "offerings": [
             {
-                "Price": 3.6486218022912,
+                "Price": 3.6486218022912005,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21023,7 +21023,7 @@
                 ]
             },
             {
-                "Price": 5.212316860416,
+                "Price": 5.212316860416001,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21043,7 +21043,7 @@
                 ]
             },
             {
-                "Price": 3.6486218022912,
+                "Price": 3.6486218022912005,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21063,7 +21063,7 @@
                 ]
             },
             {
-                "Price": 5.212316860416,
+                "Price": 5.212316860416001,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21083,7 +21083,7 @@
                 ]
             },
             {
-                "Price": 3.6486218022912,
+                "Price": 3.6486218022912005,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21103,7 +21103,7 @@
                 ]
             },
             {
-                "Price": 5.212316860416,
+                "Price": 5.212316860416001,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21123,7 +21123,7 @@
                 ]
             },
             {
-                "Price": 3.6486218022912,
+                "Price": 3.6486218022912005,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21143,7 +21143,7 @@
                 ]
             },
             {
-                "Price": 5.212316860416,
+                "Price": 5.212316860416001,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21178,7 +21178,7 @@
         "name": "c-192x-arm64-linux",
         "offerings": [
             {
-                "Price": 3.6486218022912005,
+                "Price": 3.6486218022912,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21198,7 +21198,7 @@
                 ]
             },
             {
-                "Price": 5.212316860416001,
+                "Price": 5.212316860416,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21218,7 +21218,7 @@
                 ]
             },
             {
-                "Price": 3.6486218022912005,
+                "Price": 3.6486218022912,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21238,7 +21238,7 @@
                 ]
             },
             {
-                "Price": 5.212316860416001,
+                "Price": 5.212316860416,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21258,7 +21258,7 @@
                 ]
             },
             {
-                "Price": 3.6486218022912005,
+                "Price": 3.6486218022912,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21278,7 +21278,7 @@
                 ]
             },
             {
-                "Price": 5.212316860416001,
+                "Price": 5.212316860416,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21298,7 +21298,7 @@
                 ]
             },
             {
-                "Price": 3.6486218022912005,
+                "Price": 3.6486218022912,
                 "Available": true,
                 "Requirements": [
                     {
@@ -21318,7 +21318,7 @@
                 ]
             },
             {
-                "Price": 5.212316860416001,
+                "Price": 5.212316860416,
                 "Available": true,
                 "Requirements": [
                     {
