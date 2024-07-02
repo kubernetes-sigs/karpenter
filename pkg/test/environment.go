@@ -20,6 +20,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/utils/env"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
@@ -80,8 +82,7 @@ func NewEnvironment(options ...functional.Option[EnvironmentOptions]) *Environme
 	ctx, cancel := context.WithCancel(context.Background())
 
 	os.Setenv(system.NamespaceEnvKey, "default")
-	// version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.29.x"), ".x", ".0", -1))
-	version := version.MustParseSemantic("1.30.0")
+	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.29.x"), ".x", ".0", -1))
 	environment := envtest.Environment{Scheme: scheme.Scheme, CRDs: opts.crds}
 	if version.Minor() >= 21 {
 		// PodAffinityNamespaceSelector is used for label selectors in pod affinities.  If the feature-gate is turned off,
