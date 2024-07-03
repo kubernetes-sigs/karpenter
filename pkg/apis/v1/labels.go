@@ -50,7 +50,7 @@ const (
 	NodePoolHashAnnotationKey             = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey      = apis.Group + "/nodepool-hash-version"
 	KubeletCompatabilityAnnotationKey     = apis.CompatabilityGroup + "/v1beta1-kubelet-conversion"
-	NodeTerminationTimestampAnnotationKey = apis.Group + "/node-termination-time"
+	NodeTerminationTimestampAnnotationKey = apis.Group + "/node-termination-timestamp"
 )
 
 // Karpenter specific finalizers

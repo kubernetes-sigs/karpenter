@@ -710,12 +710,20 @@ var _ = Describe("Termination", func() {
 			}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
 		})
 		It("should preemptively delete pods to satisfy their terminationGracePeriodSeconds", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			node.Annotations = map[string]string{
+				v1.NodeTerminationTimestampAnnotationKey: time.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339),
+			}
 			pod := test.Pod(test.PodOptions{
-				NodeName:                      node.Name,
-				ObjectMeta:                    metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+					OwnerReferences: defaultOwnerRefs,
+				},
 				TerminationGracePeriodSeconds: lo.ToPtr(int64(300)),
 			})
-			nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 60}
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pod)
 
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
@@ -725,21 +733,36 @@ var _ = Describe("Termination", func() {
 			ExpectDeleted(ctx, env.Client, pod)
 		})
 		It("should not delete pods if their terminationGracePeriodSeconds is less than the the node's remaining terminationGracePeriod", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			node.Annotations = map[string]string{
+				v1.NodeTerminationTimestampAnnotationKey: time.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339),
+			}
 			pod := test.Pod(test.PodOptions{
-				NodeName:                      node.Name,
-				ObjectMeta:                    metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+					OwnerReferences: defaultOwnerRefs,
+				},
 				TerminationGracePeriodSeconds: lo.ToPtr(int64(60)),
 			})
-			nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 			fakeClock.SetTime(time.Now())
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pod)
-
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			fakeClock.SetTime(time.Now().Add(90 * time.Second))
+
+			// expect pod still exists
+			fakeClock.Step(90 * time.Second)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 			ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectPodExists(ctx, env.Client, pod.Name, pod.Namespace)
+
+			// expect pod is now deleted
+			fakeClock.Step(175 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectSingletonReconciled(ctx, queue)
+			ExpectDeleted(ctx, env.Client, pod)
 		})
 	})
 	Context("Metrics", func() {

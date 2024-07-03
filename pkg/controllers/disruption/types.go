@@ -97,7 +97,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
 		// if the disruption class is not eventual or the nodepool has no TerminationGracePeriod, block disruption of pods
 		// if the error is anything but a PodBlockEvictionError, also block disruption of pods
-		if !state.IsPodBlockEvictionError(err) || nodePool.Spec.Disruption.TerminationGracePeriod == nil || disruptionClass != EventualDisruptionClass {
+		if !(state.IsPodBlockEvictionError(err) && node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass) {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
 			return nil, err
 		}

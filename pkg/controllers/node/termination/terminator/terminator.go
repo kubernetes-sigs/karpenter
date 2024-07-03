@@ -57,7 +57,7 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 	stored := node.DeepCopy()
 	// If the node already has the correct taint (key, value, and effect), do nothing.
 	if _, ok := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
-		return t.MatchTaint(&taint) && t.Value == taint.Value && t.Effect == taint.Effect
+		return t.MatchTaint(&taint)
 	}); !ok {
 		// Otherwise, if the taint key exists (but with a different value or effect), remove it.
 		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
@@ -77,11 +77,14 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 		if err := t.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
 			return err
 		}
-		log.FromContext(ctx).WithValues(
+		taintValues := []any{
 			"taint.Key", taint.Key,
-			"taint.Effect", taint.Effect,
 			"taint.Value", taint.Value,
-		).Info("tainted node")
+		}
+		if len(string(taint.Effect)) > 0 {
+			taintValues = append(taintValues, "taint.Effect", taint.Effect)
+		}
+		log.FromContext(ctx).WithValues(taintValues...).Info("tainted node")
 	}
 	return nil
 }
@@ -173,8 +176,8 @@ func (t *Terminator) DeleteExpiringPods(ctx context.Context, pods []*corev1.Pod,
 				"name", pod.Name,
 				"pod.terminationGracePeriodSeconds", *pod.Spec.TerminationGracePeriodSeconds,
 				"delete.gracePeriodSeconds", *gracePeriodSeconds,
-				"nodeclaim.expirationTime", *nodeGracePeriodTerminationTime,
-			).Info("deleting pod")
+				"nodeclaim.terminationTime", *nodeGracePeriodTerminationTime,
+			).V(1).Info("deleting pod")
 		}
 	}
 	return nil

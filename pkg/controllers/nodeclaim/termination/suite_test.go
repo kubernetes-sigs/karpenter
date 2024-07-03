@@ -41,7 +41,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
@@ -283,12 +282,13 @@ var _ = Describe("Termination", func() {
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
 
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.ObjectMeta.Annotations).To(BeNil())
 	})
 	It("should annotate the node if the NodeClaim has a terminationGracePeriod", func() {
-		nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
 
@@ -303,11 +303,11 @@ var _ = Describe("Termination", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
 		node = ExpectExists(ctx, env.Client, node)
 
-		_, annotationExists := node.ObjectMeta.Annotations[v1beta1.NodeTerminationTimestampAnnotationKey]
+		_, annotationExists := node.ObjectMeta.Annotations[v1.NodeTerminationTimestampAnnotationKey]
 		Expect(annotationExists).To(BeTrue())
 	})
 	It("should not change the annotation if the NodeClaim has a terminationGracePeriod and the annotation already exists", func() {
-		nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
 
@@ -317,7 +317,7 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		node.ObjectMeta.Annotations = map[string]string{
-			v1beta1.NodeTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
+			v1.NodeTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
 		}
 		ExpectApplied(ctx, env.Client, node)
 
@@ -326,7 +326,7 @@ var _ = Describe("Termination", func() {
 		node = ExpectExists(ctx, env.Client, node)
 
 		Expect(node.ObjectMeta.Annotations).To(Equal(map[string]string{
-			v1beta1.NodeTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
+			v1.NodeTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
 		}))
 	})
 })

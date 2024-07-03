@@ -28,7 +28,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -167,7 +166,7 @@ var _ = Describe("Eviction/Queue", func() {
 		It("should not delete a pod with no nodeTerminationTime", func() {
 			ExpectApplied(ctx, env.Client, pod)
 
-			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*v1.Pod{pod}, nil)).To(Succeed())
+			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, nil)).To(Succeed())
 			ExpectExists(ctx, env.Client, pod)
 			Expect(recorder.Calls("Disrupted")).To(Equal(0))
 		})
@@ -176,7 +175,7 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectApplied(ctx, env.Client, pod)
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 5)
-			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*v1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
+			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
 			ExpectExists(ctx, env.Client, pod)
 			Expect(recorder.Calls("Disrupted")).To(Equal(0))
 		})
@@ -185,7 +184,7 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectApplied(ctx, env.Client, pod)
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 1)
-			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*v1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
+			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
 			ExpectNotFound(ctx, env.Client, pod)
 			Expect(recorder.Calls("Disrupted")).To(Equal(1))
 		})

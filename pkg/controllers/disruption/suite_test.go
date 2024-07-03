@@ -42,7 +42,6 @@ import (
 
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -821,7 +820,7 @@ var _ = Describe("Candidate Filtering", func() {
 		pdbLimits, err = pdb.NewLimits(ctx, fakeClock, env.Client)
 		Expect(err).ToNot(HaveOccurred())
 	})
-	It("should not consider candidates that have do-not-disrupt pods scheduled and no termationGracePeriod", func() {
+	It("should not consider candidates that have do-not-disrupt pods scheduled and no terminationGracePeriod", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -927,21 +926,21 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
 	})
 	It("should consider candidates that have do-not-disrupt pods scheduled with a terminationGracePeriod set for eventual disruption", func() {
-		nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:       nodePool.Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
 					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey:   mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
 		})
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		pod := test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					v1beta1.DoNotDisruptAnnotationKey: "true",
+					v1.DoNotDisruptAnnotationKey: "true",
 				},
 			},
 		})
@@ -955,22 +954,54 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(c.NodeClaim).ToNot(BeNil())
 		Expect(c.Node).ToNot(BeNil())
 	})
-	It("should not consider candidates that have do-not-disrupt pods scheduled with a terminationGracePeriod set for graceful disruption", func() {
-		nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+	It("should consider candidates that have PDB-blocked pods scheduled with a terminationGracePeriod set for eventual disruption", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:       nodePool.Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
 					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey:   mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
 		})
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+		podLabels := map[string]string{"test": "value"}
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+			},
+		})
+		budget := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         podLabels,
+			MaxUnavailable: fromInt(0),
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.EventualDisruptionClass)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(c.NodeClaim).ToNot(BeNil())
+		Expect(c.Node).ToNot(BeNil())
+	})
+	It("should not consider candidates that have do-not-disrupt pods scheduled with a terminationGracePeriod set for graceful disruption", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+		})
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		pod := test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					v1beta1.DoNotDisruptAnnotationKey: "true",
+					v1.DoNotDisruptAnnotationKey: "true",
 				},
 			},
 		})
@@ -984,13 +1015,49 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err.Error()).To(Equal(fmt.Sprintf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod))))
 		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
 	})
+	It("should not consider candidates that have PDB-blocked pods scheduled with a terminationGracePeriod set for graceful disruption", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+		})
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+		podLabels := map[string]string{"test": "value"}
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+			},
+		})
+		budget := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         podLabels,
+			MaxUnavailable: fromInt(0),
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+		var err error
+		pdbLimits, err = pdb.NewLimits(ctx, fakeClock, env.Client)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err = disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`pdb %q prevents pod evictions`, client.ObjectKeyFromObject(budget))))
+		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: pdb %q prevents pod evictions`, client.ObjectKeyFromObject(budget)))).To(BeTrue())
+	})
 	It("should not consider candidates that have do-not-disrupt pods scheduled without a terminationGracePeriod set for eventual disruption", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:       nodePool.Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
 					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey:   mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
@@ -998,7 +1065,7 @@ var _ = Describe("Candidate Filtering", func() {
 		pod := test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					v1beta1.DoNotDisruptAnnotationKey: "true",
+					v1.DoNotDisruptAnnotationKey: "true",
 				},
 			},
 		})
@@ -1011,6 +1078,41 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(Equal(fmt.Sprintf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod))))
 		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
+	})
+	It("should not consider candidates that have PDB-blocked pods scheduled without a terminationGracePeriod set for eventual disruption", func() {
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+		})
+		podLabels := map[string]string{"test": "value"}
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: podLabels,
+			},
+		})
+		budget := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:         podLabels,
+			MaxUnavailable: fromInt(0),
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget)
+		ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+		var err error
+		pdbLimits, err = pdb.NewLimits(ctx, fakeClock, env.Client)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cluster.Nodes()).To(HaveLen(1))
+		_, err = disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.EventualDisruptionClass)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal(fmt.Sprintf(`pdb %q prevents pod evictions`, client.ObjectKeyFromObject(budget))))
+		Expect(recorder.DetectedEvent(fmt.Sprintf(`Cannot disrupt Node: pdb %q prevents pod evictions`, client.ObjectKeyFromObject(budget)))).To(BeTrue())
 	})
 	It("should consider candidates that have do-not-disrupt terminating pods", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -1233,17 +1335,17 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(c.Node).ToNot(BeNil())
 	})
 	It("should consider candidates that have fully blocking PDBs with a terminationGracePeriod set for eventual disruption", func() {
-		nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:       nodePool.Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
 					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey:   mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
 		})
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		podLabels := map[string]string{"test": "value"}
 		pod := test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1268,17 +1370,17 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(c.Node).ToNot(BeNil())
 	})
 	It("should not consider candidates that have fully blocking PDBs with a terminationGracePeriod set for graceful disruption", func() {
-		nodePool.Spec.Disruption.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:       nodePool.Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
 					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey:   mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
 		})
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		podLabels := map[string]string{"test": "value"}
 		pod := test.Pod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1306,9 +1408,9 @@ var _ = Describe("Candidate Filtering", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:       nodePool.Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
 					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey:   mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
