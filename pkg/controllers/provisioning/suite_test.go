@@ -259,7 +259,6 @@ var _ = Describe("Provisioning", func() {
 				},
 				Finalizers: []string{v1beta1.TerminationFinalizer},
 			},
-			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		},
 		)
 		ExpectApplied(ctx, env.Client, node, nodePool)

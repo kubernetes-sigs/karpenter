@@ -70,11 +70,7 @@ func Node(overrides ...NodeOptions) *v1.Node {
 // this check is done for tests that assume the nodeclaim is past registration but will not be reconciled by the NodeClaim Lifecycle controller
 func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 	taints := append(nodeClaim.Spec.StartupTaints, nodeClaim.Spec.Taints...)
-	if nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsFalse() &&
-		nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsFalse() {
-		taints = append(taints, v1beta1.UnregisteredNoExecuteTaint)
-	}
-	return Node(
+	n := Node(
 		NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels:      nodeClaim.Labels,
@@ -87,4 +83,6 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 			ProviderID:  nodeClaim.Status.ProviderID,
 		},
 	)
+	n.Spec.Taints = append(n.Spec.Taints, v1beta1.UnregisteredNoExecuteTaint)
+	return n
 }

@@ -64,9 +64,9 @@ var _ = Describe("Initialization", func() {
 			Taints:     []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -126,8 +126,8 @@ var _ = Describe("Initialization", func() {
 			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		node = ExpectExists(ctx, env.Client, node)
@@ -169,6 +169,7 @@ var _ = Describe("Initialization", func() {
 			ReadyStatus: v1.ConditionFalse,
 			Taints:      []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
@@ -219,8 +220,8 @@ var _ = Describe("Initialization", func() {
 			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -270,6 +271,7 @@ var _ = Describe("Initialization", func() {
 			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -338,6 +340,7 @@ var _ = Describe("Initialization", func() {
 			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Should add the startup taints to the node
@@ -410,6 +413,7 @@ var _ = Describe("Initialization", func() {
 			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Shouldn't consider the node ready since the startup taints still exist

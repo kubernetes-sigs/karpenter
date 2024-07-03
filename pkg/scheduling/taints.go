@@ -23,8 +23,6 @@ import (
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	cloudproviderapi "k8s.io/cloud-provider/api"
-
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 // KnownEphemeralTaints are taints that are expected to be added to a node while it's initializing
@@ -34,7 +32,6 @@ var KnownEphemeralTaints = []v1.Taint{
 	{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
 	{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
 	{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
-	v1beta1.UnregisteredNoExecuteTaint,
 }
 
 // Taints is a decorated alias type for []v1.Taint

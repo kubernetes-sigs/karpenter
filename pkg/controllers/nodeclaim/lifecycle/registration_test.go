@@ -110,6 +110,22 @@ var _ = Describe("Registration", func() {
 		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeRegisteredLabelKey, "true"))
 		Expect(node.Spec.Taints).To(Not(ContainElement(v1beta1.UnregisteredNoExecuteTaint)))
 	})
+	It("should fail registration if the karpenter.sh/unregistered taint is not present on the node", func() {
+		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1beta1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+	})
 	It("should sync the labels to the Node when the Node comes online", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{

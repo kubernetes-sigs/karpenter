@@ -61,9 +61,11 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for nodeclaim, %w", err)
 	}
-	if _, hasStartupTaint := lo.Find(node.Spec.Taints, func(t v1.Taint) bool {
+	_, hasStartupTaint := lo.Find(node.Spec.Taints, func(t v1.Taint) bool {
 		return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
-	}); !hasStartupTaint {
+	})
+	// needs label
+	if !hasStartupTaint {
 		return reconcile.Result{}, fmt.Errorf("missing required startup taint, %s", v1beta1.UnregisteredTaintKey)
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
