@@ -18,14 +18,15 @@ package disruption
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
@@ -51,8 +52,8 @@ func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 	if ok {
 		podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
 		if err != nil {
-			logging.FromContext(ctx).Errorf("parsing %s=%s from pod %s, %s",
-				corev1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p), err)
+			log.FromContext(ctx).Error(err, fmt.Sprintf("failed parsing %s=%s from pod %s",
+				v1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p)))
 		} else {
 			// the pod deletion disruptionCost is in [-2147483647, 2147483647]
 			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.

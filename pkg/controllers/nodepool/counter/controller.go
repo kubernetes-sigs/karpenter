@@ -18,6 +18,7 @@ package counter
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -30,7 +31,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,6 +45,16 @@ import (
 type Controller struct {
 	kubeClient client.Client
 	cluster    *state.Cluster
+}
+
+var ResourceNode = v1.ResourceName("nodes")
+
+var BaseResources = v1.ResourceList{
+	v1.ResourceCPU:              resource.MustParse("0"),
+	v1.ResourceMemory:           resource.MustParse("0"),
+	v1.ResourcePods:             resource.MustParse("0"),
+	v1.ResourceEphemeralStorage: resource.MustParse("0"),
+	ResourceNode:                resource.MustParse("0"),
 }
 
 // NewController is a constructor
@@ -77,7 +87,8 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 }
 
 func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) corev1.ResourceList {
-	var res corev1.ResourceList
+	res := BaseResources.DeepCopy()
+	nodeCount := 0
 	// Record all resources provisioned by the nodepools, we look at the cluster state nodes as their capacity
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our nodepool
 	// status immediately upon node creation instead of waiting for the node to become ready.
@@ -89,10 +100,12 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) core
 		}
 		if n.Labels()[ownerLabel] == ownerName {
 			res = resources.MergeInto(res, n.Capacity())
+			nodeCount += 1
 		}
 		return true
 	})
-	return functional.FilterMap(res, func(_ corev1.ResourceName, v resource.Quantity) bool { return !v.IsZero() })
+	res[ResourceNode] = resource.MustParse(fmt.Sprintf("%d", nodeCount))
+	return res
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

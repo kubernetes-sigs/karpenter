@@ -25,7 +25,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	. "knative.dev/pkg/logging/testing"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"

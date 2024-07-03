@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/ptr"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
@@ -82,7 +81,7 @@ var _ = Describe("Webhook/Validation", func() {
 		It("should fail to validate a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("*"),
+				Schedule: lo.ToPtr("*"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
@@ -90,7 +89,7 @@ var _ = Describe("Webhook/Validation", func() {
 		It("should fail to validate a schedule with less than 5 entries", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * "),
+				Schedule: lo.ToPtr("* * * * "),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
@@ -98,7 +97,7 @@ var _ = Describe("Webhook/Validation", func() {
 		It("should fail to validate a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 			}}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
@@ -112,7 +111,7 @@ var _ = Describe("Webhook/Validation", func() {
 		It("should succeed to validate a budget with both duration and cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(nodePool.Validate(ctx)).To(Succeed())
@@ -126,7 +125,7 @@ var _ = Describe("Webhook/Validation", func() {
 		It("should succeed to validate a budget with special cased crons", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("@annually"),
+				Schedule: lo.ToPtr("@annually"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(nodePool.Validate(ctx)).To(Succeed())
@@ -134,7 +133,7 @@ var _ = Describe("Webhook/Validation", func() {
 		It("should succeed when creating a budget with hours and minutes in duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("2h20m"))},
 			}}
 			Expect(nodePool.Validate(ctx)).To(Succeed())
@@ -143,12 +142,12 @@ var _ = Describe("Webhook/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("@annually"),
+					Schedule: lo.ToPtr("@annually"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("*"),
+					Schedule: lo.ToPtr("*"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
@@ -161,7 +160,7 @@ var _ = Describe("Webhook/Validation", func() {
 				},
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("* * * * *"),
+					Schedule: lo.ToPtr("* * * * *"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{

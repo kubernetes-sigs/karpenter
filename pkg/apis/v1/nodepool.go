@@ -31,7 +31,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/clock"
-	"knative.dev/pkg/ptr"
 )
 
 // NodePoolSpec is the top level nodepool specification. Nodepools
@@ -200,7 +199,12 @@ type ObjectMeta struct {
 // +kubebuilder:storageversion
 // +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter
 // +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClassRef.name",description=""
-// +kubebuilder:printcolumn:name="Weight",type="string",JSONPath=".spec.weight",priority=1,description=""
+// +kubebuilder:printcolumn:name="Nodes",type="string",JSONPath=".status.resources.nodes",description=""
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
+// +kubebuilder:printcolumn:name="Weight",type="integer",JSONPath=".spec.weight",priority=1,description=""
+// +kubebuilder:printcolumn:name="CPU",type="string",JSONPath=".status.resources.cpu",priority=1,description=""
+// +kubebuilder:printcolumn:name="Memory",type="string",JSONPath=".status.resources.memory",priority=1,description=""
 // +kubebuilder:subresource:status
 type NodePool struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -239,8 +243,8 @@ type NodePoolList struct {
 //  2. If two NodePools have the same weight, then the NodePool with the name later in the alphabet will come first
 func (nl *NodePoolList) OrderByWeight() {
 	sort.Slice(nl.Items, func(a, b int) bool {
-		weightA := ptr.Int32Value(nl.Items[a].Spec.Weight)
-		weightB := ptr.Int32Value(nl.Items[b].Spec.Weight)
+		weightA := lo.FromPtr(nl.Items[a].Spec.Weight)
+		weightB := lo.FromPtr(nl.Items[b].Spec.Weight)
 
 		if weightA == weightB {
 			// Order NodePools by name for a consistent ordering when sorting equal weight
