@@ -46,7 +46,7 @@ import (
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	nodepoolvalidation "sigs.k8s.io/karpenter/pkg/controllers/nodepool/validation"
-	"sigs.k8s.io/karpenter/pkg/controllers/orb/batcher"
+	"sigs.k8s.io/karpenter/pkg/controllers/orb/orbbatcher"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -62,10 +62,10 @@ func NewControllers(
 ) []controller.Controller {
 
 	cluster := state.NewCluster(clock, kubeClient)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster)
+	testQueue := orbbatcher.NewQueue()
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, testQueue)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
-	testQueue := batcher.NewQueue()
 
 	return []controller.Controller{
 		p, evictionQueue, disruptionQueue,
@@ -92,7 +92,7 @@ func NewControllers(
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewController(kubeClient, cloudProvider, recorder),
 		nodeclaimdisruption.NewController(clock, kubeClient, cluster, cloudProvider),
-		batcher.NewController(testQueue),
+		orbbatcher.NewController(testQueue),
 		leasegarbagecollection.NewController(kubeClient),
 		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),

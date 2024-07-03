@@ -52,6 +52,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/orb/orbbatcher"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -82,11 +83,12 @@ type Provisioner struct {
 	volumeTopology *scheduler.VolumeTopology
 	cluster        *state.Cluster
 	recorder       events.Recorder
+	queue          *orbbatcher.Queue
 	cm             *pretty.ChangeMonitor
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
-	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, queue *orbbatcher.Queue,
 ) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
@@ -95,6 +97,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
 		cluster:        cluster,
 		recorder:       recorder,
+		queue:          queue,
 		cm:             pretty.NewChangeMonitor(),
 	}
 	return p
@@ -330,7 +333,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 
 	// Logs the pending pods
 	// This feels like a lot of info, how do I cut it down?
-	//log.FromContext(ctx).Info("Pending pods", "pods", lo.ToSlicePtr(pods))
+	log.FromContext(ctx).Info("Pending pods", "pods", lo.ToSlicePtr(pods))
 	//pods[0].Marshal() I think this saves as protobuf intrinsically, using k8s api generated.pb.go
 	// k8s.io/api/core/v1/generated.proto
 
@@ -352,16 +355,11 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	//log.Info("daemonSetPods input to scheduler.NewScheduler", "daemonSetPods", daemonSetPods)
 	// log.Info("recorder input to scheduler.NewScheduler", "recorder", p.recorder)
 
-	// mountPath := "/data"         // Log directory
-	// logname := "hello_world.txt" // Log file name
-	// path := filepath.Join(mountPath, logname) // Log file path
-	//logline := fmt.Sprintf("Printing data (from %s) to the S3 bucket", logname) // Log payload
-
 	// if err := orbbatcher.saveToS3Bucket(logname, logline); err != nil {
 	// 	fmt.Println("Error saving to bucket:", err)
 	// }
-
-	//p.queue.set.Insert("Testing from the Provisioner")
+	// p.queue.Set.Insert("Testing from the Provisioner")
+	// fmt.Println("I'm printing the queue from Provisioner...", p.queue)
 
 	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }
