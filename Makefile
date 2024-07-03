@@ -55,13 +55,18 @@ e2etests: ## Run the e2e suite against your local cluster
 # Webhooks are currently not supported in the kwok provider.
 apply: verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	kubectl apply -f kwok/charts/crds
+	kubectl apply -f ./pv_and_pvc.yaml
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
 		--set controller.image.digest=$(IMG_DIGEST) \
 		--set-string controller.env[0].name=ENABLE_PROFILING \
-		--set-string controller.env[0].value=true
+		--set-string controller.env[0].value=true \
+		--set-string extraVolumes[0].name=persistent-storage \
+		--set-string extraVolumes[0].persistentVolumeClaim.claimName=s3-claim \
+		--set-string controller.extraVolumeMounts[0].name=persistent-storage \
+		--set-string controller.extraVolumeMounts[0].mountPath=/data
 
 delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)

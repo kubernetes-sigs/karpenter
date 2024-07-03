@@ -309,57 +309,10 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
 
-	// // Print the scheduling simulation inputs
-	// fmt.Printf("Inputs to scheduler.NewScheduler:\n")
-	// fmt.Printf("  ctx: %v\n", ctx)
-	// fmt.Printf("  kubeClient: %v\n", p.kubeClient)
-	// fmt.Printf("  nodePools: %v\n", lo.ToSlicePtr(nodePoolList.Items))
-	// fmt.Printf("  cluster: %v\n", p.cluster)
-	// fmt.Printf("  stateNodes: %v\n", stateNodes)
-	// fmt.Printf("  topology: %v\n", topology)
-	// fmt.Printf("  instanceTypes: %v\n", instanceTypes)
-	// fmt.Printf("  daemonSetPods: %v\n", daemonSetPods)
-	// //fmt.Printf("  recorder: %v\n", p.recorder)
-	//log.FromContext(ctx).Info("Context input to scheduler.NewScheduler", "ctx", ctx)
-	//log.FromContext(ctx).Info("kubeClient input to scheduler.NewScheduler", "kubeClient", p.kubeClient)
-	//log.FromContext(ctx).Info("nodePools input to scheduler.NewScheduler", "nodePools", lo.ToSlicePtr(nodePoolList.Items))
+	// Runs a few test logs that ORB should run. It queues as strings not pbs yet, and not to PV yet.
+	//p.queue.TestLogProvisioningScheduler(pods, stateNodes, instanceTypes)
 
-	// Deserialize and JSON marshal cluster
-	// clusterJSON, err := json.Marshal(p.cluster)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("marshaling cluster, %w", err)
-	// }
-	// fmt.Println(string(clusterJSON))
-
-	// Logs the pending pods
-	// This feels like a lot of info, how do I cut it down?
-	log.FromContext(ctx).Info("Pending pods", "pods", lo.ToSlicePtr(pods))
-	//pods[0].Marshal() I think this saves as protobuf intrinsically, using k8s api generated.pb.go
-	// k8s.io/api/core/v1/generated.proto
-
-	// Also only do this is pending pods has changed.
-
-	// Log the state nodes
-	// log.FromContext(ctx).Info("State nodes", "stateNodes", lo.ToSlicePtr(stateNodes))
-
-	// Log the topology
-	// log.FromContext(ctx).Info("Topology", "topology", topology)
-
-	// Log the instance types
-	// log.FromContext(ctx).Info("Instance types", "instanceTypes", instanceTypes)
-
-	// log.Info("cluster input to scheduler.NewScheduler", "cluster", p.cluster)
-	// log.Info("stateNodes input to scheduler.NewScheduler", "stateNodes", stateNodes[0])
-	//log.Info("topology input to scheduler.NewScheduler", "topology", topology)
-	// log.Info("instanceTypes input to scheduler.NewScheduler", "instanceTypes", instanceTypes["default"][0])
-	//log.Info("daemonSetPods input to scheduler.NewScheduler", "daemonSetPods", daemonSetPods)
-	// log.Info("recorder input to scheduler.NewScheduler", "recorder", p.recorder)
-
-	// if err := orbbatcher.saveToS3Bucket(logname, logline); err != nil {
-	// 	fmt.Println("Error saving to bucket:", err)
-	// }
-	// p.queue.Set.Insert("Testing from the Provisioner")
-	// fmt.Println("I'm printing the queue from Provisioner...", p.queue)
+	p.queue.LogProvisioningScheduler(pods, stateNodes, instanceTypes)
 
 	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }

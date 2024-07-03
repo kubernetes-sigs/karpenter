@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+// Sample entry, TODO: needs revision
+message ORBLogEntry {
+  string timestamp = 1;
+  string event_type = 2;
+  string message = 3;
+  repeated string tags = 4;
+}

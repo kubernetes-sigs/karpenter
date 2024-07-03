@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package karpenter;
+
+message Pod {
+    string name = 1;
+    string namespace = 2;
+    string uid = 3;
+    string creationTimestamp = 4;
+    repeated Label labels = 5;
+    repeated OwnerReference ownerReferences = 6;
+    PodSpec spec = 7;
+    PodStatus status = 8;
+
+    message Label {
+        string key = 1;
+        string value = 2;
+    }
+
+    message OwnerReference {
+        string apiVersion = 1;
+        string kind = 2;
+        string name = 3;
+        string uid = 4;
+        bool controller = 5;
+        bool blockOwnerDeletion = 6;
+    }
+
+    message PodSpec {
+        // Add fields for PodSpec as needed
+    }
+
+    message PodStatus {
+        string phase = 1;
+        repeated PodCondition conditions = 2;
+        string qosClass = 3;
+
+        message PodCondition {
+            string type = 1;
+            string status = 2;
+            string lastProbeTime = 3;
+            string lastTransitionTime = 4;
+            string reason = 5;
+            string message = 6;
+        }
+    }
+}
+
+// This will be a list of pods.
+message PendingPods {
+	repeated Pod pods = 1;
+}
