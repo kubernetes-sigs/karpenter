@@ -26,6 +26,7 @@ import (
 const (
 	DisruptionTaintKey             = apis.Group + "/disruption"
 	DisruptingNoScheduleTaintValue = "disrupting"
+	DisruptionCandidateTaintKey    = apis.Group + "/candidate"
 )
 
 var (
@@ -35,6 +36,12 @@ var (
 		Key:    DisruptionTaintKey,
 		Effect: v1.TaintEffectNoSchedule,
 		Value:  DisruptingNoScheduleTaintValue,
+	}
+
+	// DisruptionCandidatePreferNoScheduleTaint is applied to any disruption candidates (e.g. drifted, empty, etc).
+	DisruptionCandidatePreferNoScheduleTaint = v1.Taint{
+		Key:    DisruptionCandidateTaintKey,
+		Effect: v1.TaintEffectPreferNoSchedule,
 	}
 )
 
