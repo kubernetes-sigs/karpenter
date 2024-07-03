@@ -113,6 +113,7 @@ var _ = Describe("Disruption", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
 	})
 	It("should remove multiple disruption conditions simultaneously", func() {
+		cp.Drifted = ""
 		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
 
@@ -124,7 +125,7 @@ var _ = Describe("Disruption", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted)).To(BeNil())
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty)).To(BeNil())
 	})
 })
