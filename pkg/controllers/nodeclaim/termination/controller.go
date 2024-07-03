@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"knative.dev/pkg/logging"
-
 	"sigs.k8s.io/karpenter/pkg/utils/termination"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -136,13 +134,8 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1beta1.NodeClaim)
 		NodeClaimTerminationDuration.With(map[string]string{
 			metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
 		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
-		logging.FromContext(ctx).Infof("deleted nodeclaim")
 	}
 	return reconcile.Result{}, nil
-}
-
-func (*Controller) Name() string {
-	return ""
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

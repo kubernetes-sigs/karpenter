@@ -287,6 +287,160 @@ var _ = Describe("Provisioning", func() {
 			Expect(n.Node.Name).ToNot(Equal(node.Name))
 		}
 	})
+	It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when initcontainer comes first", func() {
+		if env.Version.Minor() < 29 {
+			Skip("Native Sidecar containers is only on by default starting in K8s version >= 1.29.x")
+		}
+
+		ExpectApplied(ctx, env.Client, test.NodePool())
+
+		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
+		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
+			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
+			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
+			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
+		})
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
+				Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
+			},
+			InitContainers: []v1.Container{
+				{
+					Resources: v1.ResourceRequirements{
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("4Gi")},
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("4Gi")},
+					},
+				},
+				{
+					RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+					Resources: v1.ResourceRequirements{
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
+					},
+				},
+			},
+		})
+
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node := ExpectScheduled(ctx, env.Client, pod)
+		ExpectResources(v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse("11"),
+			v1.ResourceMemory: resource.MustParse("5Gi"),
+		}, node.Status.Capacity)
+	})
+	It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when sidecar container comes first and init container resources are smaller than container resources", func() {
+		if env.Version.Minor() < 29 {
+			Skip("Native Sidecar containers is only on by default starting in K8s version >= 1.29.x")
+		}
+
+		ExpectApplied(ctx, env.Client, test.NodePool())
+
+		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
+		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
+			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
+			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
+			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
+		})
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
+				Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
+			},
+			InitContainers: []v1.Container{
+				{
+					RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+					Resources: v1.ResourceRequirements{
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
+					},
+				},
+				{
+					Resources: v1.ResourceRequirements{
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
+					},
+				},
+			},
+		})
+
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node := ExpectScheduled(ctx, env.Client, pod)
+		ExpectResources(v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse("11"),
+			v1.ResourceMemory: resource.MustParse("5Gi"),
+		}, node.Status.Capacity)
+	})
+	It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when sidecar container comes first and init container resources are bigger than container resources", func() {
+		if env.Version.Minor() < 29 {
+			Skip("Native Sidecar containers is only on by default starting in K8s version >= 1.29.x")
+		}
+
+		ExpectApplied(ctx, env.Client, test.NodePool())
+
+		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
+		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
+			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
+			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
+			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
+		})
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			ResourceRequirements: v1.ResourceRequirements{
+				Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
+				Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
+			},
+			InitContainers: []v1.Container{
+				{
+					RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+					Resources: v1.ResourceRequirements{
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
+					},
+				},
+				{
+					Resources: v1.ResourceRequirements{
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
+					},
+				},
+			},
+		})
+
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node := ExpectScheduled(ctx, env.Client, pod)
+		ExpectResources(v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse("11"),
+			v1.ResourceMemory: resource.MustParse("5Gi"),
+		}, node.Status.Capacity)
+	})
+
 	Context("Resource Limits", func() {
 		It("should not schedule when limits are exceeded", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(v1beta1.NodePool{
@@ -562,159 +716,6 @@ var _ = Describe("Provisioning", func() {
 			allocatable := instanceTypeMap[node.Labels[v1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
-		})
-		It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when initcontainer comes first", func() {
-			if env.Version.Minor() < 29 {
-				Skip("Native Sidecar containers is only on by default starting in K8s version >= 1.29.x")
-			}
-
-			ExpectApplied(ctx, env.Client, test.NodePool())
-
-			// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
-			// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
-			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
-			})
-			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
-			})
-			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
-			})
-
-			pod := test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
-					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
-				},
-				InitContainers: []v1.Container{
-					{
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("4Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("4Gi")},
-						},
-					},
-					{
-						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
-						},
-					},
-				},
-			})
-
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
-			ExpectResources(v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("11"),
-				v1.ResourceMemory: resource.MustParse("5Gi"),
-			}, node.Status.Capacity)
-		})
-		It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when sidecar container comes first and init container resources are smaller than container resources", func() {
-			if env.Version.Minor() < 29 {
-				Skip("Native Sidecar containers is only on by default starting in K8s version >= 1.29.x")
-			}
-
-			ExpectApplied(ctx, env.Client, test.NodePool())
-
-			// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
-			// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
-			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
-			})
-			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
-			})
-			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
-			})
-
-			pod := test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
-					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
-				},
-				InitContainers: []v1.Container{
-					{
-						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
-						},
-					},
-					{
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
-						},
-					},
-				},
-			})
-
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
-			ExpectResources(v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("11"),
-				v1.ResourceMemory: resource.MustParse("5Gi"),
-			}, node.Status.Capacity)
-		})
-		It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when sidecar container comes first and init container resources are bigger than container resources", func() {
-			if env.Version.Minor() < 29 {
-				Skip("Native Sidecar containers is only on by default starting in K8s version >= 1.29.x")
-			}
-
-			ExpectApplied(ctx, env.Client, test.NodePool())
-
-			// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
-			// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
-			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
-			})
-			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
-			})
-			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
-				v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
-			})
-
-			pod := test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
-					Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
-				},
-				InitContainers: []v1.Container{
-					{
-						RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
-						},
-					},
-					{
-						Resources: v1.ResourceRequirements{
-							Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
-							Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
-						},
-					},
-				},
-			})
-
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
-			ExpectResources(v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("11"),
-				v1.ResourceMemory: resource.MustParse("5Gi"),
-			}, node.Status.Capacity)
 		})
 		It("should not schedule if combined max resources are too large for any node", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
