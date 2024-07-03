@@ -64,8 +64,9 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 	_, hasStartupTaint := lo.Find(node.Spec.Taints, func(t v1.Taint) bool {
 		return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
 	})
-	// needs label
-	if !hasStartupTaint {
+	// check if sync succeeded but setting the registered status condition failed
+	// if sync succeeded, then the label will be present and the taint will be gone
+	if _, ok := node.Labels[v1beta1.NodeRegisteredLabelKey]; !ok && !hasStartupTaint {
 		return reconcile.Result{}, fmt.Errorf("missing required startup taint, %s", v1beta1.UnregisteredTaintKey)
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
