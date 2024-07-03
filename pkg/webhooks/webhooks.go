@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -54,12 +55,12 @@ const component = "webhook"
 
 var (
 	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
-		{Group: "karpenter.sh", Version: "v1beta1", Kind: "NodePool"}:  &v1beta1.NodePool{},
-		{Group: "karpenter.sh", Version: "v1beta1", Kind: "NodeClaim"}: &v1beta1.NodeClaim{},
+		object.GVK(&v1beta1.NodePool{}):  &v1beta1.NodePool{},
+		object.GVK(&v1beta1.NodeClaim{}): &v1beta1.NodeClaim{},
 	}
-	// Remove conversion webhooks once v1.1.0, and v1beta1 APIs are droped
+	// Remove conversion webhooks once v1.1.0, and v1beta1 APIs are dropped
 	ConversionResource = map[schema.GroupKind]conversion.GroupKindConversion{
-		{Group: "karpenter.sh", Kind: "NodePool"}: {
+		object.GVK(&v1beta1.NodePool{}).GroupKind(): {
 			DefinitionName: "nodepools.karpenter.sh",
 			HubVersion:     "v1",
 			Zygotes: map[string]conversion.ConvertibleObject{
@@ -67,7 +68,7 @@ var (
 				"v1beta1": &v1beta1.NodePool{},
 			},
 		},
-		{Group: "karpenter.sh", Kind: "NodeClaim"}: {
+		object.GVK(&v1beta1.NodeClaim{}).GroupKind(): {
 			DefinitionName: "nodeclaims.karpenter.sh",
 			HubVersion:     "v1",
 			Zygotes: map[string]conversion.ConvertibleObject{

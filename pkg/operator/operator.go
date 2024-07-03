@@ -250,7 +250,6 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 			defer wg.Done()
 			// Taking the first supported NodeClass to be the default NodeClass
 			ctx = injection.WithNodeClasses(ctx, cp.GetSupportedNodeClasses())
-			ctx = injection.WithClient(ctx, o.GetClient())
 			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()
 	}

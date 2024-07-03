@@ -22,6 +22,8 @@ import (
 	"knative.dev/pkg/apis"
 )
 
+// Since v1 is the hub conversion version, We will only need to implement conversion webhooks for v1
+
 func (in *NodePool) ConvertTo(_ context.Context, _ apis.Convertible) error { return nil }
 
 func (in *NodePool) ConvertFrom(_ context.Context, _ apis.Convertible) error { return nil }

@@ -18,12 +18,10 @@ package v1
 
 import (
 	"context"
-	"strings"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/apis"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -32,21 +30,7 @@ import (
 
 func (in *NodeClaim) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	v1beta1NC := to.(*v1beta1.NodeClaim)
-	v1beta1NC.Name = in.Name
-	v1beta1NC.UID = in.UID
-	v1beta1NC.Labels = in.Labels
-	v1beta1NC.Annotations = in.Annotations
-
-	// Updating the drift hash on the nodeclaim
-	v1OwnerNodePool, err := in.getV1NodePoolDriftHash(ctx)
-	if err != nil {
-		return err
-	}
-	temp := map[string]string{
-		NodePoolHashAnnotationKey:        v1OwnerNodePool.Annotations[NodePoolHashAnnotationKey],
-		NodePoolHashVersionAnnotationKey: v1OwnerNodePool.Annotations[NodePoolHashVersionAnnotationKey],
-	}
-	v1beta1NC.Annotations = lo.Assign(v1beta1NC.Annotations, temp)
+	v1beta1NC.ObjectMeta = in.ObjectMeta
 
 	in.Spec.convertTo(ctx, &v1beta1NC.Spec)
 	in.Status.convertTo((&v1beta1NC.Status))
@@ -93,27 +77,13 @@ func (in *NodeClaimStatus) convertTo(v1beta1nc *v1beta1.NodeClaimStatus) {
 
 func (in *NodeClaim) ConvertFrom(ctx context.Context, from apis.Convertible) error {
 	v1beta1NC := from.(*v1beta1.NodeClaim)
-	in.Name = v1beta1NC.Name
-	in.UID = v1beta1NC.UID
-	in.Labels = v1beta1NC.Labels
-	in.Annotations = v1beta1NC.Annotations
-
-	in.Spec.convertFrom(ctx, &v1beta1NC.Spec)
-	// Updating the drift hash on the nodeclaim
-	v1beta1OwnerNodePool, err := getV1Beta1NodePoolDriftHash(ctx, v1beta1NC)
-	if err != nil {
-		return err
-	}
-	in.Annotations = lo.Assign(in.Annotations, map[string]string{
-		NodePoolHashAnnotationKey:        v1beta1OwnerNodePool.Annotations[v1beta1.NodePoolHashAnnotationKey],
-		NodePoolHashVersionAnnotationKey: v1beta1OwnerNodePool.Annotations[v1beta1.NodePoolHashVersionAnnotationKey],
-	})
+	in.ObjectMeta = v1beta1NC.ObjectMeta
 
 	in.Status.convertFrom((&v1beta1NC.Status))
-	return nil
+	return in.Spec.convertFrom(ctx, &v1beta1NC.Spec)
 }
 
-func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec) {
+func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec) error {
 	in.Taints = v1beta1nc.Taints
 	in.StartupTaints = v1beta1nc.StartupTaints
 	in.Resources = ResourceRequirements(v1beta1nc.Resources)
@@ -128,16 +98,19 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 		}
 	})
 
-	nodeclasses := injection.GetNodeClasses(ctx)
-	if v1beta1nc.NodeClassRef != nil {
-		in.NodeClassRef = &NodeClassReference{
-			Name:  v1beta1nc.NodeClassRef.Name,
-			Kind:  lo.Ternary(v1beta1nc.NodeClassRef.Kind == "", nodeclasses[0].Kind, v1beta1nc.NodeClassRef.Kind),
-			Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", nodeclasses[0].Group, strings.Split(v1beta1nc.NodeClassRef.APIVersion, "/")[0]),
-		}
+	defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
+	nodeclassGroupVersion, err := schema.ParseGroupVersion(v1beta1nc.NodeClassRef.APIVersion)
+	if err != nil {
+		return err
+	}
+	in.NodeClassRef = &NodeClassReference{
+		Name:  v1beta1nc.NodeClassRef.Name,
+		Kind:  lo.Ternary(v1beta1nc.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1nc.NodeClassRef.Kind),
+		Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, nodeclassGroupVersion.Group),
 	}
 
 	// Need to implement Kubelet Conversion
+	return nil
 }
 
 func (in *NodeClaimStatus) convertFrom(v1beta1nc *v1beta1.NodeClaimStatus) {
@@ -147,26 +120,4 @@ func (in *NodeClaimStatus) convertFrom(v1beta1nc *v1beta1.NodeClaimStatus) {
 	in.Capacity = v1beta1nc.Capacity
 	in.Allocatable = v1beta1nc.Allocatable
 	in.Conditions = v1beta1nc.Conditions
-}
-
-func (in *NodeClaim) getV1NodePoolDriftHash(ctx context.Context) (*NodePool, error) {
-	client := injection.GetClient(ctx)
-
-	nodepool := &NodePool{}
-	err := client.Get(ctx, types.NamespacedName{Name: in.Labels[NodePoolLabelKey]}, nodepool)
-	if err != nil {
-		return nil, err
-	}
-	return nodepool, nil
-}
-
-func getV1Beta1NodePoolDriftHash(ctx context.Context, v1beta1nc *v1beta1.NodeClaim) (*v1beta1.NodePool, error) {
-	client := injection.GetClient(ctx)
-
-	nodepool := &v1beta1.NodePool{}
-	err := client.Get(ctx, types.NamespacedName{Name: v1beta1nc.Labels[NodePoolLabelKey]}, nodepool)
-	if err != nil {
-		return nil, err
-	}
-	return nodepool, nil
 }
