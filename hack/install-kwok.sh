@@ -4,18 +4,26 @@
 # depending on the UNINSTALL_KWOK environment variable. Set this to 
 # true if you want to delete the generated objects.
 
-# This will create 10 different partitions, so that Karpenter can scale 
-# to 10000 nodes, as each kwok controller can only reliably handle about
-# 1000 nodes.
+# This will create 1 partition (should be expanded to multiple once https://github.com/kubernetes-sigs/kwok/issues/1122 is fixed). 
+# The more partitions, the higher number of nodes that can be managed by kwok.
+# Note: Beware that when using kind clusters, the total compute of nodes is limited, so 
+# the higher number of partitions, the less effective each partition might be, since 
+# the controller pods could be competing for limited CPU.
+
 set -euo pipefail
 
 # get the latest version
 KWOK_REPO=kubernetes-sigs/kwok
-KWOK_LATEST_RELEASE=v0.3.0
+KWOK_RELEASE=v0.5.2
 # make a base directory for multi-base kustomization
 HOME_DIR=$(mktemp -d)
 BASE=${HOME_DIR}/base
 mkdir ${BASE}
+
+# make the alphabet, so that we can set be flexible to the number of allowed partitions (inferred max at 26)
+alphabet=( {a..z} )
+# set the number of partitions to 1. Currently only one partition is supported. 
+num_partitions=1
 
 # allow it to schedule to critical addons, but not schedule onto kwok nodes.
 cat <<EOF > "${BASE}/tolerate-all.yaml"
@@ -47,23 +55,23 @@ cat <<EOF > "${BASE}/kustomization.yaml"
   kind: Kustomization
   images:
   - name: registry.k8s.io/kwok/kwok
-    newTag: "${KWOK_LATEST_RELEASE}"
+    newTag: "${KWOK_RELEASE}"
   resources:
-  - "https://github.com/${KWOK_REPO}/kustomize/kwok?ref=${KWOK_LATEST_RELEASE}"
+  - "https://github.com/${KWOK_REPO}/kustomize/kwok?ref=${KWOK_RELEASE}"
   patches:
   - path: tolerate-all.yaml
 EOF
 
-# Define 10 different kwok controllers to handle large load
-for let in partition-a partition-b partition-c partition-d partition-e partition-f partition-g partition-h partition-i partition-j
+# Create num_partitions
+for ((i=0; i<num_partitions; i++))
 do
-  SUB_LET_DIR=$HOME_DIR/${let}
+  SUB_LET_DIR=$HOME_DIR/${alphabet[i]}
   mkdir ${SUB_LET_DIR}
 
   cat <<EOF > "${SUB_LET_DIR}/patch.yaml"
   - op: replace
     path: /spec/template/spec/containers/0/args/2
-    value: --manage-nodes-with-label-selector=kwok-partition=${let}
+    value: --manage-nodes-with-label-selector=kwok-partition=${alphabet[i]}
 EOF
 
 cat <<EOF > "${SUB_LET_DIR}/kustomization.yaml"
@@ -71,10 +79,10 @@ cat <<EOF > "${SUB_LET_DIR}/kustomization.yaml"
   kind: Kustomization
   images:
   - name: registry.k8s.io/kwok/kwok
-    newTag: "${KWOK_LATEST_RELEASE}"
+    newTag: "${KWOK_RELEASE}"
   resources:
   - ./../base
-  nameSuffix: -${let}
+  nameSuffix: -${alphabet[i]}
   patches:
     - path: ${SUB_LET_DIR}/patch.yaml
       target:
@@ -88,17 +96,13 @@ done
 
 cat <<EOF > "${HOME_DIR}/kustomization.yaml"
 resources:
-- ./partition-a
-- ./partition-b
-- ./partition-c
-- ./partition-d
-- ./partition-e
-- ./partition-f
-- ./partition-g
-- ./partition-h
-- ./partition-i
-- ./partition-j
 EOF
+
+# Create num_partitions
+for ((i=0; i<num_partitions; i++))
+do
+  echo " - ./${alphabet[i]}" >> "${HOME_DIR}/kustomization.yaml"
+done
 
 kubectl kustomize "${HOME_DIR}" > "${HOME_DIR}/kwok.yaml"
 

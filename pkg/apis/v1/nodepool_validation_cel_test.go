@@ -29,7 +29,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/pkg/ptr"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
@@ -107,7 +106,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("*"),
+				Schedule: lo.ToPtr("*"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -115,7 +114,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a schedule with less than 5 entries", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * "),
+				Schedule: lo.ToPtr("* * * * "),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -123,7 +122,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a negative duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("-20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -131,7 +130,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a seconds duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("30s"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -157,7 +156,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail when creating a budget with a cron but no duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
@@ -171,7 +170,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should succeed when creating a budget with both duration and cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -179,7 +178,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should succeed when creating a budget with hours and minutes in duration", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("* * * * *"),
+				Schedule: lo.ToPtr("* * * * *"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("2h20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -193,7 +192,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should succeed when creating a budget with special cased crons", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",
-				Schedule: ptr.String("@annually"),
+				Schedule: lo.ToPtr("@annually"),
 				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -202,12 +201,12 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("@annually"),
+					Schedule: lo.ToPtr("@annually"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("*"),
+					Schedule: lo.ToPtr("*"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				}}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
@@ -220,7 +219,7 @@ var _ = Describe("CEL/Validation", func() {
 				},
 				{
 					Nodes:    "10",
-					Schedule: ptr.String("* * * * *"),
+					Schedule: lo.ToPtr("* * * * *"),
 					Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
 				},
 				{
@@ -228,6 +227,43 @@ var _ = Describe("CEL/Validation", func() {
 				},
 			}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		DescribeTable("should succeed when creating a budget with valid reasons", func(reason DisruptionReason) {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				Reasons:  []DisruptionReason{reason},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		},
+			Entry("should allow disruption reason drifted", DisruptionReasonDrifted),
+			Entry("should allow disruption reason underutilized", DisruptionReasonUnderutilized),
+			Entry("should allow disruption reason empty", DisruptionReasonEmpty),
+		)
+
+		DescribeTable("should fail when creating a budget with invalid reasons", func(reason string) {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				Reasons:  []DisruptionReason{DisruptionReason(reason)},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		},
+			Entry("should not allow invalid reason", "invalid"),
+			Entry("should not allow expired disruption reason", "expired"),
+			Entry("should not allow empty reason", ""),
+		)
+
+		It("should allow setting multiple reasons", func() {
+			nodePool.Spec.Disruption.Budgets = []Budget{{
+				Nodes:    "10",
+				Schedule: lo.ToPtr("* * * * *"),
+				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
+				Reasons:  []DisruptionReason{DisruptionReasonDrifted, DisruptionReasonEmpty},
+			}}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 	})
 	Context("Taints", func() {
