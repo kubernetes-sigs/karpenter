@@ -67,7 +67,6 @@ func Node(overrides ...NodeOptions) *v1.Node {
 	}
 }
 
-// this check is done for tests that assume the nodeclaim is past registration but will not be reconciled by the NodeClaim Lifecycle controller
 func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 	n := Node(
 		NodeOptions{
@@ -76,7 +75,7 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 				Annotations: nodeClaim.Annotations,
 				Finalizers:  nodeClaim.Finalizers,
 			},
-			Taints:      append(nodeClaim.Spec.StartupTaints, nodeClaim.Spec.Taints...),
+			Taints:      append(nodeClaim.Spec.Taints, nodeClaim.Spec.StartupTaints...),
 			Capacity:    nodeClaim.Status.Capacity,
 			Allocatable: nodeClaim.Status.Allocatable,
 			ProviderID:  nodeClaim.Status.ProviderID,
