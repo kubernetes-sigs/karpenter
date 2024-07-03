@@ -110,7 +110,7 @@ var _ = Describe("Registration", func() {
 		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeRegisteredLabelKey, "true"))
 		Expect(node.Spec.Taints).To(Not(ContainElement(v1beta1.UnregisteredNoExecuteTaint)))
 	})
-	It("should fail registration if the karpenter.sh/unregistered taint is not present on the node", func() {
+	It("should fail registration if the karpenter.sh/unregistered taint is not present on the node and the node isn't labeled as registered", func() {
 		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
