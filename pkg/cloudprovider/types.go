@@ -24,9 +24,10 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/awslabs/operatorpkg/status"
+
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -62,8 +63,9 @@ type CloudProvider interface {
 	IsDrifted(context.Context, *v1beta1.NodeClaim) (DriftReason, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
-	// GetSupportedNodeClass returns the group, version, and kind of the CloudProvider NodeClass
-	GetSupportedNodeClasses() []schema.GroupVersionKind
+	// GetSupportedNodeClasses returns CloudProvider NodeClass that implements status.Object
+	// NOTE: It returns a list where the first element should be the default NodeClass
+	GetSupportedNodeClasses() []status.Object
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type

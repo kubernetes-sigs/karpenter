@@ -95,8 +95,8 @@ func NodeClassEventHandler(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
 		nodeClaimList := &v1beta1.NodeClaimList{}
 		if err := c.List(ctx, nodeClaimList, client.MatchingFields{
-			"spec.nodeClassRef.apiVersion": o.GetObjectKind().GroupVersionKind().GroupVersion().String(),
-			"spec.nodeClassRef.kind":       o.GetObjectKind().GroupVersionKind().Kind,
+			"spec.nodeClassRef.apiVersion": object.GVK(o).GroupVersion().String(),
+			"spec.nodeClassRef.kind":       object.GVK(o).Kind,
 			"spec.nodeClassRef.name":       o.GetName(),
 		}); err != nil {
 			return requests

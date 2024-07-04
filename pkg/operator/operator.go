@@ -204,6 +204,15 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "spec.nodeClassRef.name", func(o client.Object) []string {
 		return []string{o.(*v1beta1.NodeClaim).Spec.NodeClassRef.Name}
 	}), "failed to setup nodeclaim nodeclassref name indexer")
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodePool{}, "spec.template.spec.nodeClassRef.apiVersion", func(o client.Object) []string {
+		return []string{o.(*v1beta1.NodePool).Spec.Template.Spec.NodeClassRef.APIVersion}
+	}), "failed to setup nodepool nodeclassref apiversion indexer")
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodePool{}, "spec.template.spec.nodeClassRef.kind", func(o client.Object) []string {
+		return []string{o.(*v1beta1.NodePool).Spec.Template.Spec.NodeClassRef.Kind}
+	}), "failed to setup nodepool nodeclassref kind indexer")
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(o client.Object) []string {
+		return []string{o.(*v1beta1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
+	}), "failed to setup nodepool nodeclassref name indexer")
 
 	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
 		return lo.Ternary(mgr.GetCache().WaitForCacheSync(req.Context()), nil, fmt.Errorf("failed to sync caches"))
