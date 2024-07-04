@@ -22,6 +22,9 @@ import (
 	"reflect"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/patrickmn/go-cache"
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
@@ -78,6 +81,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	if nodeClaim.Status.ProviderID == "" {
 		return reconcile.Result{}, nil
 	}
+	stored := nodeClaim.DeepCopy()
 	// If we get an event before we should check for consistency checks, we ignore and wait
 	if lastTime, ok := c.lastScanned.Get(string(nodeClaim.UID)); ok {
 		if lastTime, ok := lastTime.(time.Time); ok {
@@ -95,18 +99,46 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	if err != nil {
 		return reconcile.Result{}, nodeclaimutil.IgnoreDuplicateNodeError(nodeclaimutil.IgnoreNodeNotFoundError(err))
 	}
+	if err = c.checkConsistency(ctx, nodeClaim, node); err != nil {
+		return reconcile.Result{}, err
+	}
+	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+		// We call Update() here rather than Patch() because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the status condition list
+		if err = c.kubeClient.Status().Update(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, err
+		}
+	}
+	return reconcile.Result{RequeueAfter: scanPeriod}, nil
+}
+
+func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1beta1.NodeClaim, node *v1.Node) error {
+	hasIssues := false
 	for _, check := range c.checks {
 		issues, err := check.Check(ctx, node, nodeClaim)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("checking node with %T, %w", check, err)
+			return fmt.Errorf("checking node with %T, %w", check, err)
 		}
 		for _, issue := range issues {
 			log.FromContext(ctx).Error(err, "consistency error")
 			consistencyErrors.With(prometheus.Labels{checkLabel: reflect.TypeOf(check).Elem().Name()}).Inc()
 			c.recorder.Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
 		}
+		hasIssues = hasIssues || (len(issues) > 0)
 	}
-	return reconcile.Result{RequeueAfter: scanPeriod}, nil
+	// If status condition for consistent state is not true and no issues are found, set the status condition to true
+	if !nodeClaim.StatusConditions().IsTrue(v1beta1.ConditionTypeConsistentStateFound) && !hasIssues {
+		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeConsistentStateFound)
+	}
+	// If there are issues then set the status condition for consistent state as false
+	if hasIssues {
+		nodeClaim.StatusConditions().SetFalse(v1beta1.ConditionTypeConsistentStateFound, "ConsistencyCheckFailed", "Consistency Check Failed")
+	}
+	return nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
