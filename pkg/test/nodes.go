@@ -68,7 +68,7 @@ func Node(overrides ...NodeOptions) *v1.Node {
 }
 
 func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
-	return Node(
+	n := Node(
 		NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels:      nodeClaim.Labels,
@@ -81,4 +81,6 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 			ProviderID:  nodeClaim.Status.ProviderID,
 		},
 	)
+	n.Spec.Taints = append(n.Spec.Taints, v1beta1.UnregisteredNoExecuteTaint)
+	return n
 }

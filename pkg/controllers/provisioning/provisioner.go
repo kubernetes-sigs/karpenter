@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
+
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -221,8 +223,8 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		return nil, fmt.Errorf("listing node pools, %w", err)
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
-		if err := n.RuntimeValidate(); err != nil {
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.Name)).Error(err, "nodepool failed validation")
+		if !n.StatusConditions().IsTrue(status.ConditionReady) {
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.Name)).Error(err, "nodePool not ready")
 			return false
 		}
 		return n.DeletionTimestamp.IsZero()

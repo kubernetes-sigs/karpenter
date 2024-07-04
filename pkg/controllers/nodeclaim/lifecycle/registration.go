@@ -61,9 +61,17 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeCla
 		}
 		return reconcile.Result{}, fmt.Errorf("getting node for nodeclaim, %w", err)
 	}
+	_, hasStartupTaint := lo.Find(node.Spec.Taints, func(t v1.Taint) bool {
+		return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
+	})
+	// check if sync succeeded but setting the registered status condition failed
+	// if sync succeeded, then the label will be present and the taint will be gone
+	if _, ok := node.Labels[v1beta1.NodeRegisteredLabelKey]; !ok && !hasStartupTaint {
+		return reconcile.Result{}, fmt.Errorf("missing required startup taint, %s", v1beta1.UnregisteredTaintKey)
+	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
+		return reconcile.Result{}, err
 	}
 	log.FromContext(ctx).Info("registered nodeclaim")
 	nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
@@ -88,12 +96,16 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1beta1.NodeClai
 	// Sync all taints inside NodeClaim into the Node taints
 	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.Taints)
 	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.StartupTaints)
+	// Remove karpenter.sh/unregistered taint
+	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
+		return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint)
+	})
 	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels, map[string]string{
 		v1beta1.NodeRegisteredLabelKey: "true",
 	})
 	if !equality.Semantic.DeepEqual(stored, node) {
-		if err := r.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
-			return fmt.Errorf("syncing node labels, %w", err)
+		if err := r.kubeClient.Update(ctx, node); err != nil {
+			return fmt.Errorf("syncing node, %w", err)
 		}
 	}
 	return nil
