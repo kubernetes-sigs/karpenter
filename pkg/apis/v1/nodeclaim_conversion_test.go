@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -28,6 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -91,14 +94,11 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 			},
 		}
 		Expect(env.Client.Create(ctx, v1nodepool)).To(Succeed())
-		cloudProvider.NodeClassGroupVersionKind = []schema.GroupVersionKind{
-			{
-				Group:   "fake-cloudprovider-group",
-				Version: "fake-cloudprovider-version",
-				Kind:    "fake-cloudprovider-kind",
-			},
-		}
-		ctx = injection.WithNodeClasses(ctx, cloudProvider.GetSupportedNodeClasses())
+		gvk := lo.Map(cloudProvider.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
+			return object.GVK(nc)
+		})
+		cloudProvider.NodeClassGroupVersionKind = gvk
+		ctx = injection.WithNodeClasses(ctx, gvk)
 	})
 
 	It("should convert v1 nodeclaim metadata", func() {
@@ -189,9 +189,9 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 		Context("NodeClassRef", func() {
 			It("should convert v1 nodeclaim template nodeClassRef", func() {
 				v1nodeclaim.Spec.NodeClassRef = &NodeClassReference{
-					Kind:  "fake-cloudprovider-kind",
+					Kind:  object.GVK(&v1alpha1.TestNodeClass{}).Kind,
 					Name:  "nodeclass-test",
-					Group: "fake-cloudprovider-group",
+					Group: object.GVK(&v1alpha1.TestNodeClass{}).Group,
 				}
 				Expect(v1nodeclaim.ConvertTo(ctx, v1beta1nodeclaim)).To(Succeed())
 				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(v1nodeclaim.Spec.NodeClassRef.Kind))
@@ -316,14 +316,11 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 			},
 		}
 		Expect(env.Client.Create(ctx, v1beta1nodepool)).To(Succeed())
-		cloudProvider.NodeClassGroupVersionKind = []schema.GroupVersionKind{
-			{
-				Group:   "fake-cloudprovider-group",
-				Version: "fake-cloudprovider-version",
-				Kind:    "fake-cloudprovider-kind",
-			},
-		}
-		ctx = injection.WithNodeClasses(ctx, cloudProvider.GetSupportedNodeClasses())
+		gvk := lo.Map(cloudProvider.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
+			return object.GVK(nc)
+		})
+		cloudProvider.NodeClassGroupVersionKind = gvk
+		ctx = injection.WithNodeClasses(ctx, gvk)
 	})
 
 	It("should convert v1beta1 nodeclaim metadata", func() {

@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	"sigs.k8s.io/karpenter/pkg/utils/node"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -47,7 +49,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
 })
 
 var _ = AfterSuite(func() {

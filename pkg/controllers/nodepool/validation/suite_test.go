@@ -22,6 +22,8 @@ import (
 	"strings"
 	"testing"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	"github.com/Pallinder/go-randomdata"
 	v1 "k8s.io/api/core/v1"
 
@@ -50,7 +52,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	nodePoolValidationController = NewController(env.Client)
 })
 var _ = AfterEach(func() {

@@ -240,7 +240,12 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.Set[string]{}
+	var notReadyNodePools []string
 	for _, nodePool := range nodePoolList.Items {
+		if !nodePool.StatusConditions().IsTrue(status.ConditionReady) {
+			notReadyNodePools = append(notReadyNodePools, nodePool.Name)
+			continue
+		}
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, lo.ToPtr(nodePool))
 		if err != nil {
@@ -290,7 +295,9 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			}
 		}
 	}
-
+	if len(notReadyNodePools) > 0 {
+		log.FromContext(ctx).WithValues("nodePools", nodePoolList).Info("skipped nodePools, not ready")
+	}
 	// inject topology constraints
 	pods = p.injectVolumeTopologyRequirements(ctx, pods)
 

@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -62,7 +64,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()

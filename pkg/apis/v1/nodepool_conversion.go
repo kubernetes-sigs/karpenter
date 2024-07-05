@@ -19,6 +19,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -105,7 +106,8 @@ func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.N
 		v1beta1kubelet := &v1beta1.KubeletConfiguration{}
 		err := json.Unmarshal([]byte(kubeletAnnotation), v1beta1kubelet)
 		if err != nil {
-			return err
+			return fmt.Errorf("unmarshaling kubelet config annotation, %w", err)
+
 		}
 		v1beta1np.Spec.Kubelet = v1beta1kubelet
 	}
@@ -187,7 +189,7 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 
 	kubelet, err := json.Marshal(v1beta1np.Spec.Kubelet)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("marshaling kubelet config annotation, %w", err)
 	}
 	return string(kubelet), nil
 }

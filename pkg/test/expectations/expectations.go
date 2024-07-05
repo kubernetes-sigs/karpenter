@@ -26,6 +26,8 @@ import (
 	"sync"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
@@ -230,6 +232,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.PersistentVolume{},
 		&storagev1.StorageClass{},
 		&v1beta1.NodePool{},
+		&v1alpha1.TestNodeClass{},
 		&v1beta1.NodeClaim{},
 	} {
 		for _, namespace := range namespaces.Items {

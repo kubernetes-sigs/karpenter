@@ -26,6 +26,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/status"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
@@ -204,6 +208,15 @@ func NewOperator() (context.Context, *Operator) {
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "spec.nodeClassRef.name", func(o client.Object) []string {
 		return []string{o.(*v1beta1.NodeClaim).Spec.NodeClassRef.Name}
 	}), "failed to setup nodeclaim nodeclassref name indexer")
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodePool{}, "spec.template.spec.nodeClassRef.apiVersion", func(o client.Object) []string {
+		return []string{o.(*v1beta1.NodePool).Spec.Template.Spec.NodeClassRef.APIVersion}
+	}), "failed to setup nodepool nodeclassref apiversion indexer")
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodePool{}, "spec.template.spec.nodeClassRef.kind", func(o client.Object) []string {
+		return []string{o.(*v1beta1.NodePool).Spec.Template.Spec.NodeClassRef.Kind}
+	}), "failed to setup nodepool nodeclassref kind indexer")
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(o client.Object) []string {
+		return []string{o.(*v1beta1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
+	}), "failed to setup nodepool nodeclassref name indexer")
 
 	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
 		return lo.Ternary(mgr.GetCache().WaitForCacheSync(req.Context()), nil, fmt.Errorf("failed to sync caches"))
@@ -249,7 +262,10 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 		go func() {
 			defer wg.Done()
 			// Taking the first supported NodeClass to be the default NodeClass
-			ctx = injection.WithNodeClasses(ctx, cp.GetSupportedNodeClasses())
+			gvk := lo.Map(cp.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
+				return object.GVK(nc)
+			})
+			ctx = injection.WithNodeClasses(ctx, gvk)
 			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()
 	}

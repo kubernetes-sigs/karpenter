@@ -19,6 +19,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -67,7 +68,7 @@ func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeC
 		v1beta1kubelet := &v1beta1.KubeletConfiguration{}
 		err := json.Unmarshal([]byte(kubeletAnnotation), v1beta1kubelet)
 		if err != nil {
-			return err
+			return fmt.Errorf("unmarshaling kubelet config annotation, %w", err)
 		}
 		v1beta1nc.Kubelet = v1beta1kubelet
 	}
@@ -125,7 +126,7 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 
 	kubelet, err := json.Marshal(v1beta1nc.Kubelet)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("marshaling kubelet config annotation, %w", err)
 	}
 	return string(kubelet), nil
 }

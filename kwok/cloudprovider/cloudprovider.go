@@ -23,14 +23,13 @@ import (
 	"math/rand"
 	"strings"
 
-	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/status"
 
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -124,8 +123,8 @@ func (c CloudProvider) Name() string {
 	return "kwok"
 }
 
-func (c CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
-	return []schema.GroupVersionKind{object.GVK(&v1alpha1.KWOKNodeClass{})}
+func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
+	return []status.Object{&v1alpha1.KWOKNodeClass{}}
 }
 
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {

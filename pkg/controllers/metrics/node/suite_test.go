@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	clock "k8s.io/utils/clock/testing"
 
 	v1 "k8s.io/api/core/v1"
@@ -59,7 +61,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
