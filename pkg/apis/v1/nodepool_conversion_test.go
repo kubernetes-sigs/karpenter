@@ -17,6 +17,7 @@ limitations under the License.
 package v1_test
 
 import (
+	"encoding/json"
 	"time"
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -80,6 +81,7 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 	It("should convert v1 nodepool metadata", func() {
 		v1nodepool.ObjectMeta = test.ObjectMeta()
 		Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+		v1beta1nodepool.Annotations = map[string]string{KubeletCompatabilityAnnotationKey: "null"}
 		Expect(v1beta1nodepool.ObjectMeta).To(BeEquivalentTo(v1nodepool.ObjectMeta))
 	})
 	Context("NodePool Spec", func() {
@@ -318,6 +320,7 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 	It("should convert v1beta1 nodepool metadata", func() {
 		v1beta1nodepool.ObjectMeta = test.ObjectMeta()
 		Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+		v1beta1nodepool.Annotations = map[string]string{KubeletCompatabilityAnnotationKey: "null"}
 		Expect(v1nodepool.ObjectMeta).To(BeEquivalentTo(v1beta1nodepool.ObjectMeta))
 	})
 	Context("NodePool Spec", func() {
@@ -417,42 +420,42 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 					Expect(v1nodepool.Spec.Template.Spec.Requirements[i].MinValues).To(Equal(v1beta1nodepool.Spec.Template.Spec.Requirements[i].MinValues))
 				}
 			})
-			// It("should convert v1 nodepool template kubelet", func() {
-			// 	v1beta1nodepool.Spec.Template.Spec.Kubelet = &v1beta1.KubeletConfiguration{
-			// 		ClusterDNS:                  []string{"test-cluster-dns"},
-			// 		MaxPods:                     lo.ToPtr(int32(9383)),
-			// 		PodsPerCore:                 lo.ToPtr(int32(9334283)),
-			// 		SystemReserved:              map[string]string{"system-key": "reserved"},
-			// 		KubeReserved:                map[string]string{"kube-key": "reserved"},
-			// 		EvictionHard:                map[string]string{"eviction-key": "eviction"},
-			// 		EvictionSoft:                map[string]string{"eviction-key": "eviction"},
-			// 		EvictionSoftGracePeriod:     map[string]metav1.Duration{"test-soft-grace": {Duration: time.Hour}},
-			// 		EvictionMaxPodGracePeriod:   lo.ToPtr(int32(382902)),
-			// 		ImageGCHighThresholdPercent: lo.ToPtr(int32(382902)),
-			// 		CPUCFSQuota:                 lo.ToPtr(false),
-			// 	}
-			// 	Expect(v1nodepool.Annotations).To(BeNil())
-			// 	Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
-			// 	kubelet := &v1beta1.KubeletConfiguration{}
-			// 	kubeletString, found := v1nodepool.Annotations[V1Beta1KubeletConfiguration]
-			// 	Expect(found).To(BeTrue())
-			// 	err := json.Unmarshal([]byte(kubeletString), kubelet)
-			// 	Expect(err).To(BeNil())
-			// 	Expect(kubelet.ClusterDNS).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.ClusterDNS))
-			// 	Expect(lo.FromPtr(kubelet.MaxPods)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.MaxPods)))
-			// 	Expect(lo.FromPtr(kubelet.PodsPerCore)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.PodsPerCore)))
-			// 	Expect(lo.FromPtr(kubelet.EvictionMaxPodGracePeriod)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.EvictionMaxPodGracePeriod)))
-			// 	Expect(lo.FromPtr(kubelet.ImageGCHighThresholdPercent)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.ImageGCHighThresholdPercent)))
-			// 	Expect(lo.FromPtr(kubelet.ImageGCHighThresholdPercent)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.ImageGCHighThresholdPercent)))
-			// 	Expect(lo.FromPtr(kubelet.ImageGCHighThresholdPercent)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.ImageGCHighThresholdPercent)))
-			// 	Expect(lo.FromPtr(kubelet.ImageGCHighThresholdPercent)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.ImageGCHighThresholdPercent)))
-			// 	Expect(kubelet.SystemReserved).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.SystemReserved))
-			// 	Expect(kubelet.KubeReserved).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.KubeReserved))
-			// 	Expect(kubelet.EvictionHard).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.EvictionHard))
-			// 	Expect(kubelet.EvictionSoft).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.EvictionSoft))
-			// 	Expect(kubelet.EvictionSoftGracePeriod).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.EvictionSoftGracePeriod))
-			// 	Expect(lo.FromPtr(kubelet.CPUCFSQuota)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.CPUCFSQuota)))
-			// })
+			It("should convert v1 nodepool template kubelet", func() {
+				v1beta1nodepool.Spec.Template.Spec.Kubelet = &v1beta1.KubeletConfiguration{
+					ClusterDNS:                  []string{"test-cluster-dns"},
+					MaxPods:                     lo.ToPtr(int32(9383)),
+					PodsPerCore:                 lo.ToPtr(int32(9334283)),
+					SystemReserved:              map[string]string{"system-key": "reserved"},
+					KubeReserved:                map[string]string{"kube-key": "reserved"},
+					EvictionHard:                map[string]string{"eviction-key": "eviction"},
+					EvictionSoft:                map[string]string{"eviction-key": "eviction"},
+					EvictionSoftGracePeriod:     map[string]metav1.Duration{"test-soft-grace": {Duration: time.Hour}},
+					EvictionMaxPodGracePeriod:   lo.ToPtr(int32(382902)),
+					ImageGCHighThresholdPercent: lo.ToPtr(int32(382902)),
+					CPUCFSQuota:                 lo.ToPtr(false),
+				}
+				Expect(v1nodepool.Annotations).To(BeNil())
+				Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+				kubelet := &v1beta1.KubeletConfiguration{}
+				kubeletString, found := v1nodepool.Annotations[KubeletCompatabilityAnnotationKey]
+				Expect(found).To(BeTrue())
+				err := json.Unmarshal([]byte(kubeletString), kubelet)
+				Expect(err).To(BeNil())
+				Expect(kubelet.ClusterDNS).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.ClusterDNS))
+				Expect(lo.FromPtr(kubelet.MaxPods)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.MaxPods)))
+				Expect(lo.FromPtr(kubelet.PodsPerCore)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.PodsPerCore)))
+				Expect(lo.FromPtr(kubelet.EvictionMaxPodGracePeriod)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.EvictionMaxPodGracePeriod)))
+				Expect(lo.FromPtr(kubelet.ImageGCHighThresholdPercent)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.ImageGCHighThresholdPercent)))
+				Expect(lo.FromPtr(kubelet.ImageGCHighThresholdPercent)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.ImageGCHighThresholdPercent)))
+				Expect(lo.FromPtr(kubelet.ImageGCHighThresholdPercent)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.ImageGCHighThresholdPercent)))
+				Expect(lo.FromPtr(kubelet.ImageGCHighThresholdPercent)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.ImageGCHighThresholdPercent)))
+				Expect(kubelet.SystemReserved).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.SystemReserved))
+				Expect(kubelet.KubeReserved).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.KubeReserved))
+				Expect(kubelet.EvictionHard).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.EvictionHard))
+				Expect(kubelet.EvictionSoft).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.EvictionSoft))
+				Expect(kubelet.EvictionSoftGracePeriod).To(Equal(v1beta1nodepool.Spec.Template.Spec.Kubelet.EvictionSoftGracePeriod))
+				Expect(lo.FromPtr(kubelet.CPUCFSQuota)).To(Equal(lo.FromPtr(v1beta1nodepool.Spec.Template.Spec.Kubelet.CPUCFSQuota)))
+			})
 			Context("NodeClassRef", func() {
 				It("should convert v1beta1 nodepool template nodeClassRef", func() {
 					v1beta1nodepool.Spec.Template.Spec.NodeClassRef = &v1beta1.NodeClassReference{

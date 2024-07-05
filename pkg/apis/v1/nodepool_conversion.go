@@ -18,6 +18,8 @@ package v1
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -34,18 +36,18 @@ import (
 func (in *NodePool) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	v1beta1NP := to.(*v1beta1.NodePool)
 	v1beta1NP.ObjectMeta = in.ObjectMeta
-	in.Spec.convertTo(ctx, &v1beta1NP.Spec)
 
 	// Convert v1 status
 	v1beta1NP.Status.Resources = in.Status.Resources
-	return nil
+	v1beta1NP.Status.Conditions = in.Status.Conditions
+	return in.Spec.convertTo(ctx, &v1beta1NP.Spec, in.Annotations[KubeletCompatabilityAnnotationKey])
 }
 
-func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) {
+func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec, kubeletAnnotation string) error {
 	v1beta1np.Weight = in.Weight
 	v1beta1np.Limits = v1beta1.Limits(in.Limits)
 	in.Disruption.convertTo(&v1beta1np.Disruption)
-	in.Template.convertTo(ctx, &v1beta1np.Template)
+	return in.Template.convertTo(ctx, &v1beta1np.Template, kubeletAnnotation)
 }
 
 func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
@@ -64,7 +66,7 @@ func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
 	})
 }
 
-func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate) {
+func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate, kubeletAnnotation string) error {
 	v1beta1np.ObjectMeta = v1beta1.ObjectMeta(in.ObjectMeta)
 	v1beta1np.Spec.Taints = in.Spec.Taints
 	v1beta1np.Spec.StartupTaints = in.Spec.StartupTaints
@@ -100,7 +102,16 @@ func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.N
 		APIVersion: lo.Ternary(found, matchingNodeClass.GroupVersion().String(), ""),
 	}
 
-	// Need to implement Kubelet Conversion
+	if kubeletAnnotation != "" {
+		v1beta1kubelet := &v1beta1.KubeletConfiguration{}
+		err := json.Unmarshal([]byte(kubeletAnnotation), v1beta1kubelet)
+		if err != nil {
+			return fmt.Errorf("unmarshaling kubelet config annotation, %w", err)
+
+		}
+		v1beta1np.Spec.Kubelet = v1beta1kubelet
+	}
+	return nil
 }
 
 // Convert v1beta1 NodePool to V1 NodePool
@@ -110,11 +121,17 @@ func (in *NodePool) ConvertFrom(ctx context.Context, v1beta1np apis.Convertible)
 
 	// Convert v1beta1 status
 	in.Status.Resources = v1beta1NP.Status.Resources
+	in.Status.Conditions = v1beta1NP.Status.Conditions
 
-	return in.Spec.convertFrom(ctx, &v1beta1NP.Spec)
+	kubeletAnnotation, err := in.Spec.convertFrom(ctx, &v1beta1NP.Spec)
+	if err != nil {
+		return err
+	}
+	in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatabilityAnnotationKey: kubeletAnnotation})
+	return nil
 }
 
-func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) error {
+func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) (string, error) {
 	in.Weight = v1beta1np.Weight
 	in.Limits = Limits(v1beta1np.Limits)
 	in.Disruption.convertFrom(&v1beta1np.Disruption)
@@ -137,7 +154,7 @@ func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
 	})
 }
 
-func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate) error {
+func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate) (string, error) {
 	in.ObjectMeta = ObjectMeta(v1beta1np.ObjectMeta)
 	in.Spec.Taints = v1beta1np.Spec.Taints
 	in.Spec.StartupTaints = v1beta1np.Spec.StartupTaints
@@ -162,13 +179,17 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 	defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
 	nodeclassGroupVersion, err := schema.ParseGroupVersion(v1beta1np.Spec.NodeClassRef.APIVersion)
 	if err != nil {
-		return err
+		return "", err
 	}
 	in.Spec.NodeClassRef = &NodeClassReference{
 		Name:  v1beta1np.Spec.NodeClassRef.Name,
 		Kind:  lo.Ternary(v1beta1np.Spec.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1np.Spec.NodeClassRef.Kind),
 		Group: lo.Ternary(v1beta1np.Spec.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, nodeclassGroupVersion.Group),
 	}
-	// Need to implement Kubelet Conversion
-	return nil
+
+	kubelet, err := json.Marshal(v1beta1np.Spec.Kubelet)
+	if err != nil {
+		return "", fmt.Errorf("marshaling kubelet config annotation, %w", err)
+	}
+	return string(kubelet), nil
 }

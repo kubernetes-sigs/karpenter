@@ -49,6 +49,7 @@ const (
 	ManagedByAnnotationKey             = apis.Group + "/managed-by"
 	NodePoolHashAnnotationKey          = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey   = apis.Group + "/nodepool-hash-version"
+	KubeletCompatabilityAnnotationKey  = apis.CompatabilityGroup + "/v1beta1-kubelet-conversion"
 )
 
 // Karpenter specific finalizers

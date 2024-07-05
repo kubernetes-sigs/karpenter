@@ -18,6 +18,8 @@ package v1
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -32,12 +34,11 @@ func (in *NodeClaim) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	v1beta1NC := to.(*v1beta1.NodeClaim)
 	v1beta1NC.ObjectMeta = in.ObjectMeta
 
-	in.Spec.convertTo(ctx, &v1beta1NC.Spec)
 	in.Status.convertTo((&v1beta1NC.Status))
-	return nil
+	return in.Spec.convertTo(ctx, &v1beta1NC.Spec, in.Annotations[KubeletCompatabilityAnnotationKey])
 }
 
-func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec) {
+func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec, kubeletAnnotation string) error {
 	v1beta1nc.Taints = in.Taints
 	v1beta1nc.StartupTaints = in.StartupTaints
 	v1beta1nc.Resources = v1beta1.ResourceRequirements(in.Resources)
@@ -63,7 +64,15 @@ func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeC
 		}
 	}
 
-	// Need to implement Kubelet Conversion
+	if kubeletAnnotation != "" {
+		v1beta1kubelet := &v1beta1.KubeletConfiguration{}
+		err := json.Unmarshal([]byte(kubeletAnnotation), v1beta1kubelet)
+		if err != nil {
+			return fmt.Errorf("unmarshaling kubelet config annotation, %w", err)
+		}
+		v1beta1nc.Kubelet = v1beta1kubelet
+	}
+	return nil
 }
 
 func (in *NodeClaimStatus) convertTo(v1beta1nc *v1beta1.NodeClaimStatus) {
@@ -80,10 +89,16 @@ func (in *NodeClaim) ConvertFrom(ctx context.Context, from apis.Convertible) err
 	in.ObjectMeta = v1beta1NC.ObjectMeta
 
 	in.Status.convertFrom((&v1beta1NC.Status))
-	return in.Spec.convertFrom(ctx, &v1beta1NC.Spec)
+	kubeletAnnotation, err := in.Spec.convertFrom(ctx, &v1beta1NC.Spec)
+	if err != nil {
+		return err
+	}
+	in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatabilityAnnotationKey: kubeletAnnotation})
+
+	return nil
 }
 
-func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec) error {
+func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec) (string, error) {
 	in.Taints = v1beta1nc.Taints
 	in.StartupTaints = v1beta1nc.StartupTaints
 	in.Resources = ResourceRequirements(v1beta1nc.Resources)
@@ -101,7 +116,7 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 	defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
 	nodeclassGroupVersion, err := schema.ParseGroupVersion(v1beta1nc.NodeClassRef.APIVersion)
 	if err != nil {
-		return err
+		return "", err
 	}
 	in.NodeClassRef = &NodeClassReference{
 		Name:  v1beta1nc.NodeClassRef.Name,
@@ -109,8 +124,11 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 		Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, nodeclassGroupVersion.Group),
 	}
 
-	// Need to implement Kubelet Conversion
-	return nil
+	kubelet, err := json.Marshal(v1beta1nc.Kubelet)
+	if err != nil {
+		return "", fmt.Errorf("marshaling kubelet config annotation, %w", err)
+	}
+	return string(kubelet), nil
 }
 
 func (in *NodeClaimStatus) convertFrom(v1beta1nc *v1beta1.NodeClaimStatus) {
