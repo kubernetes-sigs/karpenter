@@ -63,7 +63,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 			return reconcile.Result{}, e
 		}
 	}
-	return reconcile.Result{}, err
+	return reconcile.Result{}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
