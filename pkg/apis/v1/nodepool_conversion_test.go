@@ -19,6 +19,11 @@ package v1_test
 import (
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
+	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/status"
+
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -65,14 +70,11 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 				},
 			},
 		}
-		cloudProvider.NodeClassGroupVersionKind = []schema.GroupVersionKind{
-			{
-				Group:   "fake-cloudprovider-group",
-				Version: "fake-cloudprovider-version",
-				Kind:    "fake-cloudprovider-kind",
-			},
-		}
-		ctx = injection.WithNodeClasses(ctx, cloudProvider.GetSupportedNodeClasses())
+		gvk := lo.Map(cloudProvider.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
+			return object.GVK(nc)
+		})
+		cloudProvider.NodeClassGroupVersionKind = gvk
+		ctx = injection.WithNodeClasses(ctx, gvk)
 	})
 
 	It("should convert v1 nodepool metadata", func() {
@@ -180,9 +182,9 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 			Context("NodeClassRef", func() {
 				It("should convert v1 nodepool template nodeClassRef", func() {
 					v1nodepool.Spec.Template.Spec.NodeClassRef = &NodeClassReference{
-						Kind:  "fake-cloudprovider-kind",
+						Kind:  object.GVK(&v1alpha1.TestNodeClass{}).Kind,
 						Name:  "nodeclass-test",
-						Group: "fake-cloudprovider-group",
+						Group: object.GVK(&v1alpha1.TestNodeClass{}).Group,
 					}
 					Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
 					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind))
@@ -306,14 +308,11 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 				},
 			},
 		}
-		cloudProvider.NodeClassGroupVersionKind = []schema.GroupVersionKind{
-			{
-				Group:   "fake-cloudprovider-group",
-				Version: "fake-cloudprovider-version",
-				Kind:    "fake-cloudprovider-kind",
-			},
-		}
-		ctx = injection.WithNodeClasses(ctx, cloudProvider.GetSupportedNodeClasses())
+		gvk := lo.Map(cloudProvider.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
+			return object.GVK(nc)
+		})
+		cloudProvider.NodeClassGroupVersionKind = gvk
+		ctx = injection.WithNodeClasses(ctx, gvk)
 	})
 
 	It("should convert v1beta1 nodepool metadata", func() {

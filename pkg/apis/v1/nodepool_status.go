@@ -25,6 +25,8 @@ const (
 	// ConditionTypeValidationSucceeded = "ValidationSucceeded" condition indicates that the
 	// runtime-based configuration is valid for this NodePool
 	ConditionTypeValidationSucceeded = "ValidationSucceeded"
+	// ConditionTypeNodeClassReady = "NodeClassReady" condition indicates that underlying nodeClass was resolved and is reporting as Ready
+	ConditionTypeNodeClassReady = "NodeClassReady"
 )
 
 // NodePoolStatus defines the observed state of NodePool
@@ -38,7 +40,10 @@ type NodePoolStatus struct {
 }
 
 func (in *NodePool) StatusConditions() status.ConditionSet {
-	return status.NewReadyConditions(ConditionTypeValidationSucceeded).For(in)
+	return status.NewReadyConditions(
+		ConditionTypeValidationSucceeded,
+		ConditionTypeNodeClassReady,
+	).For(in)
 }
 
 func (in *NodePool) GetConditions() []status.Condition {
