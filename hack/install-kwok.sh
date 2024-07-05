@@ -106,10 +106,16 @@ done
 
 kubectl kustomize "${HOME_DIR}" > "${HOME_DIR}/kwok.yaml"
 
+# v0.4.0 added in stage CRDs which are necessary for pod/node initialization
+crdURL="https://github.com/${KWOK_REPO}/releases/download/${KWOK_RELEASE}/stage-fast.yaml"
+
 # Set UNINSTALL_KWOK=true if you want to uninstall.
 if [[ ${UNINSTALL_KWOK} = "true" ]]
 then
   kubectl delete -f ${HOME_DIR}/kwok.yaml
+  kubectl delete -f ${crdURL}
 else
   kubectl apply -f ${HOME_DIR}/kwok.yaml
+  kubectl apply -f ${crdURL}
 fi
+
