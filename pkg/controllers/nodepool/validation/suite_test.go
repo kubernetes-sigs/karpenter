@@ -77,7 +77,7 @@ var _ = Describe("Counter", func() {
 	It("should set the NodePoolValidationSucceeded status condition to false if nodePool validation failed", func() {
 		nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Effect: v1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, nodePool)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodePoolValidationController, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 		Expect(nodePool.StatusConditions().Get(v1beta1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
