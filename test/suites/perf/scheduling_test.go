@@ -93,11 +93,14 @@ var _ = Describe("Performance", func() {
 		It("should do complex provisioning", func() {
 			deployments := []*appsv1.Deployment{}
 			podOptions := test.MakeDiversePodOptions()
+			totalReplicas := 0
 			for _, option := range podOptions {
+				podDensity := replicas / len(podOptions)
+				totalReplicas += podDensity
 				deployments = append(deployments, test.Deployment(
 					test.DeploymentOptions{
 						PodOptions: option,
-						Replicas:   int32(replicas / len(podOptions)),
+						Replicas:   int32(podDensity),
 					},
 				))
 			}
@@ -106,17 +109,20 @@ var _ = Describe("Performance", func() {
 			}
 			env.TimeIntervalCollector.Start("PostDeployment")
 			env.ExpectCreated(nodePool, nodeClass)
-			env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, len(deployments)*replicas)
+			env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, totalReplicas)
 			env.TimeIntervalCollector.End("PostDeployment")
 		})
 		It("should do complex provisioning and complex drift", func() {
 			deployments := []*appsv1.Deployment{}
 			podOptions := test.MakeDiversePodOptions()
+			totalReplicas := 0
 			for _, option := range podOptions {
+				podDensity := replicas / len(podOptions)
+				totalReplicas += podDensity
 				deployments = append(deployments, test.Deployment(
 					test.DeploymentOptions{
 						PodOptions: option,
-						Replicas:   int32(replicas / len(podOptions)),
+						Replicas:   int32(podDensity),
 					},
 				))
 			}
@@ -125,7 +131,7 @@ var _ = Describe("Performance", func() {
 			}
 
 			env.ExpectCreated(nodePool, nodeClass)
-			env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, len(deployments)*replicas)
+			env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, totalReplicas)
 
 			env.TimeIntervalCollector.Start("Drift")
 			nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{
