@@ -120,6 +120,8 @@ var _ = Describe("NodeClaimController", func() {
 			_ = env.Client.Delete(ctx, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %q is blocking evictions", client.ObjectKeyFromObject(pdb)))).To(BeTrue())
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsistentStateFound).IsFalse()).To(BeTrue())
 		})
 	})
 
@@ -160,6 +162,42 @@ var _ = Describe("NodeClaimController", func() {
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsistentStateFound).IsFalse()).To(BeTrue())
+		})
+		It("should set consistent state found condition to true if there are no consistency issues", func() {
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: "arm-instance-type",
+						v1.NodeInitializedLabelKey:     "true",
+					},
+				},
+				Spec: v1.NodeClaimSpec{
+					Resources: v1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("8"),
+							corev1.ResourceMemory: resource.MustParse("64Gi"),
+							corev1.ResourcePods:   resource.MustParse("5"),
+						},
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("16"),
+						corev1.ResourceMemory: resource.MustParse("128Gi"),
+						corev1.ResourcePods:   resource.MustParse("10"),
+					},
+				},
+			})
+			nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeConsistentStateFound)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeConsistentStateFound)).To(BeTrue())
 		})
 	})
 })

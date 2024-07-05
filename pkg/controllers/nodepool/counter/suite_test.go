@@ -136,7 +136,7 @@ var _ = Describe("Counter", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 
 		// Change the node capacity to be different than the nodeClaim capacity
@@ -157,7 +157,7 @@ var _ = Describe("Counter", func() {
 
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should increase the counter when new nodes are created", func() {
@@ -169,11 +169,11 @@ var _ = Describe("Counter", func() {
 
 		// Should equal both the nodeClaim and node capacity
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should decrease the counter when an existing node is deleted", func() {
@@ -184,7 +184,7 @@ var _ = Describe("Counter", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal the sums of the nodeClaims and nodes
-		res := v1.ResourceList{
+		res := corev1.ResourceList{
 			corev1.ResourceCPU:           resource.MustParse("600m"),
 			corev1.ResourcePods:          resource.MustParse("1256"),
 			corev1.ResourceMemory:        resource.MustParse("6Gi"),
@@ -202,11 +202,11 @@ var _ = Describe("Counter", func() {
 		// Should equal both the nodeClaim and node capacity
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, nodeClaim2.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node2.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should zero out the counter when all nodes are deleted", func() {
@@ -218,11 +218,11 @@ var _ = Describe("Counter", func() {
 
 		// Should equal both the nodeClaim and node capacity
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 
 		ExpectDeleted(ctx, env.Client, node, nodeClaim)

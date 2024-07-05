@@ -61,11 +61,12 @@ var _ = Describe("Initialization", func() {
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
+			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -122,10 +123,11 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourceMemory: resource.MustParse("80Mi"),
 				corev1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		node = ExpectExists(ctx, env.Client, node)
@@ -165,7 +167,9 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourcePods:   resource.MustParse("110"),
 			},
 			ReadyStatus: corev1.ConditionFalse,
+			Taints:      []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
@@ -213,10 +217,11 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourceMemory: resource.MustParse("80Mi"),
 				corev1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -263,8 +268,10 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourceMemory: resource.MustParse("80Mi"),
 				corev1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -330,8 +337,10 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourceMemory: resource.MustParse("80Mi"),
 				corev1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Should add the startup taints to the node
@@ -401,8 +410,10 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourceMemory: resource.MustParse("80Mi"),
 				corev1.ResourcePods:   resource.MustParse("110"),
 			},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Shouldn't consider the node ready since the startup taints still exist
@@ -480,6 +491,7 @@ var _ = Describe("Initialization", func() {
 					Effect: corev1.TaintEffectNoSchedule,
 					Value:  "true",
 				},
+				v1.UnregisteredNoExecuteTaint,
 			},
 		})
 		ExpectApplied(ctx, env.Client, node)
@@ -549,6 +561,7 @@ var _ = Describe("Initialization", func() {
 					Effect: corev1.TaintEffectNoSchedule,
 					Value:  "true",
 				},
+				v1.UnregisteredNoExecuteTaint,
 			},
 		})
 		ExpectApplied(ctx, env.Client, node)

@@ -47,14 +47,14 @@ type Controller struct {
 	cluster    *state.Cluster
 }
 
-var ResourceNode = v1.ResourceName("nodes")
+var ResourceNode = corev1.ResourceName("nodes")
 
-var BaseResources = v1.ResourceList{
-	v1.ResourceCPU:              resource.MustParse("0"),
-	v1.ResourceMemory:           resource.MustParse("0"),
-	v1.ResourcePods:             resource.MustParse("0"),
-	v1.ResourceEphemeralStorage: resource.MustParse("0"),
-	ResourceNode:                resource.MustParse("0"),
+var BaseResources = corev1.ResourceList{
+	corev1.ResourceCPU:              resource.MustParse("0"),
+	corev1.ResourceMemory:           resource.MustParse("0"),
+	corev1.ResourcePods:             resource.MustParse("0"),
+	corev1.ResourceEphemeralStorage: resource.MustParse("0"),
+	ResourceNode:                    resource.MustParse("0"),
 }
 
 // NewController is a constructor

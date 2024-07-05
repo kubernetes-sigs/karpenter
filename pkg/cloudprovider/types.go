@@ -199,7 +199,7 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 // Truncate truncates the InstanceTypes based on the passed-in requirements
 // It returns an error if it isn't possible to truncate the instance types on maxItems without violating minValues
 func (its InstanceTypes) Truncate(requirements scheduling.Requirements, maxItems int) (InstanceTypes, error) {
-	truncatedInstanceTypes := InstanceTypes(lo.Slice(its.OrderByPrice(requirements), 0, maxItems))
+	truncatedInstanceTypes := lo.Slice(its.OrderByPrice(requirements), 0, maxItems)
 	// Only check for a validity of NodeClaim if its requirement has minValues in it.
 	if requirements.HasMinValues() {
 		if _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil {

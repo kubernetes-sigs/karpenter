@@ -1163,7 +1163,7 @@ var _ = Describe("Cluster State Sync", func() {
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 1.0, nil)
 		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
 	})
-	FIt("should consider the cluster state synced when all nodeclaims are tracked", func() {
+	It("should consider the cluster state synced when all nodeclaims are tracked", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
 		for i := 0; i < 1000; i++ {
 			nodeClaim := test.NodeClaim(v1.NodeClaim{

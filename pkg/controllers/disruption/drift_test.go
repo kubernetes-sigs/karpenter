@@ -581,7 +581,7 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
-		FIt("should ignore nodes with the drifted status condition set to false", func() {
+		It("should ignore nodes with the drifted status condition set to false", func() {
 			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeDrifted, "NotDrifted", "NotDrifted")
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
@@ -619,7 +619,7 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
-		FIt("should disrupt all empty drifted nodes in parallel", func() {
+		It("should disrupt all empty drifted nodes in parallel", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(100, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

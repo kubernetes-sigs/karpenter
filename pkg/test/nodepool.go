@@ -53,6 +53,9 @@ func NodePool(overrides ...v1.NodePool) *v1.NodePool {
 	if override.Spec.Template.Spec.Requirements == nil {
 		override.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{}
 	}
+	if override.Status.Conditions == nil {
+		override.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
+	}
 	np := &v1.NodePool{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
 		Spec:       override.Spec,

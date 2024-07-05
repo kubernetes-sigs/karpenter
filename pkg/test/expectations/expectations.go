@@ -207,7 +207,6 @@ func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ..
 		Expect(c.Update(ctx, object)).To(Succeed())
 		Expect(c.Delete(ctx, object)).To(Succeed())
 		DeferCleanup(func(obj client.Object) {
-			Expect(c.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
 			mergeFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
 			obj.SetFinalizers([]string{})
 			Expect(client.IgnoreNotFound(c.Patch(ctx, obj, mergeFrom))).To(Succeed())
@@ -220,7 +219,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	wg := sync.WaitGroup{}
 	namespaces := &corev1.NamespaceList{}
 	Expect(c.List(ctx, namespaces)).To(Succeed())
-	ExpectFinalizersRemovedFromList(ctx, c, &corev1.NodeList{}, &corev1.PersistentVolumeClaimList{})
+	ExpectFinalizersRemovedFromList(ctx, c, &corev1.NodeList{}, &v1.NodeClaimList{}, &corev1.PersistentVolumeClaimList{})
 	for _, object := range []client.Object{
 		&corev1.Pod{},
 		&corev1.Node{},
@@ -358,6 +357,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 
 	// Mock the nodeclaim launch and node joining at the apiserver
 	node := test.NodeClaimLinkedNode(nc)
+	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1.NodeRegisteredLabelKey: "true"})
 	ExpectApplied(ctx, c, nc, node)
 	return nc, node, nil
@@ -409,6 +409,7 @@ func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*
 	ExpectMakeNodesReady(ctx, c, nodes...)
 
 	for i := range nodes {
+		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
 		nodes[i].Labels[v1.NodeRegisteredLabelKey] = "true"
 		nodes[i].Labels[v1.NodeInitializedLabelKey] = "true"
 		ExpectApplied(ctx, c, nodes[i])

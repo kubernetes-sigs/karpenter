@@ -265,36 +265,36 @@ var _ = Describe("Provisioning", func() {
 
 		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
 		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
-		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
-			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
 		})
-		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
-			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
 		})
-		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
-			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
 		})
 
 		pod := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
-				Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
 			},
-			InitContainers: []v1.Container{
+			InitContainers: []corev1.Container{
 				{
-					Resources: v1.ResourceRequirements{
-						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("4Gi")},
-						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("4Gi")},
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10"), corev1.ResourceMemory: resource.MustParse("4Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10"), corev1.ResourceMemory: resource.MustParse("4Gi")},
 					},
 				},
 				{
-					RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-					Resources: v1.ResourceRequirements{
-						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
-						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
+					RestartPolicy: lo.ToPtr(corev1.ContainerRestartPolicyAlways),
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4.9"), corev1.ResourceMemory: resource.MustParse("2.9Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4.9"), corev1.ResourceMemory: resource.MustParse("2.9Gi")},
 					},
 				},
 			},
@@ -302,9 +302,9 @@ var _ = Describe("Provisioning", func() {
 
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("11"),
-			v1.ResourceMemory: resource.MustParse("5Gi"),
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("11"),
+			corev1.ResourceMemory: resource.MustParse("5Gi"),
 		}, node.Status.Capacity)
 	})
 	It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when sidecar container comes first and init container resources are smaller than container resources", func() {
@@ -316,36 +316,36 @@ var _ = Describe("Provisioning", func() {
 
 		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
 		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
-		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
-			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
 		})
-		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
-			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
 		})
-		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
-			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
 		})
 
 		pod := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
-				Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
 			},
-			InitContainers: []v1.Container{
+			InitContainers: []corev1.Container{
 				{
-					RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-					Resources: v1.ResourceRequirements{
-						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
-						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
+					RestartPolicy: lo.ToPtr(corev1.ContainerRestartPolicyAlways),
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4.9"), corev1.ResourceMemory: resource.MustParse("2.9Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4.9"), corev1.ResourceMemory: resource.MustParse("2.9Gi")},
 					},
 				},
 				{
-					Resources: v1.ResourceRequirements{
-						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
-						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5"), corev1.ResourceMemory: resource.MustParse("1Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5"), corev1.ResourceMemory: resource.MustParse("1Gi")},
 					},
 				},
 			},
@@ -353,9 +353,9 @@ var _ = Describe("Provisioning", func() {
 
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("11"),
-			v1.ResourceMemory: resource.MustParse("5Gi"),
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("11"),
+			corev1.ResourceMemory: resource.MustParse("5Gi"),
 		}, node.Status.Capacity)
 	})
 	It("should schedule based on the max resource requests of containers and initContainers with sidecar containers when sidecar container comes first and init container resources are bigger than container resources", func() {
@@ -367,36 +367,36 @@ var _ = Describe("Provisioning", func() {
 
 		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
 		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
-		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
-			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
 		})
-		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
-			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
 		})
-		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
-			v1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
 		})
 
 		pod := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
-				Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("5"), v1.ResourceMemory: resource.MustParse("1Gi")},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5"), corev1.ResourceMemory: resource.MustParse("1Gi")},
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5"), corev1.ResourceMemory: resource.MustParse("1Gi")},
 			},
-			InitContainers: []v1.Container{
+			InitContainers: []corev1.Container{
 				{
-					RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-					Resources: v1.ResourceRequirements{
-						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
-						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("4.9"), v1.ResourceMemory: resource.MustParse("2.9Gi")},
+					RestartPolicy: lo.ToPtr(corev1.ContainerRestartPolicyAlways),
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4.9"), corev1.ResourceMemory: resource.MustParse("2.9Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4.9"), corev1.ResourceMemory: resource.MustParse("2.9Gi")},
 					},
 				},
 				{
-					Resources: v1.ResourceRequirements{
-						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
-						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("6"), v1.ResourceMemory: resource.MustParse("2Gi")},
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
 					},
 				},
 			},
@@ -404,9 +404,9 @@ var _ = Describe("Provisioning", func() {
 
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("11"),
-			v1.ResourceMemory: resource.MustParse("5Gi"),
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("11"),
+			corev1.ResourceMemory: resource.MustParse("5Gi"),
 		}, node.Status.Capacity)
 	})
 

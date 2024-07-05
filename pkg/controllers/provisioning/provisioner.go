@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
+
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -182,7 +184,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.Pod) {
 	// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
 	// unexpectedly with consolidation, so we warn once per hour when we see these pods.
-	antiAffinityPods := lo.FilterMap(pods, func(po *v1.Pod, _ int) (client.ObjectKey, bool) {
+	antiAffinityPods := lo.FilterMap(pods, func(po *corev1.Pod, _ int) (client.ObjectKey, bool) {
 		if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
 			if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
 				if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
@@ -192,9 +194,9 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 		}
 		return client.ObjectKey{}, false
 	})
-	topologySpreadPods := lo.FilterMap(pods, func(po *v1.Pod, _ int) (client.ObjectKey, bool) {
+	topologySpreadPods := lo.FilterMap(pods, func(po *corev1.Pod, _ int) (client.ObjectKey, bool) {
 		for _, tsc := range po.Spec.TopologySpreadConstraints {
-			if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
+			if tsc.WhenUnsatisfiable == corev1.ScheduleAnyway {
 				if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
 					return client.ObjectKeyFromObject(po), true
 				}
@@ -221,8 +223,8 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 		return nil, fmt.Errorf("listing node pools, %w", err)
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1.NodePool, _ int) bool {
-		if err := n.RuntimeValidate(); err != nil {
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.Name)).Error(err, "nodepool failed validation")
+		if !n.StatusConditions().IsTrue(status.ConditionReady) {
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.Name)).Error(err, "nodePool not ready")
 			return false
 		}
 		return n.DeletionTimestamp.IsZero()
