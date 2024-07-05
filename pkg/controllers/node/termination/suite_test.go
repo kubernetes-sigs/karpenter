@@ -64,12 +64,12 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx)))
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewQueue(env.Client, recorder)
-	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
+	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
 })
 
 var _ = AfterSuite(func() {

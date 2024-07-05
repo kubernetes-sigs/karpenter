@@ -77,7 +77,7 @@ func NewControllers(
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewNodePoolController(kubeClient, cluster),
 		informer.NewNodeClaimController(kubeClient, cluster),
-		termination.NewController(kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
+		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		metricspod.NewController(kubeClient),
 		metricsnodepool.NewController(kubeClient),
 		metricsnode.NewController(cluster),

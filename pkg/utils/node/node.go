@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
@@ -140,6 +141,17 @@ func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*cor
 	}
 	return lo.FilterMap(podList.Items, func(p corev1.Pod, _ int) (*corev1.Pod, bool) {
 		return &p, pod.IsProvisionable(&p)
+	}), nil
+}
+
+// GetVolumeAttachments grabs all volumeAttachments associated with the passed node
+func GetVolumeAttachments(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*storagev1.VolumeAttachment, error) {
+	var volumeAttachmentList storagev1.VolumeAttachmentList
+	if err := kubeClient.List(ctx, &volumeAttachmentList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+		return nil, fmt.Errorf("listing volumeattachments, %w", err)
+	}
+	return lo.FilterMap(volumeAttachmentList.Items, func(v storagev1.VolumeAttachment, _ int) (*storagev1.VolumeAttachment, bool) {
+		return &v, v.Spec.NodeName == node.Name
 	}), nil
 }
 
