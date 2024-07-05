@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
@@ -74,6 +75,24 @@ func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*cor
 	return lo.FilterMap(podList.Items, func(p corev1.Pod, _ int) (*corev1.Pod, bool) {
 		return &p, pod.IsProvisionable(&p)
 	}), nil
+}
+
+// GetVolumeAttachments grabs all volumeAttachments of passed node
+func GetVolumeAttachments(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*storagev1.VolumeAttachment, error) {
+	var volumeAttachments []*storagev1.VolumeAttachment
+	var volumeAttachmentList storagev1.VolumeAttachmentList
+	if err := kubeClient.List(ctx, &volumeAttachmentList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+		// If there have not been any volumeAttachments, index may not exist. Therefore, fall back to default List
+		if err = kubeClient.List(ctx, &volumeAttachmentList); err != nil {
+			return nil, fmt.Errorf("listing volumeattachments, %w", err)
+		}
+	}
+	for i := range volumeAttachmentList.Items {
+		if volumeAttachmentList.Items[i].Spec.NodeName == node.Name {
+			volumeAttachments = append(volumeAttachments, &volumeAttachmentList.Items[i])
+		}
+	}
+	return volumeAttachments, nil
 }
 
 func GetCondition(n *corev1.Node, match corev1.NodeConditionType) corev1.NodeCondition {
