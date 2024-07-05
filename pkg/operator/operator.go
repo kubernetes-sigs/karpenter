@@ -26,6 +26,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/status"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
@@ -258,7 +262,10 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 		go func() {
 			defer wg.Done()
 			// Taking the first supported NodeClass to be the default NodeClass
-			ctx = injection.WithNodeClasses(ctx, cp.GetSupportedNodeClasses())
+			gvk := lo.Map(cp.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
+				return object.GVK(nc)
+			})
+			ctx = injection.WithNodeClasses(ctx, gvk)
 			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()
 	}

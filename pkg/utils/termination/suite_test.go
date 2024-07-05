@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"testing"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -50,7 +52,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	cloudProvider = fake.NewCloudProvider()
 })
 

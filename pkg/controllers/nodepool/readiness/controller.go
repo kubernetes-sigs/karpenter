@@ -79,7 +79,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 func (c *Controller) getNodeClass(ctx context.Context, nodePool *v1beta1.NodePool, supportedNC []status.Object) (status.Object, error) {
 	nodeClass := supportedNC[0]
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name}, nodeClass); err != nil {
-		if client.IgnoreNotFound(err) == nil {
+		if errors.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, err

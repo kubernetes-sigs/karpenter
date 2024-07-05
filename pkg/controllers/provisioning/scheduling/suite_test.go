@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	"github.com/awslabs/operatorpkg/status"
 
 	io_prometheus_client "github.com/prometheus/client_model/go"
@@ -85,7 +87,7 @@ func TestScheduling(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
