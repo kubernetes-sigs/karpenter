@@ -19,10 +19,8 @@ package apis
 import (
 	_ "embed"
 
-	"github.com/samber/lo"
+	"github.com/awslabs/operatorpkg/object"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 const (
@@ -34,6 +32,6 @@ var (
 	//go:embed crds/karpenter.kwok.sh_kwoknodeclasses.yaml
 	KWOKNodeClassCRD []byte
 	CRDs             = []*v1.CustomResourceDefinition{
-		lo.Must(functional.Unmarshal[v1.CustomResourceDefinition](KWOKNodeClassCRD)),
+		object.Unmarshal[v1.CustomResourceDefinition](KWOKNodeClassCRD),
 	}
 )

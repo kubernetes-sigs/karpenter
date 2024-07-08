@@ -17,10 +17,10 @@ limitations under the License.
 package scheduling
 
 import (
+	"github.com/awslabs/operatorpkg/option"
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 // TopologyNodeFilter is used to determine if a given actual node or scheduling node matches the pod's node selectors
@@ -58,7 +58,7 @@ func (t TopologyNodeFilter) Matches(node *v1.Node) bool {
 // MatchesRequirements returns true if the TopologyNodeFilter doesn't prohibit a node with the requirements from
 // participating in the topology. This method allows checking the requirements from a scheduling.NodeClaim to see if the
 // node we will soon create participates in this topology.
-func (t TopologyNodeFilter) MatchesRequirements(requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatibilityOptions]) bool {
+func (t TopologyNodeFilter) MatchesRequirements(requirements scheduling.Requirements, compatabilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
 	// no requirements, so it always matches
 	if len(t) == 0 {
 		return true
