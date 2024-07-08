@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -35,7 +36,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 type Environment struct {
@@ -54,18 +54,16 @@ type EnvironmentOptions struct {
 }
 
 // WithCRDs registers the specified CRDs to the apiserver for use in testing
-func WithCRDs(crds ...*v1.CustomResourceDefinition) functional.Option[EnvironmentOptions] {
-	return func(o EnvironmentOptions) EnvironmentOptions {
+func WithCRDs(crds ...*v1.CustomResourceDefinition) option.Function[EnvironmentOptions] {
+	return func(o *EnvironmentOptions) {
 		o.crds = append(o.crds, crds...)
-		return o
 	}
 }
 
 // WithFieldIndexers expects a function that indexes fields against the cache such as cache.IndexField(...)
-func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) functional.Option[EnvironmentOptions] {
-	return func(o EnvironmentOptions) EnvironmentOptions {
+func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) option.Function[EnvironmentOptions] {
+	return func(o *EnvironmentOptions) {
 		o.fieldIndexers = append(o.fieldIndexers, fieldIndexers...)
-		return o
 	}
 }
 
@@ -77,8 +75,8 @@ func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	}
 }
 
-func NewEnvironment(options ...functional.Option[EnvironmentOptions]) *Environment {
-	opts := functional.ResolveOptions(options...)
+func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment {
+	opts := option.Resolve(options...)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	os.Setenv(system.NamespaceEnvKey, "default")

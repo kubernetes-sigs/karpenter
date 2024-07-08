@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 
 	"github.com/awslabs/operatorpkg/singleton"
@@ -48,7 +49,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -66,16 +66,12 @@ type LaunchOptions struct {
 }
 
 // RecordPodNomination causes nominate pod events to be recorded against the node.
-func RecordPodNomination(o LaunchOptions) LaunchOptions {
+func RecordPodNomination(o *LaunchOptions) {
 	o.RecordPodNomination = true
-	return o
 }
 
-func WithReason(reason string) func(LaunchOptions) LaunchOptions {
-	return func(o LaunchOptions) LaunchOptions {
-		o.Reason = reason
-		return o
-	}
+func WithReason(reason string) func(*LaunchOptions) {
+	return func(o *LaunchOptions) { o.Reason = reason }
 }
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
@@ -146,7 +142,7 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconcile.Result, e
 
 // CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) ([]string, error) {
+func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) ([]string, error) {
 	// Create capacity and bind pods
 	errs := make([]error, len(nodeClaims))
 	nodeClaimNames := make([]string, len(nodeClaims))
@@ -362,9 +358,9 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	return results, nil
 }
 
-func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (string, error) {
+func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) (string, error) {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.NodePoolName)))
-	options := functional.ResolveOptions(opts...)
+	options := option.Resolve(opts...)
 	latest := &v1beta1.NodePool{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {
 		return "", fmt.Errorf("getting current resource usage, %w", err)
@@ -394,7 +390,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	// to then trigger cluster state updates. Triggering it manually ensures that Karpenter waits for the
 	// internal cache to sync before moving onto another disruption loop.
 	p.cluster.UpdateNodeClaim(nodeClaim)
-	if functional.ResolveOptions(opts...).RecordPodNomination {
+	if option.Resolve(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
 			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
 		}

@@ -19,10 +19,8 @@ package apis
 import (
 	_ "embed"
 
-	"github.com/samber/lo"
+	"github.com/awslabs/operatorpkg/object"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 const (
@@ -37,7 +35,7 @@ var (
 	//go:embed crds/karpenter.sh_nodeclaims.yaml
 	NodeClaimCRD []byte
 	CRDs         = []*apiextensionsv1.CustomResourceDefinition{
-		lo.Must(functional.Unmarshal[apiextensionsv1.CustomResourceDefinition](NodePoolCRD)),
-		lo.Must(functional.Unmarshal[apiextensionsv1.CustomResourceDefinition](NodeClaimCRD)),
+		object.Unmarshal[apiextensionsv1.CustomResourceDefinition](NodePoolCRD),
+		object.Unmarshal[apiextensionsv1.CustomResourceDefinition](NodeClaimCRD),
 	}
 )

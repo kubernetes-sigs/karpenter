@@ -19,11 +19,9 @@ package v1alpha1
 import (
 	_ "embed"
 
-	"github.com/samber/lo"
+	"github.com/awslabs/operatorpkg/object"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 //go:generate controller-gen crd object:headerFile="../../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
@@ -31,7 +29,7 @@ var (
 	//go:embed crds/karpenter.test.sh_testnodeclasses.yaml
 	TestNodeClassCRD []byte
 	CRDs             = []*v1.CustomResourceDefinition{
-		lo.Must(functional.Unmarshal[v1.CustomResourceDefinition](TestNodeClassCRD)),
+		object.Unmarshal[v1.CustomResourceDefinition](TestNodeClassCRD),
 	}
 )
 

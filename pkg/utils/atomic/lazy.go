@@ -20,18 +20,16 @@ import (
 	"context"
 	"sync"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
-
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 type Options struct {
 	ignoreCache bool
 }
 
-func IgnoreCacheOption(o Options) Options {
+func IgnoreCacheOption(o *Options) {
 	o.ignoreCache = true
-	return o
 }
 
 // Lazy persistently stores a value in memory by evaluating
@@ -51,8 +49,8 @@ func (c *Lazy[T]) Set(v T) {
 
 // TryGet attempts to get a non-nil value from the internal value. If the internal value is nil, the Resolve function
 // will attempt to resolve the value, setting the value to be persistently stored if the resolve of Resolve is non-nil.
-func (c *Lazy[T]) TryGet(ctx context.Context, opts ...functional.Option[Options]) (T, error) {
-	o := functional.ResolveOptions(opts...)
+func (c *Lazy[T]) TryGet(ctx context.Context, opts ...option.Function[Options]) (T, error) {
+	o := option.Resolve(opts...)
 	c.mu.RLock()
 	if c.value != nil && !o.ignoreCache {
 		ret := *c.value
