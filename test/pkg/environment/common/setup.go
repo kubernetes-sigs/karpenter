@@ -56,12 +56,12 @@ var (
 		&v1.PersistentVolumeClaim{},
 		&v1.PersistentVolume{},
 		&storagev1.StorageClass{},
-		&v1beta1.NodePool{},
-		&v1.LimitRange{},
-		&schedulingv1.PriorityClass{},
 		&v1.Node{},
 		&v1beta1.NodeClaim{},
+		&v1beta1.NodePool{},
 		&v1alpha1.KWOKNodeClass{},
+		&v1.LimitRange{},
+		&schedulingv1.PriorityClass{},
 	}
 )
 
