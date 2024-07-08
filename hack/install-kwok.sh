@@ -112,8 +112,8 @@ crdURL="https://github.com/${KWOK_REPO}/releases/download/${KWOK_RELEASE}/stage-
 # Set UNINSTALL_KWOK=true if you want to uninstall.
 if [[ ${UNINSTALL_KWOK} = "true" ]]
 then
-  kubectl delete -f ${HOME_DIR}/kwok.yaml
   kubectl delete -f ${crdURL}
+  kubectl delete -f ${HOME_DIR}/kwok.yaml
 else
   kubectl apply -f ${HOME_DIR}/kwok.yaml
   kubectl apply -f ${crdURL}
