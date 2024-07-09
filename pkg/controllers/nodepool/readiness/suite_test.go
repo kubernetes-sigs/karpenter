@@ -112,4 +112,11 @@ var _ = Describe("Readiness", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeFalse())
 	})
+	It("should mark NodeClassReady status condition on nodePool as NotReady if nodeClass is terminating", func() {
+		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
+		ExpectDeletionTimestampSet(ctx, env.Client, nodeClass)
+		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
+	})
 })

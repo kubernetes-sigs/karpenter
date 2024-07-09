@@ -63,6 +63,8 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 	}
 	if nodeClass == nil {
 		nodePool.StatusConditions().SetFalse(v1beta1.ConditionTypeNodeClassReady, "UnresolvedNodeClass", "Unable to resolve nodeClass")
+	} else if !nodeClass.GetDeletionTimestamp().IsZero() {
+		nodePool.StatusConditions().SetFalse(v1beta1.ConditionTypeNodeClassReady, "NodeClassTerminating", "NodeClass is Terminating")
 	} else {
 		c.setReadyCondition(nodePool, nodeClass)
 	}
