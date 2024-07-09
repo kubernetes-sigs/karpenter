@@ -238,10 +238,6 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 	domains := map[string]sets.Set[string]{}
 	var notReadyNodePools []string
 	for _, nodePool := range nodePoolList.Items {
-		if !nodePool.StatusConditions().IsTrue(status.ConditionReady) {
-			notReadyNodePools = append(notReadyNodePools, nodePool.Name)
-			continue
-		}
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, lo.ToPtr(nodePool))
 		if err != nil {
