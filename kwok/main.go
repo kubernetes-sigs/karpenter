@@ -34,6 +34,7 @@ func main() {
 	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
 	op.
 		WithControllers(ctx, controllers.NewControllers(
+			op.Manager,
 			op.Clock,
 			op.GetClient(),
 			op.EventRecorder,

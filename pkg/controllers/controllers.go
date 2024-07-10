@@ -18,8 +18,12 @@ package controllers
 
 import (
 	"github.com/awslabs/operatorpkg/controller"
+	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
 
@@ -47,6 +51,7 @@ import (
 )
 
 func NewControllers(
+	mgr manager.Manager,
 	clock clock.Clock,
 	kubeClient client.Client,
 	recorder events.Recorder,
@@ -82,5 +87,7 @@ func NewControllers(
 		nodeclaimtermination.NewController(kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cluster, cloudProvider),
 		leasegarbagecollection.NewController(kubeClient),
+		status.NewController[*v1beta1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),
+		status.NewController[*v1beta1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 	}
 }
