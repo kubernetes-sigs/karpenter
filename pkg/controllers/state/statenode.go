@@ -185,7 +185,7 @@ func (in *StateNode) ValidateDisruptable(ctx context.Context, kubeClient client.
 	if in.Nominated() {
 		return nil, fmt.Errorf("state node is nominated for a pending pod")
 	}
-	if _, ok := in.Annotations()[v1beta1.DoNotDisruptAnnotationKey]; ok {
+	if in.Annotations()[v1beta1.DoNotDisruptAnnotationKey] == "true" {
 		return nil, fmt.Errorf("disruption is blocked through the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
 	}
 	// check whether the node has all the labels we need
