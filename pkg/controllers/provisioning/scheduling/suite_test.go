@@ -77,7 +77,7 @@ var cloudProvider *fake.CloudProvider
 var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
 var podStateController *informer.PodController
-var queue *orbbatcher.Queue
+var queue *orbbatcher.SchedulingInputQueue
 
 const csiProvider = "fake.csi.provider"
 const isDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"
@@ -100,7 +100,7 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	queue = orbbatcher.NewQueue()
+	queue = orbbatcher.NewSchedulingInputQueue()
 	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, queue)
 })
 

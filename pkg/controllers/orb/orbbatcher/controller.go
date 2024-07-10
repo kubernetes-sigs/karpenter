@@ -53,6 +53,18 @@ type Queue struct {
 	data [][]byte
 }
 
+type SchedulingInputQueue struct {
+	mu     sync.Mutex
+	inputs []SchedulingInput
+}
+
+// Timestamp, dynamic inputs (like pending pods, statenodes, etc.)
+type SchedulingInput struct {
+	//Timestamp time.Time
+	PendingPods []*v1.Pod
+	//Node *v1.Node
+}
+
 type TestQueue struct {
 	mu  sync.Mutex
 	Set sets.Set[string]
@@ -73,6 +85,12 @@ func (q *Queue) toString() string {
 	}
 
 	return buf.String()
+}
+
+func NewSchedulingInputQueue() *SchedulingInputQueue {
+	return &SchedulingInputQueue{
+		inputs: make([]SchedulingInput, 0),
+	}
 }
 
 func NewTestQueue() *TestQueue {
@@ -112,6 +130,31 @@ func (q *TestQueue) TestDequeue() (string, bool) {
 	item := q.Set.UnsortedList()[0]
 	q.Set.Delete(item)
 	return item, true
+}
+
+// SchedulingInputEnqueue
+func (q *SchedulingInputQueue) Enqueue(si SchedulingInput) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.inputs = append(q.inputs, si)
+}
+
+func (q *SchedulingInputQueue) Dequeue() (SchedulingInput, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.inputs) == 0 {
+		return SchedulingInput{}, false
+	}
+	item := q.inputs[0]
+	q.inputs = q.inputs[1:]
+	return item, true
+}
+
+// Create a new scheduling input
+func NewSchedulingInput(pendingPods []*v1.Pod) SchedulingInput {
+	return SchedulingInput{
+		PendingPods: pendingPods,
+	}
 }
 
 // This will take the info we pass from Provisioner or Disruption to log
@@ -159,12 +202,12 @@ func (q *TestQueue) LogLine(item string) {
 // This functions deserialized _ resource into protobuf
 
 type Controller struct {
-	queue *Queue // Batches logs in a Queue
+	queue *SchedulingInputQueue // Batches logs in a Queue
 	//testqueue *TestQueue
 }
 
 // TODO: add struct elements and their instantiations, when defined
-func NewController(queue *Queue) *Controller {
+func NewController(queue *SchedulingInputQueue) *Controller {
 	return &Controller{
 		queue: queue,
 		//testqueue: queue,
@@ -179,28 +222,53 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 	fmt.Println("Starting One Reconcile Print from ORB...")
 
-	// set a blank []byte
-	//sample_logline := []byte{}
+	// qstr := c.queue.toString()
+	// fmt.Println(qstr)
 
-	qstr := c.queue.toString()
-	fmt.Println(qstr)
+	//qstr := SchedulingInputToString(c.queue)
 
-	//c.queue.TestEnqueue("Hello World from the ORB Batcher Reconciler")
-
-	// While a queue is not empty (has items to dequeue), dequeue and print
-	// TODO: There must be a prettier / more Go-like way to write this...
+	// For each scheduling input in my queue (c.queue), print to string and send to PV
 	for {
 		item, nonempty := c.queue.Dequeue()
-		//item, nonempty := c.queue.TestDequeue()
 		if !nonempty {
 			break
 		}
 		// Test prints, to show they are dequeuing. These otherwise get sent to the PV
-		//fmt.Println(item)
-		PrintPodPB(item)
+		fmt.Println(SchedulingInputToString(item))
+		data, err := SchedulingInputToPB(item)
+		if err != nil {
+			fmt.Println("Error converting to PB:", err)
+			return reconcile.Result{}, err
+		}
+		// Save to the Persistent Volume (maybe save as log_timestamp for uniqueness, or monotonically increasing counter)
+		err = c.SaveToPV("pendingpods_"+string(len(data))+".log", "sample_log: "+string(data))
+		if err != nil {
+			fmt.Println("Error saving to PV:", err)
+			return reconcile.Result{}, err
+		}
+		//PrintPodPB(item)
 		// sample_logline = item
 		// fmt.Println(sample_logline)
 	}
+
+	// // For each scheduling input in my queue (c.queue), print to string and send to PV
+
+	// //c.queue.TestEnqueue("Hello World from the ORB Batcher Reconciler")
+
+	// // While a queue is not empty (has items to dequeue), dequeue and print
+	// // TODO: There must be a prettier / more Go-like way to write this...
+	// for {
+	// 	item, nonempty := c.queue.Dequeue()
+	// 	//item, nonempty := c.queue.TestDequeue()
+	// 	if !nonempty {
+	// 		break
+	// 	}
+	// 	// Test prints, to show they are dequeuing. These otherwise get sent to the PV
+	// 	//fmt.Println(item)
+	// 	PrintPodPB(item)
+	// 	// sample_logline = item
+	// 	// fmt.Println(sample_logline)
+	// }
 
 	fmt.Println("Ending One Reconcile Print from ORB...")
 	fmt.Println()
@@ -212,12 +280,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 	// TODO: How should I save a [][]byte (i.e. the pb queue) to a file (or multiple files?)
 
-	// Save to the Persistent Volume
-	err := c.SaveToPV("helloworld_"+string(len(qstr))+".txt", "sample_logline: "+qstr)
-	if err != nil {
-		fmt.Println("Error saving to PV:", err)
-		return reconcile.Result{}, err
-	}
+	// Save to the Persistent Volume (maybe save as log_timestamp for uniqueness, or monotonically increasing counter)
+	// err := c.SaveToPV("helloworld_"+string(len(qstr))+".log", "sample_log: "+qstr)
+	// if err != nil {
+	// 	fmt.Println("Error saving to PV:", err)
+	// 	return reconcile.Result{}, err
+	// }
 
 	return reconcile.Result{RequeueAfter: time.Second * 5}, nil
 }
@@ -242,6 +310,17 @@ func PodToString(pod *v1.Pod) string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("Name: %s, Namespace: %s, Phase: %s, NodeName: %s", pod.Name, pod.Namespace, pod.Status.Phase, pod.Spec.NodeName)
+}
+
+func PodsToString(pods []*v1.Pod) string {
+	if pods == nil {
+		return "<nil>"
+	}
+	var buf bytes.Buffer
+	for _, pod := range pods {
+		buf.WriteString(PodToString(pod) + "\n")
+	}
+	return buf.String()
 }
 
 // Similar function for stateNode
@@ -324,6 +403,40 @@ func (q *Queue) LogProvisioningScheduler(pods []*v1.Pod, stateNodes []*state.Sta
 
 	fmt.Println("End Provisioner Logging")
 }
+
+// Function for logging everything in the Provisioner Scheduler (i.e. pending pods, statenodes...)
+func (q *SchedulingInputQueue) SILogProvisioningScheduler(pods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes map[string][]*cloudprovider.InstanceType) {
+	fmt.Println("SI Logging from the Provisioner")
+
+	si := NewSchedulingInput(pods)
+	q.Enqueue(si) // sends that scheduling input into the data structure to be dequeued in batch to go to PV as a protobuf
+
+	fmt.Println("End Provisioner SI Logging")
+}
+
+// Function take a Scheduling Input to string
+func SchedulingInputToString(si SchedulingInput) string {
+	// if si == (SchedulingInput{}) {
+	// 	return "<nil>"
+	// }
+	return fmt.Sprintf("Pending Pods: %s", PodsToString(si.PendingPods))
+}
+
+// Function take a Scheduling Input to []byte, marshalled as a protobuf
+func SchedulingInputToPB(si SchedulingInput) ([]byte, error) {
+	podList := &v1.PodList{
+		Items: make([]v1.Pod, 0, len(si.PendingPods)),
+	}
+
+	for _, podPtr := range si.PendingPods {
+		podList.Items = append(podList.Items, *podPtr)
+	}
+	return podList.Marshal()
+}
+
+// Function take a []byte, marshalled as a protobuf, and deserialize it into a SchedulingInput
+
+// Function for logging pending pods (as protobuf)
 
 // Function for logging everything in the Provisioner Scheduler (i.e. pending pods, statenodes...)
 func (q *TestQueue) TestLogProvisioningScheduler(pods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes map[string][]*cloudprovider.InstanceType) {
@@ -413,6 +526,12 @@ func (q *TestQueue) TestLogInstanceTypes(instanceTypes map[string][]*cloudprovid
 }
 
 // Similar for IT Capacity
+
+// func testPrintandPV() {
+// 	fmt.Println("Printing from the ORB Batcher Reconciler")
+// 	// Save to the Persistent Volume (maybe save as log_timestamp for uniqueness, or monotonically increasing counter)
+// 	err := SaveToPV("testfile.log", "sample_log: testPrintandPV")
+// }
 
 // Security Issue Common Weakness Enumeration (CWE)-22,23 Path Traversal
 // They highly recommend sanitizing inputs before accessing that path.

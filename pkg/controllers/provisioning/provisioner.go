@@ -83,12 +83,12 @@ type Provisioner struct {
 	volumeTopology *scheduler.VolumeTopology
 	cluster        *state.Cluster
 	recorder       events.Recorder
-	queue          *orbbatcher.Queue
+	queue          *orbbatcher.SchedulingInputQueue
 	cm             *pretty.ChangeMonitor
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
-	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, queue *orbbatcher.Queue,
+	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, queue *orbbatcher.SchedulingInputQueue,
 ) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
@@ -312,7 +312,9 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	// Runs a few test logs that ORB should run. It queues as strings not pbs yet, and not to PV yet.
 	//p.queue.TestLogProvisioningScheduler(pods, stateNodes, instanceTypes)
 
-	p.queue.LogProvisioningScheduler(pods, stateNodes, instanceTypes)
+	//p.queue.LogProvisioningScheduler(pods, stateNodes, instanceTypes)
+
+	p.queue.SILogProvisioningScheduler(pods, stateNodes, instanceTypes)
 
 	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }

@@ -57,7 +57,7 @@ var nodeClaimStateController *informer.NodeClaimController
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
 var queue *orchestration.Queue
-var orbqueue *orbbatcher.Queue
+var orbqueue *orbbatcher.SchedulingInputQueue
 var prov *provisioning.Provisioner
 
 var replacements []string
@@ -82,7 +82,7 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
-	orbqueue = orbbatcher.NewQueue()
+	orbqueue = orbbatcher.NewSchedulingInputQueue()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, orbqueue)
 	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
 })

@@ -1,9 +1,15 @@
 syntax = "proto3";
 
+package orblog;
+
+// protoc --proto_path=/Users/loupetro/go/pkg/mod/k8s.io/api@v0.30.2/core/v1/ --proto_path=. --go_out=. --go_opt=paths=source_relative ORBLogEntry.proto
+//import "k8s.io/api/core/v1/generated.proto";
+
 // Sample entry, TODO: needs revision
 message ORBLogEntry {
   string timestamp = 1;
-  string event_type = 2;
-  string message = 3;
-  repeated string tags = 4;
+  //repeated k8s.io.api.core.v1.Pod pods = 2;
+  // string event_type = 2;
+  // string message = 3;
+  // repeated string tags = 4;
 }
