@@ -51,14 +51,10 @@ func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 		// Webhooks are deprecated, so support for changing their log level is also deprecated
 		logLevel = lo.Must(zap.ParseAtomicLevel(l))
 	}
-	disableCaller := true
-	if l := options.FromContext(ctx).LogLevel; l == "debug" {
-		disableCaller = false
-	}
 	return zap.Config{
 		Level:             logLevel,
 		Development:       false,
-		DisableCaller:  options.FromContext(ctx).LogLevel != "debug",
+		DisableCaller:     options.FromContext(ctx).LogLevel != "debug",
 		DisableStacktrace: true,
 		Sampling: &zap.SamplingConfig{
 			Initial:    100,
