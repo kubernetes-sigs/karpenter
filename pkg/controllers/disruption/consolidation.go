@@ -141,8 +141,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	if len(results.NewNodeClaims) != 1 {
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Can't remove without creating %d candidates", len(results.NewNodeClaims)))...)
+			return Command{}, pscheduling.Results{}, nil
 		}
-		return Command{}, pscheduling.Results{}, nil
 	}
 
 	// get the current node price based on the offering
