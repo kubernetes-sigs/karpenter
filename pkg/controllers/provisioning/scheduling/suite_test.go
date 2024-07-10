@@ -26,6 +26,10 @@ import (
 	"testing"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
+	"github.com/awslabs/operatorpkg/status"
+
 	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -83,7 +87,7 @@ func TestScheduling(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
@@ -464,6 +468,13 @@ var _ = Context("Scheduling", func() {
 			})
 		})
 		Context("Scheduling Logic", func() {
+			It("should not schedule pods with nodePool which is not ready ", func() {
+				nodePool.StatusConditions().SetFalse(status.ConditionReady, "NodePoolNotReady", "Node Pool Not Ready")
+				ExpectApplied(ctx, env.Client, nodePool)
+				pod := test.UnschedulablePod()
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectNotScheduled(ctx, env.Client, pod)
+			})
 			It("should not schedule pods that have node selectors with In operator and undefined key", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(

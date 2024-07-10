@@ -26,6 +26,8 @@ import (
 	"sync"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
@@ -230,6 +232,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.PersistentVolume{},
 		&storagev1.StorageClass{},
 		&v1beta1.NodePool{},
+		&v1alpha1.TestNodeClass{},
 		&v1beta1.NodeClaim{},
 	} {
 		for _, namespace := range namespaces.Items {
@@ -357,6 +360,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 
 	// Mock the nodeclaim launch and node joining at the apiserver
 	node := test.NodeClaimLinkedNode(nc)
+	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool { return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint) })
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1beta1.NodeRegisteredLabelKey: "true"})
 	ExpectApplied(ctx, c, nc, node)
 	return nc, node, nil
@@ -408,6 +412,7 @@ func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*
 	ExpectMakeNodesReady(ctx, c, nodes...)
 
 	for i := range nodes {
+		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(t v1.Taint, _ int) bool { return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint) })
 		nodes[i].Labels[v1beta1.NodeRegisteredLabelKey] = "true"
 		nodes[i].Labels[v1beta1.NodeInitializedLabelKey] = "true"
 		ExpectApplied(ctx, c, nodes[i])

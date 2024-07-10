@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -59,7 +61,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
 		return c.IndexField(ctx, &v1.Node{}, "spec.providerID", func(obj client.Object) []string {
 			return []string{obj.(*v1.Node).Spec.ProviderID}
 		})
@@ -120,6 +122,8 @@ var _ = Describe("NodeClaimController", func() {
 			_ = env.Client.Delete(ctx, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %q is blocking evictions", client.ObjectKeyFromObject(pdb)))).To(BeTrue())
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeConsistentStateFound).IsFalse()).To(BeTrue())
 		})
 	})
 
@@ -160,6 +164,42 @@ var _ = Describe("NodeClaimController", func() {
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeConsistentStateFound).IsFalse()).To(BeTrue())
+		})
+		It("should set consistent state found condition to true if there are no consistency issues", func() {
+			nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1beta1.NodePoolLabelKey:        nodePool.Name,
+						v1.LabelInstanceTypeStable:      "arm-instance-type",
+						v1beta1.NodeInitializedLabelKey: "true",
+					},
+				},
+				Spec: v1beta1.NodeClaimSpec{
+					Resources: v1beta1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("8"),
+							v1.ResourceMemory: resource.MustParse("64Gi"),
+							v1.ResourcePods:   resource.MustParse("5"),
+						},
+					},
+				},
+				Status: v1beta1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Capacity: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("16"),
+						v1.ResourceMemory: resource.MustParse("128Gi"),
+						v1.ResourcePods:   resource.MustParse("10"),
+					},
+				},
+			})
+			nodeClaim.StatusConditions().SetUnknown(v1beta1.ConditionTypeConsistentStateFound)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().IsTrue(v1beta1.ConditionTypeConsistentStateFound)).To(BeTrue())
 		})
 	})
 })

@@ -23,14 +23,13 @@ import (
 	"math/rand"
 	"strings"
 
-	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/status"
 
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -124,8 +123,8 @@ func (c CloudProvider) Name() string {
 	return "kwok"
 }
 
-func (c CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
-	return []schema.GroupVersionKind{object.GVK(&v1alpha1.KWOKNodeClass{})}
+func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
+	return []status.Object{&v1alpha1.KWOKNodeClass{}}
 }
 
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {
@@ -178,6 +177,7 @@ func (c CloudProvider) toNode(nodeClaim *v1beta1.NodeClaim) (*v1.Node, error) {
 		},
 		Spec: v1.NodeSpec{
 			ProviderID: kwokProviderPrefix + newName,
+			Taints:     []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
 		},
 		Status: v1.NodeStatus{
 			Capacity:    instanceType.Capacity,
@@ -213,7 +213,7 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.
 
-	ret[v1alpha1.KwokPartitionLabelKey] = lo.Sample(KwokPartitions)
+	ret[v1alpha1.KwokPartitionLabelKey] = lo.Sample(kwokPartitions)
 	ret[v1beta1.CapacityTypeLabelKey] = offering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
 	ret[v1.LabelTopologyZone] = offering.Requirements.Get(v1.LabelTopologyZone).Any()
 	ret[v1.LabelHostname] = nodeClaim.Name

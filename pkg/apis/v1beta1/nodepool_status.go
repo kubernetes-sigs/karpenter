@@ -17,7 +17,16 @@ limitations under the License.
 package v1beta1
 
 import (
+	"github.com/awslabs/operatorpkg/status"
 	v1 "k8s.io/api/core/v1"
+)
+
+const (
+	// ConditionTypeValidationSucceeded = "ValidationSucceeded" condition indicates that the
+	// runtime-based configuration is valid for this NodePool
+	ConditionTypeValidationSucceeded = "ValidationSucceeded"
+	// ConditionTypeNodeClassReady = "NodeClassReady" condition indicates that underlying nodeClass was resolved and is reporting as Ready
+	ConditionTypeNodeClassReady = "NodeClassReady"
 )
 
 // NodePoolStatus defines the observed state of NodePool
@@ -25,4 +34,22 @@ type NodePoolStatus struct {
 	// Resources is the list of resources that have been provisioned.
 	// +optional
 	Resources v1.ResourceList `json:"resources,omitempty"`
+	// Conditions contains signals for health and readiness
+	// +optional
+	Conditions []status.Condition `json:"conditions,omitempty"`
+}
+
+func (in *NodePool) StatusConditions() status.ConditionSet {
+	return status.NewReadyConditions(
+		ConditionTypeValidationSucceeded,
+		ConditionTypeNodeClassReady,
+	).For(in)
+}
+
+func (in *NodePool) GetConditions() []status.Condition {
+	return in.Status.Conditions
+}
+
+func (in *NodePool) SetConditions(conditions []status.Condition) {
+	in.Status.Conditions = conditions
 }

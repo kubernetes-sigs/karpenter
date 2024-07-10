@@ -23,6 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
+	"github.com/awslabs/operatorpkg/status"
+
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -46,7 +49,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -64,16 +66,12 @@ type LaunchOptions struct {
 }
 
 // RecordPodNomination causes nominate pod events to be recorded against the node.
-func RecordPodNomination(o LaunchOptions) LaunchOptions {
+func RecordPodNomination(o *LaunchOptions) {
 	o.RecordPodNomination = true
-	return o
 }
 
-func WithReason(reason string) func(LaunchOptions) LaunchOptions {
-	return func(o LaunchOptions) LaunchOptions {
-		o.Reason = reason
-		return o
-	}
+func WithReason(reason string) func(*LaunchOptions) {
+	return func(o *LaunchOptions) { o.Reason = reason }
 }
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
@@ -144,7 +142,7 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconcile.Result, e
 
 // CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
 // names as well as a multierr of any errors that occurred while launching nodes
-func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) ([]string, error) {
+func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) ([]string, error) {
 	// Create capacity and bind pods
 	errs := make([]error, len(nodeClaims))
 	nodeClaimNames := make([]string, len(nodeClaims))
@@ -166,34 +164,48 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*v1.Pod, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}
-	return lo.Reject(pods, func(po *v1.Pod, _ int) bool {
+	pods = lo.Reject(pods, func(po *v1.Pod, _ int) bool {
 		if err := p.Validate(ctx, po); err != nil {
 			log.FromContext(ctx).WithValues("Pod", klog.KRef(po.Namespace, po.Name)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
-		p.consolidationWarnings(ctx, po)
 		return false
-	}), nil
+	})
+	p.consolidationWarnings(ctx, pods)
+	return pods, nil
 }
 
-// consolidationWarnings potentially writes logs warning about possible unexpected interactions between scheduling
-// constraints and consolidation
-func (p *Provisioner) consolidationWarnings(ctx context.Context, po *v1.Pod) {
+// consolidationWarnings potentially writes logs warning about possible unexpected interactions
+// between scheduling constraints and consolidation
+func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*v1.Pod) {
 	// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
-	// unexpectedly with consolidation so we warn once per hour when we see these pods.
-	if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
-		if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
-			if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
-				log.FromContext(ctx).Info(fmt.Sprintf("pod %s has a preferred Anti-Affinity which can prevent consolidation", client.ObjectKeyFromObject(po)))
+	// unexpectedly with consolidation, so we warn once per hour when we see these pods.
+	antiAffinityPods := lo.FilterMap(pods, func(po *v1.Pod, _ int) (client.ObjectKey, bool) {
+		if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
+			if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
+				if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
+					return client.ObjectKeyFromObject(po), true
+				}
 			}
 		}
+		return client.ObjectKey{}, false
+	})
+	topologySpreadPods := lo.FilterMap(pods, func(po *v1.Pod, _ int) (client.ObjectKey, bool) {
+		for _, tsc := range po.Spec.TopologySpreadConstraints {
+			if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
+				if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
+					return client.ObjectKeyFromObject(po), true
+				}
+			}
+		}
+		return client.ObjectKey{}, false
+	})
+	// We reduce the amount of logging that we do per-pod by grouping log lines like this together
+	if len(antiAffinityPods) > 0 {
+		log.FromContext(ctx).WithValues("pods", pretty.Slice(antiAffinityPods, 10)).Info("pod(s) have a preferred Anti-Affinity which can prevent consolidation")
 	}
-	for _, tsc := range po.Spec.TopologySpreadConstraints {
-		if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
-			if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
-				log.FromContext(ctx).Info(fmt.Sprintf("pod %s has a preferred TopologySpreadConstraint which can prevent consolidation", client.ObjectKeyFromObject(po)))
-			}
-		}
+	if len(topologySpreadPods) > 0 {
+		log.FromContext(ctx).WithValues("pods", pretty.Slice(topologySpreadPods, 10)).Info("pod(s) have a preferred TopologySpreadConstraint which can prevent consolidation")
 	}
 }
 
@@ -207,8 +219,8 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 		return nil, fmt.Errorf("listing node pools, %w", err)
 	}
 	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1beta1.NodePool, _ int) bool {
-		if err := n.RuntimeValidate(); err != nil {
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.Name)).Error(err, "nodepool failed validation")
+		if !n.StatusConditions().IsTrue(status.ConditionReady) {
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.Name)).Error(err, "nodePool not ready")
 			return false
 		}
 		return n.DeletionTimestamp.IsZero()
@@ -224,6 +236,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.Set[string]{}
+	var notReadyNodePools []string
 	for _, nodePool := range nodePoolList.Items {
 		// Get instance type options
 		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, lo.ToPtr(nodePool))
@@ -274,7 +287,9 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNod
 			}
 		}
 	}
-
+	if len(notReadyNodePools) > 0 {
+		log.FromContext(ctx).WithValues("nodePools", nodePoolList).Info("skipped nodePools, not ready")
+	}
 	// inject topology constraints
 	pods = p.injectVolumeTopologyRequirements(ctx, pods)
 
@@ -339,9 +354,9 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	return results, nil
 }
 
-func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...functional.Option[LaunchOptions]) (string, error) {
+func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) (string, error) {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.NodePoolName)))
-	options := functional.ResolveOptions(opts...)
+	options := option.Resolve(opts...)
 	latest := &v1beta1.NodePool{}
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {
 		return "", fmt.Errorf("getting current resource usage, %w", err)
@@ -371,7 +386,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	// to then trigger cluster state updates. Triggering it manually ensures that Karpenter waits for the
 	// internal cache to sync before moving onto another disruption loop.
 	p.cluster.UpdateNodeClaim(nodeClaim)
-	if functional.ResolveOptions(opts...).RecordPodNomination {
+	if option.Resolve(opts...).RecordPodNomination {
 		for _, pod := range n.Pods {
 			p.recorder.Publish(scheduler.NominatePodEvent(pod, nil, nodeClaim))
 		}

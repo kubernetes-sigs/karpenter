@@ -22,13 +22,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 // Requirements are an efficient set representation under the hood. Since its underlying
@@ -163,18 +163,18 @@ type CompatibilityOptions struct {
 	AllowUndefined sets.Set[string]
 }
 
-var AllowUndefinedWellKnownLabels = func(options CompatibilityOptions) CompatibilityOptions {
+var AllowUndefinedWellKnownLabels = func(options *CompatibilityOptions) {
 	options.AllowUndefined = v1beta1.WellKnownLabels
-	return options
 }
 
-func (r Requirements) IsCompatible(requirements Requirements, options ...functional.Option[CompatibilityOptions]) bool {
+func (r Requirements) IsCompatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) bool {
 	return r.Compatible(requirements, options...) == nil
 }
 
 // Compatible ensures the provided requirements can loosely be met.
-func (r Requirements) Compatible(requirements Requirements, options ...functional.Option[CompatibilityOptions]) (errs error) {
-	opts := functional.ResolveOptions(options...)
+func (r Requirements) Compatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) (errs error) {
+	opts := option.Resolve(options...)
+
 	// Custom Labels must intersect, but if not defined are denied.
 	for key := range requirements.Keys().Difference(opts.AllowUndefined) {
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == v1.NodeSelectorOpNotIn || operator == v1.NodeSelectorOpDoesNotExist {

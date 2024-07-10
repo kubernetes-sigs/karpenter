@@ -21,13 +21,16 @@ import (
 	"fmt"
 	"testing"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	. "knative.dev/pkg/logging/testing"
+
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -49,7 +52,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	cloudProvider = fake.NewCloudProvider()
 })
 

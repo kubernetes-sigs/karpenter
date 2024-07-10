@@ -49,7 +49,7 @@ e2etests: ## Run the e2e suite against your local cluster
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.timeout=30m \
 		--ginkgo.grace-period=5m \
-		--ginkgo.vv	
+		--ginkgo.vv
 
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
@@ -69,7 +69,7 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 test: ## Run tests
 	go test ./pkg/... \
 		-race \
-		-timeout 15m \
+		-timeout 20m \
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.randomize-all \
 		--ginkgo.v \

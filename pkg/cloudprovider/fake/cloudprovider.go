@@ -23,6 +23,10 @@ import (
 	"sort"
 	"sync"
 
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
+	"github.com/awslabs/operatorpkg/status"
+
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -34,7 +38,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -146,8 +149,8 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 		Spec: *nodeClaim.Spec.DeepCopy(),
 		Status: v1beta1.NodeClaimStatus{
 			ProviderID:  test.RandomProviderID(),
-			Capacity:    functional.FilterMap(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
-			Allocatable: functional.FilterMap(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
+			Capacity:    lo.PickBy(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
+			Allocatable: lo.PickBy(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
 	}
 	c.CreatedNodeClaims[created.Status.ProviderID] = created
@@ -262,6 +265,6 @@ func (c *CloudProvider) Name() string {
 	return "fake"
 }
 
-func (c *CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
-	return c.NodeClassGroupVersionKind
+func (c *CloudProvider) GetSupportedNodeClasses() []status.Object {
+	return []status.Object{&v1alpha1.TestNodeClass{}}
 }

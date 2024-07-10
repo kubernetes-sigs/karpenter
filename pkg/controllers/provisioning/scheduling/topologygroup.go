@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -29,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/utils/functional"
 )
 
 type TopologyType byte
@@ -114,7 +114,7 @@ func (t *TopologyGroup) Record(domains ...string) {
 
 // Counts returns true if the pod would count for the topology, given that it schedule to a node with the provided
 // requirements
-func (t *TopologyGroup) Counts(pod *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...functional.Option[scheduling.CompatibilityOptions]) bool {
+func (t *TopologyGroup) Counts(pod *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
 	return t.selects(pod) && t.nodeFilter.MatchesRequirements(requirements, compatabilityOptions...)
 }
 

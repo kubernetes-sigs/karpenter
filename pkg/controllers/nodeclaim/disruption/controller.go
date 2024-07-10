@@ -23,7 +23,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -115,11 +114,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	builder := controllerruntime.NewControllerManagedBy(m)
-	for _, ncGVK := range c.cloudProvider.GetSupportedNodeClasses() {
-		nodeclass := &unstructured.Unstructured{}
-		nodeclass.SetGroupVersionKind(ncGVK)
+	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
 		builder = builder.Watches(
-			nodeclass,
+			nodeClass,
 			nodeclaimutil.NodeClassEventHandler(c.kubeClient),
 		)
 	}

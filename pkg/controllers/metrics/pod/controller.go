@@ -112,10 +112,6 @@ func NewController(kubeClient client.Client) *Controller {
 	}
 }
 
-func (c *Controller) Name() string {
-	return "metrics.pod"
-}
-
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "metrics.pod")
