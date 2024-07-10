@@ -23,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
 
@@ -87,7 +87,7 @@ func NewControllers(
 		nodeclaimtermination.NewController(kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cluster, cloudProvider),
 		leasegarbagecollection.NewController(kubeClient),
-		status.NewController[*v1beta1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),
-		status.NewController[*v1beta1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),
+		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),
+		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 	}
 }

@@ -26,14 +26,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// NodeClassEventHandler is a watcher on v1beta1.NodePool that maps NodeClass to NodePools based
+// NodeClassEventHandler is a watcher on v1.NodePool that maps NodeClass to NodePools based
 // on the nodeClassRef and enqueues reconcile.Requests for the NodePool
 func NodeClassEventHandler(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		nodePoolList := &v1beta1.NodePoolList{}
+		nodePoolList := &v1.NodePoolList{}
 		if err := c.List(ctx, nodePoolList, client.MatchingFields{
 			"spec.template.spec.nodeClassRef.apiVersion": object.GVK(o).GroupVersion().String(),
 			"spec.template.spec.nodeClassRef.kind":       object.GVK(o).Kind,
@@ -41,7 +41,7 @@ func NodeClassEventHandler(c client.Client) handler.EventHandler {
 		}); err != nil {
 			return requests
 		}
-		return lo.Map(nodePoolList.Items, func(n v1beta1.NodePool, _ int) reconcile.Request {
+		return lo.Map(nodePoolList.Items, func(n v1.NodePool, _ int) reconcile.Request {
 			return reconcile.Request{
 				NamespacedName: client.ObjectKeyFromObject(&n),
 			}

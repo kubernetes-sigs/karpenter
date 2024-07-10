@@ -35,7 +35,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -178,9 +178,9 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	}
 	metricLabels[podHostZone] = node.Labels[corev1.LabelTopologyZone]
 	metricLabels[podHostArchitecture] = node.Labels[corev1.LabelArchStable]
-	metricLabels[podHostCapacityType] = node.Labels[v1beta1.CapacityTypeLabelKey]
+	metricLabels[podHostCapacityType] = node.Labels[v1.CapacityTypeLabelKey]
 	metricLabels[podHostInstanceType] = node.Labels[corev1.LabelInstanceTypeStable]
-	metricLabels[podNodePool] = node.Labels[v1beta1.NodePoolLabelKey]
+	metricLabels[podNodePool] = node.Labels[v1.NodePoolLabelKey]
 	return metricLabels, nil
 }
 
