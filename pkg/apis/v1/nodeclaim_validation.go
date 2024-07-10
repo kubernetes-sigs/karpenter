@@ -17,13 +17,11 @@ limitations under the License.
 package v1
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -57,28 +55,6 @@ var (
 	)
 )
 
-func (in *NodeClaim) SupportedVerbs() []admissionregistrationv1.OperationType {
-	return []admissionregistrationv1.OperationType{
-		admissionregistrationv1.Create,
-		admissionregistrationv1.Update,
-	}
-}
-
-// Validate the NodeClaim
-func (in *NodeClaim) Validate(_ context.Context) (errs *apis.FieldError) {
-	return errs.Also(
-		apis.ValidateObjectMetadata(in).ViaField("metadata"),
-		in.Spec.validate().ViaField("spec"),
-	)
-}
-
-func (in *NodeClaimSpec) validate() (errs *apis.FieldError) {
-	return errs.Also(
-		in.validateTaints(),
-		in.validateRequirements(),
-	)
-}
-
 type taintKeyEffect struct {
 	OwnerKey string
 	Effect   v1.TaintEffect
@@ -86,12 +62,12 @@ type taintKeyEffect struct {
 
 func (in *NodeClaimSpec) validateTaints() (errs *apis.FieldError) {
 	existing := map[taintKeyEffect]struct{}{}
-	errs = errs.Also(in.validateTaintsField(in.Taints, existing, "taints"))
-	errs = errs.Also(in.validateTaintsField(in.StartupTaints, existing, "startupTaints"))
+	errs = errs.Also(validateTaintsField(in.Taints, existing, "taints"))
+	errs = errs.Also(validateTaintsField(in.StartupTaints, existing, "startupTaints"))
 	return errs
 }
 
-func (in *NodeClaimSpec) validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}, fieldName string) *apis.FieldError {
+func validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}, fieldName string) *apis.FieldError {
 	var errs *apis.FieldError
 	for i, taint := range taints {
 		// Validate OwnerKey
