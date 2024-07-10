@@ -58,7 +58,7 @@ func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 	return zap.Config{
 		Level:             logLevel,
 		Development:       false,
-		DisableCaller:     disableCaller,
+		DisableCaller:  options.FromContext(ctx).LogLevel != "debug",
 		DisableStacktrace: true,
 		Sampling: &zap.SamplingConfig{
 			Initial:    100,
