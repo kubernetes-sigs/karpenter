@@ -23,7 +23,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -38,7 +38,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclaimlifcycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
@@ -65,8 +65,8 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1.Node{}, "spec.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1.Node).Spec.ProviderID}
+		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Node).Spec.ProviderID}
 		})
 	}))
 	ctx = options.ToContext(ctx, test.Options())
@@ -86,16 +86,16 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("GarbageCollection", func() {
-	var nodePool *v1beta1.NodePool
+	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
 	It("should delete the NodeClaim when the Node is there in a NotReady state and the instance is gone", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})
@@ -119,10 +119,10 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("shouldn't delete the NodeClaim when the Node is there in a Ready state and the instance is gone", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})
@@ -143,12 +143,12 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should delete many NodeClaims when the Nodes are there in a NotReady state and the instances are gone", func() {
-		var nodeClaims []*v1beta1.NodeClaim
+		var nodeClaims []*v1.NodeClaim
 		for i := 0; i < 100; i++ {
-			nodeClaims = append(nodeClaims, test.NodeClaim(v1beta1.NodeClaim{
+			nodeClaims = append(nodeClaims, test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey: nodePool.Name,
+						v1.NodePoolLabelKey: nodePool.Name,
 					},
 				},
 			}))
@@ -157,7 +157,7 @@ var _ = Describe("GarbageCollection", func() {
 		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
 			defer GinkgoRecover()
 			ExpectApplied(ctx, env.Client, nodeClaims[i])
-			var node *v1.Node
+			var node *corev1.Node
 			var err error
 			nodeClaims[i], node, err = ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaims[i])
 			Expect(err).ToNot(HaveOccurred())
@@ -182,13 +182,13 @@ var _ = Describe("GarbageCollection", func() {
 			defer GinkgoRecover()
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaims[i])
 		})
-		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(n *v1beta1.NodeClaim, _ int) client.Object { return n })...)
+		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(n *v1.NodeClaim, _ int) client.Object { return n })...)
 	})
 	It("shouldn't delete the NodeClaim when the Node isn't there and the instance is gone", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})
@@ -208,10 +208,10 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("shouldn't delete the NodeClaim when the Node isn't there but the instance is there", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})

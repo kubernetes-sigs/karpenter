@@ -32,7 +32,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
@@ -43,7 +43,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	clock "k8s.io/utils/clock/testing"
 )
 
@@ -61,9 +61,9 @@ var prov *provisioning.Provisioner
 var replacements []string
 var ncName string
 
-var nodeClaim1, nodeClaim2, replacementNodeClaim *v1beta1.NodeClaim
-var nodePool *v1beta1.NodePool
-var node1, node2, replacementNode *v1.Node
+var nodeClaim1, nodeClaim2, replacementNodeClaim *v1.NodeClaim
+var nodePool *v1.NodePool
+var node1, node2, replacementNode *corev1.Node
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -107,56 +107,56 @@ var _ = Describe("Queue", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 		nodeClaim1, node1 = test.NodeClaimAndNode(
-			v1beta1.NodeClaim{
+			v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[0].Name,
-						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+						v1.CapacityTypeLabelKey:        cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
+				Status: v1.NodeClaimStatus{
 					ProviderID:  test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 				},
 			},
 		)
 		nodeClaim2, node2 = test.NodeClaimAndNode(
-			v1beta1.NodeClaim{
+			v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[0].Name,
-						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+						v1.CapacityTypeLabelKey:        cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
+				Status: v1.NodeClaimStatus{
 					ProviderID:  test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 				},
 			},
 		)
-		node1.Spec.Taints = append(node1.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
-		node2.Spec.Taints = append(node2.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		node1.Spec.Taints = append(node1.Spec.Taints, v1.DisruptionNoScheduleTaint)
+		node2.Spec.Taints = append(node2.Spec.Taints, v1.DisruptionNoScheduleTaint)
 
 		ncName = test.RandomName()
 		replacements = []string{ncName}
 		replacementNodeClaim, replacementNode = test.NodeClaimAndNode(
-			v1beta1.NodeClaim{
+			v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: ncName,
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   cloudProvider.InstanceTypes[0].Name,
-						v1beta1.CapacityTypeLabelKey: cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+						v1.CapacityTypeLabelKey:        cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
+				Status: v1.NodeClaimStatus{
 					ProviderID:  test.RandomProviderID(),
-					Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 				},
 			},
 		)
@@ -164,13 +164,13 @@ var _ = Describe("Queue", func() {
 	Context("Reconcile", func() {
 		It("should keep nodes tainted when replacements haven't finished initialization", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, replacementNodeClaim, replacementNode)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
 			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type"))).To(BeNil())
 
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
-			Expect(node1.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptionNoScheduleTaint))
 
 			ExpectSingletonReconciled(ctx, queue)
 
@@ -178,11 +178,11 @@ var _ = Describe("Queue", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
-			Expect(node1.Spec.Taints).To(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptionNoScheduleTaint))
 		})
 		It("should not return an error when handling commands before the timeout", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, replacementNodeClaim)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type"))).To(BeNil())
@@ -190,7 +190,7 @@ var _ = Describe("Queue", func() {
 		})
 		It("should untaint nodes when a command times out", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type"))).To(BeNil())
@@ -200,11 +200,11 @@ var _ = Describe("Queue", func() {
 
 			ExpectSingletonReconciled(ctx, queue)
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
-			Expect(node1.Spec.Taints).ToNot(ContainElement(v1beta1.DisruptionNoScheduleTaint))
+			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptionNoScheduleTaint))
 		})
 		It("should fully handle a command when replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, replacementNodeClaim, replacementNode)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
@@ -218,7 +218,7 @@ var _ = Describe("Queue", func() {
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(replacementNodeClaim).Message)).To(BeTrue())
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
-				[]*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
+				[]*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
 
 			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
@@ -234,14 +234,14 @@ var _ = Describe("Queue", func() {
 		It("should only finish a command when all replacements are initialized", func() {
 			ncName2 := test.RandomName()
 			replacements = []string{ncName, ncName2}
-			replacementNodeClaim2, replacementNode2 := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			replacementNodeClaim2, replacementNode2 := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: ncName2,
 				},
 			})
 
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, replacementNodeClaim, replacementNode, replacementNodeClaim2, replacementNode2, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
@@ -252,14 +252,14 @@ var _ = Describe("Queue", func() {
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
 
 			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode2}, []*v1beta1.NodeClaim{replacementNodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode2}, []*v1.NodeClaim{replacementNodeClaim2})
 
 			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
@@ -271,7 +271,7 @@ var _ = Describe("Queue", func() {
 		})
 		It("should not wait for replacements when none are needed", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1}, []*v1beta1.NodeClaim{nodeClaim1})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			cmd := orchestration.NewCommand([]string{}, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
@@ -289,14 +289,14 @@ var _ = Describe("Queue", func() {
 		It("should finish two commands in order as replacements are intialized", func() {
 			ncName2 := test.RandomName()
 			replacements2 := []string{ncName2}
-			replacementnodeClaim2, replacementNode2 := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			replacementnodeClaim2, replacementNode2 := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: ncName2,
 				},
 			})
 
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodeClaim2, node2, replacementNodeClaim, replacementNode, replacementnodeClaim2, replacementNode2, nodePool)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node1, node2}, []*v1beta1.NodeClaim{nodeClaim1, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2})
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 			stateNode2 := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim2)
 
@@ -313,7 +313,7 @@ var _ = Describe("Queue", func() {
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim2).Message)).To(BeTrue())
 
 			// Make the first command's node initialized
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode}, []*v1beta1.NodeClaim{replacementNodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
 			// Reconcile the second command and expect nothing to be initialized
 			ExpectSingletonReconciled(ctx, queue)
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
@@ -330,7 +330,7 @@ var _ = Describe("Queue", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
 
 			// Make the second command's node initialized
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{replacementNode2}, []*v1beta1.NodeClaim{replacementnodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode2}, []*v1.NodeClaim{replacementnodeClaim2})
 
 			// Reconcile the second command and expect the replacement to be initialized
 			ExpectSingletonReconciled(ctx, queue)

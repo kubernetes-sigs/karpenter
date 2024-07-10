@@ -36,7 +36,7 @@ import (
 	prometheusmodel "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -55,7 +55,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -71,14 +71,14 @@ const (
 	RequestInterval           = 1 * time.Second
 )
 
-type Bindings map[*v1.Pod]*Binding
+type Bindings map[*corev1.Pod]*Binding
 
 type Binding struct {
-	NodeClaim *v1beta1.NodeClaim
-	Node      *v1.Node
+	NodeClaim *v1.NodeClaim
+	Node      *corev1.Node
 }
 
-func (b Bindings) Get(p *v1.Pod) *Binding {
+func (b Bindings) Get(p *corev1.Pod) *Binding {
 	for k, v := range b {
 		if client.ObjectKeyFromObject(k) == client.ObjectKeyFromObject(p) {
 			return v
@@ -94,14 +94,14 @@ func ExpectExists[T client.Object](ctx context.Context, c client.Client, obj T) 
 	return resp
 }
 
-func ExpectPodExists(ctx context.Context, c client.Client, name string, namespace string) *v1.Pod {
+func ExpectPodExists(ctx context.Context, c client.Client, name string, namespace string) *corev1.Pod {
 	GinkgoHelper()
-	return ExpectExists(ctx, c, &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
+	return ExpectExists(ctx, c, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
 }
 
-func ExpectNodeExists(ctx context.Context, c client.Client, name string) *v1.Node {
+func ExpectNodeExists(ctx context.Context, c client.Client, name string) *corev1.Node {
 	GinkgoHelper()
-	return ExpectExists(ctx, c, &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
+	return ExpectExists(ctx, c, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
 }
 
 func ExpectNotFound(ctx context.Context, c client.Client, objects ...client.Object) {
@@ -115,14 +115,14 @@ func ExpectNotFound(ctx context.Context, c client.Client, objects ...client.Obje
 	}
 }
 
-func ExpectScheduled(ctx context.Context, c client.Client, pod *v1.Pod) *v1.Node {
+func ExpectScheduled(ctx context.Context, c client.Client, pod *corev1.Pod) *corev1.Node {
 	GinkgoHelper()
 	p := ExpectPodExists(ctx, c, pod.Name, pod.Namespace)
 	Expect(p.Spec.NodeName).ToNot(BeEmpty(), fmt.Sprintf("expected %s/%s to be scheduled", pod.Namespace, pod.Name))
 	return ExpectNodeExists(ctx, c, p.Spec.NodeName)
 }
 
-func ExpectNotScheduled(ctx context.Context, c client.Client, pod *v1.Pod) *v1.Pod {
+func ExpectNotScheduled(ctx context.Context, c client.Client, pod *corev1.Pod) *corev1.Pod {
 	GinkgoHelper()
 	p := ExpectPodExists(ctx, c, pod.Name, pod.Namespace)
 	Eventually(p.Spec.NodeName).Should(BeEmpty(), fmt.Sprintf("expected %s/%s to not be scheduled", pod.Namespace, pod.Name))
@@ -219,21 +219,21 @@ func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ..
 func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	GinkgoHelper()
 	wg := sync.WaitGroup{}
-	namespaces := &v1.NamespaceList{}
+	namespaces := &corev1.NamespaceList{}
 	Expect(c.List(ctx, namespaces)).To(Succeed())
-	ExpectFinalizersRemovedFromList(ctx, c, &v1.NodeList{}, &v1beta1.NodeClaimList{}, &v1.PersistentVolumeClaimList{})
+	ExpectFinalizersRemovedFromList(ctx, c, &corev1.NodeList{}, &v1.NodeClaimList{}, &corev1.PersistentVolumeClaimList{})
 	for _, object := range []client.Object{
-		&v1.Pod{},
-		&v1.Node{},
+		&corev1.Pod{},
+		&corev1.Node{},
 		&appsv1.DaemonSet{},
 		&nodev1.RuntimeClass{},
 		&policyv1.PodDisruptionBudget{},
-		&v1.PersistentVolumeClaim{},
-		&v1.PersistentVolume{},
+		&corev1.PersistentVolumeClaim{},
+		&corev1.PersistentVolume{},
 		&storagev1.StorageClass{},
-		&v1beta1.NodePool{},
+		&v1.NodePool{},
 		&v1alpha1.TestNodeClass{},
-		&v1beta1.NodeClaim{},
+		&v1.NodeClaim{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
@@ -273,10 +273,10 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...clien
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*v1.Pod) Bindings {
+func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
 	GinkgoHelper()
 	bindings := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
-	podKeys := sets.NewString(lo.Map(pods, func(p *v1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
+	podKeys := sets.NewString(lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
 	for pod, binding := range bindings {
 		// Only bind the pods that are passed through
 		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
@@ -288,7 +288,7 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 }
 
 //nolint:gocyclo
-func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*v1.Pod) Bindings {
+func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
 	GinkgoHelper()
 	// Persist objects
 	for _, pod := range pods {
@@ -307,7 +307,7 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 		if err != nil {
 			return bindings
 		}
-		nodeClaim := &v1beta1.NodeClaim{}
+		nodeClaim := &v1.NodeClaim{}
 		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
 		nodeClaim, node := ExpectNodeClaimDeployedAndStateUpdated(ctx, c, cluster, cloudProvider, nodeClaim)
 		if nodeClaim != nil && node != nil {
@@ -332,7 +332,7 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	return bindings
 }
 
-func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, nc *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
+func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, error) {
 	GinkgoHelper()
 
 	resolved, err := cloudProvider.Create(ctx, nc)
@@ -344,29 +344,29 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudPr
 
 	// Make the nodeclaim ready in the status conditions
 	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
-	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
+	nc.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 	ExpectApplied(ctx, c, nc)
 	return nc, nil
 }
 
-func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, nc *v1beta1.NodeClaim) (*v1beta1.NodeClaim, *v1.Node, error) {
+func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, *corev1.Node, error) {
 	GinkgoHelper()
 
 	nc, err := ExpectNodeClaimDeployedNoNode(ctx, c, cloudProvider, nc)
 	if err != nil {
 		return nc, nil, err
 	}
-	nc.StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
+	nc.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
 
 	// Mock the nodeclaim launch and node joining at the apiserver
 	node := test.NodeClaimLinkedNode(nc)
-	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool { return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint) })
-	node.Labels = lo.Assign(node.Labels, map[string]string{v1beta1.NodeRegisteredLabelKey: "true"})
+	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
+	node.Labels = lo.Assign(node.Labels, map[string]string{v1.NodeRegisteredLabelKey: "true"})
 	ExpectApplied(ctx, c, nc, node)
 	return nc, node, nil
 }
 
-func ExpectNodeClaimDeployedAndStateUpdated(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1beta1.NodeClaim) (*v1beta1.NodeClaim, *v1.Node) {
+func ExpectNodeClaimDeployedAndStateUpdated(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, *corev1.Node) {
 	GinkgoHelper()
 
 	nc, node, err := ExpectNodeClaimDeployed(ctx, c, cloudProvider, nc)
@@ -378,11 +378,11 @@ func ExpectNodeClaimDeployedAndStateUpdated(ctx context.Context, c client.Client
 	return nc, node
 }
 
-func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeClaims ...*v1beta1.NodeClaim) {
+func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeClaims ...*v1.NodeClaim) {
 	GinkgoHelper()
 	nodes := ExpectNodes(ctx, c)
 	for _, nodeClaim := range nodeClaims {
-		err := c.Get(ctx, client.ObjectKeyFromObject(nodeClaim), &v1beta1.NodeClaim{})
+		err := c.Get(ctx, client.ObjectKeyFromObject(nodeClaim), &v1.NodeClaim{})
 		if !errors.IsNotFound(err) {
 			continue
 		}
@@ -396,37 +396,37 @@ func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeC
 	}
 }
 
-func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeClaims ...*v1beta1.NodeClaim) {
+func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeClaims ...*v1.NodeClaim) {
 	GinkgoHelper()
 	for i := range nodeClaims {
 		nodeClaims[i] = ExpectExists(ctx, c, nodeClaims[i])
-		nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeLaunched)
-		nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeRegistered)
-		nodeClaims[i].StatusConditions().SetTrue(v1beta1.ConditionTypeInitialized)
+		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeInitialized)
 		ExpectApplied(ctx, c, nodeClaims[i])
 	}
 }
 
-func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*v1.Node) {
+func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*corev1.Node) {
 	GinkgoHelper()
 	ExpectMakeNodesReady(ctx, c, nodes...)
 
 	for i := range nodes {
-		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(t v1.Taint, _ int) bool { return t.MatchTaint(&v1beta1.UnregisteredNoExecuteTaint) })
-		nodes[i].Labels[v1beta1.NodeRegisteredLabelKey] = "true"
-		nodes[i].Labels[v1beta1.NodeInitializedLabelKey] = "true"
+		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
+		nodes[i].Labels[v1.NodeRegisteredLabelKey] = "true"
+		nodes[i].Labels[v1.NodeInitializedLabelKey] = "true"
 		ExpectApplied(ctx, c, nodes[i])
 	}
 }
 
-func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*v1.Node) {
+func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*corev1.Node) {
 	for i := range nodes {
 		nodes[i] = ExpectExists(ctx, c, nodes[i])
-		nodes[i].Status.Phase = v1.NodeRunning
-		nodes[i].Status.Conditions = []v1.NodeCondition{
+		nodes[i].Status.Phase = corev1.NodeRunning
+		nodes[i].Status.Conditions = []corev1.NodeCondition{
 			{
-				Type:               v1.NodeReady,
-				Status:             v1.ConditionFalse,
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionFalse,
 				LastHeartbeatTime:  metav1.Now(),
 				LastTransitionTime: metav1.Now(),
 				Reason:             "NotReady",
@@ -439,14 +439,14 @@ func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*v1.
 	}
 }
 
-func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Node) {
+func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*corev1.Node) {
 	for i := range nodes {
 		nodes[i] = ExpectExists(ctx, c, nodes[i])
-		nodes[i].Status.Phase = v1.NodeRunning
-		nodes[i].Status.Conditions = []v1.NodeCondition{
+		nodes[i].Status.Phase = corev1.NodeRunning
+		nodes[i].Status.Conditions = []corev1.NodeCondition{
 			{
-				Type:               v1.NodeReady,
-				Status:             v1.ConditionTrue,
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionTrue,
 				LastHeartbeatTime:  metav1.Now(),
 				LastTransitionTime: metav1.Now(),
 				Reason:             "KubeletReady",
@@ -456,8 +456,8 @@ func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*v1.Nod
 			nodes[i].Labels = map[string]string{}
 		}
 		// Remove any of the known ephemeral taints to make the Node ready
-		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(taint v1.Taint, _ int) bool {
-			_, found := lo.Find(pscheduling.KnownEphemeralTaints, func(t v1.Taint) bool {
+		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(taint corev1.Taint, _ int) bool {
+			_, found := lo.Find(pscheduling.KnownEphemeralTaints, func(t corev1.Taint) bool {
 				return t.MatchTaint(&taint)
 			})
 			return found
@@ -574,16 +574,16 @@ func ExpectMetricHistogramSampleCountValue(metricName string, expectedValue uint
 	Expect(lo.FromPtr(metric.Histogram.SampleCount)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")
 }
 
-func ExpectManualBinding(ctx context.Context, c client.Client, pod *v1.Pod, node *v1.Node) {
+func ExpectManualBinding(ctx context.Context, c client.Client, pod *corev1.Pod, node *corev1.Node) {
 	GinkgoHelper()
-	Expect(c.Create(ctx, &v1.Binding{
+	Expect(c.Create(ctx, &corev1.Binding{
 		TypeMeta: pod.TypeMeta,
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pod.ObjectMeta.Name,
 			Namespace: pod.ObjectMeta.Namespace,
 			UID:       pod.ObjectMeta.UID,
 		},
-		Target: v1.ObjectReference{
+		Target: corev1.ObjectReference{
 			Name: node.Name,
 		},
 	})).To(Succeed())
@@ -593,11 +593,11 @@ func ExpectManualBinding(ctx context.Context, c client.Client, pod *v1.Pod, node
 	}).Should(Succeed())
 }
 
-func ExpectSkew(ctx context.Context, c client.Client, namespace string, constraint *v1.TopologySpreadConstraint) Assertion {
+func ExpectSkew(ctx context.Context, c client.Client, namespace string, constraint *corev1.TopologySpreadConstraint) Assertion {
 	GinkgoHelper()
-	nodes := &v1.NodeList{}
+	nodes := &corev1.NodeList{}
 	Expect(c.List(ctx, nodes)).To(Succeed())
-	pods := &v1.PodList{}
+	pods := &corev1.PodList{}
 	Expect(c.List(ctx, pods, scheduling.TopologyListOptions(namespace, constraint.LabelSelector))).To(Succeed())
 	skew := map[string]int{}
 	for i, pod := range pods.Items {
@@ -607,7 +607,7 @@ func ExpectSkew(ctx context.Context, c client.Client, namespace string, constrai
 		for _, node := range nodes.Items {
 			if pod.Spec.NodeName == node.Name {
 				switch constraint.TopologyKey {
-				case v1.LabelHostname:
+				case corev1.LabelHostname:
 					skew[node.Name]++ // Check node name since hostname labels aren't applied
 				default:
 					if key, ok := node.Labels[constraint.TopologyKey]; ok {
@@ -621,7 +621,7 @@ func ExpectSkew(ctx context.Context, c client.Client, namespace string, constrai
 }
 
 // ExpectResources expects all the resources in expected to exist in real with the same values
-func ExpectResources(expected, real v1.ResourceList) {
+func ExpectResources(expected, real corev1.ResourceList) {
 	GinkgoHelper()
 	for k, v := range expected {
 		realV := real[k]
@@ -629,21 +629,21 @@ func ExpectResources(expected, real v1.ResourceList) {
 	}
 }
 
-func ExpectNodes(ctx context.Context, c client.Client) []*v1.Node {
+func ExpectNodes(ctx context.Context, c client.Client) []*corev1.Node {
 	GinkgoHelper()
-	nodeList := &v1.NodeList{}
+	nodeList := &corev1.NodeList{}
 	Expect(c.List(ctx, nodeList)).To(Succeed())
 	return lo.ToSlicePtr(nodeList.Items)
 }
 
-func ExpectNodeClaims(ctx context.Context, c client.Client) []*v1beta1.NodeClaim {
+func ExpectNodeClaims(ctx context.Context, c client.Client) []*v1.NodeClaim {
 	GinkgoHelper()
-	nodeClaims := &v1beta1.NodeClaimList{}
+	nodeClaims := &v1.NodeClaimList{}
 	Expect(c.List(ctx, nodeClaims)).To(Succeed())
 	return lo.ToSlicePtr(nodeClaims.Items)
 }
 
-func ExpectStateNodeExists(cluster *state.Cluster, node *v1.Node) *state.StateNode {
+func ExpectStateNodeExists(cluster *state.Cluster, node *corev1.Node) *state.StateNode {
 	GinkgoHelper()
 	var ret *state.StateNode
 	cluster.ForEachNode(func(n *state.StateNode) bool {
@@ -657,7 +657,7 @@ func ExpectStateNodeExists(cluster *state.Cluster, node *v1.Node) *state.StateNo
 	return ret
 }
 
-func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1beta1.NodeClaim) *state.StateNode {
+func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1.NodeClaim) *state.StateNode {
 	GinkgoHelper()
 	var ret *state.StateNode
 	cluster.ForEachNode(func(n *state.StateNode) bool {
@@ -671,7 +671,7 @@ func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1beta
 	return ret
 }
 
-func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController *informer.NodeController, nodeClaimStateController *informer.NodeClaimController, nodes []*v1.Node, nodeClaims []*v1beta1.NodeClaim) {
+func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context, c client.Client, nodeStateController *informer.NodeController, nodeClaimStateController *informer.NodeClaimController, nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 	GinkgoHelper()
 
 	ExpectMakeNodesInitialized(ctx, c, nodes...)
@@ -687,13 +687,13 @@ func ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx context.Context,
 }
 
 // ExpectEvicted triggers an eviction call for all the passed pods
-func ExpectEvicted(ctx context.Context, c client.Client, pods ...*v1.Pod) {
+func ExpectEvicted(ctx context.Context, c client.Client, pods ...*corev1.Pod) {
 	GinkgoHelper()
 
 	for _, pod := range pods {
 		Expect(c.SubResource("eviction").Create(ctx, pod, &policyv1.Eviction{})).To(Succeed())
 	}
-	EventuallyExpectTerminating(ctx, c, lo.Map(pods, func(p *v1.Pod, _ int) client.Object { return p })...)
+	EventuallyExpectTerminating(ctx, c, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
 }
 
 // EventuallyExpectTerminating ensures that the deletion timestamp is eventually set

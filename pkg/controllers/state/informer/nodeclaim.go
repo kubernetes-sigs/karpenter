@@ -28,7 +28,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
@@ -49,7 +49,7 @@ func NewNodeClaimController(kubeClient client.Client, cluster *state.Cluster) *N
 func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "state.nodeclaim")
 
-	nodeClaim := &v1beta1.NodeClaim{}
+	nodeClaim := &v1.NodeClaim{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodeClaim); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the node deletion
@@ -65,7 +65,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 func (c *NodeClaimController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.nodeclaim").
-		For(&v1beta1.NodeClaim{}).
+		For(&v1.NodeClaim{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(c)
 }

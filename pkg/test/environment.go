@@ -25,7 +25,7 @@ import (
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
@@ -49,12 +49,12 @@ type Environment struct {
 }
 
 type EnvironmentOptions struct {
-	crds          []*v1.CustomResourceDefinition
+	crds          []*apiextensionsv1.CustomResourceDefinition
 	fieldIndexers []func(cache.Cache) error
 }
 
 // WithCRDs registers the specified CRDs to the apiserver for use in testing
-func WithCRDs(crds ...*v1.CustomResourceDefinition) option.Function[EnvironmentOptions] {
+func WithCRDs(crds ...*apiextensionsv1.CustomResourceDefinition) option.Function[EnvironmentOptions] {
 	return func(o *EnvironmentOptions) {
 		o.crds = append(o.crds, crds...)
 	}
@@ -69,8 +69,8 @@ func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) option.Function
 
 func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1beta1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1beta1.NodeClaim).Status.ProviderID}
+		return c.IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Status.ProviderID}
 		})
 	}
 }
@@ -85,7 +85,7 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 	if version.Minor() >= 21 {
 		// PodAffinityNamespaceSelector is used for label selectors in pod affinities.  If the feature-gate is turned off,
 		// the api-server just clears out the label selector so we never see it.  If we turn it on, the label selectors
-		// are passed to us and we handle them. This feature is alpha in v1.21, beta in v1.22 and will be GA in 1.24. See
+		// are passed to us and we handle them. This feature is alpha in apiextensionsv1.21, beta in apiextensionsv1.22 and will be GA in 1.24. See
 		// https://github.com/kubernetes/enhancements/issues/2249 for more info.
 		environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "PodAffinityNamespaceSelector=true")
 	}

@@ -25,7 +25,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -71,7 +71,7 @@ type QueueKey struct {
 	UID types.UID
 }
 
-func NewQueueKey(pod *v1.Pod) QueueKey {
+func NewQueueKey(pod *corev1.Pod) QueueKey {
 	return QueueKey{
 		NamespacedName: client.ObjectKeyFromObject(pod),
 		UID:            pod.UID,
@@ -106,7 +106,7 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 }
 
 // Add adds pods to the Queue
-func (q *Queue) Add(pods ...*v1.Pod) {
+func (q *Queue) Add(pods ...*corev1.Pod) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -119,7 +119,7 @@ func (q *Queue) Add(pods ...*v1.Pod) {
 	}
 }
 
-func (q *Queue) Has(pod *v1.Pod) bool {
+func (q *Queue) Has(pod *corev1.Pod) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -160,7 +160,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(key.Namespace, key.Name)))
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
-		&v1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}},
 		&policyv1.Eviction{
 			DeleteOptions: &metav1.DeleteOptions{
 				Preconditions: &metav1.Preconditions{
@@ -178,7 +178,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 			return true
 		}
 		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
-			q.recorder.Publish(terminatorevents.NodeFailedToDrain(&v1.Node{ObjectMeta: metav1.ObjectMeta{
+			q.recorder.Publish(terminatorevents.NodeFailedToDrain(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name:      key.Name,
 				Namespace: key.Namespace,
 			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", key.Namespace, key.Name)))
@@ -187,7 +187,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 		log.FromContext(ctx).Error(err, "failed evicting pod")
 		return false
 	}
-	q.recorder.Publish(terminatorevents.EvictPod(&v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
+	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
 	return true
 }
 

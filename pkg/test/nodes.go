@@ -20,25 +20,25 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 type NodeOptions struct {
 	metav1.ObjectMeta
-	ReadyStatus   v1.ConditionStatus
+	ReadyStatus   corev1.ConditionStatus
 	ReadyReason   string
-	Conditions    []v1.NodeCondition
+	Conditions    []corev1.NodeCondition
 	Unschedulable bool
 	ProviderID    string
-	Taints        []v1.Taint
-	Allocatable   v1.ResourceList
-	Capacity      v1.ResourceList
+	Taints        []corev1.Taint
+	Allocatable   corev1.ResourceList
+	Capacity      corev1.ResourceList
 }
 
-func Node(overrides ...NodeOptions) *v1.Node {
+func Node(overrides ...NodeOptions) *corev1.Node {
 	options := NodeOptions{}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
@@ -46,28 +46,28 @@ func Node(overrides ...NodeOptions) *v1.Node {
 		}
 	}
 	if options.ReadyStatus == "" {
-		options.ReadyStatus = v1.ConditionTrue
+		options.ReadyStatus = corev1.ConditionTrue
 	}
 	if options.Capacity == nil {
 		options.Capacity = options.Allocatable
 	}
 
-	return &v1.Node{
+	return &corev1.Node{
 		ObjectMeta: ObjectMeta(options.ObjectMeta),
-		Spec: v1.NodeSpec{
+		Spec: corev1.NodeSpec{
 			Unschedulable: options.Unschedulable,
 			Taints:        options.Taints,
 			ProviderID:    options.ProviderID,
 		},
-		Status: v1.NodeStatus{
+		Status: corev1.NodeStatus{
 			Allocatable: options.Allocatable,
 			Capacity:    options.Capacity,
-			Conditions:  []v1.NodeCondition{{Type: v1.NodeReady, Status: options.ReadyStatus, Reason: options.ReadyReason}},
+			Conditions:  []corev1.NodeCondition{{Type: corev1.NodeReady, Status: options.ReadyStatus, Reason: options.ReadyReason}},
 		},
 	}
 }
 
-func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
+func NodeClaimLinkedNode(nodeClaim *v1.NodeClaim) *corev1.Node {
 	n := Node(
 		NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
@@ -81,6 +81,6 @@ func NodeClaimLinkedNode(nodeClaim *v1beta1.NodeClaim) *v1.Node {
 			ProviderID:  nodeClaim.Status.ProviderID,
 		},
 	)
-	n.Spec.Taints = append(n.Spec.Taints, v1beta1.UnregisteredNoExecuteTaint)
+	n.Spec.Taints = append(n.Spec.Taints, v1.UnregisteredNoExecuteTaint)
 	return n
 }

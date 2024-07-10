@@ -26,7 +26,7 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -63,11 +63,11 @@ type Validation struct {
 	once          sync.Once
 	recorder      events.Recorder
 	queue         *orchestration.Queue
-	reason        v1beta1.DisruptionReason
+	reason        v1.DisruptionReason
 }
 
 func NewValidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue, reason v1beta1.DisruptionReason) *Validation {
+	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue, reason v1.DisruptionReason) *Validation {
 	return &Validation{
 		clock:         clk,
 		cluster:       cluster,
@@ -148,7 +148,7 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (v *Validation) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	return c.nodePool.Spec.Disruption.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized
+	return c.nodePool.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyWhenUnderutilized
 }
 
 // ValidateCommand validates a command for a Method

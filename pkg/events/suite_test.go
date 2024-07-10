@@ -24,12 +24,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/util/flowcontrol"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	schedulingevents "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -151,19 +151,19 @@ var _ = Describe("Rate Limiting", func() {
 	})
 })
 
-func PodWithUID() *v1.Pod {
+func PodWithUID() *corev1.Pod {
 	p := test.Pod()
 	p.UID = uuid.NewUUID()
 	return p
 }
 
-func NodeWithUID() *v1.Node {
+func NodeWithUID() *corev1.Node {
 	n := test.Node()
 	n.UID = uuid.NewUUID()
 	return n
 }
 
-func NodeClaimWithUID() *v1beta1.NodeClaim {
+func NodeClaimWithUID() *v1.NodeClaim {
 	nc := test.NodeClaim()
 	nc.UID = uuid.NewUUID()
 	return nc

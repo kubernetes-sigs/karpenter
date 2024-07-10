@@ -23,13 +23,13 @@ import (
 	"strconv"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// Requirement is an efficient represenatation of v1.NodeSelectorRequirement
+// Requirement is an efficient represenatation of corev1.NodeSelectorRequirement
 type Requirement struct {
 	Key         string
 	complement  bool
@@ -41,13 +41,13 @@ type Requirement struct {
 
 // NewRequirementWithFlexibility constructs new requirement from the combination of key, values, minValues and the operator that
 // connects the keys and values.
-func NewRequirementWithFlexibility(key string, operator v1.NodeSelectorOperator, minValues *int, values ...string) *Requirement {
-	if normalized, ok := v1beta1.NormalizedLabels[key]; ok {
+func NewRequirementWithFlexibility(key string, operator corev1.NodeSelectorOperator, minValues *int, values ...string) *Requirement {
+	if normalized, ok := v1.NormalizedLabels[key]; ok {
 		key = normalized
 	}
 
 	// This is a super-common case, so optimize for it an inline everything.
-	if operator == v1.NodeSelectorOpIn {
+	if operator == corev1.NodeSelectorOpIn {
 		s := make(sets.Set[string], len(values))
 		for _, value := range values {
 			s[value] = sets.Empty{}
@@ -66,43 +66,43 @@ func NewRequirementWithFlexibility(key string, operator v1.NodeSelectorOperator,
 		complement: true,
 		MinValues:  minValues,
 	}
-	if operator == v1.NodeSelectorOpIn || operator == v1.NodeSelectorOpDoesNotExist {
+	if operator == corev1.NodeSelectorOpIn || operator == corev1.NodeSelectorOpDoesNotExist {
 		r.complement = false
 	}
-	if operator == v1.NodeSelectorOpIn || operator == v1.NodeSelectorOpNotIn {
+	if operator == corev1.NodeSelectorOpIn || operator == corev1.NodeSelectorOpNotIn {
 		r.values.Insert(values...)
 	}
-	if operator == v1.NodeSelectorOpGt {
+	if operator == corev1.NodeSelectorOpGt {
 		value, _ := strconv.Atoi(values[0]) // prevalidated
 		r.greaterThan = &value
 	}
-	if operator == v1.NodeSelectorOpLt {
+	if operator == corev1.NodeSelectorOpLt {
 		value, _ := strconv.Atoi(values[0]) // prevalidated
 		r.lessThan = &value
 	}
 	return r
 }
 
-func NewRequirement(key string, operator v1.NodeSelectorOperator, values ...string) *Requirement {
+func NewRequirement(key string, operator corev1.NodeSelectorOperator, values ...string) *Requirement {
 	return NewRequirementWithFlexibility(key, operator, nil, values...)
 }
 
-func (r *Requirement) NodeSelectorRequirement() v1beta1.NodeSelectorRequirementWithMinValues {
+func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirementWithMinValues {
 	switch {
 	case r.greaterThan != nil:
-		return v1beta1.NodeSelectorRequirementWithMinValues{
-			NodeSelectorRequirement: v1.NodeSelectorRequirement{
+		return v1.NodeSelectorRequirementWithMinValues{
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 				Key:      r.Key,
-				Operator: v1.NodeSelectorOpGt,
+				Operator: corev1.NodeSelectorOpGt,
 				Values:   []string{strconv.FormatInt(int64(lo.FromPtr(r.greaterThan)), 10)},
 			},
 			MinValues: r.MinValues,
 		}
 	case r.lessThan != nil:
-		return v1beta1.NodeSelectorRequirementWithMinValues{
-			NodeSelectorRequirement: v1.NodeSelectorRequirement{
+		return v1.NodeSelectorRequirementWithMinValues{
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 				Key:      r.Key,
-				Operator: v1.NodeSelectorOpLt,
+				Operator: corev1.NodeSelectorOpLt,
 				Values:   []string{strconv.FormatInt(int64(lo.FromPtr(r.lessThan)), 10)},
 			},
 			MinValues: r.MinValues,
@@ -110,19 +110,19 @@ func (r *Requirement) NodeSelectorRequirement() v1beta1.NodeSelectorRequirementW
 	case r.complement:
 		switch {
 		case len(r.values) > 0:
-			return v1beta1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+			return v1.NodeSelectorRequirementWithMinValues{
+				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 					Key:      r.Key,
-					Operator: v1.NodeSelectorOpNotIn,
+					Operator: corev1.NodeSelectorOpNotIn,
 					Values:   sets.List(r.values),
 				},
 				MinValues: r.MinValues,
 			}
 		default:
-			return v1beta1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+			return v1.NodeSelectorRequirementWithMinValues{
+				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 					Key:      r.Key,
-					Operator: v1.NodeSelectorOpExists,
+					Operator: corev1.NodeSelectorOpExists,
 				},
 				MinValues: r.MinValues,
 			}
@@ -130,19 +130,19 @@ func (r *Requirement) NodeSelectorRequirement() v1beta1.NodeSelectorRequirementW
 	default:
 		switch {
 		case len(r.values) > 0:
-			return v1beta1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+			return v1.NodeSelectorRequirementWithMinValues{
+				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 					Key:      r.Key,
-					Operator: v1.NodeSelectorOpIn,
+					Operator: corev1.NodeSelectorOpIn,
 					Values:   sets.List(r.values),
 				},
 				MinValues: r.MinValues,
 			}
 		default:
-			return v1beta1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: v1.NodeSelectorRequirement{
+			return v1.NodeSelectorRequirementWithMinValues{
+				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 					Key:      r.Key,
-					Operator: v1.NodeSelectorOpDoesNotExist,
+					Operator: corev1.NodeSelectorOpDoesNotExist,
 				},
 				MinValues: r.MinValues,
 			}
@@ -161,7 +161,7 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	lessThan := minIntPtr(r.lessThan, requirement.lessThan)
 	minValues := maxIntPtr(r.MinValues, requirement.MinValues)
 	if greaterThan != nil && lessThan != nil && *greaterThan >= *lessThan {
-		return NewRequirementWithFlexibility(r.Key, v1.NodeSelectorOpDoesNotExist, minValues)
+		return NewRequirementWithFlexibility(r.Key, corev1.NodeSelectorOpDoesNotExist, minValues)
 	}
 
 	// Values
@@ -189,9 +189,9 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 
 func (r *Requirement) Any() string {
 	switch r.Operator() {
-	case v1.NodeSelectorOpIn:
+	case corev1.NodeSelectorOpIn:
 		return r.values.UnsortedList()[0]
-	case v1.NodeSelectorOpNotIn, v1.NodeSelectorOpExists:
+	case corev1.NodeSelectorOpNotIn, corev1.NodeSelectorOpExists:
 		min := 0
 		max := math.MaxInt64
 		if r.greaterThan != nil {
@@ -221,17 +221,17 @@ func (r *Requirement) Insert(items ...string) {
 	r.values.Insert(items...)
 }
 
-func (r *Requirement) Operator() v1.NodeSelectorOperator {
+func (r *Requirement) Operator() corev1.NodeSelectorOperator {
 	if r.complement {
 		if r.Len() < math.MaxInt64 {
-			return v1.NodeSelectorOpNotIn
+			return corev1.NodeSelectorOpNotIn
 		}
-		return v1.NodeSelectorOpExists // v1.NodeSelectorOpGt and v1.NodeSelectorOpLt are treated as "Exists" with bounds
+		return corev1.NodeSelectorOpExists // corev1.NodeSelectorOpGt and corev1.NodeSelectorOpLt are treated as "Exists" with bounds
 	}
 	if r.Len() > 0 {
-		return v1.NodeSelectorOpIn
+		return corev1.NodeSelectorOpIn
 	}
-	return v1.NodeSelectorOpDoesNotExist
+	return corev1.NodeSelectorOpDoesNotExist
 }
 
 func (r *Requirement) Len() int {
@@ -244,7 +244,7 @@ func (r *Requirement) Len() int {
 func (r *Requirement) String() string {
 	var s string
 	switch r.Operator() {
-	case v1.NodeSelectorOpExists, v1.NodeSelectorOpDoesNotExist:
+	case corev1.NodeSelectorOpExists, corev1.NodeSelectorOpDoesNotExist:
 		s = fmt.Sprintf("%s %s", r.Key, r.Operator())
 	default:
 		values := sets.List(r.values)

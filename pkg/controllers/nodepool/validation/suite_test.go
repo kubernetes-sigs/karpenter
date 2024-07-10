@@ -22,17 +22,18 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	"github.com/Pallinder/go-randomdata"
-	v1 "k8s.io/api/core/v1"
 
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -42,7 +43,7 @@ var (
 	nodePoolValidationController *Controller
 	ctx                          context.Context
 	env                          *test.Environment
-	nodePool                     *v1beta1.NodePool
+	nodePool                     *v1.NodePool
 )
 
 func TestAPIs(t *testing.T) {
@@ -65,21 +66,21 @@ var _ = AfterSuite(func() {
 var _ = Describe("Counter", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
-		nodePool.StatusConditions().SetUnknown(v1beta1.ConditionTypeValidationSucceeded)
+		nodePool.StatusConditions().SetUnknown(v1.ConditionTypeValidationSucceeded)
 	})
 	It("should set the NodePoolValidationSucceeded status condition to true if nodePool healthy checks succeed", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
-		Expect(nodePool.StatusConditions().IsTrue(v1beta1.ConditionTypeValidationSucceeded)).To(BeTrue())
+		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
 	})
 	It("should set the NodePoolValidationSucceeded status condition to false if nodePool validation failed", func() {
-		nodePool.Spec.Template.Spec.Taints = []v1.Taint{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Effect: v1.TaintEffectNoSchedule}}
+		nodePool.Spec.Template.Spec.Taints = []corev1.Taint{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Effect: corev1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
-		Expect(nodePool.StatusConditions().Get(v1beta1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
+		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
 	})
 })

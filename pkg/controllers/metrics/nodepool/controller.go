@@ -28,13 +28,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"github.com/prometheus/client_golang/prometheus"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -92,7 +92,7 @@ func NewController(kubeClient client.Client) *Controller {
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "metrics.nodepool")
 
-	nodePool := &v1beta1.NodePool{}
+	nodePool := &v1.NodePool{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nodePool); err != nil {
 		if errors.IsNotFound(err) {
 			c.metricStore.Delete(req.NamespacedName.String())
@@ -104,8 +104,8 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-func buildMetrics(nodePool *v1beta1.NodePool) (res []*metrics.StoreMetric) {
-	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]v1.ResourceList{
+func buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
+	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]corev1.ResourceList{
 		usageGaugeVec: nodePool.Status.Resources,
 		limitGaugeVec: getLimits(nodePool),
 	} {
@@ -113,21 +113,21 @@ func buildMetrics(nodePool *v1beta1.NodePool) (res []*metrics.StoreMetric) {
 			res = append(res, &metrics.StoreMetric{
 				GaugeVec: gaugeVec,
 				Labels:   makeLabels(nodePool, strings.ReplaceAll(strings.ToLower(string(k)), "-", "_")),
-				Value:    lo.Ternary(k == v1.ResourceCPU, float64(v.MilliValue())/float64(1000), float64(v.Value())),
+				Value:    lo.Ternary(k == corev1.ResourceCPU, float64(v.MilliValue())/float64(1000), float64(v.Value())),
 			})
 		}
 	}
 	return res
 }
 
-func getLimits(nodePool *v1beta1.NodePool) v1.ResourceList {
+func getLimits(nodePool *v1.NodePool) corev1.ResourceList {
 	if nodePool.Spec.Limits != nil {
-		return v1.ResourceList(nodePool.Spec.Limits)
+		return corev1.ResourceList(nodePool.Spec.Limits)
 	}
-	return v1.ResourceList{}
+	return corev1.ResourceList{}
 }
 
-func makeLabels(nodePool *v1beta1.NodePool, resourceTypeName string) prometheus.Labels {
+func makeLabels(nodePool *v1.NodePool, resourceTypeName string) prometheus.Labels {
 	return prometheus.Labels{
 		resourceTypeLabel: resourceTypeName,
 		nodePoolNameLabel: nodePool.Name,
@@ -137,6 +137,6 @@ func makeLabels(nodePool *v1beta1.NodePool, resourceTypeName string) prometheus.
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("metrics.nodepool").
-		For(&v1beta1.NodePool{}).
+		For(&v1.NodePool{}).
 		Complete(c)
 }

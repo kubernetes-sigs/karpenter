@@ -26,6 +26,7 @@ import (
 const (
 	DisruptionTaintKey             = apis.Group + "/disruption"
 	DisruptingNoScheduleTaintValue = "disrupting"
+	UnregisteredTaintKey           = apis.Group + "/unregistered"
 )
 
 var (
@@ -35,6 +36,10 @@ var (
 		Key:    DisruptionTaintKey,
 		Effect: v1.TaintEffectNoSchedule,
 		Value:  DisruptingNoScheduleTaintValue,
+	}
+	UnregisteredNoExecuteTaint = v1.Taint{
+		Key:    UnregisteredTaintKey,
+		Effect: v1.TaintEffectNoExecute,
 	}
 )
 

@@ -26,7 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
@@ -36,7 +36,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -61,8 +61,8 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1.Node{}, "spec.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1.Node).Spec.ProviderID}
+		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Node).Spec.ProviderID}
 		})
 	}))
 	ctx = options.ToContext(ctx, test.Options())
@@ -82,16 +82,16 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("Finalizer", func() {
-	var nodePool *v1beta1.NodePool
+	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
 	It("should add the finalizer if it doesn't exist", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
 		})
@@ -100,7 +100,7 @@ var _ = Describe("Finalizer", func() {
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, ok := lo.Find(nodeClaim.Finalizers, func(f string) bool {
-			return f == v1beta1.TerminationFinalizer
+			return f == v1.TerminationFinalizer
 		})
 		Expect(ok).To(BeTrue())
 	})

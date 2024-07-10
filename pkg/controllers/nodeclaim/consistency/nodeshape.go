@@ -20,9 +20,9 @@ import (
 	"context"
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 // NodeShape detects nodes that have launched with 10% or less of any resource than was expected.
@@ -32,13 +32,13 @@ func NewNodeShape() Check {
 	return &NodeShape{}
 }
 
-func (n *NodeShape) Check(_ context.Context, node *v1.Node, nodeClaim *v1beta1.NodeClaim) ([]Issue, error) {
+func (n *NodeShape) Check(_ context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim) ([]Issue, error) {
 	// ignore NodeClaims that are deleting
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
 	// and NodeClaims that haven't initialized yet
-	if !nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsTrue() {
+	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue() {
 		return nil, nil
 	}
 	var issues []Issue

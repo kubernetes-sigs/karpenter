@@ -34,6 +34,7 @@ import (
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	coordinationv1 "k8s.io/api/coordination/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"knative.dev/pkg/changeset"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -46,7 +47,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -64,7 +64,7 @@ import (
 
 	"github.com/go-logr/zapr"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -191,32 +191,32 @@ func NewOperator() (context.Context, *Operator) {
 	}
 	mgr, err := ctrl.NewManager(config, mgrOpts)
 	mgr = lo.Must(mgr, err, "failed to setup manager")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Pod{}, "spec.nodeName", func(o client.Object) []string {
-		return []string{o.(*v1.Pod).Spec.NodeName}
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
+		return []string{o.(*corev1.Pod).Spec.NodeName}
 	}), "failed to setup pod indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.Node{}, "spec.providerID", func(o client.Object) []string {
-		return []string{o.(*v1.Node).Spec.ProviderID}
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &corev1.Node{}, "spec.providerID", func(o client.Object) []string {
+		return []string{o.(*corev1.Node).Spec.ProviderID}
 	}), "failed to setup node provider id indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodeClaim).Status.ProviderID}
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
+		return []string{o.(*v1.NodeClaim).Status.ProviderID}
 	}), "failed to setup nodeclaim provider id indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "spec.nodeClassRef.apiVersion", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodeClaim).Spec.NodeClassRef.APIVersion}
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.apiVersion", func(o client.Object) []string {
+		return []string{o.(*v1.NodeClaim).Spec.NodeClassRef.Group}
 	}), "failed to setup nodeclaim nodeclassref apiversion indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "spec.nodeClassRef.kind", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodeClaim).Spec.NodeClassRef.Kind}
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.kind", func(o client.Object) []string {
+		return []string{o.(*v1.NodeClaim).Spec.NodeClassRef.Kind}
 	}), "failed to setup nodeclaim nodeclassref kind indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodeClaim{}, "spec.nodeClassRef.name", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodeClaim).Spec.NodeClassRef.Name}
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.name", func(o client.Object) []string {
+		return []string{o.(*v1.NodeClaim).Spec.NodeClassRef.Name}
 	}), "failed to setup nodeclaim nodeclassref name indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodePool{}, "spec.template.spec.nodeClassRef.apiVersion", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodePool).Spec.Template.Spec.NodeClassRef.APIVersion}
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.apiVersion", func(o client.Object) []string {
+		return []string{o.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Group}
 	}), "failed to setup nodepool nodeclassref apiversion indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodePool{}, "spec.template.spec.nodeClassRef.kind", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodePool).Spec.Template.Spec.NodeClassRef.Kind}
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.kind", func(o client.Object) []string {
+		return []string{o.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Kind}
 	}), "failed to setup nodepool nodeclassref kind indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1beta1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(o client.Object) []string {
-		return []string{o.(*v1beta1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
+	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(o client.Object) []string {
+		return []string{o.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
 	}), "failed to setup nodepool nodeclassref name indexer")
 
 	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {

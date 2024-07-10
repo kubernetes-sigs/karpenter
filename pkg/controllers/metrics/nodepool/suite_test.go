@@ -25,14 +25,14 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -58,13 +58,13 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Metrics", func() {
-	var nodePool *v1beta1.NodePool
+	var nodePool *v1.NodePool
 	BeforeEach(func() {
-		nodePool = test.NodePool(v1beta1.NodePool{
-			Spec: v1beta1.NodePoolSpec{
-				Template: v1beta1.NodeClaimTemplate{
-					Spec: v1beta1.NodeClaimSpec{
-						NodeClassRef: &v1beta1.NodeClassReference{
+		nodePool = test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Template: v1.NodeClaimTemplate{
+					Spec: v1.NodeClaimSpec{
+						NodeClassRef: &v1.NodeClassReference{
 							Name: "default",
 						},
 					},
@@ -73,10 +73,10 @@ var _ = Describe("Metrics", func() {
 		})
 	})
 	It("should update the nodepool limit metrics", func() {
-		limits := v1beta1.Limits{
-			v1.ResourceCPU:              resource.MustParse("10"),
-			v1.ResourceMemory:           resource.MustParse("10Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
+		limits := v1.Limits{
+			corev1.ResourceCPU:              resource.MustParse("10"),
+			corev1.ResourceMemory:           resource.MustParse("10Mi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
 		nodePool.Spec.Limits = limits
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -92,10 +92,10 @@ var _ = Describe("Metrics", func() {
 		}
 	})
 	It("should update the nodepool usage metrics", func() {
-		resources := v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("10"),
-			v1.ResourceMemory:           resource.MustParse("10Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
+		resources := corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("10"),
+			corev1.ResourceMemory:           resource.MustParse("10Mi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
 		nodePool.Status.Resources = resources
 
@@ -113,15 +113,15 @@ var _ = Describe("Metrics", func() {
 	})
 	It("should delete the nodepool state metrics on nodepool delete", func() {
 		expectedMetrics := []string{"karpenter_nodepool_limit", "karpenter_nodepool_usage"}
-		nodePool.Spec.Limits = v1beta1.Limits{
-			v1.ResourceCPU:              resource.MustParse("100"),
-			v1.ResourceMemory:           resource.MustParse("100Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("1000Gi"),
+		nodePool.Spec.Limits = v1.Limits{
+			corev1.ResourceCPU:              resource.MustParse("100"),
+			corev1.ResourceMemory:           resource.MustParse("100Mi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("1000Gi"),
 		}
-		nodePool.Status.Resources = v1.ResourceList{
-			v1.ResourceCPU:              resource.MustParse("10"),
-			v1.ResourceMemory:           resource.MustParse("10Mi"),
-			v1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
+		nodePool.Status.Resources = corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("10"),
+			corev1.ResourceMemory:           resource.MustParse("10Mi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))

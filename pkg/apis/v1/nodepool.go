@@ -196,6 +196,7 @@ type ObjectMeta struct {
 
 // NodePool is the Schema for the NodePools API
 // +kubebuilder:object:root=true
+// +kubebuilder:storageversion
 // +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter
 // +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClassRef.name",description=""
 // +kubebuilder:printcolumn:name="Nodes",type="string",JSONPath=".status.resources.nodes",description=""
@@ -218,14 +219,19 @@ type NodePool struct {
 // 1. A field changes its default value for an existing field that is already hashed
 // 2. A field is added to the hash calculation with an already-set value
 // 3. A field is removed from the hash calculations
-const NodePoolHashVersion = "v2"
+const NodePoolHashVersion = "v3"
 
 func (in *NodePool) Hash() string {
-	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec.Template, hashstructure.FormatV2, &hashstructure.HashOptions{
+	kubeletHash := lo.Must(hashstructure.Hash(in.Annotations[ProviderCompatabilityAnnotationKey], hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,
 		IgnoreZeroValue: true,
 		ZeroNil:         true,
-	})))
+	}))
+	return fmt.Sprintf("%d-%d", lo.Must(hashstructure.Hash(in.Spec.Template, hashstructure.FormatV2, &hashstructure.HashOptions{
+		SlicesAsSets:    true,
+		IgnoreZeroValue: true,
+		ZeroNil:         true,
+	})), kubeletHash)
 }
 
 // NodePoolList contains a list of NodePool

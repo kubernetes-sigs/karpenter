@@ -23,18 +23,18 @@ import (
 	"strconv"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 // lifetimeRemaining calculates the fraction of node lifetime remaining in the range [0.0, 1.0].  If the ExpireAfter
 // is non-zero, we use it to scale down the disruption costs of candidates that are going to expire.  Just after creation, the
 // disruption cost is highest, and it approaches zero as the node ages towards its expiration time.
-func LifetimeRemaining(clock clock.Clock, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) float64 {
+func LifetimeRemaining(clock clock.Clock, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) float64 {
 	remaining := 1.0
 	if nodePool.Spec.Disruption.ExpireAfter.Duration != nil {
 		ageInSeconds := clock.Since(nodeClaim.CreationTimestamp.Time).Seconds()
@@ -46,14 +46,14 @@ func LifetimeRemaining(clock clock.Clock, nodePool *v1beta1.NodePool, nodeClaim 
 }
 
 // EvictionCost returns the disruption cost computed for evicting the given pod.
-func EvictionCost(ctx context.Context, p *v1.Pod) float64 {
+func EvictionCost(ctx context.Context, p *corev1.Pod) float64 {
 	cost := 1.0
-	podDeletionCostStr, ok := p.Annotations[v1.PodDeletionCost]
+	podDeletionCostStr, ok := p.Annotations[corev1.PodDeletionCost]
 	if ok {
 		podDeletionCost, err := strconv.ParseFloat(podDeletionCostStr, 64)
 		if err != nil {
 			log.FromContext(ctx).Error(err, fmt.Sprintf("failed parsing %s=%s from pod %s",
-				v1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p)))
+				corev1.PodDeletionCost, podDeletionCostStr, client.ObjectKeyFromObject(p)))
 		} else {
 			// the pod deletion disruptionCost is in [-2147483647, 2147483647]
 			// the min pod disruptionCost makes one pod ~ -15 pods, and the max pod disruptionCost to ~ 17 pods.
@@ -69,7 +69,7 @@ func EvictionCost(ctx context.Context, p *v1.Pod) float64 {
 	return lo.Clamp(cost, -10.0, 10.0)
 }
 
-func ReschedulingCost(ctx context.Context, pods []*v1.Pod) float64 {
+func ReschedulingCost(ctx context.Context, pods []*corev1.Pod) float64 {
 	cost := 0.0
 	for _, p := range pods {
 		cost += EvictionCost(ctx, p)

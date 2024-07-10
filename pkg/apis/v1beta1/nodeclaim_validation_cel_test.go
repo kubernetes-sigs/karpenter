@@ -46,8 +46,9 @@ var _ = Describe("Validation", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
 			Spec: NodeClaimSpec{
 				NodeClassRef: &NodeClassReference{
-					Kind: "NodeClaim",
-					Name: "default",
+					APIVersion: "test.sh/version",
+					Kind:       "NodeClaim",
+					Name:       "default",
 				},
 				Requirements: []NodeSelectorRequirementWithMinValues{
 					{

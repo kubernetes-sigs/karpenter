@@ -30,7 +30,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -62,10 +62,10 @@ var _ = AfterSuite(func() {
 var _ = Describe("OrderByWeight", func() {
 	It("should order the NodePools by weight", func() {
 		// Generate 10 NodePools that have random weights, some might have the same weights
-		var nodePools []v1beta1.NodePool
+		var nodePools []v1.NodePool
 		for i := 0; i < 10; i++ {
-			np := test.NodePool(v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
+			np := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
 					Weight: lo.ToPtr[int32](int32(rand.Intn(100) + 1)), //nolint:gosec
 				},
 			})
@@ -73,7 +73,7 @@ var _ = Describe("OrderByWeight", func() {
 		}
 
 		nodePools = lo.Shuffle(nodePools)
-		nodePoolList := v1beta1.NodePoolList{Items: nodePools}
+		nodePoolList := v1.NodePoolList{Items: nodePools}
 		nodePoolList.OrderByWeight()
 
 		lastWeight := 101 // This is above the allowed weight values
@@ -84,10 +84,10 @@ var _ = Describe("OrderByWeight", func() {
 	})
 	It("should order the NodePools by name when the weights are the same", func() {
 		// Generate 10 NodePools with the same weight
-		var nodePools []v1beta1.NodePool
+		var nodePools []v1.NodePool
 		for i := 0; i < 10; i++ {
-			np := test.NodePool(v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
+			np := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
 					Weight: lo.ToPtr[int32](10),
 				},
 			})
@@ -95,7 +95,7 @@ var _ = Describe("OrderByWeight", func() {
 		}
 
 		nodePools = lo.Shuffle(nodePools)
-		nodePoolList := v1beta1.NodePoolList{Items: nodePools}
+		nodePoolList := v1.NodePoolList{Items: nodePools}
 		nodePoolList.OrderByWeight()
 
 		lastName := "zzzzzzzzzzzzzzzzzzzzzzzz" // large string value
