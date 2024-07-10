@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,6 +29,8 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/singleton"
+	"github.com/samber/lo"
+
 	//"google.golang.org/protobuf/proto"
 	proto "github.com/gogo/protobuf/proto"
 	v1 "k8s.io/api/core/v1"
@@ -237,18 +240,37 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		fmt.Println(SchedulingInputToString(item))
 		data, err := SchedulingInputToPB(item)
 		if err != nil {
-			fmt.Println("Error converting to PB:", err)
+			fmt.Println("Error converting Scheduling Input to Protobuf:", err)
 			return reconcile.Result{}, err
 		}
+
+		// Timestamp the file
+		now := time.Now()
+		timestampStr := now.Format("2006-01-02_15-04-05")
+		fileName := fmt.Sprintf("ProvisioningSchedulingInput_%s.log", timestampStr)
+
 		// Save to the Persistent Volume (maybe save as log_timestamp for uniqueness, or monotonically increasing counter)
-		err = c.SaveToPV("pendingpods_"+string(len(data))+".log", "sample_log: "+string(data))
+		err = c.SaveToPV(fileName, data)
 		if err != nil {
 			fmt.Println("Error saving to PV:", err)
 			return reconcile.Result{}, err
 		}
-		//PrintPodPB(item)
-		// sample_logline = item
-		// fmt.Println(sample_logline)
+
+		// Read from the PV to check (will be what the ORB tool does from the Command Line)
+		readdata, err := c.ReadFromPV(fileName)
+		if err != nil {
+			fmt.Println("Error reading from PV:", err)
+			return reconcile.Result{}, err
+		}
+
+		// Protobuff to si
+		si, err := PBToSchedulingInput(readdata)
+		if err != nil {
+			fmt.Println("Error converting PB to SI:", err)
+			return reconcile.Result{}, err
+		}
+		// Print si
+		fmt.Println("Reconstructed Scheduling Input looks like: " + SchedulingInputToString(si))
 	}
 
 	// // For each scheduling input in my queue (c.queue), print to string and send to PV
@@ -434,6 +456,18 @@ func SchedulingInputToPB(si SchedulingInput) ([]byte, error) {
 	return podList.Marshal()
 }
 
+// Function to do the reverse, take a scheduling input's []byte and unmarshal it back into a SchedulingInput
+func PBToSchedulingInput(data []byte) (SchedulingInput, error) {
+	podList := &v1.PodList{}
+	if err := proto.Unmarshal(data, podList); err != nil {
+		return SchedulingInput{}, fmt.Errorf("unmarshaling pod list, %w", err)
+	}
+	pods := lo.ToSlicePtr(podList.Items)
+	return NewSchedulingInput(pods), nil
+}
+
+// Function for logging pending pods (as protobuf)
+
 // Function take a []byte, marshalled as a protobuf, and deserialize it into a SchedulingInput
 
 // Function for logging pending pods (as protobuf)
@@ -550,7 +584,7 @@ func (c *Controller) sanitizePath(path string) string {
 // Saves data to PV (S3 Bucket for AWS) via the mounted log path
 // It takes a name of the log file as well as the logline to be logged.
 // The function opens a file for writing, writes some data to the file, and then closes the file
-func (c *Controller) SaveToPV(logname string, logline string) error {
+func (c *Controller) SaveToPV(logname string, logdata []byte) error {
 
 	// Set global variable(s) for Mounted PV path
 	var mountPath = "/data"
@@ -569,7 +603,8 @@ func (c *Controller) SaveToPV(logname string, logline string) error {
 	defer file.Close()
 
 	// Writes data to the file
-	_, err = fmt.Fprintln(file, logline)
+	//_, err = fmt.Fprintln(file, logdata)
+	_, err = file.Write(logdata)
 	if err != nil {
 		fmt.Println("Error writing to file:", err)
 		return err
@@ -577,4 +612,28 @@ func (c *Controller) SaveToPV(logname string, logline string) error {
 
 	fmt.Println("Data written to S3 bucket successfully!")
 	return nil
+}
+
+// Function to pull from an S3 bucket
+func (c *Controller) ReadFromPV(logname string) ([]byte, error) {
+	var mountPath = "/data"
+	sanitizedname := c.sanitizePath(logname)
+	path := filepath.Join(mountPath, sanitizedname)
+
+	// Open the file for reading
+	file, err := os.Open(path)
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return nil, err
+	}
+	defer file.Close()
+
+	// Read the contents of the file
+	contents, err := io.ReadAll(file)
+	if err != nil {
+		fmt.Println("Error reading file:", err)
+		return nil, err
+	}
+
+	return contents, nil
 }
