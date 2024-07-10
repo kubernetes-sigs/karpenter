@@ -120,7 +120,6 @@ var _ = Describe("Options", func() {
 			err := opts.Parse(
 				fs,
 				"--karpenter-service", "cli",
-				"--disable-webhook",
 				"--webhook-port", "0",
 				"--metrics-port", "0",
 				"--webhook-metrics-port", "0",
@@ -221,7 +220,6 @@ var _ = Describe("Options", func() {
 			err := opts.Parse(
 				fs,
 				"--karpenter-service", "cli",
-				"--disable-webhook",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
