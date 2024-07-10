@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,7 +29,7 @@ import (
 
 	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -48,17 +48,17 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *Queue) *Termin
 }
 
 // Taint idempotently adds the karpenter.sh/disruption taint to a node with a NodeClaim
-func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
+func (t *Terminator) Taint(ctx context.Context, node *corev1.Node) error {
 	stored := node.DeepCopy()
 	// If the taint already has the karpenter.sh/disruption=disrupting:NoSchedule taint, do nothing.
-	if _, ok := lo.Find(node.Spec.Taints, func(t v1.Taint) bool {
-		return v1beta1.IsDisruptingTaint(t)
+	if _, ok := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
+		return v1.IsDisruptingTaint(t)
 	}); !ok {
 		// If the taint key exists (but with a different value or effect), remove it.
-		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
-			return t.Key == v1beta1.DisruptionTaintKey
+		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
+			return t.Key == v1.DisruptionTaintKey
 		})
-		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptionNoScheduleTaint)
 	}
 	// Adding this label to the node ensures that the node is removed from the load-balancer target group
 	// while it is draining and before it is terminated. This prevents 500s coming prior to health check
@@ -66,7 +66,7 @@ func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 	// https://github.com/aws/aws-node-termination-handler/issues/316
 	// https://github.com/aws/karpenter/pull/2518
 	node.Labels = lo.Assign(node.Labels, map[string]string{
-		v1.LabelNodeExcludeBalancers: "karpenter",
+		corev1.LabelNodeExcludeBalancers: "karpenter",
 	})
 	if !equality.Semantic.DeepEqual(node, stored) {
 		if err := t.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
@@ -79,27 +79,27 @@ func (t *Terminator) Taint(ctx context.Context, node *v1.Node) error {
 
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
-func (t *Terminator) Drain(ctx context.Context, node *v1.Node) error {
+func (t *Terminator) Drain(ctx context.Context, node *corev1.Node) error {
 	pods, err := nodeutil.GetPods(ctx, t.kubeClient, node)
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
 	// evictablePods are pods that aren't yet terminating are eligible to have the eviction API called against them
-	evictablePods := lo.Filter(pods, func(p *v1.Pod, _ int) bool { return podutil.IsEvictable(p) })
+	evictablePods := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p) })
 	t.Evict(evictablePods)
 
 	// podsWaitingEvictionCount are  the number of pods that either haven't had eviction called against them yet
 	// or are still actively terminated and haven't exceeded their termination grace period yet
-	podsWaitingEvictionCount := lo.CountBy(pods, func(p *v1.Pod) bool { return podutil.IsWaitingEviction(p, t.clock) })
+	podsWaitingEvictionCount := lo.CountBy(pods, func(p *corev1.Pod) bool { return podutil.IsWaitingEviction(p, t.clock) })
 	if podsWaitingEvictionCount > 0 {
 		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(pods)))
 	}
 	return nil
 }
 
-func (t *Terminator) Evict(pods []*v1.Pod) {
+func (t *Terminator) Evict(pods []*corev1.Pod) {
 	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
-	var criticalNonDaemon, criticalDaemon, nonCriticalNonDaemon, nonCriticalDaemon []*v1.Pod
+	var criticalNonDaemon, criticalDaemon, nonCriticalNonDaemon, nonCriticalDaemon []*corev1.Pod
 	for _, pod := range pods {
 		if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
 			if podutil.IsOwnedByDaemonSet(pod) {

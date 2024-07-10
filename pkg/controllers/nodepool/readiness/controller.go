@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/utils/nodepool"
@@ -49,7 +49,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepool.readiness")
 	stored := nodePool.DeepCopy()
 	supportedNC := c.cloudProvider.GetSupportedNodeClasses()
@@ -62,9 +62,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 		return reconcile.Result{}, err
 	}
 	if nodeClass == nil {
-		nodePool.StatusConditions().SetFalse(v1beta1.ConditionTypeNodeClassReady, "UnresolvedNodeClass", "Unable to resolve nodeClass")
+		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "UnresolvedNodeClass", "Unable to resolve nodeClass")
 	} else if !nodeClass.GetDeletionTimestamp().IsZero() {
-		nodePool.StatusConditions().SetFalse(v1beta1.ConditionTypeNodeClassReady, "NodeClassTerminating", "NodeClass is Terminating")
+		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassTerminating", "NodeClass is Terminating")
 	} else {
 		c.setReadyCondition(nodePool, nodeClass)
 	}
@@ -78,7 +78,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 	}
 	return reconcile.Result{}, nil
 }
-func (c *Controller) getNodeClass(ctx context.Context, nodePool *v1beta1.NodePool, supportedNC []status.Object) (status.Object, error) {
+func (c *Controller) getNodeClass(ctx context.Context, nodePool *v1.NodePool, supportedNC []status.Object) (status.Object, error) {
 	nodeClass := supportedNC[0]
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name}, nodeClass); err != nil {
 		if errors.IsNotFound(err) {
@@ -89,14 +89,14 @@ func (c *Controller) getNodeClass(ctx context.Context, nodePool *v1beta1.NodePoo
 	return nodeClass, nil
 }
 
-func (c *Controller) setReadyCondition(nodePool *v1beta1.NodePool, nodeClass status.Object) {
+func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.Object) {
 	ready := nodeClass.StatusConditions().Get(status.ConditionReady)
 	if ready.IsUnknown() {
-		nodePool.StatusConditions().SetFalse(v1beta1.ConditionTypeNodeClassReady, "NodeClassReadinessUnknown", "Node Class Readiness Unknown")
+		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassReadinessUnknown", "Node Class Readiness Unknown")
 	} else if ready.IsFalse() {
-		nodePool.StatusConditions().SetFalse(v1beta1.ConditionTypeNodeClassReady, ready.Reason, ready.Message)
+		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, ready.Reason, ready.Message)
 	} else {
-		nodePool.StatusConditions().SetTrue(v1beta1.ConditionTypeNodeClassReady)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
 	}
 }
 
@@ -110,7 +110,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	}
 	return builder.
 		Named("nodepool.readiness").
-		For(&v1beta1.NodePool{}).
+		For(&v1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

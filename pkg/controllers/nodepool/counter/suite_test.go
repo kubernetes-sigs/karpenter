@@ -25,7 +25,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
@@ -37,7 +37,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -54,7 +54,7 @@ var env *test.Environment
 var cluster *state.Cluster
 var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
-var node, node2 *v1.Node
+var node, node2 *corev1.Node
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -77,40 +77,40 @@ var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
-var nodePool *v1beta1.NodePool
-var nodeClaim, nodeClaim2 *v1beta1.NodeClaim
-var expected v1.ResourceList
+var nodePool *v1.NodePool
+var nodeClaim, nodeClaim2 *v1.NodeClaim
+var expected corev1.ResourceList
 
 var _ = Describe("Counter", func() {
 	BeforeEach(func() {
 		cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 		nodePool = test.NodePool()
 		instanceType := cloudProvider.InstanceTypes[0]
-		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: instanceType.Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: instanceType.Name,
 			}},
-			Status: v1beta1.NodeClaimStatus{
+			Status: v1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("100m"),
-					v1.ResourcePods:   resource.MustParse("256"),
-					v1.ResourceMemory: resource.MustParse("1Gi"),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("100m"),
+					corev1.ResourcePods:   resource.MustParse("256"),
+					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			},
 		})
-		nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim2, node2 = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: instanceType.Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: instanceType.Name,
 			}},
-			Status: v1beta1.NodeClaimStatus{
+			Status: v1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("500m"),
-					v1.ResourcePods:   resource.MustParse("1000"),
-					v1.ResourceMemory: resource.MustParse("5Gi"),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("500m"),
+					corev1.ResourcePods:   resource.MustParse("1000"),
+					corev1.ResourceMemory: resource.MustParse("5Gi"),
 				},
 			},
 		})
@@ -138,14 +138,14 @@ var _ = Describe("Counter", func() {
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 
 		// Change the node capacity to be different than the nodeClaim capacity
-		node.Status.Capacity = v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("1"),
-			v1.ResourcePods:   resource.MustParse("512"),
-			v1.ResourceMemory: resource.MustParse("2Gi"),
+		node.Status.Capacity = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("1"),
+			corev1.ResourcePods:   resource.MustParse("512"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
 		}
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
 		// Don't initialize the node yet
@@ -159,38 +159,38 @@ var _ = Describe("Counter", func() {
 
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should increase the counter when new nodes are created", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should decrease the counter when an existing node is deleted", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal the sums of the nodeClaims and nodes
-		res := v1.ResourceList{
-			v1.ResourceCPU:           resource.MustParse("600m"),
-			v1.ResourcePods:          resource.MustParse("1256"),
-			v1.ResourceMemory:        resource.MustParse("6Gi"),
-			v1.ResourceName("nodes"): resource.MustParse("2"),
+		res := corev1.ResourceList{
+			corev1.ResourceCPU:           resource.MustParse("600m"),
+			corev1.ResourcePods:          resource.MustParse("1256"),
+			corev1.ResourceMemory:        resource.MustParse("6Gi"),
+			corev1.ResourceName("nodes"): resource.MustParse("2"),
 		}
 		expected = resources.MergeInto(expected, res)
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
@@ -204,27 +204,27 @@ var _ = Describe("Counter", func() {
 		// Should equal both the nodeClaim and node capacity
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, nodeClaim2.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node2.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should zero out the counter when all nodes are deleted", func() {
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
-		expected[v1.ResourceName("nodes")] = resource.MustParse("1")
+		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 
 		ExpectDeleted(ctx, env.Client, node, nodeClaim)

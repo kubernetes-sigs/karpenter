@@ -24,7 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -40,7 +40,7 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
@@ -62,7 +62,7 @@ func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudp
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.garbagecollection")
 
-	nodeClaimList := &v1beta1.NodeClaimList{}
+	nodeClaimList := &v1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
 		return reconcile.Result{}, err
 	}
@@ -70,16 +70,16 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	cloudProviderNodeClaims = lo.Filter(cloudProviderNodeClaims, func(nc *v1beta1.NodeClaim, _ int) bool {
+	cloudProviderNodeClaims = lo.Filter(cloudProviderNodeClaims, func(nc *v1.NodeClaim, _ int) bool {
 		return nc.DeletionTimestamp.IsZero()
 	})
-	cloudProviderProviderIDs := sets.New[string](lo.Map(cloudProviderNodeClaims, func(nc *v1beta1.NodeClaim, _ int) string {
+	cloudProviderProviderIDs := sets.New[string](lo.Map(cloudProviderNodeClaims, func(nc *v1.NodeClaim, _ int) string {
 		return nc.Status.ProviderID
 	})...)
 	// Only consider NodeClaims that are Registered since we don't want to fully rely on the CloudProvider
 	// API to trigger deletion of the Node. Instead, we'll wait for our registration timeout to trigger
-	nodeClaims := lo.Filter(lo.ToSlicePtr(nodeClaimList.Items), func(n *v1beta1.NodeClaim, _ int) bool {
-		return n.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsTrue() &&
+	nodeClaims := lo.Filter(lo.ToSlicePtr(nodeClaimList.Items), func(n *v1.NodeClaim, _ int) bool {
+		return n.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() &&
 			n.DeletionTimestamp.IsZero() &&
 			!cloudProviderProviderIDs.Has(n.Status.ProviderID)
 	})
@@ -95,7 +95,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		// We do a check on the Ready condition of the node since, even though the CloudProvider says the instance
 		// is not around, we know that the kubelet process is still running if the Node Ready condition is true
 		// Similar logic to: https://github.com/kubernetes/kubernetes/blob/3a75a8c8d9e6a1ebd98d8572132e675d4980f184/staging/src/k8s.io/cloud-provider/controllers/nodelifecycle/node_lifecycle_controller.go#L144
-		if node != nil && nodeutils.GetCondition(node, v1.NodeReady).Status == v1.ConditionTrue {
+		if node != nil && nodeutils.GetCondition(node, corev1.NodeReady).Status == corev1.ConditionTrue {
 			return
 		}
 		if err := c.kubeClient.Delete(ctx, nodeClaims[i]); err != nil {
@@ -105,12 +105,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		log.FromContext(ctx).WithValues(
 			"NodeClaim", klog.KRef("", nodeClaims[i].Name),
 			"provider-id", nodeClaims[i].Status.ProviderID,
-			"nodepool", nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
+			"nodepool", nodeClaims[i].Labels[v1.NodePoolLabelKey],
 		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
 		metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 			metrics.ReasonLabel:       "garbage_collected",
-			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1beta1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaims[i].Labels, v1beta1.CapacityTypeLabelKey),
+			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaims[i].Labels, v1.CapacityTypeLabelKey),
 		}).Inc()
 	})
 	if err = multierr.Combine(errs...); err != nil {

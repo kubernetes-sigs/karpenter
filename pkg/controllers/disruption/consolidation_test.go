@@ -29,14 +29,14 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -49,48 +49,48 @@ import (
 )
 
 var _ = Describe("Consolidation", func() {
-	var nodePool *v1beta1.NodePool
-	var nodeClaim, spotNodeClaim *v1beta1.NodeClaim
-	var node, spotNode *v1.Node
+	var nodePool *v1.NodePool
+	var nodeClaim, spotNodeClaim *v1.NodeClaim
+	var node, spotNode *corev1.Node
 	var labels = map[string]string{
 		"app": "test",
 	}
 	BeforeEach(func() {
-		nodePool = test.NodePool(v1beta1.NodePool{
-			Spec: v1beta1.NodePoolSpec{
-				Disruption: v1beta1.Disruption{
-					ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
+		nodePool = test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Disruption: v1.Disruption{
+					ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
 					// Disrupt away!
-					Budgets: []v1beta1.Budget{{
+					Budgets: []v1.Budget{{
 						Nodes: "100%",
 					}},
 				},
 			},
 		})
-		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
-			Status: v1beta1.NodeClaimStatus{
-				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+			Status: v1.NodeClaimStatus{
+				Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
-		spotNodeClaim, spotNode = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		spotNodeClaim, spotNode = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         mostExpensiveSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
-			Status: v1beta1.NodeClaimStatus{
-				Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+			Status: v1.NodeClaimStatus{
+				Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(true)}}))
@@ -98,12 +98,12 @@ var _ = Describe("Consolidation", func() {
 	Context("Events", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmpty", func() {
 			pod := test.Pod()
-			nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-			nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Minute)}
+			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
+			nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: lo.ToPtr(time.Minute)}
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -114,11 +114,11 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
 			pod := test.Pod()
-			nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{}
+			nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{}
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -136,7 +136,7 @@ var _ = Describe("Consolidation", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						v1beta1.DoNotDisruptAnnotationKey: "true",
+						v1.DoNotDisruptAnnotationKey: "true",
 					},
 				},
 			})
@@ -144,7 +144,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 			wg := sync.WaitGroup{}
@@ -162,7 +162,7 @@ var _ = Describe("Consolidation", func() {
 			// remove the do-not-disrupt annotation to make the node eligible for consolidation and update cluster state
 			pod.SetAnnotations(map[string]string{})
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 			ExpectTriggerVerifyAction(&wg)
@@ -179,23 +179,23 @@ var _ = Describe("Consolidation", func() {
 	})
 	Context("Budgets", func() {
 		var numNodes = 10
-		var nodeClaims []*v1beta1.NodeClaim
-		var nodes []*v1.Node
+		var nodeClaims []*v1.NodeClaim
+		var nodes []*corev1.Node
 		var rs *appsv1.ReplicaSet
 		BeforeEach(func() {
-			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1beta1.NodeClaim{
+			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
 					},
 				},
 			})
@@ -205,7 +205,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 		})
 		It("should only allow 3 empty nodes to be disrupted", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "30%"}}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
@@ -230,7 +230,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
 		It("should allow all empty nodes to be disrupted", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "100%"}}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
@@ -256,7 +256,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 		It("should allow no empty nodes to be disrupted", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
@@ -283,7 +283,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(numNodes).To(Equal(numNodes))
 		})
 		It("should only allow 3 nodes to be deleted in multi node consolidation delete", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "30%"}}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
@@ -293,10 +293,10 @@ var _ = Describe("Consolidation", func() {
 			// this should make the optimal multi node decision to delete 9.
 			// budgets will make it so we can only delete 3.
 			pods := test.Pods(numNodes, test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
 						// 100m * 10 = 1 vCPU. This should be less than the largest node capacity.
-						v1.ResourceCPU: resource.MustParse("100m"),
+						corev1.ResourceCPU: resource.MustParse("100m"),
 					},
 				},
 				ObjectMeta: metav1.ObjectMeta{Labels: labels,
@@ -328,7 +328,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
 		It("should only allow 3 nodes to be deleted in single node consolidation delete", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "30%"}}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
@@ -338,10 +338,10 @@ var _ = Describe("Consolidation", func() {
 			// this will skip over multi node consolidation and go to single
 			// node consolidation delete
 			pods := test.Pods(numNodes, test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
 						// 15 + 15 = 30 < 32
-						v1.ResourceCPU: resource.MustParse("15"),
+						corev1.ResourceCPU: resource.MustParse("15"),
 					},
 				},
 				ObjectMeta: metav1.ObjectMeta{Labels: labels,
@@ -379,11 +379,11 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should allow 2 nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
-			nps := test.NodePools(10, v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-						Budgets: []v1beta1.Budget{{
+			nps := test.NodePools(10, v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
 						}},
@@ -394,23 +394,23 @@ var _ = Describe("Consolidation", func() {
 			for i := 0; i < len(nps); i++ {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
-			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
-			nodes = make([]*v1.Node, 0, 30)
+			nodeClaims = make([]*v1.NodeClaim, 0, 30)
+			nodes = make([]*corev1.Node, 0, 30)
 			// Create 3 nodes for each nodePool
 			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     np.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+							v1.NodePoolLabelKey:            np.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("32"),
-							v1.ResourcePods: resource.MustParse("100"),
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
 						},
 					},
 				})
@@ -444,11 +444,11 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should allow all nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
-			nps := test.NodePools(10, v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-						Budgets: []v1beta1.Budget{{
+			nps := test.NodePools(10, v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1.Budget{{
 							Nodes: "100%",
 						}},
 					},
@@ -458,23 +458,23 @@ var _ = Describe("Consolidation", func() {
 			for i := 0; i < len(nps); i++ {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
-			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
-			nodes = make([]*v1.Node, 0, 30)
+			nodeClaims = make([]*v1.NodeClaim, 0, 30)
+			nodes = make([]*corev1.Node, 0, 30)
 			// Create 3 nodes for each nodePool
 			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     np.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+							v1.NodePoolLabelKey:            np.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("32"),
-							v1.ResourcePods: resource.MustParse("100"),
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
 						},
 					},
 				})
@@ -508,11 +508,11 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should allow no nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
-			nps := test.NodePools(10, v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-						Budgets: []v1beta1.Budget{{
+			nps := test.NodePools(10, v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
 					},
@@ -522,23 +522,23 @@ var _ = Describe("Consolidation", func() {
 			for i := 0; i < len(nps); i++ {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
-			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
-			nodes = make([]*v1.Node, 0, 30)
+			nodeClaims = make([]*v1.NodeClaim, 0, 30)
+			nodes = make([]*corev1.Node, 0, 30)
 			// Create 3 nodes for each nodePool
 			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     np.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+							v1.NodePoolLabelKey:            np.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("32"),
-							v1.ResourcePods: resource.MustParse("100"),
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
 						},
 					},
 				})
@@ -571,7 +571,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(30))
 		})
 		It("should not mark empty node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
@@ -599,11 +599,11 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should not mark empty node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
 			// Create 10 nodepools
-			nps := test.NodePools(10, v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-						Budgets: []v1beta1.Budget{{
+			nps := test.NodePools(10, v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
 					},
@@ -613,23 +613,23 @@ var _ = Describe("Consolidation", func() {
 			for i := 0; i < len(nps); i++ {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
-			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
-			nodes = make([]*v1.Node, 0, 30)
+			nodeClaims = make([]*v1.NodeClaim, 0, 30)
+			nodes = make([]*corev1.Node, 0, 30)
 			// Create 3 nodes for each nodePool
 			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     np.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+							v1.NodePoolLabelKey:            np.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("32"),
-							v1.ResourcePods: resource.MustParse("100"),
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
 						},
 					},
 				})
@@ -662,7 +662,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
 		It("should not mark multi node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
@@ -690,11 +690,11 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should not mark multi node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
 			// Create 10 nodepools
-			nps := test.NodePools(10, v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-						Budgets: []v1beta1.Budget{{
+			nps := test.NodePools(10, v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
 					},
@@ -704,23 +704,23 @@ var _ = Describe("Consolidation", func() {
 			for i := 0; i < len(nps); i++ {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
-			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
-			nodes = make([]*v1.Node, 0, 30)
+			nodeClaims = make([]*v1.NodeClaim, 0, 30)
+			nodes = make([]*corev1.Node, 0, 30)
 			// Create 3 nodes for each nodePool
 			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     np.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+							v1.NodePoolLabelKey:            np.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("32"),
-							v1.ResourcePods: resource.MustParse("100"),
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
 						},
 					},
 				})
@@ -753,7 +753,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
 		})
 		It("should not mark single node consolidated if the candidates can't be disrupted due to budgets with one nodepool", func() {
-			nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "0%"}}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
@@ -781,11 +781,11 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should not mark single node consolidated if all candidates can't be disrupted due to budgets with many nodepools", func() {
 			// Create 10 nodepools
-			nps := test.NodePools(10, v1beta1.NodePool{
-				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenUnderutilized,
-						Budgets: []v1beta1.Budget{{
+			nps := test.NodePools(10, v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
 					},
@@ -795,23 +795,23 @@ var _ = Describe("Consolidation", func() {
 			for i := 0; i < len(nps); i++ {
 				ExpectApplied(ctx, env.Client, nps[i])
 			}
-			nodeClaims = make([]*v1beta1.NodeClaim, 0, 30)
-			nodes = make([]*v1.Node, 0, 30)
+			nodeClaims = make([]*v1.NodeClaim, 0, 30)
+			nodes = make([]*corev1.Node, 0, 30)
 			// Create 3 nodes for each nodePool
 			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     np.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+							v1.NodePoolLabelKey:            np.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("32"),
-							v1.ResourcePods: resource.MustParse("100"),
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("32"),
+							corev1.ResourcePods: resource.MustParse("100"),
 						},
 					},
 				})
@@ -845,23 +845,23 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 	Context("Empty", func() {
-		var nodeClaim2 *v1beta1.NodeClaim
-		var node2 *v1.Node
+		var nodeClaim2 *v1.NodeClaim
+		var node2 *corev1.Node
 
 		BeforeEach(func() {
-			nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			nodeClaim2, node2 = test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
 					},
 				},
 			})
@@ -870,7 +870,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -893,7 +893,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 			fakeClock.Step(10 * time.Minute)
 			wg := sync.WaitGroup{}
@@ -921,35 +921,35 @@ var _ = Describe("Consolidation", func() {
 			})
 
 			largeCheapType := largeTypes[0]
-			nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   largeCheapType.Name,
-						v1beta1.CapacityTypeLabelKey: largeCheapType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         largeCheapType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: largeCheapType.Name,
+						v1.CapacityTypeLabelKey:        largeCheapType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       largeCheapType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  *largeCheapType.Capacity.Cpu(),
-						v1.ResourcePods: *largeCheapType.Capacity.Pods(),
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  *largeCheapType.Capacity.Cpu(),
+						corev1.ResourcePods: *largeCheapType.Capacity.Pods(),
 					},
 				},
 			})
 
 			// there is a pending pod that should land on the node
 			pod := test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("1"),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("1"),
 					},
 				},
 			})
 			unsched := test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse("62"),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("62"),
 					},
 				},
 			})
@@ -960,7 +960,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -973,14 +973,14 @@ var _ = Describe("Consolidation", func() {
 		It("will consider a node with a DaemonSet pod as empty", func() {
 			// assign the nodeclaims to the least expensive offering so we don't get a replacement
 			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 			node.Labels = lo.Assign(node.Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			ds := test.DaemonSet()
@@ -1000,14 +1000,14 @@ var _ = Describe("Consolidation", func() {
 						},
 					},
 				},
-				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+				Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 			})
 			ExpectApplied(ctx, env.Client, pod)
 
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1029,14 +1029,14 @@ var _ = Describe("Consolidation", func() {
 		It("will consider a node with terminating Deployment pods as empty", func() {
 			// assign the nodeclaims to the least expensive offering so we don't get a replacement
 			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 			node.Labels = lo.Assign(node.Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			rs := test.ReplicaSet()
@@ -1056,9 +1056,9 @@ var _ = Describe("Consolidation", func() {
 						},
 					},
 				},
-				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+				Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 			})
-			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *v1.Pod, _ int) client.Object { return p })...)
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
 
 			for _, p := range pods {
 				ExpectManualBinding(ctx, env.Client, p, node)
@@ -1072,7 +1072,7 @@ var _ = Describe("Consolidation", func() {
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1094,14 +1094,14 @@ var _ = Describe("Consolidation", func() {
 		It("will not consider a node with a terminating StatefulSet pod as empty", func() {
 			// assign the nodeclaims to the least expensive offering so we don't get a replacement
 			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 			node.Labels = lo.Assign(node.Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			ss := test.StatefulSet()
@@ -1121,7 +1121,7 @@ var _ = Describe("Consolidation", func() {
 						},
 					},
 				},
-				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+				Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 			})
 			ExpectApplied(ctx, env.Client, pod)
 
@@ -1132,7 +1132,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, pod)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1181,7 +1181,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pod, node)
 
 				// inform cluster state about nodes and nodeClaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -1206,8 +1206,8 @@ var _ = Describe("Consolidation", func() {
 
 				// Expect that the new nodeclaim does not request the most expensive instance type
 				Expect(nodeClaims[0].Name).ToNot(Equal(nodeClaim.Name))
-				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
-				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
+				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(corev1.LabelInstanceTypeStable)).To(BeTrue())
+				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
 
 				// and delete the old one
 				ExpectNotFound(ctx, env.Client, nodeClaim, node)
@@ -1221,11 +1221,11 @@ var _ = Describe("Consolidation", func() {
 			// Forcefully assign lowest possible instancePrice to make sure we have atleast one instance
 			// that is lower than the current node.
 			cloudProvider.InstanceTypes[0].Offerings[0].Price = 0.001
-			cloudProvider.InstanceTypes[0].Offerings[0].Requirements[v1beta1.CapacityTypeLabelKey] = scheduling.NewRequirement(
-				v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot)
+			cloudProvider.InstanceTypes[0].Offerings[0].Requirements[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(
+				v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot)
 			spotInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 				for _, o := range i.Offerings {
-					if o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == v1beta1.CapacityTypeSpot {
+					if o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == v1.CapacityTypeSpot {
 						return true
 					}
 				}
@@ -1238,17 +1238,17 @@ var _ = Describe("Consolidation", func() {
 			mostExpSpotInstance := spotInstances[len(spotInstances)-1]
 			mostExpSpotOffering := mostExpSpotInstance.Offerings[0]
 			spotNodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   mostExpSpotInstance.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: mostExpSpotInstance.Name,
+				v1.CapacityTypeLabelKey:        mostExpSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			spotNode.Labels = lo.Assign(spotNode.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   mostExpSpotInstance.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: mostExpSpotInstance.Name,
+				v1.CapacityTypeLabelKey:        mostExpSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			rs := test.ReplicaSet()
@@ -1273,7 +1273,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{spotNode}, []*v1beta1.NodeClaim{spotNodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1319,7 +1319,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{spotNode}, []*v1beta1.NodeClaim{spotNodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1344,15 +1344,15 @@ var _ = Describe("Consolidation", func() {
 			// Forcefully assign lowest possible instancePrice to make sure we have atleast one instance
 			// that is lower than the current node.
 			cloudProvider.InstanceTypes[0].Offerings[0].Price = 0.001
-			cloudProvider.InstanceTypes[0].Offerings[0].Requirements[v1beta1.CapacityTypeLabelKey] = scheduling.NewRequirement(
-				v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot)
+			cloudProvider.InstanceTypes[0].Offerings[0].Requirements[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(
+				v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot)
 			// Also sort the cloud provider instances by pricing from low to high
 			sort.Slice(cloudProvider.InstanceTypes, func(i, j int) bool {
 				return cloudProvider.InstanceTypes[i].Offerings.Cheapest().Price < cloudProvider.InstanceTypes[j].Offerings.Cheapest().Price
 			})
 			spotInstances = lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 				for _, o := range i.Offerings {
-					if o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == v1beta1.CapacityTypeSpot {
+					if o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == v1.CapacityTypeSpot {
 						return true
 					}
 				}
@@ -1362,17 +1362,17 @@ var _ = Describe("Consolidation", func() {
 			spotInstance := spotInstances[1]
 			spotOffering := spotInstance.Offerings[0]
 			spotNodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   spotInstance.Name,
-				v1beta1.CapacityTypeLabelKey: spotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         spotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: spotInstance.Name,
+				v1.CapacityTypeLabelKey:        spotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       spotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			spotNode.Labels = lo.Assign(spotNode.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   spotInstance.Name,
-				v1beta1.CapacityTypeLabelKey: spotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         spotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: spotInstance.Name,
+				v1.CapacityTypeLabelKey:        spotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       spotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			rs := test.ReplicaSet()
@@ -1397,7 +1397,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{spotNode}, []*v1beta1.NodeClaim{spotNodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1417,7 +1417,7 @@ var _ = Describe("Consolidation", func() {
 			// Fetch 18 spot instances
 			spotInstances = lo.Slice(lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 				for _, o := range i.Offerings {
-					if o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == v1beta1.CapacityTypeSpot {
+					if o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == v1.CapacityTypeSpot {
 						return true
 					}
 				}
@@ -1451,17 +1451,17 @@ var _ = Describe("Consolidation", func() {
 
 			// Assign the most expensive spot instancetype so that it will definitely be replaced through consolidation
 			spotNodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: mostExpensiveInstanceType.Name,
+				v1.CapacityTypeLabelKey:        mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpensiveInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			spotNode.Labels = lo.Assign(spotNode.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: mostExpensiveInstanceType.Name,
+				v1.CapacityTypeLabelKey:        mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpensiveInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			rs := test.ReplicaSet()
@@ -1486,7 +1486,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{spotNode}, []*v1beta1.NodeClaim{spotNodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1511,12 +1511,12 @@ var _ = Describe("Consolidation", func() {
 
 			// Expect that the new nodeclaim does not request the most expensive instance type
 			Expect(nodeClaims[0].Name).ToNot(Equal(spotNodeClaim.Name))
-			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
-			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstanceType.Name)).To(BeFalse())
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(corev1.LabelInstanceTypeStable)).To(BeTrue())
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(mostExpensiveInstanceType.Name)).To(BeFalse())
 
 			// Make sure that the cheapest instance that was outside the bound of 15 instance types is considered for consolidation.
-			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(cheapestSpotInstanceType.Name)).To(BeTrue())
-			spotInstancesConsideredForConsolidation := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Values()
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(cheapestSpotInstanceType.Name)).To(BeTrue())
+			spotInstancesConsideredForConsolidation := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Values()
 
 			// Make sure that we send only 15 instance types.
 			Expect(len(spotInstancesConsideredForConsolidation)).To(Equal(15))
@@ -1530,11 +1530,11 @@ var _ = Describe("Consolidation", func() {
 			ExpectNotFound(ctx, env.Client, spotNodeClaim, spotNode)
 		})
 		It("spot to spot consolidation should consider the max of default and minimum number of instanceTypeOptions from minValues in requirement for truncation if minimum number of instanceTypeOptions from minValues in requirement is greater than 15.", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpExists,
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpExists,
 					},
 					MinValues: lo.ToPtr(16),
 				},
@@ -1542,7 +1542,7 @@ var _ = Describe("Consolidation", func() {
 			// Fetch 18 spot instances
 			spotInstances = lo.Slice(lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 				for _, o := range i.Offerings {
-					if o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == v1beta1.CapacityTypeSpot {
+					if o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == v1.CapacityTypeSpot {
 						return true
 					}
 				}
@@ -1576,17 +1576,17 @@ var _ = Describe("Consolidation", func() {
 
 			// Assign the most expensive spot instancetype so that it will definitely be replaced through consolidation
 			spotNodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: mostExpensiveInstanceType.Name,
+				v1.CapacityTypeLabelKey:        mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpensiveInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			spotNode.Labels = lo.Assign(spotNode.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: mostExpensiveInstanceType.Name,
+				v1.CapacityTypeLabelKey:        mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpensiveInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			rs := test.ReplicaSet()
@@ -1611,7 +1611,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{spotNode}, []*v1beta1.NodeClaim{spotNodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1636,12 +1636,12 @@ var _ = Describe("Consolidation", func() {
 
 			// Expect that the new nodeclaim does not request the most expensive instance type
 			Expect(nodeClaims[0].Name).ToNot(Equal(spotNodeClaim.Name))
-			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
-			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstanceType.Name)).To(BeFalse())
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(corev1.LabelInstanceTypeStable)).To(BeTrue())
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(mostExpensiveInstanceType.Name)).To(BeFalse())
 
 			// Make sure that the cheapest instance that was outside the bound of 15 instance types is considered for consolidation.
-			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(cheapestSpotInstanceType.Name)).To(BeTrue())
-			spotInstancesConsideredForConsolidation := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Values()
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(cheapestSpotInstanceType.Name)).To(BeTrue())
+			spotInstancesConsideredForConsolidation := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Values()
 
 			// Make sure that we send only 16 instance types.
 			Expect(len(spotInstancesConsideredForConsolidation)).To(Equal(16))
@@ -1655,11 +1655,11 @@ var _ = Describe("Consolidation", func() {
 			ExpectNotFound(ctx, env.Client, spotNodeClaim, spotNode)
 		})
 		It("spot to spot consolidation should consider the default for truncation if minimum number of instanceTypeOptions from minValues in requirement is less than 15.", func() {
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1.LabelInstanceTypeStable,
-						Operator: v1.NodeSelectorOpExists,
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpExists,
 					},
 					MinValues: lo.ToPtr(10),
 				},
@@ -1667,7 +1667,7 @@ var _ = Describe("Consolidation", func() {
 			// Fetch 18 spot instances
 			spotInstances = lo.Slice(lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 				for _, o := range i.Offerings {
-					if o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any() == v1beta1.CapacityTypeSpot {
+					if o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == v1.CapacityTypeSpot {
 						return true
 					}
 				}
@@ -1701,17 +1701,17 @@ var _ = Describe("Consolidation", func() {
 
 			// Assign the most expensive spot instancetype so that it will definitely be replaced through consolidation
 			spotNodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: mostExpensiveInstanceType.Name,
+				v1.CapacityTypeLabelKey:        mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpensiveInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			spotNode.Labels = lo.Assign(spotNode.Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: mostExpensiveInstanceType.Name,
+				v1.CapacityTypeLabelKey:        mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpensiveInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			rs := test.ReplicaSet()
@@ -1736,7 +1736,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{spotNode}, []*v1beta1.NodeClaim{spotNodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -1761,12 +1761,12 @@ var _ = Describe("Consolidation", func() {
 
 			// Expect that the new nodeclaim does not request the most expensive instance type
 			Expect(nodeClaims[0].Name).ToNot(Equal(spotNodeClaim.Name))
-			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
-			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstanceType.Name)).To(BeFalse())
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(corev1.LabelInstanceTypeStable)).To(BeTrue())
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(mostExpensiveInstanceType.Name)).To(BeFalse())
 
 			// Make sure that the cheapest instance that was outside the bound of 15 instance types is considered for consolidation.
-			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(cheapestSpotInstanceType.Name)).To(BeTrue())
-			spotInstancesConsideredForConsolidation := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Values()
+			Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(cheapestSpotInstanceType.Name)).To(BeTrue())
+			spotInstancesConsideredForConsolidation := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Values()
 
 			// Make sure that we send only 15 instance types.
 			Expect(len(spotInstancesConsideredForConsolidation)).To(Equal(15))
@@ -1782,11 +1782,11 @@ var _ = Describe("Consolidation", func() {
 		DescribeTable("Consolidation should fail if filterByPrice breaks the minimum requirement from the NodePools.",
 			func(spotToSpot bool) {
 				// Create a NodePool that has minValues in requirement
-				nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 					{
-						NodeSelectorRequirement: v1.NodeSelectorRequirement{
-							Key:      v1.LabelInstanceTypeStable,
-							Operator: v1.NodeSelectorOpExists,
+						NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpExists,
 						},
 						MinValues: lo.ToPtr(16),
 					},
@@ -1804,31 +1804,31 @@ var _ = Describe("Consolidation", func() {
 
 				// Assign borderline instanceType as the most expensive so that we have exactly 15 instances to replace for consolidation.
 				spotNodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstanceType.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 				})
 
 				spotNode.Labels = lo.Assign(spotNode.Labels, map[string]string{
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1.LabelInstanceTypeStable:   mostExpensiveInstanceType.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstanceType.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 				})
 
 				nodeClaim.Labels = lo.Assign(spotNodeClaim.Labels, map[string]string{
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1.LabelInstanceTypeStable:   mostExpensiveODInstanceType.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveODInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         mostExpensiveODInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveODInstanceType.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveODInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveODInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 				})
 
 				node.Labels = lo.Assign(spotNode.Labels, map[string]string{
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
-					v1.LabelInstanceTypeStable:   mostExpensiveODInstanceType.Name,
-					v1beta1.CapacityTypeLabelKey: mostExpensiveODInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         mostExpensiveODInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveODInstanceType.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveODInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveODInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 				})
 
 				nodeClaim = lo.Ternary(spotToSpot, spotNodeClaim, nodeClaim)
@@ -1858,7 +1858,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{spotNode}, []*v1beta1.NodeClaim{spotNodeClaim})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -1907,7 +1907,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pod, node)
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -1932,8 +1932,8 @@ var _ = Describe("Consolidation", func() {
 
 				// Expect that the new nodeclaim does not request the most expensive instance type
 				Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
-				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeclaims[0].Spec.Requirements...).Has(v1.LabelInstanceTypeStable)).To(BeTrue())
-				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeclaims[0].Spec.Requirements...).Get(v1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
+				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeclaims[0].Spec.Requirements...).Has(corev1.LabelInstanceTypeStable)).To(BeTrue())
+				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeclaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(BeFalse())
 
 				// and delete the old one
 				ExpectNotFound(ctx, env.Client, nodeClaim, node)
@@ -1983,7 +1983,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pods[2], node)
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -2047,10 +2047,10 @@ var _ = Describe("Consolidation", func() {
 
 				// set all of these pods to unhealthy so the PDB won't stop their eviction
 				for _, p := range pods {
-					p.Status.Conditions = []v1.PodCondition{
+					p.Status.Conditions = []corev1.PodCondition{
 						{
-							Type:               v1.PodReady,
-							Status:             v1.ConditionFalse,
+							Type:               corev1.PodReady,
+							Status:             corev1.ConditionFalse,
 							LastProbeTime:      metav1.Now(),
 							LastTransitionTime: metav1.Now(),
 						},
@@ -2059,7 +2059,7 @@ var _ = Describe("Consolidation", func() {
 				}
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -2133,7 +2133,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pod, node)
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -2181,42 +2181,42 @@ var _ = Describe("Consolidation", func() {
 							},
 						},
 					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: v1.ResourceList{
-							v1.ResourceCPU: resource.MustParse("2"),
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("2"),
 						},
 					},
 				})
-				annotatedNodeClaim, annotatedNode := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				annotatedNodeClaim, annotatedNode := test.NodeClaimAndNode(v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							v1beta1.DoNotDisruptAnnotationKey: "true",
+							v1.DoNotDisruptAnnotationKey: "true",
 						},
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     nodePool.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("5"),
-							v1.ResourcePods: resource.MustParse("100"),
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("5"),
+							corev1.ResourcePods: resource.MustParse("100"),
 						},
 					},
 				})
 
 				if spotToSpot {
 					annotatedNodeClaim.Labels = lo.Assign(annotatedNodeClaim.Labels, map[string]string{
-						v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         mostExpensiveSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					})
 					annotatedNode.Labels = lo.Assign(annotatedNode.Labels, map[string]string{
-						v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         mostExpensiveSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					})
 				}
 
@@ -2229,7 +2229,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pods[2], annotatedNode)
 
 				// inform cluster state about nodes and nodeClaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, annotatedNode}, []*v1beta1.NodeClaim{nodeClaim, annotatedNodeClaim})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, annotatedNode}, []*v1.NodeClaim{nodeClaim, annotatedNodeClaim})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -2274,42 +2274,42 @@ var _ = Describe("Consolidation", func() {
 							},
 						},
 					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: v1.ResourceList{
-							v1.ResourceCPU: resource.MustParse("2"),
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("2"),
 						},
 					},
 				})
-				nodeClaim2, node2 := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     nodePool.Name,
-							v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-							v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:  resource.MustParse("5"),
-							v1.ResourcePods: resource.MustParse("100"),
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:  resource.MustParse("5"),
+							corev1.ResourcePods: resource.MustParse("100"),
 						},
 					},
 				})
 				if spotToSpot {
 					nodeClaim2.Labels = lo.Assign(nodeClaim2.Labels, map[string]string{
-						v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         mostExpensiveSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					})
 					node2.Labels = lo.Assign(node2.Labels, map[string]string{
-						v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         mostExpensiveSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					})
 				}
 				// Block this pod from being disrupted with karpenter.sh/do-not-disrupt
-				pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+				pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
 
 				ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
 				ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2)
@@ -2320,7 +2320,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 				// inform cluster state about nodes and nodeClaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node, node2}, []*v1beta1.NodeClaim{nodeClaim, nodeClaim2})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -2348,7 +2348,7 @@ var _ = Describe("Consolidation", func() {
 				Name: "current-on-demand",
 				Offerings: []cloudprovider.Offering{
 					{
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}),
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.5,
 						Available:    false,
 					},
@@ -2358,17 +2358,17 @@ var _ = Describe("Consolidation", func() {
 				Name: "potential-spot-replacement",
 				Offerings: []cloudprovider.Offering{
 					{
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1a"}),
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        1.0,
 						Available:    true,
 					},
 					{
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1b"}),
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
 						Available:    true,
 					},
 					{
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1c"}),
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.4,
 						Available:    true,
 					},
@@ -2396,17 +2396,17 @@ var _ = Describe("Consolidation", func() {
 							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					}}})
-			nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   currentInstance.Name,
-						v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         currentInstance.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: currentInstance.Name,
+						v1.CapacityTypeLabelKey:        currentInstance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       currentInstance.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 				},
 			})
 
@@ -2416,7 +2416,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 			var wg sync.WaitGroup
@@ -2435,7 +2435,7 @@ var _ = Describe("Consolidation", func() {
 				Name: "current-on-demand",
 				Offerings: []cloudprovider.Offering{
 					{
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}),
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.5,
 						Available:    false,
 					},
@@ -2445,22 +2445,22 @@ var _ = Describe("Consolidation", func() {
 				Name: "on-demand-replacement",
 				Offerings: []cloudprovider.Offering{
 					{
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1a"}),
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.6,
 						Available:    true,
 					},
 					{
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeOnDemand, v1.LabelTopologyZone: "test-zone-1b"}),
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.6,
 						Available:    true,
 					},
 					{
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1b"}),
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
 						Available:    true,
 					},
 					{
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1beta1.CapacityTypeLabelKey: v1beta1.CapacityTypeSpot, v1.LabelTopologyZone: "test-zone-1c"}),
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.3,
 						Available:    true,
 					},
@@ -2491,26 +2491,26 @@ var _ = Describe("Consolidation", func() {
 					}}})
 
 			// nodePool should require on-demand instance for this test case
-			nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: v1.NodeSelectorRequirement{
-						Key:      v1beta1.CapacityTypeLabelKey,
-						Operator: v1.NodeSelectorOpIn,
-						Values:   []string{v1beta1.CapacityTypeOnDemand},
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      v1.CapacityTypeLabelKey,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{v1.CapacityTypeOnDemand},
 					},
 				},
 			}
-			nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+			nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   currentInstance.Name,
-						v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         currentInstance.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: currentInstance.Name,
+						v1.CapacityTypeLabelKey:        currentInstance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       currentInstance.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("32")},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 				},
 			})
 
@@ -2520,7 +2520,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 			var wg sync.WaitGroup
@@ -2536,23 +2536,23 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 	Context("Delete", func() {
-		var nodeClaims []*v1beta1.NodeClaim
-		var nodes []*v1.Node
+		var nodeClaims []*v1.NodeClaim
+		var nodes []*corev1.Node
 
 		BeforeEach(func() {
-			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1beta1.NodeClaim{
+			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
 					},
 				},
 			})
@@ -2581,7 +2581,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -2628,7 +2628,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -2652,9 +2652,9 @@ var _ = Describe("Consolidation", func() {
 		It("can delete nodes, when non-Karpenter capacity can fit pods", func() {
 			unmanagedNode := test.Node(test.NodeOptions{
 				ProviderID: test.RandomProviderID(),
-				Allocatable: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:  resource.MustParse("32"),
-					v1.ResourcePods: resource.MustParse("100"),
+				Allocatable: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU:  resource.MustParse("32"),
+					corev1.ResourcePods: resource.MustParse("100"),
 				},
 			})
 			// create our RS so we can link a pod to it
@@ -2682,7 +2682,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[0])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], unmanagedNode}, []*v1beta1.NodeClaim{nodeClaims[0]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], unmanagedNode}, []*v1.NodeClaim{nodeClaims[0]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -2744,7 +2744,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -2784,8 +2784,8 @@ var _ = Describe("Consolidation", func() {
 							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					}}})
-			nodeClaims[1].Annotations = lo.Assign(nodeClaims[1].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
-			nodes[1].Annotations = lo.Assign(nodeClaims[1].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+			nodeClaims[1].Annotations = lo.Assign(nodeClaims[1].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			nodes[1].Annotations = lo.Assign(nodeClaims[1].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
 			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
@@ -2796,7 +2796,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -2833,7 +2833,7 @@ var _ = Describe("Consolidation", func() {
 						},
 					}}})
 			// Block this pod from being disrupted with karpenter.sh/do-not-disrupt
-			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1beta1.DoNotDisruptAnnotationKey: "true"})
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
 			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
@@ -2844,7 +2844,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -2893,7 +2893,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -2941,7 +2941,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims, intentionally leaving node as not ready
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
 			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaims[0]))
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[1]}, []*v1.NodeClaim{nodeClaims[1]})
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -2966,18 +2966,18 @@ var _ = Describe("Consolidation", func() {
 		It("should consider initialized nodes before uninitialized nodes", func() {
 			defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "default-instance-type",
-				Resources: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("3"),
-					v1.ResourceMemory: resource.MustParse("3Gi"),
-					v1.ResourcePods:   resource.MustParse("110"),
+				Resources: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("3"),
+					corev1.ResourceMemory: resource.MustParse("3Gi"),
+					corev1.ResourcePods:   resource.MustParse("110"),
 				},
 			})
 			smallInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "small-instance-type",
-				Resources: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("1"),
-					v1.ResourceMemory: resource.MustParse("1Gi"),
-					v1.ResourcePods:   resource.MustParse("10"),
+				Resources: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("1"),
+					corev1.ResourceMemory: resource.MustParse("1Gi"),
+					corev1.ResourcePods:   resource.MustParse("10"),
 				},
 			})
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
@@ -3002,10 +3002,10 @@ var _ = Describe("Consolidation", func() {
 						},
 					},
 				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("2Gi"),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					},
 				},
 			})
@@ -3014,20 +3014,20 @@ var _ = Describe("Consolidation", func() {
 			// Setup 100 nodeclaims/nodes with a single nodeclaim/node that is initialized
 			elem := rand.Intn(100) //nolint:gosec
 			for i := 0; i < podCount; i++ {
-				m, n := test.NodeClaimAndNode(v1beta1.NodeClaim{
+				m, n := test.NodeClaimAndNode(v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							v1beta1.NodePoolLabelKey:     nodePool.Name,
-							v1.LabelInstanceTypeStable:   defaultInstanceType.Name,
-							v1beta1.CapacityTypeLabelKey: defaultInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-							v1.LabelTopologyZone:         defaultInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: defaultInstanceType.Name,
+							v1.CapacityTypeLabelKey:        defaultInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       defaultInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
-					Status: v1beta1.NodeClaimStatus{
-						Allocatable: map[v1.ResourceName]resource.Quantity{
-							v1.ResourceCPU:    resource.MustParse("3"),
-							v1.ResourceMemory: resource.MustParse("3Gi"),
-							v1.ResourcePods:   resource.MustParse("100"),
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:    resource.MustParse("3"),
+							corev1.ResourceMemory: resource.MustParse("3Gi"),
+							corev1.ResourcePods:   resource.MustParse("100"),
 						},
 					},
 				})
@@ -3035,7 +3035,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pods[i], n)
 
 				if i == elem {
-					ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{n}, []*v1beta1.NodeClaim{m})
+					ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{n}, []*v1.NodeClaim{m})
 				} else {
 					ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(m))
 					ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
@@ -3043,20 +3043,20 @@ var _ = Describe("Consolidation", func() {
 			}
 
 			// Create a pod and nodeclaim/node that will eventually be scheduled onto the initialized node
-			consolidatableNodeClaim, consolidatableNode := test.NodeClaimAndNode(v1beta1.NodeClaim{
+			consolidatableNodeClaim, consolidatableNode := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   smallInstanceType.Name,
-						v1beta1.CapacityTypeLabelKey: smallInstanceType.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         smallInstanceType.Offerings[0].Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: smallInstanceType.Name,
+						v1.CapacityTypeLabelKey:        smallInstanceType.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       smallInstanceType.Offerings[0].Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:    resource.MustParse("1"),
-						v1.ResourceMemory: resource.MustParse("1Gi"),
-						v1.ResourcePods:   resource.MustParse("100"),
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
+						corev1.ResourcePods:   resource.MustParse("100"),
 					},
 				},
 			})
@@ -3077,16 +3077,16 @@ var _ = Describe("Consolidation", func() {
 						},
 					},
 				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("1"),
-						v1.ResourceMemory: resource.MustParse("1Gi"),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
 					},
 				},
 			})
 			ExpectApplied(ctx, env.Client, consolidatableNodeClaim, consolidatableNode, consolidatablePod)
 			ExpectManualBinding(ctx, env.Client, consolidatablePod, consolidatableNode)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{consolidatableNode}, []*v1beta1.NodeClaim{consolidatableNodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{consolidatableNode}, []*v1.NodeClaim{consolidatableNodeClaim})
 
 			var wg sync.WaitGroup
 			ExpectTriggerVerifyAction(&wg)
@@ -3140,7 +3140,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -3198,7 +3198,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -3210,15 +3210,15 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("can delete nodes while an invalid node pool exists", func() {
 			// this invalid node pool should not be enough to stop all disruption
-			badNodePool := &v1beta1.NodePool{
+			badNodePool := &v1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "bad-nodepool",
 				},
-				Spec: v1beta1.NodePoolSpec{
-					Template: v1beta1.NodeClaimTemplate{
-						Spec: v1beta1.NodeClaimSpec{
-							Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{},
-							NodeClassRef: &v1beta1.NodeClassReference{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{},
+							NodeClassRef: &v1.NodeClassReference{
 								Name: "non-existent",
 							},
 						},
@@ -3250,7 +3250,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -3273,23 +3273,23 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 	Context("TTL", func() {
-		var nodeClaims []*v1beta1.NodeClaim
-		var nodes []*v1.Node
+		var nodeClaims []*v1.NodeClaim
+		var nodes []*corev1.Node
 
 		BeforeEach(func() {
-			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1beta1.NodeClaim{
+			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
 					},
 				},
 			})
@@ -3298,7 +3298,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0]}, []*v1beta1.NodeClaim{nodeClaims[0]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -3342,24 +3342,24 @@ var _ = Describe("Consolidation", func() {
 
 			// assign the nodeclaims to the least expensive offering so only one of them gets deleted
 			nodeClaims[0].Labels = lo.Assign(nodeClaims[0].Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 			nodes[0].Labels = lo.Assign(nodes[0].Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 			nodeClaims[1].Labels = lo.Assign(nodeClaims[1].Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 			nodes[1].Labels = lo.Assign(nodes[1].Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-				v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+				v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 
 			pods := test.Pods(3, test.PodOptions{
@@ -3383,7 +3383,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -3439,9 +3439,9 @@ var _ = Describe("Consolidation", func() {
 						},
 					},
 				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU: resource.MustParse("1"),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("1"),
 					},
 				},
 			})
@@ -3449,7 +3449,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, nodes[0])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0]}, []*v1beta1.NodeClaim{nodeClaims[0]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -3483,9 +3483,9 @@ var _ = Describe("Consolidation", func() {
 						},
 					},
 				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU: resource.MustParse("1"),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("1"),
 					},
 				},
 			})
@@ -3507,13 +3507,13 @@ var _ = Describe("Consolidation", func() {
 		It("should not consolidate if the action becomes invalid during the node TTL wait", func() {
 			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					v1beta1.DoNotDisruptAnnotationKey: "true",
+					v1.DoNotDisruptAnnotationKey: "true",
 				},
 			}})
 			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool, pod)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0]}, []*v1beta1.NodeClaim{nodeClaims[0]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -3557,7 +3557,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -3581,7 +3581,7 @@ var _ = Describe("Consolidation", func() {
 			doNotDisruptPod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						v1beta1.DoNotDisruptAnnotationKey: "true",
+						v1.DoNotDisruptAnnotationKey: "true",
 					},
 				},
 			})
@@ -3605,7 +3605,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -3656,7 +3656,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -3680,7 +3680,7 @@ var _ = Describe("Consolidation", func() {
 			doNotDisruptPods := test.Pods(2, test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						v1beta1.DoNotDisruptAnnotationKey: "true",
+						v1.DoNotDisruptAnnotationKey: "true",
 					},
 				},
 			})
@@ -3707,7 +3707,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -3754,43 +3754,43 @@ var _ = Describe("Consolidation", func() {
 	})
 
 	Context("Multi-NodeClaim", func() {
-		var nodeClaims, spotNodeClaims []*v1beta1.NodeClaim
-		var nodes, spotNodes []*v1.Node
+		var nodeClaims, spotNodeClaims []*v1.NodeClaim
+		var nodes, spotNodes []*corev1.Node
 
 		BeforeEach(func() {
-			nodeClaims = []*v1beta1.NodeClaim{}
-			spotNodeClaims = []*v1beta1.NodeClaim{}
-			nodes = []*v1.Node{}
-			spotNodes = []*v1.Node{}
-			nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+			nodeClaims = []*v1.NodeClaim{}
+			spotNodeClaims = []*v1.NodeClaim{}
+			nodes = []*corev1.Node{}
+			spotNodes = []*corev1.Node{}
+			nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
 					},
 				},
 			})
-			spotNodeClaims, spotNodes = test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+			spotNodeClaims, spotNodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-						v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         mostExpensiveSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
 					},
 				},
 			})
@@ -3824,7 +3824,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1], nodes[2]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -3854,14 +3854,14 @@ var _ = Describe("Consolidation", func() {
 			nodes = lo.Ternary(false, spotNodes, nodes)
 			// Change one of them to spot.
 			nodeClaims[2].Labels = lo.Assign(nodeClaims[2].Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpensiveSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
+				v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 			nodes[2].Labels = lo.Assign(nodeClaims[2].Labels, map[string]string{
-				v1.LabelInstanceTypeStable:   mostExpensiveSpotInstance.Name,
-				v1beta1.CapacityTypeLabelKey: mostExpensiveSpotOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-				v1.LabelTopologyZone:         mostExpensiveSpotOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+				corev1.LabelInstanceTypeStable: mostExpensiveSpotInstance.Name,
+				v1.CapacityTypeLabelKey:        mostExpensiveSpotOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       mostExpensiveSpotOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			})
 			// create our RS so we can link a pod to it
 			rs := test.ReplicaSet()
@@ -3888,7 +3888,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1], nodes[2]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -3933,24 +3933,24 @@ var _ = Describe("Consolidation", func() {
 
 				// Make the nodeclaims the least expensive instance type and make them of the same type
 				nodeClaims[0].Labels = lo.Assign(nodeClaims[0].Labels, map[string]string{
-					v1.LabelInstanceTypeStable:   leastExpInstance.Name,
-					v1beta1.CapacityTypeLabelKey: leastExpOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         leastExpOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+					corev1.LabelInstanceTypeStable: leastExpInstance.Name,
+					v1.CapacityTypeLabelKey:        leastExpOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       leastExpOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				})
 				nodes[0].Labels = lo.Assign(nodes[0].Labels, map[string]string{
-					v1.LabelInstanceTypeStable:   leastExpInstance.Name,
-					v1beta1.CapacityTypeLabelKey: leastExpOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         leastExpOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+					corev1.LabelInstanceTypeStable: leastExpInstance.Name,
+					v1.CapacityTypeLabelKey:        leastExpOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       leastExpOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				})
 				nodeClaims[1].Labels = lo.Assign(nodeClaims[1].Labels, map[string]string{
-					v1.LabelInstanceTypeStable:   leastExpInstance.Name,
-					v1beta1.CapacityTypeLabelKey: leastExpOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         leastExpOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+					corev1.LabelInstanceTypeStable: leastExpInstance.Name,
+					v1.CapacityTypeLabelKey:        leastExpOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       leastExpOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				})
 				nodes[1].Labels = lo.Assign(nodes[1].Labels, map[string]string{
-					v1.LabelInstanceTypeStable:   leastExpInstance.Name,
-					v1beta1.CapacityTypeLabelKey: leastExpOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-					v1.LabelTopologyZone:         leastExpOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+					corev1.LabelInstanceTypeStable: leastExpInstance.Name,
+					v1.CapacityTypeLabelKey:        leastExpOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       leastExpOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				})
 				ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
 				ExpectMakeNodesInitialized(ctx, env.Client, nodes[0], nodes[1])
@@ -3961,7 +3961,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 				fakeClock.Step(10 * time.Minute)
 
@@ -4020,7 +4020,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 				var wg sync.WaitGroup
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
@@ -4085,7 +4085,7 @@ var _ = Describe("Consolidation", func() {
 						}}})
 
 				ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1], nodes[2]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
 				var wg sync.WaitGroup
 				wg.Add(1)
@@ -4168,7 +4168,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1], nodes[2]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
 				var wg sync.WaitGroup
 				wg.Add(1)
@@ -4190,11 +4190,11 @@ var _ = Describe("Consolidation", func() {
 				ExpectExists(ctx, env.Client, nodeClaims[1])
 				ExpectExists(ctx, env.Client, nodeClaims[2])
 
-				var extraPods []*v1.Pod
+				var extraPods []*corev1.Pod
 				for i := 0; i < 2; i++ {
 					extraPods = append(extraPods, test.Pod(test.PodOptions{
-						ResourceRequirements: v1.ResourceRequirements{
-							Requests: v1.ResourceList{v1.ResourceCPU: *resource.NewQuantity(1, resource.DecimalSI)},
+						ResourceRequirements: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{corev1.ResourceCPU: *resource.NewQuantity(1, resource.DecimalSI)},
 						},
 					}))
 				}
@@ -4237,24 +4237,24 @@ var _ = Describe("Consolidation", func() {
 		)
 	})
 	Context("Node Lifetime Consideration", func() {
-		var nodeClaims []*v1beta1.NodeClaim
-		var nodes []*v1.Node
+		var nodeClaims []*v1.NodeClaim
+		var nodes []*corev1.Node
 
 		BeforeEach(func() {
-			nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(3 * time.Second)}
-			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1beta1.NodeClaim{
+			nodePool.Spec.Disruption.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(3 * time.Second)}
+			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelInstanceTypeStable:   leastExpensiveInstance.Name,
-						v1beta1.CapacityTypeLabelKey: leastExpensiveOffering.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
-						v1.LabelTopologyZone:         leastExpensiveOffering.Requirements.Get(v1.LabelTopologyZone).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU:  resource.MustParse("32"),
-						v1.ResourcePods: resource.MustParse("100"),
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
 					},
 				},
 			})
@@ -4289,7 +4289,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			fakeClock.SetTime(time.Now())
 
@@ -4312,8 +4312,8 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 	Context("Topology Consideration", func() {
-		var nodeClaims []*v1beta1.NodeClaim
-		var nodes []*v1.Node
+		var nodeClaims []*v1.NodeClaim
+		var nodes []*corev1.Node
 		var oldNodeClaimNames sets.Set[string]
 
 		BeforeEach(func() {
@@ -4321,39 +4321,39 @@ var _ = Describe("Consolidation", func() {
 			testZone2Instance := mostExpensiveInstanceWithZone("test-zone-2")
 			testZone3Instance := leastExpensiveInstanceWithZone("test-zone-3")
 
-			nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1beta1.NodeClaim{
+			nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						v1beta1.NodePoolLabelKey:     nodePool.Name,
-						v1.LabelTopologyZone:         "test-zone-1",
-						v1.LabelInstanceTypeStable:   testZone1Instance.Name,
-						v1beta1.CapacityTypeLabelKey: testZone1Instance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelTopologyZone:       "test-zone-1",
+						corev1.LabelInstanceTypeStable: testZone1Instance.Name,
+						v1.CapacityTypeLabelKey:        testZone1Instance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 					},
 				},
-				Status: v1beta1.NodeClaimStatus{
-					Allocatable: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("1")},
 				},
 			})
 			nodeClaims[1].Labels = lo.Assign(nodeClaims[1].Labels, map[string]string{
-				v1.LabelTopologyZone:         "test-zone-2",
-				v1.LabelInstanceTypeStable:   testZone2Instance.Name,
-				v1beta1.CapacityTypeLabelKey: testZone2Instance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       "test-zone-2",
+				corev1.LabelInstanceTypeStable: testZone2Instance.Name,
+				v1.CapacityTypeLabelKey:        testZone2Instance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 			})
 			nodes[1].Labels = lo.Assign(nodes[1].Labels, map[string]string{
-				v1.LabelTopologyZone:         "test-zone-2",
-				v1.LabelInstanceTypeStable:   testZone2Instance.Name,
-				v1beta1.CapacityTypeLabelKey: testZone2Instance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       "test-zone-2",
+				corev1.LabelInstanceTypeStable: testZone2Instance.Name,
+				v1.CapacityTypeLabelKey:        testZone2Instance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 			})
 
 			nodeClaims[2].Labels = lo.Assign(nodeClaims[2].Labels, map[string]string{
-				v1.LabelTopologyZone:         "test-zone-3",
-				v1.LabelInstanceTypeStable:   testZone3Instance.Name,
-				v1beta1.CapacityTypeLabelKey: testZone3Instance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       "test-zone-3",
+				corev1.LabelInstanceTypeStable: testZone3Instance.Name,
+				v1.CapacityTypeLabelKey:        testZone3Instance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 			})
 			nodes[2].Labels = lo.Assign(nodes[2].Labels, map[string]string{
-				v1.LabelTopologyZone:         "test-zone-3",
-				v1.LabelInstanceTypeStable:   testZone3Instance.Name,
-				v1beta1.CapacityTypeLabelKey: testZone3Instance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				corev1.LabelTopologyZone:       "test-zone-3",
+				corev1.LabelInstanceTypeStable: testZone3Instance.Name,
+				v1.CapacityTypeLabelKey:        testZone3Instance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 			})
 			oldNodeClaimNames = sets.New(nodeClaims[0].Name, nodeClaims[1].Name, nodeClaims[2].Name)
 		})
@@ -4365,15 +4365,15 @@ var _ = Describe("Consolidation", func() {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 
-			tsc := v1.TopologySpreadConstraint{
+			tsc := corev1.TopologySpreadConstraint{
 				MaxSkew:           1,
-				TopologyKey:       v1.LabelTopologyZone,
-				WhenUnsatisfiable: v1.DoNotSchedule,
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 			}
 			pods := test.Pods(4, test.PodOptions{
-				ResourceRequirements:      v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}},
-				TopologySpreadConstraints: []v1.TopologySpreadConstraint{tsc},
+				ResourceRequirements:      corev1.ResourceRequirements{Requests: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("1")}},
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{tsc},
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
 					OwnerReferences: []metav1.OwnerReference{
@@ -4395,7 +4395,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1], nodes[2]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
 			ExpectSkew(ctx, env.Client, "default", &tsc).To(ConsistOf(1, 1, 1))
 
@@ -4419,11 +4419,11 @@ var _ = Describe("Consolidation", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 
 			// Find the new node associated with the nodeclaim
-			newNodeClaim, ok := lo.Find(ExpectNodeClaims(ctx, env.Client), func(m *v1beta1.NodeClaim) bool {
+			newNodeClaim, ok := lo.Find(ExpectNodeClaims(ctx, env.Client), func(m *v1.NodeClaim) bool {
 				return !oldNodeClaimNames.Has(m.Name)
 			})
 			Expect(ok).To(BeTrue())
-			newNode, ok := lo.Find(ExpectNodes(ctx, env.Client), func(n *v1.Node) bool {
+			newNode, ok := lo.Find(ExpectNodes(ctx, env.Client), func(n *corev1.Node) bool {
 				return newNodeClaim.Status.ProviderID == n.Spec.ProviderID
 			})
 			Expect(ok).To(BeTrue())
@@ -4440,11 +4440,11 @@ var _ = Describe("Consolidation", func() {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			pods := test.Pods(3, test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{Requests: map[v1.ResourceName]resource.Quantity{v1.ResourceCPU: resource.MustParse("1")}},
-				PodAntiRequirements: []v1.PodAffinityTerm{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("1")}},
+				PodAntiRequirements: []corev1.PodAffinityTerm{
 					{
 						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
-						TopologyKey:   v1.LabelHostname,
+						TopologyKey:   corev1.LabelHostname,
 					},
 				},
 				ObjectMeta: metav1.ObjectMeta{Labels: labels,
@@ -4464,16 +4464,16 @@ var _ = Describe("Consolidation", func() {
 			// Make the Zone 2 instance also the least expensive instance
 			zone2Instance := leastExpensiveInstanceWithZone("test-zone-2")
 			nodes[1].Labels = lo.Assign(nodes[1].Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelTopologyZone:         "test-zone-2",
-				v1.LabelInstanceTypeStable:   zone2Instance.Name,
-				v1beta1.CapacityTypeLabelKey: zone2Instance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelTopologyZone:       "test-zone-2",
+				corev1.LabelInstanceTypeStable: zone2Instance.Name,
+				v1.CapacityTypeLabelKey:        zone2Instance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 			})
 			nodeClaims[1].Labels = lo.Assign(nodeClaims[1].Labels, map[string]string{
-				v1beta1.NodePoolLabelKey:     nodePool.Name,
-				v1.LabelTopologyZone:         "test-zone-2",
-				v1.LabelInstanceTypeStable:   zone2Instance.Name,
-				v1beta1.CapacityTypeLabelKey: zone2Instance.Offerings[0].Requirements.Get(v1beta1.CapacityTypeLabelKey).Any(),
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelTopologyZone:       "test-zone-2",
+				corev1.LabelInstanceTypeStable: zone2Instance.Name,
+				v1.CapacityTypeLabelKey:        zone2Instance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 			})
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
 
@@ -4483,7 +4483,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{nodes[0], nodes[1], nodes[2]}, []*v1beta1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -4532,7 +4532,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -4574,20 +4574,20 @@ var _ = Describe("Consolidation", func() {
 						},
 					},
 				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU: resource.MustParse("1"),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("1"),
 					},
 				},
 			}
 
-			var pods []*v1.Pod
+			var pods []*corev1.Pod
 			for i := 0; i < 5; i++ {
 				pod := test.UnschedulablePod(podOpts)
 				pods = append(pods, pod)
 			}
 			ExpectApplied(ctx, env.Client, rs, nodePool)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
+			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *corev1.Pod, _ int) *corev1.Pod { return p.DeepCopy() })...)
 
 			nodeClaims := ExpectNodeClaims(ctx, env.Client)
 			Expect(nodeClaims).To(HaveLen(1))
@@ -4600,12 +4600,12 @@ var _ = Describe("Consolidation", func() {
 			// Mark the node for deletion and re-trigger reconciliation
 			oldNodeName := nodes[0].Name
 			cluster.MarkForDeletion(nodes[0].Spec.ProviderID)
-			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *v1.Pod, _ int) *v1.Pod { return p.DeepCopy() })...)
+			ExpectProvisionedNoBinding(ctx, env.Client, cluster, cloudProvider, prov, lo.Map(pods, func(p *corev1.Pod, _ int) *corev1.Pod { return p.DeepCopy() })...)
 
 			// Make sure that the cluster state is aware of the current node state
 			nodes = ExpectNodes(ctx, env.Client)
 			Expect(nodes).To(HaveLen(2))
-			newNode, _ := lo.Find(nodes, func(n *v1.Node) bool { return n.Name != oldNodeName })
+			newNode, _ := lo.Find(nodes, func(n *corev1.Node) bool { return n.Name != oldNodeName })
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nil)
 

@@ -18,7 +18,7 @@ package v1alpha1
 
 import (
 	"sigs.k8s.io/karpenter/kwok/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 const (
@@ -36,8 +36,8 @@ const (
 )
 
 func init() {
-	v1beta1.RestrictedLabelDomains = v1beta1.RestrictedLabelDomains.Insert(apis.Group)
-	v1beta1.WellKnownLabels = v1beta1.WellKnownLabels.Insert(
+	v1.RestrictedLabelDomains = v1.RestrictedLabelDomains.Insert(apis.Group)
+	v1.WellKnownLabels = v1.WellKnownLabels.Insert(
 		InstanceSizeLabelKey,
 		InstanceFamilyLabelKey,
 		InstanceCPULabelKey,

@@ -23,13 +23,13 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -44,9 +44,9 @@ var _ = Describe("Performance", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: testLabels,
 					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: v1.ResourceList{
-							v1.ResourceCPU: resource.MustParse("1"),
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
 						},
 					},
 				}})
@@ -61,9 +61,9 @@ var _ = Describe("Performance", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: testLabels,
 					},
-					ResourceRequirements: v1.ResourceRequirements{
-						Requests: v1.ResourceList{
-							v1.ResourceCPU: resource.MustParse("1"),
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
 						},
 					},
 				}})
@@ -78,14 +78,14 @@ var _ = Describe("Performance", func() {
 			env.ExpectUpdated(nodePool)
 			// Eventually expect one node to be drifted
 			Eventually(func(g Gomega) {
-				nodeClaims := &v1beta1.NodeClaimList{}
-				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1beta1.ConditionTypeDrifted})).To(Succeed())
+				nodeClaims := &v1.NodeClaimList{}
+				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1.ConditionTypeDrifted})).To(Succeed())
 				g.Expect(len(nodeClaims.Items)).ToNot(Equal(0))
 			}).WithTimeout(5 * time.Second).Should(Succeed())
 			// Then eventually expect no nodes to be drifted
 			Eventually(func(g Gomega) {
-				nodeClaims := &v1beta1.NodeClaimList{}
-				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1beta1.ConditionTypeDrifted})).To(Succeed())
+				nodeClaims := &v1.NodeClaimList{}
+				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1.ConditionTypeDrifted})).To(Succeed())
 				g.Expect(len(nodeClaims.Items)).To(Equal(0))
 			}).WithTimeout(300 * time.Second).Should(Succeed())
 			env.TimeIntervalCollector.End("Drift")
@@ -140,14 +140,14 @@ var _ = Describe("Performance", func() {
 			env.ExpectUpdated(nodePool)
 			// Eventually expect one node to be drifted
 			Eventually(func(g Gomega) {
-				nodeClaims := &v1beta1.NodeClaimList{}
-				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1beta1.ConditionTypeDrifted})).To(Succeed())
+				nodeClaims := &v1.NodeClaimList{}
+				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1.ConditionTypeDrifted})).To(Succeed())
 				g.Expect(len(nodeClaims.Items)).ToNot(Equal(0))
 			}).WithTimeout(5 * time.Second).Should(Succeed())
 			// Then eventually expect no nodes to be drifted
 			Eventually(func(g Gomega) {
-				nodeClaims := &v1beta1.NodeClaimList{}
-				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1beta1.ConditionTypeDrifted})).To(Succeed())
+				nodeClaims := &v1.NodeClaimList{}
+				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1.ConditionTypeDrifted})).To(Succeed())
 				g.Expect(len(nodeClaims.Items)).To(Equal(0))
 			}).WithTimeout(10 * time.Minute).Should(Succeed())
 			env.TimeIntervalCollector.End("Drift")

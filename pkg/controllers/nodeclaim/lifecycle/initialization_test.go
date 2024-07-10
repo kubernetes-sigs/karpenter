@@ -17,12 +17,12 @@ limitations under the License.
 package lifecycle_test
 
 import (
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
 
@@ -33,24 +33,24 @@ import (
 )
 
 var _ = Describe("Initialization", func() {
-	var nodePool *v1beta1.NodePool
+	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
 	It("should consider the nodeClaim initialized when all initialization conditions are met", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("50Mi"),
-						v1.ResourcePods:   resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+						corev1.ResourcePods:   resource.MustParse("5"),
 					},
 				},
 			},
@@ -61,7 +61,7 @@ var _ = Describe("Initialization", func() {
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
-			Taints:     []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
+			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 
@@ -69,40 +69,40 @@ var _ = Describe("Initialization", func() {
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
-		node.Status.Capacity = v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("10"),
-			v1.ResourceMemory: resource.MustParse("100Mi"),
-			v1.ResourcePods:   resource.MustParse("110"),
+		node.Status.Capacity = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10"),
+			corev1.ResourceMemory: resource.MustParse("100Mi"),
+			corev1.ResourcePods:   resource.MustParse("110"),
 		}
-		node.Status.Allocatable = v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("8"),
-			v1.ResourceMemory: resource.MustParse("80Mi"),
-			v1.ResourcePods:   resource.MustParse("110"),
+		node.Status.Allocatable = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("8"),
+			corev1.ResourceMemory: resource.MustParse("80Mi"),
+			corev1.ResourcePods:   resource.MustParse("110"),
 		}
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
 	It("should add the initialization label to the node when the nodeClaim is initialized", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("50Mi"),
-						v1.ResourcePods:   resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+						corev1.ResourcePods:   resource.MustParse("5"),
 					},
 				},
 			},
@@ -113,17 +113,17 @@ var _ = Describe("Initialization", func() {
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("10"),
-				v1.ResourceMemory: resource.MustParse("100Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("8"),
-				v1.ResourceMemory: resource.MustParse("80Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -131,21 +131,21 @@ var _ = Describe("Initialization", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		node = ExpectExists(ctx, env.Client, node)
-		Expect(node.Labels).To(HaveKeyWithValue(v1beta1.NodeInitializedLabelKey, "true"))
+		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeInitializedLabelKey, "true"))
 	})
 	It("should not consider the Node to be initialized when the status of the Node is NotReady", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("50Mi"),
-						v1.ResourcePods:   resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+						corev1.ResourcePods:   resource.MustParse("5"),
 					},
 				},
 			},
@@ -156,40 +156,40 @@ var _ = Describe("Initialization", func() {
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("10"),
-				v1.ResourceMemory: resource.MustParse("100Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("8"),
-				v1.ResourceMemory: resource.MustParse("80Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			ReadyStatus: v1.ConditionFalse,
-			Taints:      []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
+			ReadyStatus: corev1.ConditionFalse,
+			Taints:      []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 	})
 	It("should not consider the Node to be initialized when all requested resources aren't registered", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:          resource.MustParse("2"),
-						v1.ResourceMemory:       resource.MustParse("50Mi"),
-						v1.ResourcePods:         resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
 						fake.ResourceGPUVendorA: resource.MustParse("1"),
 					},
 				},
@@ -207,17 +207,17 @@ var _ = Describe("Initialization", func() {
 		// Extended resource hasn't registered yet by the daemonset
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("10"),
-				v1.ResourceMemory: resource.MustParse("100Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("8"),
-				v1.ResourceMemory: resource.MustParse("80Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -225,22 +225,22 @@ var _ = Describe("Initialization", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 	})
 	It("should consider the node to be initialized once all the resources are registered", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:          resource.MustParse("2"),
-						v1.ResourceMemory:       resource.MustParse("50Mi"),
-						v1.ResourcePods:         resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
 						fake.ResourceGPUVendorA: resource.MustParse("1"),
 					},
 				},
@@ -258,17 +258,17 @@ var _ = Describe("Initialization", func() {
 		// Extended resource hasn't registered yet by the daemonset
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("10"),
-				v1.ResourceMemory: resource.MustParse("100Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("8"),
-				v1.ResourceMemory: resource.MustParse("80Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -277,8 +277,8 @@ var _ = Describe("Initialization", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 
 		// Node now registers the resource
 		node = ExpectExists(ctx, env.Client, node)
@@ -289,33 +289,33 @@ var _ = Describe("Initialization", func() {
 		// Reconcile the nodeClaim and the nodeClaim/Node should now be initilized
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
 	It("should not consider the Node to be initialized when all startupTaints aren't removed", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("50Mi"),
-						v1.ResourcePods:   resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+						corev1.ResourcePods:   resource.MustParse("5"),
 					},
 				},
-				StartupTaints: []v1.Taint{
+				StartupTaints: []corev1.Taint{
 					{
 						Key:    "custom-startup-taint",
-						Effect: v1.TaintEffectNoSchedule,
+						Effect: corev1.TaintEffectNoSchedule,
 						Value:  "custom-startup-value",
 					},
 					{
 						Key:    "other-custom-startup-taint",
-						Effect: v1.TaintEffectNoExecute,
+						Effect: corev1.TaintEffectNoExecute,
 						Value:  "other-custom-startup-value",
 					},
 				},
@@ -327,17 +327,17 @@ var _ = Describe("Initialization", func() {
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("10"),
-				v1.ResourceMemory: resource.MustParse("100Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("8"),
-				v1.ResourceMemory: resource.MustParse("80Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -347,14 +347,14 @@ var _ = Describe("Initialization", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).To(ContainElements(
-			v1.Taint{
+			corev1.Taint{
 				Key:    "custom-startup-taint",
-				Effect: v1.TaintEffectNoSchedule,
+				Effect: corev1.TaintEffectNoSchedule,
 				Value:  "custom-startup-value",
 			},
-			v1.Taint{
+			corev1.Taint{
 				Key:    "other-custom-startup-taint",
-				Effect: v1.TaintEffectNoExecute,
+				Effect: corev1.TaintEffectNoExecute,
 				Value:  "other-custom-startup-value",
 			},
 		))
@@ -362,33 +362,33 @@ var _ = Describe("Initialization", func() {
 		// Shouldn't consider the node ready since the startup taints still exist
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 	})
 	It("should consider the Node to be initialized once the startupTaints are removed", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("50Mi"),
-						v1.ResourcePods:   resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+						corev1.ResourcePods:   resource.MustParse("5"),
 					},
 				},
-				StartupTaints: []v1.Taint{
+				StartupTaints: []corev1.Taint{
 					{
 						Key:    "custom-startup-taint",
-						Effect: v1.TaintEffectNoSchedule,
+						Effect: corev1.TaintEffectNoSchedule,
 						Value:  "custom-startup-value",
 					},
 					{
 						Key:    "other-custom-startup-taint",
-						Effect: v1.TaintEffectNoExecute,
+						Effect: corev1.TaintEffectNoExecute,
 						Value:  "other-custom-startup-value",
 					},
 				},
@@ -400,17 +400,17 @@ var _ = Describe("Initialization", func() {
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("10"),
-				v1.ResourceMemory: resource.MustParse("100Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("8"),
-				v1.ResourceMemory: resource.MustParse("80Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Taints: []v1.Taint{v1beta1.UnregisteredNoExecuteTaint},
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
@@ -419,43 +419,43 @@ var _ = Describe("Initialization", func() {
 		// Shouldn't consider the node ready since the startup taints still exist
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
-		node.Spec.Taints = []v1.Taint{}
+		node.Spec.Taints = []corev1.Taint{}
 		ExpectApplied(ctx, env.Client, node)
 
 		// nodeClaim should now be ready since all startup taints are removed
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
 	It("should not consider the Node to be initialized when all ephemeralTaints aren't removed", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("50Mi"),
-						v1.ResourcePods:   resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+						corev1.ResourcePods:   resource.MustParse("5"),
 					},
 				},
-				StartupTaints: []v1.Taint{
+				StartupTaints: []corev1.Taint{
 					{
 						Key:    "custom-startup-taint",
-						Effect: v1.TaintEffectNoSchedule,
+						Effect: corev1.TaintEffectNoSchedule,
 						Value:  "custom-startup-value",
 					},
 					{
 						Key:    "other-custom-startup-taint",
-						Effect: v1.TaintEffectNoExecute,
+						Effect: corev1.TaintEffectNoExecute,
 						Value:  "other-custom-startup-value",
 					},
 				},
@@ -467,31 +467,31 @@ var _ = Describe("Initialization", func() {
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("10"),
-				v1.ResourceMemory: resource.MustParse("100Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("8"),
-				v1.ResourceMemory: resource.MustParse("80Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Taints: []v1.Taint{
+			Taints: []corev1.Taint{
 				{
-					Key:    v1.TaintNodeNotReady,
-					Effect: v1.TaintEffectNoSchedule,
+					Key:    corev1.TaintNodeNotReady,
+					Effect: corev1.TaintEffectNoSchedule,
 				},
 				{
-					Key:    v1.TaintNodeUnreachable,
-					Effect: v1.TaintEffectNoSchedule,
+					Key:    corev1.TaintNodeUnreachable,
+					Effect: corev1.TaintEffectNoSchedule,
 				},
 				{
 					Key:    cloudproviderapi.TaintExternalCloudProvider,
-					Effect: v1.TaintEffectNoSchedule,
+					Effect: corev1.TaintEffectNoSchedule,
 					Value:  "true",
 				},
-				v1beta1.UnregisteredNoExecuteTaint,
+				v1.UnregisteredNoExecuteTaint,
 			},
 		})
 		ExpectApplied(ctx, env.Client, node)
@@ -499,33 +499,33 @@ var _ = Describe("Initialization", func() {
 		// Shouldn't consider the node ready since the ephemeral taints still exist
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 	})
 	It("should consider the Node to be initialized once the ephemeralTaints are removed", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey: nodePool.Name,
+					v1.NodePoolLabelKey: nodePool.Name,
 				},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Resources: v1beta1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("50Mi"),
-						v1.ResourcePods:   resource.MustParse("5"),
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+						corev1.ResourcePods:   resource.MustParse("5"),
 					},
 				},
-				StartupTaints: []v1.Taint{
+				StartupTaints: []corev1.Taint{
 					{
 						Key:    "custom-startup-taint",
-						Effect: v1.TaintEffectNoSchedule,
+						Effect: corev1.TaintEffectNoSchedule,
 						Value:  "custom-startup-value",
 					},
 					{
 						Key:    "other-custom-startup-taint",
-						Effect: v1.TaintEffectNoExecute,
+						Effect: corev1.TaintEffectNoExecute,
 						Value:  "other-custom-startup-value",
 					},
 				},
@@ -537,31 +537,31 @@ var _ = Describe("Initialization", func() {
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
-			Capacity: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("10"),
-				v1.ResourceMemory: resource.MustParse("100Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Allocatable: v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("8"),
-				v1.ResourceMemory: resource.MustParse("80Mi"),
-				v1.ResourcePods:   resource.MustParse("110"),
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Taints: []v1.Taint{
+			Taints: []corev1.Taint{
 				{
-					Key:    v1.TaintNodeNotReady,
-					Effect: v1.TaintEffectNoSchedule,
+					Key:    corev1.TaintNodeNotReady,
+					Effect: corev1.TaintEffectNoSchedule,
 				},
 				{
-					Key:    v1.TaintNodeUnreachable,
-					Effect: v1.TaintEffectNoSchedule,
+					Key:    corev1.TaintNodeUnreachable,
+					Effect: corev1.TaintEffectNoSchedule,
 				},
 				{
 					Key:    cloudproviderapi.TaintExternalCloudProvider,
-					Effect: v1.TaintEffectNoSchedule,
+					Effect: corev1.TaintEffectNoSchedule,
 					Value:  "true",
 				},
-				v1beta1.UnregisteredNoExecuteTaint,
+				v1.UnregisteredNoExecuteTaint,
 			},
 		})
 		ExpectApplied(ctx, env.Client, node)
@@ -569,17 +569,17 @@ var _ = Describe("Initialization", func() {
 		// Shouldn't consider the node ready since the ephemeral taints still exist
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionFalse))
 
 		node = ExpectExists(ctx, env.Client, node)
-		node.Spec.Taints = []v1.Taint{}
+		node.Spec.Taints = []corev1.Taint{}
 		ExpectApplied(ctx, env.Client, node)
 
 		// nodeClaim should now be ready since all startup taints are removed
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1beta1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
 })

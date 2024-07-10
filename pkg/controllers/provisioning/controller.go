@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -30,7 +30,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -49,7 +49,7 @@ func NewPodController(kubeClient client.Client, provisioner *Provisioner) *PodCo
 }
 
 // Reconcile the resource
-func (c *PodController) Reconcile(ctx context.Context, p *v1.Pod) (reconcile.Result, error) {
+func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "provisioner.trigger.pod") //nolint:ineffassign,staticcheck
 
 	if !pod.IsProvisionable(p) {
@@ -66,7 +66,7 @@ func (c *PodController) Reconcile(ctx context.Context, p *v1.Pod) (reconcile.Res
 func (c *PodController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.pod").
-		For(&v1.Pod{}).
+		For(&corev1.Pod{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
@@ -86,14 +86,14 @@ func NewNodeController(kubeClient client.Client, provisioner *Provisioner) *Node
 }
 
 // Reconcile the resource
-func (c *NodeController) Reconcile(ctx context.Context, n *v1.Node) (reconcile.Result, error) {
+func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.Result, error) {
 	//nolint:ineffassign
 	ctx = injection.WithControllerName(ctx, "provisioner.trigger.node") //nolint:ineffassign,staticcheck
 
 	// If the disruption taint doesn't exist or the deletion timestamp isn't set, it's not being disrupted.
 	// We don't check the deletion timestamp here, as we expect the termination controller to eventually set
 	// the taint when it picks up the node from being deleted.
-	if !lo.Contains(n.Spec.Taints, v1beta1.DisruptionNoScheduleTaint) {
+	if !lo.Contains(n.Spec.Taints, v1.DisruptionNoScheduleTaint) {
 		return reconcile.Result{}, nil
 	}
 	c.provisioner.Trigger()
@@ -107,7 +107,7 @@ func (c *NodeController) Reconcile(ctx context.Context, n *v1.Node) (reconcile.R
 func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.node").
-		For(&v1.Node{}).
+		For(&corev1.Node{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

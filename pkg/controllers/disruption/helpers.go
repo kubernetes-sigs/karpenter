@@ -28,13 +28,13 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -86,7 +86,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		return pscheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *v1.Pod) (client.ObjectKey, interface{}) {
+	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *corev1.Pod) (client.ObjectKey, interface{}) {
 		return client.ObjectKeyFromObject(p), nil
 	})
 
@@ -163,9 +163,9 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
-func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1beta1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
-	nodePoolMap := map[string]*v1beta1.NodePool{}
-	nodePoolList := &v1beta1.NodePoolList{}
+func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
+	nodePoolMap := map[string]*v1.NodePool{}
+	nodePoolList := &v1.NodePoolList{}
 	if err := kubeClient.List(ctx, nodePoolList); err != nil {
 		return nil, nil, fmt.Errorf("listing node pools, %w", err)
 	}
@@ -196,8 +196,8 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 // We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are NotReady and already being deleted by that disruption reason.
 //
 //nolint:gocyclo
-func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, recorder events.Recorder) (map[string]map[v1beta1.DisruptionReason]int, error) {
-	disruptionBudgetMapping := map[string]map[v1beta1.DisruptionReason]int{}
+func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, recorder events.Recorder) (map[string]map[v1.DisruptionReason]int, error) {
+	disruptionBudgetMapping := map[string]map[v1.DisruptionReason]int{}
 	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
 	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
 	for _, node := range cluster.Nodes() {
@@ -212,17 +212,17 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 			continue
 		}
 
-		nodePool := node.Labels()[v1beta1.NodePoolLabelKey]
+		nodePool := node.Labels()[v1.NodePoolLabelKey]
 		numNodes[nodePool]++
 
 		// If the node satisfies one of the following, we subtract it from the allowed disruptions.
 		// 1. Has a NotReady conditiion
 		// 2. Is marked as disrupting
-		if cond := nodeutils.GetCondition(node.Node, v1.NodeReady); cond.Status != v1.ConditionTrue || node.MarkedForDeletion() {
+		if cond := nodeutils.GetCondition(node.Node, corev1.NodeReady); cond.Status != corev1.ConditionTrue || node.MarkedForDeletion() {
 			disrupting[nodePool]++
 		}
 	}
-	nodePoolList := &v1beta1.NodePoolList{}
+	nodePoolList := &v1.NodePoolList{}
 	if err := kubeClient.List(ctx, nodePoolList); err != nil {
 		return nil, fmt.Errorf("listing node pools, %w", err)
 	}
@@ -230,7 +230,7 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 		minDisruptionsByReason := nodePool.MustGetAllowedDisruptions(ctx, clk, numNodes[nodePool.Name])
 		allowedDisruptionsTotal := 0
 
-		disruptionBudgetMapping[nodePool.Name] = map[v1beta1.DisruptionReason]int{}
+		disruptionBudgetMapping[nodePool.Name] = map[v1.DisruptionReason]int{}
 		for reason, minDisruptions := range minDisruptionsByReason {
 			// Subtract the allowed number of disruptions from the number of already disrupting nodes.
 			// Floor the value since the number of disrupting nodes can exceed the number of allowed disruptions.

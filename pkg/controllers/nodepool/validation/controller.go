@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
@@ -43,14 +43,14 @@ func NewController(kubeClient client.Client) *Controller {
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepool.validation")
 	stored := nodePool.DeepCopy()
 	err := nodePool.RuntimeValidate()
 	if err != nil {
-		nodePool.StatusConditions().SetFalse(v1beta1.ConditionTypeValidationSucceeded, "NodePoolValidationFailed", err.Error())
+		nodePool.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "NodePoolValidationFailed", err.Error())
 	} else {
-		nodePool.StatusConditions().SetTrue(v1beta1.ConditionTypeValidationSucceeded)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
 	}
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		// We call Update() here rather than Patch() because patching a list with a JSON merge patch
@@ -69,7 +69,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool) 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.validation").
-		For(&v1beta1.NodePool{}).
+		For(&v1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

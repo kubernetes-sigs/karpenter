@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -35,7 +35,7 @@ type Expiration struct {
 	clock      clock.Clock
 }
 
-func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	// From here there are three scenarios to handle:
 	// 1. If ExpireAfter is not configured, exit expiration loop
 	if nodePool.Spec.Disruption.ExpireAfter.Duration == nil {
@@ -55,12 +55,12 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1beta1.NodePool, 
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
 	metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 		metrics.TypeLabel:     metrics.ExpirationReason,
-		metrics.NodePoolLabel: nodeClaim.Labels[v1beta1.NodePoolLabelKey],
+		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 	}).Inc()
 	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:       metrics.ExpirationReason,
-		metrics.NodePoolLabel:     nodeClaim.Labels[v1beta1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1beta1.CapacityTypeLabelKey),
+		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1.CapacityTypeLabelKey),
 	}).Inc()
 	return reconcile.Result{}, nil
 }

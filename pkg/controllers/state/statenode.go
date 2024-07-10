@@ -23,14 +23,14 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -60,8 +60,8 @@ func (n StateNodes) Deleting() StateNodes {
 }
 
 // Pods gets the pods assigned to all StateNodes based on the kubernetes api-server bindings
-func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
-	var pods []*v1.Pod
+func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+	var pods []*corev1.Pod
 	for _, node := range n {
 		p, err := node.Pods(ctx, kubeClient)
 		if err != nil {
@@ -85,8 +85,8 @@ func (n StateNodes) Disruptable(ctx context.Context, clk clock.Clock, kubeClient
 	return n, nil
 }
 
-func (n StateNodes) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
-	var pods []*v1.Pod
+func (n StateNodes) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+	var pods []*corev1.Pod
 	for _, node := range n {
 		p, err := node.ReschedulablePods(ctx, kubeClient)
 		if err != nil {
@@ -103,21 +103,21 @@ func (n StateNodes) ReschedulablePods(ctx context.Context, kubeClient client.Cli
 // +k8s:deepcopy-gen=true
 // nolint: revive
 type StateNode struct {
-	Node      *v1.Node
-	NodeClaim *v1beta1.NodeClaim
+	Node      *corev1.Node
+	NodeClaim *v1.NodeClaim
 
 	// daemonSetRequests is the total amount of resources that have been requested by daemon sets. This allows users
 	// of the Node to identify the remaining resources that we expect future daemonsets to consume.
-	daemonSetRequests map[types.NamespacedName]v1.ResourceList
-	daemonSetLimits   map[types.NamespacedName]v1.ResourceList
+	daemonSetRequests map[types.NamespacedName]corev1.ResourceList
+	daemonSetLimits   map[types.NamespacedName]corev1.ResourceList
 
-	podRequests map[types.NamespacedName]v1.ResourceList
-	podLimits   map[types.NamespacedName]v1.ResourceList
+	podRequests map[types.NamespacedName]corev1.ResourceList
+	podLimits   map[types.NamespacedName]corev1.ResourceList
 
 	hostPortUsage *scheduling.HostPortUsage
 	volumeUsage   *scheduling.VolumeUsage
 
-	// TODO remove this when v1alpha5 APIs are deprecated. With v1beta1 APIs Karpenter relies on the existence
+	// TODO remove this when v1alpha5 APIs are deprecated. With v1 APIs Karpenter relies on the existence
 	// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 	markedForDeletion bool
 	nominatedUntil    metav1.Time
@@ -125,10 +125,10 @@ type StateNode struct {
 
 func NewNode() *StateNode {
 	return &StateNode{
-		daemonSetRequests: map[types.NamespacedName]v1.ResourceList{},
-		daemonSetLimits:   map[types.NamespacedName]v1.ResourceList{},
-		podRequests:       map[types.NamespacedName]v1.ResourceList{},
-		podLimits:         map[types.NamespacedName]v1.ResourceList{},
+		daemonSetRequests: map[types.NamespacedName]corev1.ResourceList{},
+		daemonSetLimits:   map[types.NamespacedName]corev1.ResourceList{},
+		podRequests:       map[types.NamespacedName]corev1.ResourceList{},
+		podLimits:         map[types.NamespacedName]corev1.ResourceList{},
 		hostPortUsage:     scheduling.NewHostPortUsage(),
 		volumeUsage:       scheduling.NewVolumeUsage(),
 	}
@@ -158,7 +158,7 @@ func (in *StateNode) ProviderID() string {
 }
 
 // Pods gets the pods assigned to the Node based on the kubernetes api-server bindings
-func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
+func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
 	if in.Node == nil {
 		return nil, nil
 	}
@@ -171,7 +171,7 @@ func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*v1.
 // ValidateDisruptable takes in a recorder to emit events on the nodeclaims when the state node is not a candidate
 //
 //nolint:gocyclo
-func (in *StateNode) ValidateDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits) ([]*v1.Pod, error) {
+func (in *StateNode) ValidateDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits) ([]*corev1.Pod, error) {
 	if in.Node == nil || in.NodeClaim == nil {
 		return nil, fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
 	}
@@ -185,15 +185,15 @@ func (in *StateNode) ValidateDisruptable(ctx context.Context, kubeClient client.
 	if in.Nominated() {
 		return nil, fmt.Errorf("state node is nominated for a pending pod")
 	}
-	if in.Annotations()[v1beta1.DoNotDisruptAnnotationKey] == "true" {
-		return nil, fmt.Errorf("disruption is blocked through the %q annotation", v1beta1.DoNotDisruptAnnotationKey)
+	if in.Annotations()[v1.DoNotDisruptAnnotationKey] == "true" {
+		return nil, fmt.Errorf("disruption is blocked through the %q annotation", v1.DoNotDisruptAnnotationKey)
 	}
 	// check whether the node has all the labels we need
 	for _, label := range []string{
-		v1beta1.CapacityTypeLabelKey,
-		v1.LabelTopologyZone,
-		v1.LabelInstanceTypeStable,
-		v1beta1.NodePoolLabelKey,
+		v1.CapacityTypeLabelKey,
+		corev1.LabelTopologyZone,
+		corev1.LabelInstanceTypeStable,
+		v1.NodePoolLabelKey,
 	} {
 		if _, ok := in.Labels()[label]; !ok {
 			return nil, fmt.Errorf("state node doesn't have required label %q", label)
@@ -218,7 +218,7 @@ func (in *StateNode) ValidateDisruptable(ctx context.Context, kubeClient client.
 }
 
 // ReschedulablePods gets the pods assigned to the Node that are reschedulable based on the kubernetes api-server bindings
-func (in *StateNode) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*v1.Pod, error) {
+func (in *StateNode) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
 	if in.Node == nil {
 		return nil, nil
 	}
@@ -226,10 +226,10 @@ func (in *StateNode) ReschedulablePods(ctx context.Context, kubeClient client.Cl
 }
 
 func (in *StateNode) HostName() string {
-	if in.Labels()[v1.LabelHostname] == "" {
+	if in.Labels()[corev1.LabelHostname] == "" {
 		return in.Name()
 	}
-	return in.Labels()[v1.LabelHostname]
+	return in.Labels()[corev1.LabelHostname]
 }
 
 func (in *StateNode) Annotations() map[string]string {
@@ -262,11 +262,11 @@ func (in *StateNode) Labels() map[string]string {
 	return in.Node.Labels
 }
 
-func (in *StateNode) Taints() []v1.Taint {
+func (in *StateNode) Taints() []corev1.Taint {
 	// If we have a managed node that isn't registered, we should use its NodeClaim
 	// representation of taints. Likewise, if we don't have a Node representation for this
 	// providerID in our state, we should also just use the NodeClaim since this is all that we have
-	var taints []v1.Taint
+	var taints []corev1.Taint
 	if (!in.Registered() && in.Managed()) || in.Node == nil {
 		taints = in.NodeClaim.Spec.Taints
 	} else {
@@ -277,13 +277,13 @@ func (in *StateNode) Taints() []v1.Taint {
 		// the node is initialized. Without this, if the taint is generic and re-appears on the node for a
 		// different reason (e.g. the node is cordoned) we will assume that pods can schedule against the
 		// node in the future incorrectly.
-		return lo.Reject(taints, func(taint v1.Taint, _ int) bool {
-			if _, found := lo.Find(scheduling.KnownEphemeralTaints, func(t v1.Taint) bool {
+		return lo.Reject(taints, func(taint corev1.Taint, _ int) bool {
+			if _, found := lo.Find(scheduling.KnownEphemeralTaints, func(t corev1.Taint) bool {
 				return t.MatchTaint(&taint)
 			}); found {
 				return true
 			}
-			if _, found := lo.Find(in.NodeClaim.Spec.StartupTaints, func(t v1.Taint) bool {
+			if _, found := lo.Find(in.NodeClaim.Spec.StartupTaints, func(t corev1.Taint) bool {
 				return t.MatchTaint(&taint)
 			}); found {
 				return true
@@ -297,7 +297,7 @@ func (in *StateNode) Taints() []v1.Taint {
 func (in *StateNode) Registered() bool {
 	// Node is managed by Karpenter, so we can check for the Registered label
 	if in.Managed() {
-		return in.Node != nil && in.Node.Labels[v1beta1.NodeRegisteredLabelKey] == "true"
+		return in.Node != nil && in.Node.Labels[v1.NodeRegisteredLabelKey] == "true"
 	}
 	// Nodes not managed by Karpenter are always considered Registered
 	return true
@@ -306,13 +306,13 @@ func (in *StateNode) Registered() bool {
 func (in *StateNode) Initialized() bool {
 	// Node is managed by Karpenter, so we can check for the Initialized label
 	if in.Managed() {
-		return in.Node != nil && in.Node.Labels[v1beta1.NodeInitializedLabelKey] == "true"
+		return in.Node != nil && in.Node.Labels[v1.NodeInitializedLabelKey] == "true"
 	}
 	// Nodes not managed by Karpenter are always considered Initialized
 	return true
 }
 
-func (in *StateNode) Capacity() v1.ResourceList {
+func (in *StateNode) Capacity() corev1.ResourceList {
 	if !in.Initialized() && in.NodeClaim != nil {
 		// Override any zero quantity values in the node status
 		if in.Node != nil {
@@ -329,7 +329,7 @@ func (in *StateNode) Capacity() v1.ResourceList {
 	return in.Node.Status.Capacity
 }
 
-func (in *StateNode) Allocatable() v1.ResourceList {
+func (in *StateNode) Allocatable() corev1.ResourceList {
 	if !in.Initialized() && in.NodeClaim != nil {
 		// Override any zero quantity values in the node status
 		if in.Node != nil {
@@ -347,15 +347,15 @@ func (in *StateNode) Allocatable() v1.ResourceList {
 }
 
 // Available is allocatable minus anything allocated to pods.
-func (in *StateNode) Available() v1.ResourceList {
+func (in *StateNode) Available() corev1.ResourceList {
 	return resources.Subtract(in.Allocatable(), in.PodRequests())
 }
 
-func (in *StateNode) DaemonSetRequests() v1.ResourceList {
+func (in *StateNode) DaemonSetRequests() corev1.ResourceList {
 	return resources.Merge(lo.Values(in.daemonSetRequests)...)
 }
 
-func (in *StateNode) DaemonSetLimits() v1.ResourceList {
+func (in *StateNode) DaemonSetLimits() corev1.ResourceList {
 	return resources.Merge(lo.Values(in.daemonSetLimits)...)
 }
 
@@ -367,15 +367,15 @@ func (in *StateNode) VolumeUsage() *scheduling.VolumeUsage {
 	return in.volumeUsage
 }
 
-func (in *StateNode) PodRequests() v1.ResourceList {
-	var totalRequests v1.ResourceList
+func (in *StateNode) PodRequests() corev1.ResourceList {
+	var totalRequests corev1.ResourceList
 	for _, requests := range in.podRequests {
 		totalRequests = resources.MergeInto(totalRequests, requests)
 	}
 	return totalRequests
 }
 
-func (in *StateNode) PodLimits() v1.ResourceList {
+func (in *StateNode) PodLimits() corev1.ResourceList {
 	return resources.Merge(lo.Values(in.podLimits)...)
 }
 
@@ -401,7 +401,7 @@ func (in *StateNode) Managed() bool {
 	return in.NodeClaim != nil
 }
 
-func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
+func (in *StateNode) updateForPod(ctx context.Context, kubeClient client.Client, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	hostPorts := scheduling.GetHostPorts(pod)
 	volumes, err := scheduling.GetVolumes(ctx, kubeClient, pod)
@@ -449,13 +449,13 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		if n.Node == nil || n.NodeClaim == nil {
 			continue
 		}
-		node := &v1.Node{}
+		node := &corev1.Node{}
 		if err := kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
 			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
 		}
 		// If the node already has the taint, continue to the next
-		_, hasTaint := lo.Find(node.Spec.Taints, func(taint v1.Taint) bool {
-			return v1beta1.IsDisruptingTaint(taint)
+		_, hasTaint := lo.Find(node.Spec.Taints, func(taint corev1.Taint) bool {
+			return v1.IsDisruptingTaint(taint)
 		})
 		// Node is being deleted, so no need to remove taint as the node will be gone soon.
 		// This ensures that the disruption controller doesn't modify taints that the Termination
@@ -466,16 +466,16 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		stored := node.DeepCopy()
 		// If the taint is present and we want to remove the taint, remove it.
 		if !addTaint {
-			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint v1.Taint, _ int) bool {
-				return taint.Key == v1beta1.DisruptionTaintKey
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint corev1.Taint, _ int) bool {
+				return taint.Key == v1.DisruptionTaintKey
 			})
 			// otherwise, add it.
 		} else if addTaint && !hasTaint {
 			// If the taint key is present (but with a different value or effect), remove it.
-			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t v1.Taint, _ int) bool {
-				return t.Key == v1beta1.DisruptionTaintKey
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
+				return t.Key == v1.DisruptionTaintKey
 			})
-			node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
+			node.Spec.Taints = append(node.Spec.Taints, v1.DisruptionNoScheduleTaint)
 		}
 		if !equality.Semantic.DeepEqual(stored, node) {
 			if err := kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {

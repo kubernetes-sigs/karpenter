@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 type NodeClaimController struct {
@@ -44,7 +44,7 @@ func NewNodeClaimController(kubeClient client.Client) *NodeClaimController {
 }
 
 func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	nc := &v1beta1.NodeClaim{}
+	nc := &v1.NodeClaim{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nc); err != nil {
 		if errors.IsNotFound(err) {
 			fmt.Printf("[DELETED %s] NODECLAIM %s\n", time.Now().Format(time.RFC3339), req.NamespacedName.String())
@@ -55,23 +55,23 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 	return reconcile.Result{}, nil
 }
 
-func (c *NodeClaimController) GetInfo(nc *v1beta1.NodeClaim) string {
+func (c *NodeClaimController) GetInfo(nc *v1.NodeClaim) string {
 	return fmt.Sprintf("ready=%t launched=%t registered=%t initialized=%t",
 		nc.StatusConditions().Root().IsTrue(),
-		nc.StatusConditions().Get(v1beta1.ConditionTypeLaunched).IsTrue(),
-		nc.StatusConditions().Get(v1beta1.ConditionTypeRegistered).IsTrue(),
-		nc.StatusConditions().Get(v1beta1.ConditionTypeInitialized).IsTrue(),
+		nc.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue(),
+		nc.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue(),
+		nc.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue(),
 	)
 }
 
 func (c *NodeClaimController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim").
-		For(&v1beta1.NodeClaim{}).
+		For(&v1.NodeClaim{}).
 		WithEventFilter(predicate.Funcs{
 			UpdateFunc: func(e event.UpdateEvent) bool {
-				oldNodeClaim := e.ObjectOld.(*v1beta1.NodeClaim)
-				newNodeClaim := e.ObjectNew.(*v1beta1.NodeClaim)
+				oldNodeClaim := e.ObjectOld.(*v1.NodeClaim)
+				newNodeClaim := e.ObjectNew.(*v1.NodeClaim)
 				return c.GetInfo(oldNodeClaim) != c.GetInfo(newNodeClaim)
 			},
 		}).

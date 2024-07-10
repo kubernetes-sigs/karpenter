@@ -23,7 +23,7 @@ import (
 	"github.com/patrickmn/go-cache"
 	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
@@ -48,7 +48,7 @@ import (
 )
 
 type nodeClaimReconciler interface {
-	Reconcile(context.Context, *v1beta1.NodeClaim) (reconcile.Result, error)
+	Reconcile(context.Context, *v1.NodeClaim) (reconcile.Result, error)
 }
 
 // Controller is a NodeClaim Lifecycle controller that manages the lifecycle of the NodeClaim up until its termination
@@ -75,7 +75,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.lifecycle")
 
 	if !nodeClaim.DeletionTimestamp.IsZero() {
@@ -85,7 +85,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	// Add the finalizer immediately since we shouldn't launch if we don't yet have the finalizer.
 	// Otherwise, we could leak resources
 	stored := nodeClaim.DeepCopy()
-	controllerutil.AddFinalizer(nodeClaim, v1beta1.TerminationFinalizer)
+	controllerutil.AddFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(nodeClaim, stored) {
 		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -128,7 +128,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.lifecycle").
-		For(&v1beta1.NodeClaim{}, builder.WithPredicates(
+		For(&v1.NodeClaim{}, builder.WithPredicates(
 			predicate.Funcs{
 				CreateFunc: func(e event.CreateEvent) bool { return true },
 				UpdateFunc: func(e event.UpdateEvent) bool { return false },
@@ -136,7 +136,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			},
 		)).
 		Watches(
-			&v1.Node{},
+			&corev1.Node{},
 			nodeclaimutil.NodeEventHandler(c.kubeClient),
 		).
 		WithOptions(controller.Options{

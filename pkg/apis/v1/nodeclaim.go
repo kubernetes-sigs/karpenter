@@ -87,6 +87,7 @@ type Provider = runtime.RawExtension
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=nodeclaims,scope=Cluster,categories=karpenter
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".metadata.labels.node\\.kubernetes\\.io/instance-type",description=""
 // +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".metadata.labels.karpenter\\.sh/capacity-type",description=""
 // +kubebuilder:printcolumn:name="Zone",type="string",JSONPath=".metadata.labels.topology\\.kubernetes\\.io/zone",description=""

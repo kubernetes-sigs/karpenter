@@ -42,7 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -234,7 +234,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			continue
 		}
 		// Get the nodeclaim
-		nodeClaim := &v1beta1.NodeClaim{}
+		nodeClaim := &v1.NodeClaim{}
 		if err := q.kubeClient.Get(ctx, types.NamespacedName{Name: cmd.Replacements[i].name}, nodeClaim); err != nil {
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
@@ -248,7 +248,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		// We emitted this event when disruption was blocked on launching/termination.
 		// This does not block other forms of deprovisioning, but we should still emit this.
 		q.recorder.Publish(disruptionevents.Launching(nodeClaim, cmd.Reason()))
-		initializedStatus := nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeInitialized)
+		initializedStatus := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
 			waitErrs[i] = fmt.Errorf("nodeclaim %s not initialized", nodeClaim.Name)
@@ -276,8 +276,8 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		} else {
 			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 				metrics.ReasonLabel:       cmd.method,
-				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1beta1.NodePoolLabelKey],
-				metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(cmd.candidates[i].Node.Labels, v1beta1.CapacityTypeLabelKey),
+				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(cmd.candidates[i].Node.Labels, v1.CapacityTypeLabelKey),
 			}).Inc()
 		}
 	}

@@ -22,11 +22,11 @@ import (
 	"os"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
@@ -34,7 +34,7 @@ var (
 	KwokZones = []string{"test-zone-a", "test-zone-b", "test-zone-c", "test-zone-d"}
 )
 
-func makeGenericInstanceTypeName(cpu, memFactor int, arch string, os v1.OSName) string {
+func makeGenericInstanceTypeName(cpu, memFactor int, arch string, os corev1.OSName) string {
 	size := fmt.Sprintf("%dx", cpu)
 	var family string
 	switch memFactor {
@@ -50,13 +50,13 @@ func makeGenericInstanceTypeName(cpu, memFactor int, arch string, os v1.OSName) 
 	return fmt.Sprintf("%s-%s-%s-%s", family, size, arch, os)
 }
 
-func priceFromResources(resources v1.ResourceList) float64 {
+func priceFromResources(resources corev1.ResourceList) float64 {
 	price := 0.0
 	for k, v := range resources {
 		switch k {
-		case v1.ResourceCPU:
+		case corev1.ResourceCPU:
 			price += 0.025 * v.AsApproximateFloat64()
-		case v1.ResourceMemory:
+		case corev1.ResourceMemory:
 			price += 0.001 * v.AsApproximateFloat64() / (1e9)
 			// case ResourceGPUVendorA, ResourceGPUVendorB:
 			// 	price += 1.0
@@ -70,8 +70,8 @@ func constructGenericInstanceTypes() []kwok.InstanceTypeOptions {
 
 	for _, cpu := range []int{1, 2, 4, 8, 16, 32, 48, 64, 96, 128, 192, 256} {
 		for _, memFactor := range []int{2, 4, 8} {
-			for _, os := range []v1.OSName{v1.Linux, v1.Windows} {
-				for _, arch := range []string{v1beta1.ArchitectureAmd64, v1beta1.ArchitectureArm64} {
+			for _, os := range []corev1.OSName{corev1.Linux, corev1.Windows} {
+				for _, arch := range []string{v1.ArchitectureAmd64, v1.ArchitectureArm64} {
 					// Construct instance type details, then construct offerings.
 					name := makeGenericInstanceTypeName(cpu, memFactor, arch, os)
 					mem := cpu * memFactor
@@ -79,26 +79,26 @@ func constructGenericInstanceTypes() []kwok.InstanceTypeOptions {
 					opts := kwok.InstanceTypeOptions{
 						Name:             name,
 						Architecture:     arch,
-						OperatingSystems: []v1.OSName{os},
-						Resources: v1.ResourceList{
-							v1.ResourceCPU:              resource.MustParse(fmt.Sprintf("%d", cpu)),
-							v1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dGi", mem)),
-							v1.ResourcePods:             resource.MustParse(fmt.Sprintf("%d", pods)),
-							v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+						OperatingSystems: []corev1.OSName{os},
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:              resource.MustParse(fmt.Sprintf("%d", cpu)),
+							corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dGi", mem)),
+							corev1.ResourcePods:             resource.MustParse(fmt.Sprintf("%d", pods)),
+							corev1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
 						},
 					}
 					price := priceFromResources(opts.Resources)
 
 					opts.Offerings = []kwok.KWOKOffering{}
 					for _, zone := range KwokZones {
-						for _, ct := range []string{v1beta1.CapacityTypeSpot, v1beta1.CapacityTypeOnDemand} {
+						for _, ct := range []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand} {
 							opts.Offerings = append(opts.Offerings, kwok.KWOKOffering{
-								Requirements: []v1.NodeSelectorRequirement{
-									v1.NodeSelectorRequirement{Key: v1beta1.CapacityTypeLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{ct}},
-									v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{zone}},
+								Requirements: []corev1.NodeSelectorRequirement{
+									corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{ct}},
+									corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{zone}},
 								},
 								Offering: cloudprovider.Offering{
-									Price:     lo.Ternary(ct == v1beta1.CapacityTypeSpot, price*.7, price),
+									Price:     lo.Ternary(ct == v1.CapacityTypeSpot, price*.7, price),
 									Available: true,
 								},
 							})

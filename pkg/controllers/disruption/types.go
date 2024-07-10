@@ -22,13 +22,13 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
@@ -41,7 +41,7 @@ import (
 
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
-	ComputeCommand(context.Context, map[string]map[v1beta1.DisruptionReason]int, ...*Candidate) (Command, scheduling.Results, error)
+	ComputeCommand(context.Context, map[string]map[v1.DisruptionReason]int, ...*Candidate) (Command, scheduling.Results, error)
 	Type() string
 	ConsolidationType() string
 }
@@ -53,18 +53,18 @@ type CandidateFilter func(context.Context, *Candidate) bool
 type Candidate struct {
 	*state.StateNode
 	instanceType      *cloudprovider.InstanceType
-	nodePool          *v1beta1.NodePool
+	nodePool          *v1.NodePool
 	zone              string
 	capacityType      string
 	disruptionCost    float64
-	reschedulablePods []*v1.Pod
+	reschedulablePods []*corev1.Pod
 }
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
-	nodePoolMap map[string]*v1beta1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
+	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue) (*Candidate, error) {
 	var err error
-	var pods []*v1.Pod
+	var pods []*corev1.Pod
 	if pods, err = node.ValidateDisruptable(ctx, kubeClient, pdbs); err != nil {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
 		return nil, err
@@ -74,7 +74,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
-	nodePoolName := node.Labels()[v1beta1.NodePoolLabelKey]
+	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
 	nodePool := nodePoolMap[nodePoolName]
 	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
 	// skip any candidates where we can't determine the nodePool
@@ -82,19 +82,19 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("NodePool %q not found", nodePoolName))...)
 		return nil, fmt.Errorf("nodepool %q can't be resolved for state node", nodePoolName)
 	}
-	instanceType := instanceTypeMap[node.Labels()[v1.LabelInstanceTypeStable]]
+	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
 	// skip any candidates that we can't determine the instance of
 	if instanceType == nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance Type %q not found", node.Labels()[v1.LabelInstanceTypeStable]))...)
-		return nil, fmt.Errorf("instance type %q can't be resolved", node.Labels()[v1.LabelInstanceTypeStable])
+		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance Type %q not found", node.Labels()[corev1.LabelInstanceTypeStable]))...)
+		return nil, fmt.Errorf("instance type %q can't be resolved", node.Labels()[corev1.LabelInstanceTypeStable])
 	}
 	return &Candidate{
 		StateNode:         node.DeepCopy(),
 		instanceType:      instanceType,
 		nodePool:          nodePool,
-		capacityType:      node.Labels()[v1beta1.CapacityTypeLabelKey],
-		zone:              node.Labels()[v1.LabelTopologyZone],
-		reschedulablePods: lo.Filter(pods, func(p *v1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
+		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],
+		zone:              node.Labels()[corev1.LabelTopologyZone],
+		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
 		disruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 	}, nil
@@ -142,11 +142,11 @@ func (c Command) String() string {
 	odNodeClaims := 0
 	spotNodeClaims := 0
 	for _, nodeClaim := range c.replacements {
-		ct := nodeClaim.Requirements.Get(v1beta1.CapacityTypeLabelKey)
-		if ct.Has(v1beta1.CapacityTypeOnDemand) {
+		ct := nodeClaim.Requirements.Get(v1.CapacityTypeLabelKey)
+		if ct.Has(v1.CapacityTypeOnDemand) {
 			odNodeClaims++
 		}
-		if ct.Has(v1beta1.CapacityTypeSpot) {
+		if ct.Has(v1.CapacityTypeSpot) {
 			spotNodeClaims++
 		}
 	}
@@ -157,7 +157,7 @@ func (c Command) String() string {
 			scheduling.InstanceTypeList(c.replacements[0].InstanceTypeOptions))
 		return buf.String()
 	}
-	ct := c.replacements[0].Requirements.Get(v1beta1.CapacityTypeLabelKey)
+	ct := c.replacements[0].Requirements.Get(v1.CapacityTypeLabelKey)
 	nodeDesc := "node"
 	if ct.Len() == 1 {
 		nodeDesc = fmt.Sprintf("%s node", ct.Any())

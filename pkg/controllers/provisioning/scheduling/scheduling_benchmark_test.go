@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
@@ -40,7 +41,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -48,8 +49,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/test"
-
-	v1 "k8s.io/api/core/v1"
 )
 
 const MinPodsPerSec = 100.0
@@ -142,15 +141,15 @@ func TestSchedulingProfile(t *testing.T) {
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx = ctrl.IntoContext(context.Background(), operatorlogging.NopLogger)
-	nodePoolWithMinValues := test.NodePool(v1beta1.NodePool{
-		Spec: v1beta1.NodePoolSpec{
-			Template: v1beta1.NodeClaimTemplate{
-				Spec: v1beta1.NodeClaimSpec{
-					Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
+	nodePoolWithMinValues := test.NodePool(v1.NodePool{
+		Spec: v1.NodePoolSpec{
+			Template: v1.NodeClaimTemplate{
+				Spec: v1.NodeClaimSpec{
+					Requirements: []v1.NodeSelectorRequirementWithMinValues{
 						{
-							NodeSelectorRequirement: v1.NodeSelectorRequirement{
-								Key:      v1.LabelInstanceTypeStable,
-								Operator: v1.NodeSelectorOpExists,
+							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+								Key:      corev1.LabelInstanceTypeStable,
+								Operator: corev1.NodeSelectorOpExists,
 							},
 							MinValues: lo.ToPtr(50), // Adding highest possible minValues and safest way to add it would be to instanceType requirement.
 						},
@@ -174,7 +173,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 		b.Fatalf("creating topology, %s", err)
 	}
 
-	scheduler := scheduling.NewScheduler(client, []*v1beta1.NodePool{nodePool},
+	scheduler := scheduling.NewScheduler(client, []*v1.NodePool{nodePool},
 		cluster, nil, topology,
 		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil,
 		events.NewRecorder(&record.FakeRecorder{}))
@@ -231,15 +230,15 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	}
 }
 
-func makeDiversePods(count int) []*v1.Pod {
-	var pods []*v1.Pod
+func makeDiversePods(count int) []*corev1.Pod {
+	var pods []*corev1.Pod
 	numTypes := 6
 	pods = append(pods, makeGenericPods(count/numTypes)...)
-	pods = append(pods, makeTopologySpreadPods(count/numTypes, v1.LabelTopologyZone)...)
-	pods = append(pods, makeTopologySpreadPods(count/numTypes, v1.LabelHostname)...)
-	pods = append(pods, makePodAffinityPods(count/numTypes, v1.LabelHostname)...)
-	pods = append(pods, makePodAffinityPods(count/numTypes, v1.LabelTopologyZone)...)
-	pods = append(pods, makePodAntiAffinityPods(count/numTypes, v1.LabelHostname)...)
+	pods = append(pods, makeTopologySpreadPods(count/numTypes, corev1.LabelTopologyZone)...)
+	pods = append(pods, makeTopologySpreadPods(count/numTypes, corev1.LabelHostname)...)
+	pods = append(pods, makePodAffinityPods(count/numTypes, corev1.LabelHostname)...)
+	pods = append(pods, makePodAffinityPods(count/numTypes, corev1.LabelTopologyZone)...)
+	pods = append(pods, makePodAntiAffinityPods(count/numTypes, corev1.LabelHostname)...)
 
 	// fill out due to count being not evenly divisible with generic pods
 	nRemaining := count - len(pods)
@@ -247,8 +246,8 @@ func makeDiversePods(count int) []*v1.Pod {
 	return pods
 }
 
-func makePodAntiAffinityPods(count int, key string) []*v1.Pod {
-	var pods []*v1.Pod
+func makePodAntiAffinityPods(count int, key string) []*corev1.Pod {
+	var pods []*corev1.Pod
 	// all of these pods have anti-affinity to each other
 	labels := map[string]string{
 		"app": "nginx",
@@ -257,79 +256,79 @@ func makePodAntiAffinityPods(count int, key string) []*v1.Pod {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
-				PodAntiRequirements: []v1.PodAffinityTerm{
+				PodAntiRequirements: []corev1.PodAffinityTerm{
 					{
 						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
 						TopologyKey:   key,
 					},
 				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    randomCPU(),
-						v1.ResourceMemory: randomMemory(),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    randomCPU(),
+						corev1.ResourceMemory: randomMemory(),
 					},
 				}}))
 	}
 	return pods
 }
-func makePodAffinityPods(count int, key string) []*v1.Pod {
-	var pods []*v1.Pod
+func makePodAffinityPods(count int, key string) []*corev1.Pod {
+	var pods []*corev1.Pod
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: randomAffinityLabels()},
-				PodRequirements: []v1.PodAffinityTerm{
+				PodRequirements: []corev1.PodAffinityTerm{
 					{
 						LabelSelector: &metav1.LabelSelector{MatchLabels: randomAffinityLabels()},
 						TopologyKey:   key,
 					},
 				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    randomCPU(),
-						v1.ResourceMemory: randomMemory(),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    randomCPU(),
+						corev1.ResourceMemory: randomMemory(),
 					},
 				}}))
 	}
 	return pods
 }
 
-func makeTopologySpreadPods(count int, key string) []*v1.Pod {
-	var pods []*v1.Pod
+func makeTopologySpreadPods(count int, key string) []*corev1.Pod {
+	var pods []*corev1.Pod
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: randomLabels()},
-				TopologySpreadConstraints: []v1.TopologySpreadConstraint{
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
 					{
 						MaxSkew:           1,
 						TopologyKey:       key,
-						WhenUnsatisfiable: v1.DoNotSchedule,
+						WhenUnsatisfiable: corev1.DoNotSchedule,
 						LabelSelector: &metav1.LabelSelector{
 							MatchLabels: randomLabels(),
 						},
 					},
 				},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    randomCPU(),
-						v1.ResourceMemory: randomMemory(),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    randomCPU(),
+						corev1.ResourceMemory: randomMemory(),
 					},
 				}}))
 	}
 	return pods
 }
 
-func makeGenericPods(count int) []*v1.Pod {
-	var pods []*v1.Pod
+func makeGenericPods(count int) []*corev1.Pod {
+	var pods []*corev1.Pod
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: randomLabels()},
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						v1.ResourceCPU:    randomCPU(),
-						v1.ResourceMemory: randomMemory(),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    randomCPU(),
+						corev1.ResourceMemory: randomMemory(),
 					},
 				}}))
 	}

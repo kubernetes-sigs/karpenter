@@ -22,54 +22,54 @@ import (
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
-func Launching(nodeClaim *v1beta1.NodeClaim, reason string) events.Event {
+func Launching(nodeClaim *v1.NodeClaim, reason string) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
-		Type:           v1.EventTypeNormal,
+		Type:           corev1.EventTypeNormal,
 		Reason:         "DisruptionLaunching",
 		Message:        fmt.Sprintf("Launching NodeClaim: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 		DedupeValues:   []string{string(nodeClaim.UID), reason},
 	}
 }
 
-func WaitingOnReadiness(nodeClaim *v1beta1.NodeClaim) events.Event {
+func WaitingOnReadiness(nodeClaim *v1.NodeClaim) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
-		Type:           v1.EventTypeNormal,
+		Type:           corev1.EventTypeNormal,
 		Reason:         "DisruptionWaitingReadiness",
 		Message:        "Waiting on readiness to continue disruption",
 		DedupeValues:   []string{string(nodeClaim.UID)},
 	}
 }
 
-func WaitingOnDeletion(nodeClaim *v1beta1.NodeClaim) events.Event {
+func WaitingOnDeletion(nodeClaim *v1.NodeClaim) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
-		Type:           v1.EventTypeNormal,
+		Type:           corev1.EventTypeNormal,
 		Reason:         "DisruptionWaitingDeletion",
 		Message:        "Waiting on deletion to continue disruption",
 		DedupeValues:   []string{string(nodeClaim.UID)},
 	}
 }
 
-func Terminating(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {
+func Terminating(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) []events.Event {
 	return []events.Event{
 		{
 			InvolvedObject: node,
-			Type:           v1.EventTypeNormal,
+			Type:           corev1.EventTypeNormal,
 			Reason:         "DisruptionTerminating",
 			Message:        fmt.Sprintf("Disrupting Node: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 			DedupeValues:   []string{string(node.UID), reason},
 		},
 		{
 			InvolvedObject: nodeClaim,
-			Type:           v1.EventTypeNormal,
+			Type:           corev1.EventTypeNormal,
 			Reason:         "DisruptionTerminating",
 			Message:        fmt.Sprintf("Disrupting NodeClaim: %s", cases.Title(language.Und, cases.NoLower).String(reason)),
 			DedupeValues:   []string{string(nodeClaim.UID), reason},
@@ -79,11 +79,11 @@ func Terminating(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []e
 
 // Unconsolidatable is an event that informs the user that a NodeClaim/Node combination cannot be consolidated
 // due to the state of the NodeClaim/Node or due to some state of the pods that are scheduled to the NodeClaim/Node
-func Unconsolidatable(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) []events.Event {
+func Unconsolidatable(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) []events.Event {
 	return []events.Event{
 		{
 			InvolvedObject: node,
-			Type:           v1.EventTypeNormal,
+			Type:           corev1.EventTypeNormal,
 			Reason:         "Unconsolidatable",
 			Message:        reason,
 			DedupeValues:   []string{string(node.UID)},
@@ -91,7 +91,7 @@ func Unconsolidatable(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string
 		},
 		{
 			InvolvedObject: nodeClaim,
-			Type:           v1.EventTypeNormal,
+			Type:           corev1.EventTypeNormal,
 			Reason:         "Unconsolidatable",
 			Message:        reason,
 			DedupeValues:   []string{string(nodeClaim.UID)},
@@ -102,11 +102,11 @@ func Unconsolidatable(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string
 
 // Blocked is an event that informs the user that a NodeClaim/Node combination is blocked on deprovisioning
 // due to the state of the NodeClaim/Node or due to some state of the pods that are scheduled to the NodeClaim/Node
-func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) (evs []events.Event) {
+func Blocked(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) (evs []events.Event) {
 	if node != nil {
 		evs = append(evs, events.Event{
 			InvolvedObject: node,
-			Type:           v1.EventTypeNormal,
+			Type:           corev1.EventTypeNormal,
 			Reason:         "DisruptionBlocked",
 			Message:        fmt.Sprintf("Cannot disrupt Node: %s", reason),
 			DedupeValues:   []string{string(node.UID)},
@@ -115,7 +115,7 @@ func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) (evs []
 	if nodeClaim != nil {
 		evs = append(evs, events.Event{
 			InvolvedObject: nodeClaim,
-			Type:           v1.EventTypeNormal,
+			Type:           corev1.EventTypeNormal,
 			Reason:         "DisruptionBlocked",
 			Message:        fmt.Sprintf("Cannot disrupt NodeClaim: %s", reason),
 			DedupeValues:   []string{string(nodeClaim.UID)},
@@ -124,10 +124,10 @@ func Blocked(node *v1.Node, nodeClaim *v1beta1.NodeClaim, reason string) (evs []
 	return evs
 }
 
-func NodePoolBlockedForDisruptionReason(nodePool *v1beta1.NodePool, reason v1beta1.DisruptionReason) events.Event {
+func NodePoolBlockedForDisruptionReason(nodePool *v1.NodePool, reason v1.DisruptionReason) events.Event {
 	return events.Event{
 		InvolvedObject: nodePool,
-		Type:           v1.EventTypeNormal,
+		Type:           corev1.EventTypeNormal,
 		Reason:         "DisruptionBlocked",
 		Message:        fmt.Sprintf("No allowed disruptions for disruption reason %s due to blocking budget", reason),
 		DedupeValues:   []string{string(nodePool.UID), string(reason)},
@@ -135,10 +135,10 @@ func NodePoolBlockedForDisruptionReason(nodePool *v1beta1.NodePool, reason v1bet
 	}
 }
 
-func NodePoolBlocked(nodePool *v1beta1.NodePool) events.Event {
+func NodePoolBlocked(nodePool *v1.NodePool) events.Event {
 	return events.Event{
 		InvolvedObject: nodePool,
-		Type:           v1.EventTypeNormal,
+		Type:           corev1.EventTypeNormal,
 		Reason:         "DisruptionBlocked",
 		Message:        "No allowed disruptions due to blocking budget",
 		DedupeValues:   []string{string(nodePool.UID)},

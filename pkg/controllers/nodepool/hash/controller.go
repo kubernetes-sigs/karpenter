@@ -30,7 +30,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
@@ -46,19 +46,19 @@ func NewController(kubeClient client.Client) *Controller {
 }
 
 // Reconcile the resource
-func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepool.hash")
 
 	stored := np.DeepCopy()
 
-	if np.Annotations[v1beta1.NodePoolHashVersionAnnotationKey] != v1beta1.NodePoolHashVersion {
+	if np.Annotations[v1.NodePoolHashVersionAnnotationKey] != v1.NodePoolHashVersion {
 		if err := c.updateNodeClaimHash(ctx, np); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
 	np.Annotations = lo.Assign(np.Annotations, map[string]string{
-		v1beta1.NodePoolHashAnnotationKey:        np.Hash(),
-		v1beta1.NodePoolHashVersionAnnotationKey: v1beta1.NodePoolHashVersion,
+		v1.NodePoolHashAnnotationKey:        np.Hash(),
+		v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 	})
 
 	if !equality.Semantic.DeepEqual(stored, np) {
@@ -72,7 +72,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1beta1.NodePool) (recon
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.hash").
-		For(&v1beta1.NodePool{}).
+		For(&v1.NodePool{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
@@ -81,9 +81,9 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 // The `nodepool-hash` annotation on the NodePool will be updated, due to the breaking change, making the `nodepool-hash` on the NodeClaim different from
 // NodePool. Since, we cannot rely on the `nodepool-hash` on the NodeClaims, due to the breaking change, we will need to re-calculate the hash and update the annotation.
 // For more information on the Drift Hash Versioning: https://github.com/kubernetes-sigs/karpenter/blob/main/designs/drift-hash-versioning.md
-func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1beta1.NodePool) error {
-	ncList := &v1beta1.NodeClaimList{}
-	if err := c.kubeClient.List(ctx, ncList, client.MatchingLabels(map[string]string{v1beta1.NodePoolLabelKey: np.Name})); err != nil {
+func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1.NodePool) error {
+	ncList := &v1.NodeClaimList{}
+	if err := c.kubeClient.List(ctx, ncList, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: np.Name})); err != nil {
 		return err
 	}
 
@@ -92,16 +92,16 @@ func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1beta1.NodePo
 		nc := ncList.Items[i]
 		stored := nc.DeepCopy()
 
-		if nc.Annotations[v1beta1.NodePoolHashVersionAnnotationKey] != v1beta1.NodePoolHashVersion {
+		if nc.Annotations[v1.NodePoolHashVersionAnnotationKey] != v1.NodePoolHashVersion {
 			nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
-				v1beta1.NodePoolHashVersionAnnotationKey: v1beta1.NodePoolHashVersion,
+				v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 			})
 
 			// Any NodeClaim that is already drifted will remain drifted if the karpenter.sh/nodepool-hash-version doesn't match
 			// Since the hashing mechanism has changed we will not be able to determine if the drifted status of the NodeClaim has changed
-			if nc.StatusConditions().Get(v1beta1.ConditionTypeDrifted) == nil {
+			if nc.StatusConditions().Get(v1.ConditionTypeDrifted) == nil {
 				nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
-					v1beta1.NodePoolHashAnnotationKey: np.Hash(),
+					v1.NodePoolHashAnnotationKey: np.Hash(),
 				})
 			}
 

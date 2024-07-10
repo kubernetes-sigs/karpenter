@@ -47,20 +47,20 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 	)
 
 	BeforeEach(func() {
-		v1beta1nodepool = test.NodePool()
-		v1nodepool = &NodePool{
+		v1nodepool = test.NodePool()
+		v1beta1nodepool = &v1beta1.NodePool{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-nodepool",
 			},
-			Spec: NodePoolSpec{
-				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
-						NodeClassRef: &NodeClassReference{
-							Name:  "test",
-							Kind:  "test-kind",
-							Group: "test-group",
+			Spec: v1beta1.NodePoolSpec{
+				Template: v1beta1.NodeClaimTemplate{
+					Spec: v1beta1.NodeClaimSpec{
+						NodeClassRef: &v1beta1.NodeClassReference{
+							Name:       "test",
+							Kind:       "test-kind",
+							APIVersion: "test-group",
 						},
-						Requirements: []NodeSelectorRequirementWithMinValues{},
+						Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{},
 					},
 				},
 			},
@@ -269,24 +269,24 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 	)
 
 	BeforeEach(func() {
-		v1nodepool = &NodePool{
+		v1beta1nodepool = &v1beta1.NodePool{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-nodepool",
 			},
-			Spec: NodePoolSpec{
-				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
-						NodeClassRef: &NodeClassReference{
-							Name:  "test",
-							Kind:  "test-kind",
-							Group: "test-group",
+			Spec: v1beta1.NodePoolSpec{
+				Template: v1beta1.NodeClaimTemplate{
+					Spec: v1beta1.NodeClaimSpec{
+						NodeClassRef: &v1beta1.NodeClassReference{
+							Name:       "test",
+							Kind:       "test-kind",
+							APIVersion: "test-group",
 						},
-						Requirements: []NodeSelectorRequirementWithMinValues{},
+						Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{},
 					},
 				},
 			},
 		}
-		v1beta1nodepool = test.NodePool()
+		v1nodepool = test.NodePool()
 		v1nodeclaim = &NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{

@@ -26,19 +26,19 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
+	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -65,7 +65,7 @@ var podController *informer.PodController
 var nodePoolController *informer.NodePoolController
 var daemonsetController *informer.DaemonSetController
 var cloudProvider *fake.CloudProvider
-var nodePool *v1beta1.NodePool
+var nodePool *v1.NodePool
 
 const csiProvider = "fake.csi.provider"
 
@@ -95,7 +95,7 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	fakeClock.SetTime(time.Now())
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
-	nodePool = test.NodePool(v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
+	nodePool = test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	ExpectApplied(ctx, env.Client, nodePool)
 })
 var _ = AfterEach(func() {
@@ -105,18 +105,18 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("Volume Usage/Limits", func() {
-	var nodeClaim *v1beta1.NodeClaim
-	var node *v1.Node
+	var nodeClaim *v1.NodeClaim
+	var node *corev1.Node
 	var csiNode *storagev1.CSINode
 	var sc *storagev1.StorageClass
 	BeforeEach(func() {
 		instanceType := cloudProvider.InstanceTypes[0]
-		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: instanceType.Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: instanceType.Name,
 			}},
-			Status: v1beta1.NodeClaimStatus{
+			Status: v1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 			},
 		})
@@ -195,7 +195,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 	})
 	It("should ignore the volume usage limits breach if the pod update is for an already tracked pod", func() {
 		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
-		var pvcs []*v1.PersistentVolumeClaim
+		var pvcs []*corev1.PersistentVolumeClaim
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				StorageClassName: lo.ToPtr(sc.Name),
@@ -220,16 +220,16 @@ var _ = Describe("Volume Usage/Limits", func() {
 })
 
 var _ = Describe("HostPort Usage", func() {
-	var nodeClaim *v1beta1.NodeClaim
-	var node *v1.Node
+	var nodeClaim *v1.NodeClaim
+	var node *corev1.Node
 	BeforeEach(func() {
 		instanceType := cloudProvider.InstanceTypes[0]
-		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: instanceType.Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: instanceType.Name,
 			}},
-			Status: v1beta1.NodeClaimStatus{
+			Status: v1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 			},
 		})
@@ -253,7 +253,7 @@ var _ = Describe("HostPort Usage", func() {
 			{
 				IP:       net.IP("0.0.0.0"),
 				Port:     int32(5),
-				Protocol: v1.ProtocolTCP,
+				Protocol: corev1.ProtocolTCP,
 			},
 		})).ToNot(BeNil())
 	})
@@ -277,7 +277,7 @@ var _ = Describe("HostPort Usage", func() {
 			{
 				IP:       net.IP("0.0.0.0"),
 				Port:     int32(5),
-				Protocol: v1.ProtocolTCP,
+				Protocol: corev1.ProtocolTCP,
 			},
 		})).ToNot(BeNil())
 
@@ -289,14 +289,14 @@ var _ = Describe("HostPort Usage", func() {
 			{
 				IP:       net.IP("0.0.0.0"),
 				Port:     int32(5),
-				Protocol: v1.ProtocolTCP,
+				Protocol: corev1.ProtocolTCP,
 			},
 		})).ToNot(BeNil())
 	})
 	It("should ignore the host port usage conflict if the pod update is for an already tracked pod", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		var pods []*v1.Pod
+		var pods []*corev1.Pod
 		for i := 0; i < 10; i++ {
 			pod := test.Pod(test.PodOptions{
 				HostPorts: []int32{int32(i)},
@@ -315,7 +315,7 @@ var _ = Describe("HostPort Usage", func() {
 			{
 				IP:       net.IP("0.0.0.0"),
 				Port:     int32(5),
-				Protocol: v1.ProtocolTCP,
+				Protocol: corev1.ProtocolTCP,
 			},
 		})).To(BeNil())
 	})
@@ -323,11 +323,11 @@ var _ = Describe("HostPort Usage", func() {
 
 var _ = Describe("Node Deletion", func() {
 	It("should not leak a state node when the NodeClaim and Node names match", func() {
-		nodeClaim, node := test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
-					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
 			},
 		})
@@ -352,24 +352,24 @@ var _ = Describe("Node Deletion", func() {
 var _ = Describe("Node Resource Level", func() {
 	It("should not count pods not bound to nodes", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
 		})
 		pod2 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("2"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("2"),
 				}},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -381,28 +381,28 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
 		// two pods, but neither is bound to the node so the node's CPU requests should be zero
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0.0")}, ExpectStateNodeExists(cluster, node).PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("0.0")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should count new pods bound to nodes", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
 		})
 		pod2 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("2"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("2"),
 				}},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -417,32 +417,32 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 
 		ExpectManualBinding(ctx, env.Client, pod2, node)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should count existing pods bound to nodes", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
 		})
 		pod2 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("2"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("2"),
 				}},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -455,28 +455,28 @@ var _ = Describe("Node Resource Level", func() {
 
 		// that we just noticed
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should subtract requests if the pod is deleted", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
 		})
 		pod2 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("2"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("2"),
 				}},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -492,39 +492,39 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 
 		// delete the pods and the CPU usage should go down
 		ExpectDeleted(ctx, env.Client, pod2)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 
 		ExpectDeleted(ctx, env.Client, pod1)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0")}, ExpectStateNodeExists(cluster, node).PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("0")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should not add requests if the pod is terminal", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
-			Phase: v1.PodFailed,
+			Phase: corev1.PodFailed,
 		})
 		pod2 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("2"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("2"),
 				}},
-			Phase: v1.PodSucceeded,
+			Phase: corev1.PodSucceeded,
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -540,22 +540,22 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0")}, ExpectStateNodeExists(cluster, node).PodRequests())
+		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("0")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should stop tracking nodes that are deleted", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -569,8 +569,8 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
 		cluster.ForEachNode(func(n *state.StateNode) bool {
-			ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("2.5")}, n.Available())
-			ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, n.PodRequests())
+			ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2.5")}, n.Available())
+			ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1.5")}, n.PodRequests())
 			return true
 		})
 
@@ -585,19 +585,19 @@ var _ = Describe("Node Resource Level", func() {
 	It("should track pods correctly if we miss events or they are consolidated", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{Name: "stateful-set-pod"},
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
 		})
 
 		node1 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -609,8 +609,8 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
 		cluster.ForEachNode(func(n *state.StateNode) bool {
-			ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("2.5")}, n.Available())
-			ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("1.5")}, n.PodRequests())
+			ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2.5")}, n.Available())
+			ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1.5")}, n.PodRequests())
 			return true
 		})
 
@@ -619,11 +619,11 @@ var _ = Describe("Node Resource Level", func() {
 		// second node has more capacity
 		node2 := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("8"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("8"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -631,9 +631,9 @@ var _ = Describe("Node Resource Level", func() {
 		// and the pod can only bind to node2 due to the resource request
 		pod2 := test.UnschedulablePod(test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{Name: "stateful-set-pod"},
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("5.0"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("5.0"),
 				}},
 		})
 
@@ -647,11 +647,11 @@ var _ = Describe("Node Resource Level", func() {
 		cluster.ForEachNode(func(n *state.StateNode) bool {
 			if n.Node.Name == node1.Name {
 				// not on node1 any longer, so it should be fully free
-				ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("4")}, n.Available())
-				ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("0")}, n.PodRequests())
+				ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4")}, n.Available())
+				ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("0")}, n.PodRequests())
 			} else {
-				ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("3")}, n.Available())
-				ExpectResources(v1.ResourceList{v1.ResourceCPU: resource.MustParse("5")}, n.PodRequests())
+				ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3")}, n.Available())
+				ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5")}, n.PodRequests())
 			}
 			return true
 		})
@@ -659,31 +659,31 @@ var _ = Describe("Node Resource Level", func() {
 	})
 	// nolint:gosec
 	It("should maintain a correct count of resource usage as pods are deleted/added", func() {
-		var pods []*v1.Pod
+		var pods []*corev1.Pod
 		for i := 0; i < 100; i++ {
 			pods = append(pods, test.UnschedulablePod(test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{
-					Requests: map[v1.ResourceName]resource.Quantity{
-						v1.ResourceCPU: resource.MustParse(fmt.Sprintf("%1.1f", rand.Float64()*2)),
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse(fmt.Sprintf("%1.1f", rand.Float64()*2)),
 					}},
 			}))
 		}
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:  resource.MustParse("200"),
-				v1.ResourcePods: resource.MustParse("500"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:  resource.MustParse("200"),
+				corev1.ResourcePods: resource.MustParse("500"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:  resource.MustParse("0"),
-			v1.ResourcePods: resource.MustParse("0"),
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:  resource.MustParse("0"),
+			corev1.ResourcePods: resource.MustParse("0"),
 		}, ExpectStateNodeExists(cluster, node).PodRequests())
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
@@ -700,9 +700,9 @@ var _ = Describe("Node Resource Level", func() {
 				ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 			}
 			sum += pod.Spec.Containers[0].Resources.Requests.Cpu().AsApproximateFloat64()
-			ExpectResources(v1.ResourceList{
-				v1.ResourceCPU:  resource.MustParse(fmt.Sprintf("%1.1f", sum)),
-				v1.ResourcePods: resource.MustParse(fmt.Sprintf("%d", podCount)),
+			ExpectResources(corev1.ResourceList{
+				corev1.ResourceCPU:  resource.MustParse(fmt.Sprintf("%1.1f", sum)),
+				corev1.ResourcePods: resource.MustParse(fmt.Sprintf("%d", podCount)),
 			}, ExpectStateNodeExists(cluster, node).PodRequests())
 		}
 
@@ -715,39 +715,39 @@ var _ = Describe("Node Resource Level", func() {
 			}
 			sum -= pod.Spec.Containers[0].Resources.Requests.Cpu().AsApproximateFloat64()
 			podCount--
-			ExpectResources(v1.ResourceList{
-				v1.ResourceCPU:  resource.MustParse(fmt.Sprintf("%1.1f", sum)),
-				v1.ResourcePods: resource.MustParse(fmt.Sprintf("%d", podCount)),
+			ExpectResources(corev1.ResourceList{
+				corev1.ResourceCPU:  resource.MustParse(fmt.Sprintf("%1.1f", sum)),
+				corev1.ResourcePods: resource.MustParse(fmt.Sprintf("%d", podCount)),
 			}, ExpectStateNodeExists(cluster, node).PodRequests())
 		}
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:  resource.MustParse("0"),
-			v1.ResourcePods: resource.MustParse("0"),
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:  resource.MustParse("0"),
+			corev1.ResourcePods: resource.MustParse("0"),
 		}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should track daemonset requested resources separately", func() {
 		ds := test.DaemonSet(
 			test.DaemonSetOptions{PodOptions: test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{
-					v1.ResourceCPU:    resource.MustParse("1"),
-					v1.ResourceMemory: resource.MustParse("2Gi")}},
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("1"),
+					corev1.ResourceMemory: resource.MustParse("2Gi")}},
 			}},
 		)
 		ExpectApplied(ctx, env.Client, ds)
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(ds), ds)).To(Succeed())
 
 		pod1 := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
 		})
 
 		dsPod := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU:    resource.MustParse("1"),
-					v1.ResourceMemory: resource.MustParse("2Gi"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU:    resource.MustParse("1"),
+					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				}},
 		})
 		dsPod.OwnerReferences = append(dsPod.OwnerReferences, metav1.OwnerReference{
@@ -761,12 +761,12 @@ var _ = Describe("Node Resource Level", func() {
 
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("4"),
-				v1.ResourceMemory: resource.MustParse("8Gi"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -778,12 +778,12 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
 		// daemonset pod isn't bound yet
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("0"),
-			v1.ResourceMemory: resource.MustParse("0"),
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("0"),
+			corev1.ResourceMemory: resource.MustParse("0"),
 		}, ExpectStateNodeExists(cluster, node).DaemonSetRequests())
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU: resource.MustParse("1.5"),
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("1.5"),
 		}, ExpectStateNodeExists(cluster, node).PodRequests())
 
 		ExpectApplied(ctx, env.Client, dsPod)
@@ -792,27 +792,27 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(dsPod))
 
 		// just the DS request portion
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("1"),
-			v1.ResourceMemory: resource.MustParse("2Gi"),
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("1"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
 		}, ExpectStateNodeExists(cluster, node).DaemonSetRequests())
 		// total request
-		ExpectResources(v1.ResourceList{
-			v1.ResourceCPU:    resource.MustParse("2.5"),
-			v1.ResourceMemory: resource.MustParse("2Gi"),
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("2.5"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
 		}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
 	It("should mark node for deletion when node is deleted", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
-					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-				Finalizers: []string{v1beta1.TerminationFinalizer},
+				Finalizers: []string{v1.TerminationFinalizer},
 			},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -828,52 +828,52 @@ var _ = Describe("Node Resource Level", func() {
 		Expect(ExpectStateNodeExists(cluster, node).MarkedForDeletion()).To(BeTrue())
 	})
 	It("should mark node for deletion when nodeclaim is deleted", func() {
-		nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{v1beta1.TerminationFinalizer},
+				Finalizers: []string{v1.TerminationFinalizer},
 			},
-			Spec: v1beta1.NodeClaimSpec{
-				Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{
+			Spec: v1.NodeClaimSpec{
+				Requirements: []v1.NodeSelectorRequirementWithMinValues{
 					{
-						NodeSelectorRequirement: v1.NodeSelectorRequirement{
-							Key:      v1.LabelInstanceTypeStable,
-							Operator: v1.NodeSelectorOpIn,
+						NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{cloudProvider.InstanceTypes[0].Name},
 						},
 					},
 					{
-						NodeSelectorRequirement: v1.NodeSelectorRequirement{
-							Key:      v1.LabelTopologyZone,
-							Operator: v1.NodeSelectorOpIn,
+						NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"test-zone-1"},
 						},
 					},
 				},
-				NodeClassRef: &v1beta1.NodeClassReference{
+				NodeClassRef: &v1.NodeClassReference{
 					Name: "default",
 				},
 			},
-			Status: v1beta1.NodeClaimStatus{
+			Status: v1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
-				Capacity: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("2"),
-					v1.ResourceMemory:           resource.MustParse("32Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("32Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("20Gi"),
 				},
-				Allocatable: v1.ResourceList{
-					v1.ResourceCPU:              resource.MustParse("1"),
-					v1.ResourceMemory:           resource.MustParse("30Gi"),
-					v1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("1"),
+					corev1.ResourceMemory:           resource.MustParse("30Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
 				},
 			},
 		})
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
-					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-				Finalizers: []string{v1beta1.TerminationFinalizer},
+				Finalizers: []string{v1.TerminationFinalizer},
 			},
 			ProviderID: nodeClaim.Status.ProviderID,
 		})
@@ -893,13 +893,13 @@ var _ = Describe("Node Resource Level", func() {
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1beta1.NodePoolLabelKey:   nodePool.Name,
-					v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-				Finalizers: []string{v1beta1.TerminationFinalizer},
+				Finalizers: []string{v1.TerminationFinalizer},
 			},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -936,27 +936,27 @@ var _ = Describe("Node Resource Level", func() {
 var _ = Describe("Pod Anti-Affinity", func() {
 	It("should track pods with required anti-affinity", func() {
 		pod := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
-			PodAntiRequirements: []v1.PodAffinityTerm{
+			PodAntiRequirements: []corev1.PodAffinityTerm{
 				{
 					LabelSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"foo": "bar"},
 					},
-					TopologyKey: v1.LabelTopologyZone,
+					TopologyKey: corev1.LabelTopologyZone,
 				},
 			},
 		})
 
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -968,7 +968,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 		foundPodCount := 0
-		cluster.ForPodsWithAntiAffinity(func(p *v1.Pod, n *v1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
 			foundPodCount++
 			Expect(p.Name).To(Equal(pod.Name))
 			return true
@@ -977,18 +977,18 @@ var _ = Describe("Pod Anti-Affinity", func() {
 	})
 	It("should not track pods with preferred anti-affinity", func() {
 		pod := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
-			PodAntiPreferences: []v1.WeightedPodAffinityTerm{
+			PodAntiPreferences: []corev1.WeightedPodAffinityTerm{
 				{
 					Weight: 15,
-					PodAffinityTerm: v1.PodAffinityTerm{
+					PodAffinityTerm: corev1.PodAffinityTerm{
 						LabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"foo": "bar"},
 						},
-						TopologyKey: v1.LabelTopologyZone,
+						TopologyKey: corev1.LabelTopologyZone,
 					},
 				},
 			},
@@ -996,11 +996,11 @@ var _ = Describe("Pod Anti-Affinity", func() {
 
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -1012,7 +1012,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 		foundPodCount := 0
-		cluster.ForPodsWithAntiAffinity(func(p *v1.Pod, n *v1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
 			foundPodCount++
 			Fail("shouldn't track pods with preferred anti-affinity")
 			return true
@@ -1021,27 +1021,27 @@ var _ = Describe("Pod Anti-Affinity", func() {
 	})
 	It("should stop tracking pods with required anti-affinity if the pod is deleted", func() {
 		pod := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
-			PodAntiRequirements: []v1.PodAffinityTerm{
+			PodAntiRequirements: []corev1.PodAffinityTerm{
 				{
 					LabelSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"foo": "bar"},
 					},
-					TopologyKey: v1.LabelTopologyZone,
+					TopologyKey: corev1.LabelTopologyZone,
 				},
 			},
 		})
 
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -1053,7 +1053,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 		foundPodCount := 0
-		cluster.ForPodsWithAntiAffinity(func(p *v1.Pod, n *v1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
 			foundPodCount++
 			Expect(p.Name).To(Equal(pod.Name))
 			return true
@@ -1063,7 +1063,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectDeleted(ctx, env.Client, client.Object(pod))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 		foundPodCount = 0
-		cluster.ForPodsWithAntiAffinity(func(p *v1.Pod, n *v1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
 			foundPodCount++
 			Fail("should not be called as the pod was deleted")
 			return true
@@ -1072,27 +1072,27 @@ var _ = Describe("Pod Anti-Affinity", func() {
 	})
 	It("should handle events out of order", func() {
 		pod := test.UnschedulablePod(test.PodOptions{
-			ResourceRequirements: v1.ResourceRequirements{
-				Requests: map[v1.ResourceName]resource.Quantity{
-					v1.ResourceCPU: resource.MustParse("1.5"),
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU: resource.MustParse("1.5"),
 				}},
-			PodAntiRequirements: []v1.PodAffinityTerm{
+			PodAntiRequirements: []corev1.PodAffinityTerm{
 				{
 					LabelSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"foo": "bar"},
 					},
-					TopologyKey: v1.LabelTopologyZone,
+					TopologyKey: corev1.LabelTopologyZone,
 				},
 			},
 		})
 
 		node := test.Node(test.NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1beta1.NodePoolLabelKey:   nodePool.Name,
-				v1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
+				corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 			}},
-			Allocatable: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU: resource.MustParse("4"),
+			Allocatable: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("4"),
 			},
 			ProviderID: test.RandomProviderID(),
 		})
@@ -1109,7 +1109,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		foundPodCount := 0
-		cluster.ForPodsWithAntiAffinity(func(p *v1.Pod, n *v1.Node) bool {
+		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
 			foundPodCount++
 			return true
 		})
@@ -1148,7 +1148,7 @@ var _ = Describe("Cluster State Sync", func() {
 	})
 	It("should consider the cluster state synced when nodes register provider id", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
-		var nodes []*v1.Node
+		var nodes []*corev1.Node
 		for i := 0; i < 1000; i++ {
 			nodes = append(nodes, test.Node())
 			ExpectApplied(ctx, env.Client, nodes[i])
@@ -1168,8 +1168,8 @@ var _ = Describe("Cluster State Sync", func() {
 	It("should consider the cluster state synced when all nodeclaims are tracked", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
 		for i := 0; i < 1000; i++ {
-			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-				Status: v1beta1.NodeClaimStatus{
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				Status: v1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 				},
 			})
@@ -1184,8 +1184,8 @@ var _ = Describe("Cluster State Sync", func() {
 			node := test.Node(test.NodeOptions{
 				ProviderID: test.RandomProviderID(),
 			})
-			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-				Status: v1beta1.NodeClaimStatus{
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				Status: v1.NodeClaimStatus{
 					ProviderID: node.Spec.ProviderID,
 				},
 			})
@@ -1203,8 +1203,8 @@ var _ = Describe("Cluster State Sync", func() {
 		}
 		// Deploy 500 nodeclaims and sync them all with the cluster
 		for i := 0; i < 500; i++ {
-			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-				Status: v1beta1.NodeClaimStatus{
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				Status: v1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 				},
 			})
@@ -1216,8 +1216,8 @@ var _ = Describe("Cluster State Sync", func() {
 	It("should consider the cluster state synced when the representation of nodes is the same", func() {
 		// Deploy 500 nodeClaims to the cluster, apply the linked nodes, but don't sync them
 		for i := 0; i < 500; i++ {
-			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-				Status: v1beta1.NodeClaimStatus{
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				Status: v1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 				},
 			})
@@ -1234,8 +1234,8 @@ var _ = Describe("Cluster State Sync", func() {
 	It("shouldn't consider the cluster state synced if a nodeclaim hasn't resolved its provider id", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
 		for i := 0; i < 1000; i++ {
-			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-				Status: v1beta1.NodeClaimStatus{
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				Status: v1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 				},
 			})
@@ -1251,8 +1251,8 @@ var _ = Describe("Cluster State Sync", func() {
 	It("shouldn't consider the cluster state synced if a nodeclaim isn't tracked", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
 		for i := 0; i < 1000; i++ {
-			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-				Status: v1beta1.NodeClaimStatus{
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				Status: v1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 				},
 			})
@@ -1312,7 +1312,7 @@ var _ = Describe("DaemonSet Controller", func() {
 	It("should not update daemonsetCache when daemonset pod is not present", func() {
 		daemonset := test.DaemonSet(
 			test.DaemonSetOptions{PodOptions: test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
 		)
 		ExpectApplied(ctx, env.Client, daemonset)
@@ -1323,7 +1323,7 @@ var _ = Describe("DaemonSet Controller", func() {
 	It("should update daemonsetCache when daemonset pod is created", func() {
 		daemonset := test.DaemonSet(
 			test.DaemonSetOptions{PodOptions: test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
 		)
 		ExpectApplied(ctx, env.Client, daemonset)
@@ -1351,7 +1351,7 @@ var _ = Describe("DaemonSet Controller", func() {
 	It("should update daemonsetCache with the newest created pod", func() {
 		daemonset := test.DaemonSet(
 			test.DaemonSetOptions{PodOptions: test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
 		)
 		ExpectApplied(ctx, env.Client, daemonset)
@@ -1400,7 +1400,7 @@ var _ = Describe("DaemonSet Controller", func() {
 	It("should delete daemonset in cache when daemonset is deleted", func() {
 		daemonset := test.DaemonSet(
 			test.DaemonSetOptions{PodOptions: test.PodOptions{
-				ResourceRequirements: v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")}},
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
 		)
 		ExpectApplied(ctx, env.Client, daemonset)
@@ -1509,8 +1509,8 @@ var _ = Describe("Data Races", func() {
 
 		// Call UpdateNodeClaim on 100 NodeClaims (enough to trigger a DATA RACE)
 		for i := 0; i < 100; i++ {
-			nodeClaim := test.NodeClaim(v1beta1.NodeClaim{
-				Status: v1beta1.NodeClaimStatus{
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				Status: v1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 				},
 			})
@@ -1521,25 +1521,25 @@ var _ = Describe("Data Races", func() {
 })
 
 var _ = Describe("Taints", func() {
-	var nodeClaim *v1beta1.NodeClaim
-	var node *v1.Node
+	var nodeClaim *v1.NodeClaim
+	var node *corev1.Node
 	BeforeEach(func() {
 		instanceType := cloudProvider.InstanceTypes[0]
-		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
+		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1.LabelInstanceTypeStable: instanceType.Name,
+				corev1.LabelInstanceTypeStable: instanceType.Name,
 			}},
-			Status: v1beta1.NodeClaimStatus{
+			Status: v1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
 			},
 		})
 	})
 	Context("Managed", func() {
 		It("should not consider ephemeral taints on a managed node that isn't initialized", func() {
-			node.Spec.Taints = []v1.Taint{
-				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			node.Spec.Taints = []corev1.Taint{
+				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
 			ExpectApplied(ctx, env.Client, nodeClaim, node)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -1554,10 +1554,10 @@ var _ = Describe("Taints", func() {
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
 			node = ExpectExists(ctx, env.Client, node)
-			node.Spec.Taints = []v1.Taint{
-				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			node.Spec.Taints = []corev1.Taint{
+				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
 			ExpectApplied(ctx, env.Client, node)
 
@@ -1567,19 +1567,19 @@ var _ = Describe("Taints", func() {
 			stateNode := ExpectStateNodeExists(cluster, node)
 			Expect(stateNode.Taints()).To(HaveLen(3))
 			Expect(stateNode.Taints()).To(ContainElements(
-				v1.Taint{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-				v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-				v1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+				corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			))
 		})
 		It("should consider startup taints on a managed node that isn't initialized", func() {
-			nodeClaim.Spec.StartupTaints = []v1.Taint{
-				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
-				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			nodeClaim.Spec.StartupTaints = []corev1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: corev1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: corev1.TaintEffectNoExecute},
 			}
-			node.Spec.Taints = []v1.Taint{
-				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
-				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			node.Spec.Taints = []corev1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: corev1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: corev1.TaintEffectNoExecute},
 			}
 			ExpectApplied(ctx, env.Client, nodeClaim, node)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -1589,13 +1589,13 @@ var _ = Describe("Taints", func() {
 			Expect(stateNode.Taints()).To(HaveLen(0))
 		})
 		It("should consider startup taints on a managed node after the node is initialized", func() {
-			nodeClaim.Spec.StartupTaints = []v1.Taint{
-				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
-				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			nodeClaim.Spec.StartupTaints = []corev1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: corev1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: corev1.TaintEffectNoExecute},
 			}
-			node.Spec.Taints = []v1.Taint{
-				{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
-				{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+			node.Spec.Taints = []corev1.Taint{
+				{Key: "taint-key", Value: "taint-value", Effect: corev1.TaintEffectNoSchedule},
+				{Key: "taint-key2", Value: "taint-value2", Effect: corev1.TaintEffectNoExecute},
 			}
 			ExpectApplied(ctx, env.Client, nodeClaim, node)
 			ExpectMakeNodesInitialized(ctx, env.Client, node)
@@ -1607,17 +1607,17 @@ var _ = Describe("Taints", func() {
 			stateNode := ExpectStateNodeExists(cluster, node)
 			Expect(stateNode.Taints()).To(HaveLen(2))
 			Expect(stateNode.Taints()).To(ContainElements(
-				v1.Taint{Key: "taint-key", Value: "taint-value", Effect: v1.TaintEffectNoSchedule},
-				v1.Taint{Key: "taint-key2", Value: "taint-value2", Effect: v1.TaintEffectNoExecute},
+				corev1.Taint{Key: "taint-key", Value: "taint-value", Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: "taint-key2", Value: "taint-value2", Effect: corev1.TaintEffectNoExecute},
 			))
 		})
 	})
 	Context("Unmanaged", func() {
 		It("should consider ephemeral taints on an unmanaged node that isn't initialized", func() {
-			node.Spec.Taints = []v1.Taint{
-				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			node.Spec.Taints = []corev1.Taint{
+				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -1625,9 +1625,9 @@ var _ = Describe("Taints", func() {
 			stateNode := ExpectStateNodeExists(cluster, node)
 			Expect(stateNode.Taints()).To(HaveLen(3))
 			Expect(stateNode.Taints()).To(ContainElements(
-				v1.Taint{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-				v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-				v1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+				corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			))
 		})
 		It("should consider ephemeral taints on an unmanaged node after the node is initialized", func() {
@@ -1635,10 +1635,10 @@ var _ = Describe("Taints", func() {
 			ExpectMakeNodesInitialized(ctx, env.Client, node)
 
 			node = ExpectExists(ctx, env.Client, node)
-			node.Spec.Taints = []v1.Taint{
-				{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-				{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+			node.Spec.Taints = []corev1.Taint{
+				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
+				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
 
 			ExpectApplied(ctx, env.Client, node)
@@ -1647,9 +1647,9 @@ var _ = Describe("Taints", func() {
 			stateNode := ExpectStateNodeExists(cluster, node)
 			Expect(stateNode.Taints()).To(HaveLen(3))
 			Expect(stateNode.Taints()).To(ContainElements(
-				v1.Taint{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-				v1.Taint{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-				v1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+				corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			))
 		})
 	})

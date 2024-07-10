@@ -23,7 +23,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -35,7 +35,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
@@ -116,7 +116,7 @@ func NewController(kubeClient client.Client) *Controller {
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "metrics.pod")
 
-	pod := &v1.Pod{}
+	pod := &corev1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
 			c.pendingPods.Delete(req.NamespacedName.String())
@@ -139,14 +139,14 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) recordPodStartupMetric(pod *v1.Pod) {
+func (c *Controller) recordPodStartupMetric(pod *corev1.Pod) {
 	key := client.ObjectKeyFromObject(pod).String()
 	if pod.Status.Phase == phasePending {
 		c.pendingPods.Insert(key)
 		return
 	}
-	cond, ok := lo.Find(pod.Status.Conditions, func(c v1.PodCondition) bool {
-		return c.Type == v1.PodReady
+	cond, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+		return c.Type == corev1.PodReady
 	})
 	if c.pendingPods.Has(key) && ok {
 		podStartupTimeSummary.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds())
@@ -155,7 +155,7 @@ func (c *Controller) recordPodStartupMetric(pod *v1.Pod) {
 }
 
 // makeLabels creates the makeLabels using the current state of the pod
-func (c *Controller) makeLabels(ctx context.Context, pod *v1.Pod) (prometheus.Labels, error) {
+func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheus.Labels, error) {
 	metricLabels := prometheus.Labels{}
 	metricLabels[podName] = pod.Name
 	metricLabels[podNameSpace] = pod.Namespace
@@ -170,23 +170,23 @@ func (c *Controller) makeLabels(ctx context.Context, pod *v1.Pod) (prometheus.La
 	metricLabels[podHostName] = pod.Spec.NodeName
 	metricLabels[podPhase] = string(pod.Status.Phase)
 
-	node := &v1.Node{}
+	node := &corev1.Node{}
 	if pod.Spec.NodeName != "" {
 		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node); client.IgnoreNotFound(err) != nil {
 			return nil, err
 		}
 	}
-	metricLabels[podHostZone] = node.Labels[v1.LabelTopologyZone]
-	metricLabels[podHostArchitecture] = node.Labels[v1.LabelArchStable]
-	metricLabels[podHostCapacityType] = node.Labels[v1beta1.CapacityTypeLabelKey]
-	metricLabels[podHostInstanceType] = node.Labels[v1.LabelInstanceTypeStable]
-	metricLabels[podNodePool] = node.Labels[v1beta1.NodePoolLabelKey]
+	metricLabels[podHostZone] = node.Labels[corev1.LabelTopologyZone]
+	metricLabels[podHostArchitecture] = node.Labels[corev1.LabelArchStable]
+	metricLabels[podHostCapacityType] = node.Labels[v1.CapacityTypeLabelKey]
+	metricLabels[podHostInstanceType] = node.Labels[corev1.LabelInstanceTypeStable]
+	metricLabels[podNodePool] = node.Labels[v1.NodePoolLabelKey]
 	return metricLabels, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("metrics.pod").
-		For(&v1.Pod{}).
+		For(&corev1.Pod{}).
 		Complete(c)
 }

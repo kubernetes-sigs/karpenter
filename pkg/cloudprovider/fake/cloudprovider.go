@@ -28,13 +28,13 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -50,15 +50,15 @@ type CloudProvider struct {
 
 	mu sync.RWMutex
 	// CreateCalls contains the arguments for every create call that was made since it was cleared
-	CreateCalls        []*v1beta1.NodeClaim
+	CreateCalls        []*v1.NodeClaim
 	AllowedCreateCalls int
 	NextCreateErr      error
 	NextGetErr         error
 	NextDeleteErr      error
-	DeleteCalls        []*v1beta1.NodeClaim
+	DeleteCalls        []*v1.NodeClaim
 	GetCalls           []string
 
-	CreatedNodeClaims         map[string]*v1beta1.NodeClaim
+	CreatedNodeClaims         map[string]*v1.NodeClaim
 	Drifted                   cloudprovider.DriftReason
 	NodeClassGroupVersionKind []schema.GroupVersionKind
 }
@@ -66,7 +66,7 @@ type CloudProvider struct {
 func NewCloudProvider() *CloudProvider {
 	return &CloudProvider{
 		AllowedCreateCalls:       math.MaxInt,
-		CreatedNodeClaims:        map[string]*v1beta1.NodeClaim{},
+		CreatedNodeClaims:        map[string]*v1.NodeClaim{},
 		InstanceTypesForNodePool: map[string][]*cloudprovider.InstanceType{},
 		ErrorsForNodePool:        map[string]error{},
 	}
@@ -77,7 +77,7 @@ func (c *CloudProvider) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.CreateCalls = nil
-	c.CreatedNodeClaims = map[string]*v1beta1.NodeClaim{}
+	c.CreatedNodeClaims = map[string]*v1.NodeClaim{}
 	c.InstanceTypes = nil
 	c.InstanceTypesForNodePool = map[string][]*cloudprovider.InstanceType{}
 	c.ErrorsForNodePool = map[string]error{}
@@ -85,7 +85,7 @@ func (c *CloudProvider) Reset() {
 	c.NextCreateErr = nil
 	c.NextDeleteErr = nil
 	c.NextGetErr = nil
-	c.DeleteCalls = []*v1beta1.NodeClaim{}
+	c.DeleteCalls = []*v1.NodeClaim{}
 	c.GetCalls = nil
 	c.Drifted = "drifted"
 	c.NodeClassGroupVersionKind = []schema.GroupVersionKind{
@@ -97,7 +97,7 @@ func (c *CloudProvider) Reset() {
 	}
 }
 
-func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
+func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -109,10 +109,10 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 
 	c.CreateCalls = append(c.CreateCalls, nodeClaim)
 	if len(c.CreateCalls) > c.AllowedCreateCalls {
-		return &v1beta1.NodeClaim{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
+		return &v1.NodeClaim{}, fmt.Errorf("erroring as number of AllowedCreateCalls has been exceeded")
 	}
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
-	np := &v1beta1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nodeClaim.Labels[v1beta1.NodePoolLabelKey]}}
+	np := &v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nodeClaim.Labels[v1.NodePoolLabelKey]}}
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, np)), func(i *cloudprovider.InstanceType, _ int) bool {
 		return reqs.IsCompatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) &&
 			i.Offerings.Available().HasCompatible(reqs) &&
@@ -128,36 +128,36 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 	// Labels
 	labels := map[string]string{}
 	for key, requirement := range instanceType.Requirements {
-		if requirement.Operator() == v1.NodeSelectorOpIn {
+		if requirement.Operator() == corev1.NodeSelectorOpIn {
 			labels[key] = requirement.Values()[0]
 		}
 	}
 	// Find Offering
 	for _, o := range instanceType.Offerings.Available() {
 		if reqs.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-			labels[v1.LabelTopologyZone] = o.Requirements.Get(v1.LabelTopologyZone).Any()
-			labels[v1beta1.CapacityTypeLabelKey] = o.Requirements.Get(v1beta1.CapacityTypeLabelKey).Any()
+			labels[corev1.LabelTopologyZone] = o.Requirements.Get(corev1.LabelTopologyZone).Any()
+			labels[v1.CapacityTypeLabelKey] = o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
 			break
 		}
 	}
-	created := &v1beta1.NodeClaim{
+	created := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        nodeClaim.Name,
 			Labels:      lo.Assign(labels, nodeClaim.Labels),
 			Annotations: nodeClaim.Annotations,
 		},
 		Spec: *nodeClaim.Spec.DeepCopy(),
-		Status: v1beta1.NodeClaimStatus{
+		Status: v1.NodeClaimStatus{
 			ProviderID:  test.RandomProviderID(),
-			Capacity:    lo.PickBy(instanceType.Capacity, func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
-			Allocatable: lo.PickBy(instanceType.Allocatable(), func(_ v1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
+			Capacity:    lo.PickBy(instanceType.Capacity, func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
+			Allocatable: lo.PickBy(instanceType.Allocatable(), func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) }),
 		},
 	}
 	c.CreatedNodeClaims[created.Status.ProviderID] = created
 	return created, nil
 }
 
-func (c *CloudProvider) Get(_ context.Context, id string) (*v1beta1.NodeClaim, error) {
+func (c *CloudProvider) Get(_ context.Context, id string) (*v1.NodeClaim, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -173,16 +173,16 @@ func (c *CloudProvider) Get(_ context.Context, id string) (*v1beta1.NodeClaim, e
 	return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("no nodeclaim exists with id '%s'", id))
 }
 
-func (c *CloudProvider) List(_ context.Context) ([]*v1beta1.NodeClaim, error) {
+func (c *CloudProvider) List(_ context.Context) ([]*v1.NodeClaim, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return lo.Map(lo.Values(c.CreatedNodeClaims), func(nc *v1beta1.NodeClaim, _ int) *v1beta1.NodeClaim {
+	return lo.Map(lo.Values(c.CreatedNodeClaims), func(nc *v1.NodeClaim, _ int) *v1.NodeClaim {
 		return nc.DeepCopy()
 	}), nil
 }
 
-func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1beta1.NodePool) ([]*cloudprovider.InstanceType, error) {
+func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	if np != nil {
 		if err, ok := c.ErrorsForNodePool[np.Name]; ok {
 			return nil, err
@@ -201,41 +201,41 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1beta1.NodePool
 		}),
 		NewInstanceType(InstanceTypeOptions{
 			Name: "small-instance-type",
-			Resources: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("2"),
-				v1.ResourceMemory: resource.MustParse("2Gi"),
+			Resources: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("2Gi"),
 			},
 		}),
 		NewInstanceType(InstanceTypeOptions{
 			Name: "gpu-vendor-instance-type",
-			Resources: map[v1.ResourceName]resource.Quantity{
+			Resources: map[corev1.ResourceName]resource.Quantity{
 				ResourceGPUVendorA: resource.MustParse("2"),
 			}}),
 		NewInstanceType(InstanceTypeOptions{
 			Name: "gpu-vendor-b-instance-type",
-			Resources: map[v1.ResourceName]resource.Quantity{
+			Resources: map[corev1.ResourceName]resource.Quantity{
 				ResourceGPUVendorB: resource.MustParse("2"),
 			},
 		}),
 		NewInstanceType(InstanceTypeOptions{
 			Name:             "arm-instance-type",
 			Architecture:     "arm64",
-			OperatingSystems: sets.New("ios", string(v1.Linux), string(v1.Windows), "darwin"),
-			Resources: map[v1.ResourceName]resource.Quantity{
-				v1.ResourceCPU:    resource.MustParse("16"),
-				v1.ResourceMemory: resource.MustParse("128Gi"),
+			OperatingSystems: sets.New("ios", string(corev1.Linux), string(corev1.Windows), "darwin"),
+			Resources: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU:    resource.MustParse("16"),
+				corev1.ResourceMemory: resource.MustParse("128Gi"),
 			},
 		}),
 		NewInstanceType(InstanceTypeOptions{
 			Name: "single-pod-instance-type",
-			Resources: map[v1.ResourceName]resource.Quantity{
-				v1.ResourcePods: resource.MustParse("1"),
+			Resources: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourcePods: resource.MustParse("1"),
 			},
 		}),
 	}, nil
 }
 
-func (c *CloudProvider) Delete(_ context.Context, nc *v1beta1.NodeClaim) error {
+func (c *CloudProvider) Delete(_ context.Context, nc *v1.NodeClaim) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -253,7 +253,7 @@ func (c *CloudProvider) Delete(_ context.Context, nc *v1beta1.NodeClaim) error {
 	return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("no nodeclaim exists with provider id '%s'", nc.Status.ProviderID))
 }
 
-func (c *CloudProvider) IsDrifted(context.Context, *v1beta1.NodeClaim) (cloudprovider.DriftReason, error) {
+func (c *CloudProvider) IsDrifted(context.Context, *v1.NodeClaim) (cloudprovider.DriftReason, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 

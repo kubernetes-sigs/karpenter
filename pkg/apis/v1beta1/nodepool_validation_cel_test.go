@@ -42,7 +42,10 @@ var _ = Describe("CEL/Validation", func() {
 			Skip("CEL Validation is for 1.25>")
 		}
 		nodePool = &NodePool{
-			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            strings.ToLower(randomdata.SillyName()),
+				ResourceVersion: "karpenter.sh/v1beta1",
+			},
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
 					Spec: NodeClaimSpec{

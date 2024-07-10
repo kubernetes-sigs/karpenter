@@ -23,7 +23,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -51,14 +51,14 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
-	return c.NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).IsTrue()
+	return c.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1beta1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).LastTransitionTime.Time.Before(
-			candidates[j].NodeClaim.StatusConditions().Get(v1beta1.ConditionTypeDrifted).LastTransitionTime.Time)
+		return candidates[i].NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).LastTransitionTime.Time.Before(
+			candidates[j].NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).LastTransitionTime.Time)
 	})
 
 	// Do a quick check through the candidates to see if they're empty.
@@ -71,9 +71,9 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonDrifted] > 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonDrifted] > 0 {
 			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonDrifted]--
+			disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonDrifted]--
 		}
 	}
 	// Disrupt all empty drifted candidates, as they require no scheduling simulations.
@@ -87,7 +87,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since drift commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1beta1.DisruptionReasonDrifted] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonDrifted] == 0 {
 			continue
 		}
 		// Check if we need to create any NodeClaims.

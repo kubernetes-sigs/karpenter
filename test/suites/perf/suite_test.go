@@ -21,13 +21,13 @@ import (
 	"testing"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
@@ -37,7 +37,7 @@ import (
 	"github.com/samber/lo"
 )
 
-var nodePool *v1beta1.NodePool
+var nodePool *v1.NodePool
 var nodeClass *v1alpha1.KWOKNodeClass
 var env *common.Environment
 
@@ -65,14 +65,14 @@ var _ = BeforeEach(func() {
 	env.BeforeEach()
 	nodeClass = env.DefaultNodeClass()
 	nodePool = env.DefaultNodePool(nodeClass)
-	test.ReplaceRequirements(nodePool, v1beta1.NodeSelectorRequirementWithMinValues{
-		NodeSelectorRequirement: v1.NodeSelectorRequirement{
+	test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+		NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 			Key:      v1alpha1.InstanceSizeLabelKey,
-			Operator: v1.NodeSelectorOpLt,
+			Operator: corev1.NodeSelectorOpLt,
 			Values:   []string{"32"},
 		},
 	})
-	nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
+	nodePool.Spec.Disruption.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
 })
 
 var _ = AfterEach(func() {

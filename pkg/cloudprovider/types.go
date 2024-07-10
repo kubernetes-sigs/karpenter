@@ -27,17 +27,17 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 var (
-	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeSpot))
-	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1beta1.CapacityTypeLabelKey, v1.NodeSelectorOpIn, v1beta1.CapacityTypeOnDemand))
+	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
+	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand))
 )
 
 type DriftReason string
@@ -46,21 +46,21 @@ type DriftReason string
 type CloudProvider interface {
 	// Create launches a NodeClaim with the given resource requests and requirements and returns a hydrated
 	// NodeClaim back with resolved NodeClaim labels for the launched NodeClaim
-	Create(context.Context, *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error)
+	Create(context.Context, *v1.NodeClaim) (*v1.NodeClaim, error)
 	// Delete removes a NodeClaim from the cloudprovider by its provider id
-	Delete(context.Context, *v1beta1.NodeClaim) error
+	Delete(context.Context, *v1.NodeClaim) error
 	// Get retrieves a NodeClaim from the cloudprovider by its provider id
-	Get(context.Context, string) (*v1beta1.NodeClaim, error)
+	Get(context.Context, string) (*v1.NodeClaim, error)
 	// List retrieves all NodeClaims from the cloudprovider
-	List(context.Context) ([]*v1beta1.NodeClaim, error)
+	List(context.Context) ([]*v1.NodeClaim, error)
 	// GetInstanceTypes returns instance types supported by the cloudprovider.
 	// Availability of types or zone may vary by nodepool or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
-	GetInstanceTypes(context.Context, *v1beta1.NodePool) ([]*InstanceType, error)
+	GetInstanceTypes(context.Context, *v1.NodePool) ([]*InstanceType, error)
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
-	IsDrifted(context.Context, *v1beta1.NodeClaim) (DriftReason, error)
+	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
 	// GetSupportedNodeClasses returns CloudProvider NodeClass that implements status.Object
@@ -71,7 +71,7 @@ type CloudProvider interface {
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
 type InstanceType struct {
-	// Name of the instance type, must correspond to v1.LabelInstanceTypeStable
+	// Name of the instance type, must correspond to corev1.LabelInstanceTypeStable
 	Name string
 	// Requirements returns a flexible set of properties that may be selected
 	// for scheduling. Must be defined for every well known label, even if empty.
@@ -79,13 +79,13 @@ type InstanceType struct {
 	// Note that though this is an array it is expected that all the Offerings are unique from one another
 	Offerings Offerings
 	// Resources are the full resource capacities for this instance type
-	Capacity v1.ResourceList
+	Capacity corev1.ResourceList
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
 	Overhead *InstanceTypeOverhead
 
 	once        sync.Once
-	allocatable v1.ResourceList
+	allocatable corev1.ResourceList
 }
 
 type InstanceTypes []*InstanceType
@@ -96,7 +96,7 @@ func (i *InstanceType) precompute() {
 	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
 }
 
-func (i *InstanceType) Allocatable() v1.ResourceList {
+func (i *InstanceType) Allocatable() corev1.ResourceList {
 	i.once.Do(i.precompute)
 	return i.allocatable.DeepCopy()
 }
@@ -213,21 +213,21 @@ func (its InstanceTypes) Truncate(requirements scheduling.Requirements, maxItems
 
 type InstanceTypeOverhead struct {
 	// KubeReserved returns the default resources allocated to kubernetes system daemons by default
-	KubeReserved v1.ResourceList
+	KubeReserved corev1.ResourceList
 	// SystemReserved returns the default resources allocated to the OS system daemons by default
-	SystemReserved v1.ResourceList
+	SystemReserved corev1.ResourceList
 	// EvictionThreshold returns the resources used to maintain a hard eviction threshold
-	EvictionThreshold v1.ResourceList
+	EvictionThreshold corev1.ResourceList
 }
 
-func (i InstanceTypeOverhead) Total() v1.ResourceList {
+func (i InstanceTypeOverhead) Total() corev1.ResourceList {
 	return resources.Merge(i.KubeReserved, i.SystemReserved, i.EvictionThreshold)
 }
 
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
 // these properties are captured with labels in Requirements.
-// Requirements are required to contain the keys v1beta1.CapacityTypeLabelKey and v1.LabelTopologyZone
+// Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone
 type Offering struct {
 	Requirements scheduling.Requirements
 	Price        float64
@@ -281,13 +281,13 @@ func (ofs Offerings) MostExpensive() Offering {
 // to get the launch price; else, it uses the on-demand launch price
 func (ofs Offerings) WorstLaunchPrice(reqs scheduling.Requirements) float64 {
 	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeSpot) {
+	if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeSpot) {
 		spotOfferings := ofs.Compatible(reqs).Compatible(SpotRequirement)
 		if len(spotOfferings) > 0 {
 			return spotOfferings.MostExpensive().Price
 		}
 	}
-	if reqs.Get(v1beta1.CapacityTypeLabelKey).Has(v1beta1.CapacityTypeOnDemand) {
+	if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand) {
 		onDemandOfferings := ofs.Compatible(reqs).Compatible(OnDemandRequirement)
 		if len(onDemandOfferings) > 0 {
 			return onDemandOfferings.MostExpensive().Price
