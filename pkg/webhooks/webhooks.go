@@ -38,10 +38,7 @@ import (
 	"knative.dev/pkg/metrics"
 	"knative.dev/pkg/webhook"
 	"knative.dev/pkg/webhook/certificates"
-	"knative.dev/pkg/webhook/configmaps"
-	"knative.dev/pkg/webhook/resourcesemantics"
 	"knative.dev/pkg/webhook/resourcesemantics/conversion"
-	"knative.dev/pkg/webhook/resourcesemantics/validation"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -54,11 +51,7 @@ import (
 const component = "webhook"
 
 var (
-	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
-		object.GVK(&v1beta1.NodePool{}):  &v1beta1.NodePool{},
-		object.GVK(&v1beta1.NodeClaim{}): &v1beta1.NodeClaim{},
-	}
-	// Remove conversion webhooks once v1.1.0, and v1beta1 APIs are dropped
+	// TODO: Remove conversion webhooks once support for the v1beta1 APIs is dropped
 	ConversionResource = map[schema.GroupKind]conversion.GroupKindConversion{
 		object.GVK(&v1beta1.NodePool{}).GroupKind(): {
 			DefinitionName: "nodepools.karpenter.sh",
@@ -83,39 +76,17 @@ func NewWebhooks() []knativeinjection.ControllerConstructor {
 	return []knativeinjection.ControllerConstructor{
 		certificates.NewController,
 		NewCRDConversionWebhook,
-		// Webhook validation is only supported for v1beta1 APIs
-		NewCRDValidationWebhook,
-		NewConfigValidationWebhook,
 	}
-}
-
-func NewCRDValidationWebhook(ctx context.Context, _ configmap.Watcher) *controller.Impl {
-	return validation.NewAdmissionController(ctx,
-		"validation.webhook.karpenter.sh",
-		"/validate/karpenter.sh",
-		Resources,
-		func(ctx context.Context) context.Context { return ctx },
-		true,
-	)
 }
 
 func NewCRDConversionWebhook(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	nodeclassCtx := injection.GetNodeClasses(ctx)
-	return conversion.NewConversionController(ctx,
+	return conversion.NewConversionController(
+		ctx,
 		"/conversion/karpenter.sh",
 		ConversionResource,
 		func(ctx context.Context) context.Context {
 			return injection.WithNodeClasses(ctx, nodeclassCtx)
-		},
-	)
-}
-
-func NewConfigValidationWebhook(ctx context.Context, _ configmap.Watcher) *controller.Impl {
-	return configmaps.NewAdmissionController(ctx,
-		"validation.webhook.config.karpenter.sh",
-		"/validate/config.karpenter.sh",
-		configmap.Constructors{
-			knativelogging.ConfigMapName(): knativelogging.NewConfigFromConfigMap,
 		},
 	)
 }
