@@ -69,6 +69,7 @@ jobs:
         OUTPUT_DIR=$(mktemp -d)
         export OUTPUT_DIR
         make e2etests
+    - name: run test analysis
         python ./karpenter_eval/main.py
     - name: cleanup 
       shell: bash
