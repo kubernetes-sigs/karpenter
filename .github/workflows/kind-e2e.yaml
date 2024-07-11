@@ -68,8 +68,8 @@ jobs:
     - name: run test suites
       shell: bash
       run: |
-        OUTPUT_DIR=$(mktemp -d)
-        export OUTPUT_DIR
+        export OUTPUT_DIR=$(mktemp -d)
+        echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"\
         make e2etests
     - name: run test analysis
       shell: bash
