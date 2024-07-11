@@ -347,10 +347,13 @@ func MakePodAffinityPodOptions(key string) PodOptions {
 	affinityLabels := RandomAffinityLabels()
 	return PodOptions{
 		ObjectMeta: metav1.ObjectMeta{Labels: lo.Assign(affinityLabels, map[string]string{DiscoveryLabel: "owned"})},
-		PodRequirements: []v1.PodAffinityTerm{
+		PodPreferences: []v1.WeightedPodAffinityTerm{
 			{
-				LabelSelector: &metav1.LabelSelector{MatchLabels: affinityLabels},
-				TopologyKey:   key,
+				Weight: 1,
+				PodAffinityTerm: v1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: affinityLabels},
+					TopologyKey:   key,
+				},
 			},
 		},
 		ResourceRequirements: v1.ResourceRequirements{
