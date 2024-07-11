@@ -1,7 +1,5 @@
 syntax = "proto3";
 
-package karpenter;
-
 message Pod {
     string name = 1;
     string namespace = 2;

@@ -62,8 +62,8 @@ func NewControllers(
 ) []controller.Controller {
 
 	cluster := state.NewCluster(clock, kubeClient)
-	SIQueue := orbbatcher.NewSchedulingInputQueue()
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, SIQueue)
+	SIHeap := orbbatcher.NewSchedulingInputHeap()
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, SIHeap)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
 
@@ -92,7 +92,7 @@ func NewControllers(
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewController(kubeClient, cloudProvider, recorder),
 		nodeclaimdisruption.NewController(clock, kubeClient, cluster, cloudProvider),
-		orbbatcher.NewController(SIQueue),
+		orbbatcher.NewController(SIHeap),
 		leasegarbagecollection.NewController(kubeClient),
 		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),

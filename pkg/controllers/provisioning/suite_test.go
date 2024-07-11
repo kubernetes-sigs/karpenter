@@ -62,7 +62,7 @@ var (
 	cloudProvider       *fake.CloudProvider
 	prov                *provisioning.Provisioner
 	env                 *test.Environment
-	queue               *orbbatcher.SchedulingInputQueue
+	SIHeap              *orbbatcher.SchedulingInputHeap
 	instanceTypeMap     map[string]*cloudprovider.InstanceType
 )
 
@@ -79,8 +79,8 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	queue = orbbatcher.NewSchedulingInputQueue()
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, queue)
+	SIHeap = orbbatcher.NewSchedulingInputHeap()
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, SIHeap)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}

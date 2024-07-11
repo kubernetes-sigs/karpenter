@@ -13,3 +13,4 @@ message ORBLogEntry {
   // string message = 3;
   // repeated string tags = 4;
 }
+
