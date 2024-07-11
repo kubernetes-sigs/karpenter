@@ -1,9 +1,8 @@
 name: kind-e2e
 on:
-  # enable running this on merges + presubmits when the action has tests that it will execute
-  # push:
-  #   branches: [main]
-  # pull_request:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 jobs:
   test-kind:
