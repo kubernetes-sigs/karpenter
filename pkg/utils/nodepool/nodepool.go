@@ -35,9 +35,9 @@ func NodeClassEventHandler(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
 		nodePoolList := &v1.NodePoolList{}
 		if err := c.List(ctx, nodePoolList, client.MatchingFields{
-			"spec.template.spec.nodeClassRef.apiVersion": object.GVK(o).GroupVersion().String(),
-			"spec.template.spec.nodeClassRef.kind":       object.GVK(o).Kind,
-			"spec.template.spec.nodeClassRef.name":       o.GetName(),
+			"spec.template.spec.nodeClassRef.group": object.GVK(o).Group,
+			"spec.template.spec.nodeClassRef.kind":  object.GVK(o).Kind,
+			"spec.template.spec.nodeClassRef.name":  o.GetName(),
 		}); err != nil {
 			return requests
 		}
