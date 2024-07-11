@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var replicas int = 10
+var replicas int = 100
 
 var _ = Describe("Performance", func() {
 	Context("Provisioning", func() {
