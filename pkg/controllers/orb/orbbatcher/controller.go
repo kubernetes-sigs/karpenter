@@ -58,6 +58,8 @@ func (si SchedulingInput) String() string {
 		PodsToString(si.PendingPods))
 }
 
+// Function takes a slice of pod pointers and returns a string representation of the pods
+
 // Function take a Scheduling Input to []byte, marshalled as a protobuf
 // TODO: With a custom-defined .proto, this will look different.
 func (si SchedulingInput) Marshal() ([]byte, error) {
@@ -69,7 +71,60 @@ func (si SchedulingInput) Marshal() ([]byte, error) {
 		podList.Items = append(podList.Items, *podPtr)
 	}
 	return podList.Marshal()
+
+	// // Create a slice to store the wire format data
+	// podDataSlice := make([][]byte, 0, len(si.PendingPods))
+
+	// // Iterate over the slice of Pods and marshal each one to its wire format
+	// for _, pod := range si.PendingPods {
+	// 	podData, err := proto.Marshal(pod)
+	// 	if err != nil {
+	// 		fmt.Println("Error marshaling pod:", err)
+	// 		continue
+	// 	}
+	// 	podDataSlice = append(podDataSlice, podData)
+	// }
+
+	// // Create an ORBLogEntry message
+	// entry := &ORBLogEntry{
+	// 	Timestamp:      si.Timestamp.Format("2006-01-02_15-04-05"),
+	// 	PendingpodData: podDataSlice,
+	// }
+
+	// return proto.Marshal(entry)
 }
+
+// func UnmarshalSchedulingInput(data []byte) (*SchedulingInput, error) {
+// 	// Unmarshal the data into an ORBLogEntry struct
+// 	entry := &ORBLogEntry{}
+// 	if err := proto.Unmarshal(data, entry); err != nil {
+// 		return nil, fmt.Errorf("failed to unmarshal ORBLogEntry: %v", err)
+// 	}
+
+// 	// Parse the timestamp
+// 	timestamp, err := time.Parse("2006-01-02_15-04-05", entry.Timestamp)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to parse timestamp: %v", err)
+// 	}
+
+// 	// Unmarshal the PendingpodData into v1.Pod objects
+// 	pendingPods := make([]*v1.Pod, 0, len(entry.PendingpodData))
+// 	for _, podData := range entry.PendingpodData {
+// 		var pod v1.Pod
+// 		if err := proto.Unmarshal(podData, &pod); err != nil {
+// 			return nil, fmt.Errorf("failed to unmarshal pod: %v", err)
+// 		}
+// 		pendingPods = append(pendingPods, &pod)
+// 	}
+
+// 	// Create a new SchedulingInput struct
+// 	schedulingInput := &SchedulingInput{
+// 		Timestamp:   timestamp,
+// 		PendingPods: pendingPods,
+// 	}
+
+// 	return schedulingInput, nil
+// }
 
 // Function to do the reverse, take a scheduling input's []byte and unmarshal it back into a SchedulingInput
 func PBToSchedulingInput(timestamp time.Time, data []byte) (SchedulingInput, error) {

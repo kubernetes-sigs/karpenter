@@ -1,16 +1,51 @@
 syntax = "proto3";
 
-package orblog;
+package orbbatcher;
 
-// protoc --proto_path=/Users/loupetro/go/pkg/mod/k8s.io/api@v0.30.2/core/v1/ --proto_path=. --go_out=. --go_opt=paths=source_relative ORBLogEntry.proto
-//import "k8s.io/api/core/v1/generated.proto";
+option go_package = ".";
 
-// Sample entry, TODO: needs revision
+// Sample entry, TODO: needs revisions
 message ORBLogEntry {
   string timestamp = 1;
-  //repeated k8s.io.api.core.v1.Pod pods = 2;
-  // string event_type = 2;
-  // string message = 3;
-  // repeated string tags = 4;
+  repeated bytes pendingpod_data = 2;
+  // repeated bytes statenodes_data = 3;
+  // repeated bytes instancetypes_data = 4;
 }
 
+// message Pod {
+//   string name = 1;
+//   string namespace = 2;
+//   string phase = 3;
+//   string nodeName = 4;
+// }
+
+// message StateNode {
+//   Node node = 1;
+//   NodeClaim nodeClaim = 2;
+// }
+
+// message Node {
+//   string name = 1;
+//   string status = 2;
+//   string systemUUID = 3;
+// }
+
+// message NodeClaim {
+//   string name = 1;
+// }
+
+// message InstanceType {
+//   string name = 1;
+//   Requirements requirements = 2;
+//   repeated Offering offerings = 3;
+// }
+
+// message Requirements {
+//   string value = 1;
+// }
+
+// message Offering {
+//   Requirements requirements = 1;
+//   double price = 2;
+//   bool available = 3;
+// }
