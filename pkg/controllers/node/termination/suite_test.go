@@ -711,8 +711,8 @@ var _ = Describe("Termination", func() {
 		})
 		It("should preemptively delete pods to satisfy their terminationGracePeriodSeconds", func() {
 			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
-			node.Annotations = map[string]string{
-				v1.NodeTerminationTimestampAnnotationKey: time.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339),
+			nodeClaim.Annotations = map[string]string{
+				v1.NodeClaimTerminationTimestampAnnotationKey: time.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339),
 			}
 			pod := test.Pod(test.PodOptions{
 				NodeName: node.Name,
@@ -734,8 +734,8 @@ var _ = Describe("Termination", func() {
 		})
 		It("should only delete pods when their terminationGracePeriodSeconds is less than the the node's remaining terminationGracePeriod", func() {
 			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
-			node.Annotations = map[string]string{
-				v1.NodeTerminationTimestampAnnotationKey: time.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339),
+			nodeClaim.Annotations = map[string]string{
+				v1.NodeClaimTerminationTimestampAnnotationKey: time.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339),
 			}
 			pod := test.Pod(test.PodOptions{
 				NodeName: node.Name,

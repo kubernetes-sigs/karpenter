@@ -44,13 +44,13 @@ const (
 
 // Karpenter specific annotations
 const (
-	DoNotDisruptAnnotationKey             = apis.Group + "/do-not-disrupt"
-	ProviderCompatabilityAnnotationKey    = apis.CompatabilityGroup + "/provider"
-	ManagedByAnnotationKey                = apis.Group + "/managed-by"
-	NodePoolHashAnnotationKey             = apis.Group + "/nodepool-hash"
-	NodePoolHashVersionAnnotationKey      = apis.Group + "/nodepool-hash-version"
-	KubeletCompatabilityAnnotationKey     = apis.CompatabilityGroup + "/v1beta1-kubelet-conversion"
-	NodeTerminationTimestampAnnotationKey = apis.Group + "/node-termination-timestamp"
+	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
+	ProviderCompatabilityAnnotationKey         = apis.CompatabilityGroup + "/provider"
+	ManagedByAnnotationKey                     = apis.Group + "/managed-by"
+	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
+	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
+	KubeletCompatabilityAnnotationKey          = apis.CompatabilityGroup + "/v1beta1-kubelet-conversion"
+	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
 )
 
 // Karpenter specific finalizers

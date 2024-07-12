@@ -284,8 +284,10 @@ var _ = Describe("Termination", func() {
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
-		node = ExpectExists(ctx, env.Client, node)
-		Expect(node.ObjectMeta.Annotations).To(BeNil())
+		ExpectExists(ctx, env.Client, node)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		Expect(nodeClaim.ObjectMeta.Annotations).To(BeNil())
 	})
 	It("should annotate the node if the NodeClaim has a terminationGracePeriod", func() {
 		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
@@ -301,9 +303,10 @@ var _ = Describe("Termination", func() {
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
-		node = ExpectExists(ctx, env.Client, node)
+		ExpectExists(ctx, env.Client, node)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		_, annotationExists := node.ObjectMeta.Annotations[v1.NodeTerminationTimestampAnnotationKey]
+		_, annotationExists := nodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]
 		Expect(annotationExists).To(BeTrue())
 	})
 	It("should not change the annotation if the NodeClaim has a terminationGracePeriod and the annotation already exists", func() {
@@ -316,17 +319,18 @@ var _ = Describe("Termination", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
-		node.ObjectMeta.Annotations = map[string]string{
-			v1.NodeTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
+		nodeClaim.ObjectMeta.Annotations = map[string]string{
+			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
 		}
 		ExpectApplied(ctx, env.Client, node)
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
-		node = ExpectExists(ctx, env.Client, node)
+		ExpectExists(ctx, env.Client, node)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		Expect(node.ObjectMeta.Annotations).To(Equal(map[string]string{
-			v1.NodeTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
+		Expect(nodeClaim.ObjectMeta.Annotations).To(Equal(map[string]string{
+			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
 		}))
 	})
 })

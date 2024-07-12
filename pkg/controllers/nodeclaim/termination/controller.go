@@ -151,7 +151,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 
 func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim) error {
 	// if the expiration annotation is already set, we don't need to do anything
-	if _, exists := node.ObjectMeta.Annotations[v1.NodeTerminationTimestampAnnotationKey]; exists {
+	if _, exists := nodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
 		return nil
 	}
 
@@ -168,12 +168,12 @@ func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx c
 
 func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim, terminationTime string) error {
 	stored := node.DeepCopy()
-	node.ObjectMeta.Annotations = lo.Assign(node.ObjectMeta.Annotations, map[string]string{v1.NodeTerminationTimestampAnnotationKey: terminationTime})
+	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 
 	if err := c.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 		return client.IgnoreNotFound(fmt.Errorf("patching nodeclaim, %w", err))
 	}
-	log.FromContext(ctx).WithValues(v1.NodeTerminationTimestampAnnotationKey, terminationTime).Info("annotated node")
+	log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated node")
 	c.recorder.Publish(terminatorevents.NodeTerminationGracePeriodExpiring(node, terminationTime))
 	c.recorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, terminationTime))
 
