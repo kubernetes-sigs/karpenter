@@ -148,7 +148,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		methodLabel:            disruption.Type(),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
-	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, c.queue)
+	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}

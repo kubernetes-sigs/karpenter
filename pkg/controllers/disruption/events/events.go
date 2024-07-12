@@ -48,16 +48,6 @@ func WaitingOnReadiness(nodeClaim *v1.NodeClaim) events.Event {
 	}
 }
 
-func WaitingOnDeletion(nodeClaim *v1.NodeClaim) events.Event {
-	return events.Event{
-		InvolvedObject: nodeClaim,
-		Type:           corev1.EventTypeNormal,
-		Reason:         "DisruptionWaitingDeletion",
-		Message:        "Waiting on deletion to continue disruption",
-		DedupeValues:   []string{string(nodeClaim.UID)},
-	}
-}
-
 func Terminating(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) []events.Event {
 	return []events.Event{
 		{

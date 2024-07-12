@@ -36,12 +36,6 @@ func NewChangeMonitor() *ChangeMonitor {
 	}
 }
 
-// Reconfigure allows reconfiguring the change monitor with a new duration. This resets any previously recorded
-// changes and should only be done at construction.
-func (c *ChangeMonitor) Reconfigure(expiration time.Duration) {
-	c.lastSeen = cache.New(expiration, expiration/2)
-}
-
 // HasChanged takes a key and value and returns true if the hash of the value has changed since the last tine the
 // change monitor was called.
 func (c *ChangeMonitor) HasChanged(key string, value any) bool {

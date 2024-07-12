@@ -52,10 +52,12 @@ func IsReschedulable(pod *corev1.Pod) bool {
 // - Is an active pod (isn't terminal or actively terminating)
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
+// - Does not have the "karpenter.sh/do-not-disrupt=true" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls)
 func IsEvictable(pod *corev1.Pod) bool {
 	return IsActive(pod) &&
 		!ToleratesDisruptionNoScheduleTaint(pod) &&
-		!IsOwnedByNode(pod)
+		!IsOwnedByNode(pod) &&
+		!HasDoNotDisrupt(pod)
 }
 
 // IsWaitingEviction checks if this is a pod that we are waiting to be removed from the node by ensuring that the pod:
@@ -63,6 +65,7 @@ func IsEvictable(pod *corev1.Pod) bool {
 // - Isn't a pod that has been terminating past its terminationGracePeriodSeconds
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
+// Note: pods with the `karpenter.sh/do-not-disrupt` annotation are included since node drain should stall until these pods are evicted or become terminal, even though Karpenter won't orchestrate the eviction.
 func IsWaitingEviction(pod *corev1.Pod, clk clock.Clock) bool {
 	return !IsTerminal(pod) &&
 		!IsStuckTerminating(pod, clk) &&

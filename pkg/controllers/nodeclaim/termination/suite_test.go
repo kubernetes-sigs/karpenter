@@ -57,6 +57,7 @@ var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
 var nodeClaimLifecycleController *nodeclaimlifecycle.Controller
 var nodeClaimTerminationController *nodeclaimtermination.Controller
+var recorder *test.EventRecorder
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -73,8 +74,9 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
+	recorder = test.NewEventRecorder()
 	nodeClaimLifecycleController = nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
-	nodeClaimTerminationController = nodeclaimtermination.NewController(env.Client, cloudProvider)
+	nodeClaimTerminationController = nodeclaimtermination.NewController(env.Client, cloudProvider, recorder)
 })
 
 var _ = AfterSuite(func() {
@@ -268,5 +270,67 @@ var _ = Describe("Termination", func() {
 		for _, node := range nodes {
 			ExpectExists(ctx, env.Client, node)
 		}
+	})
+	It("should not annotate the node if the NodeClaim has no terminationGracePeriod", func() {
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
+		Expect(err).ToNot(HaveOccurred())
+
+		node := test.NodeClaimLinkedNode(nodeClaim)
+		ExpectApplied(ctx, env.Client, node)
+
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
+		ExpectExists(ctx, env.Client, node)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		Expect(nodeClaim.ObjectMeta.Annotations).To(BeNil())
+	})
+	It("should annotate the node if the NodeClaim has a terminationGracePeriod", func() {
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
+		Expect(err).ToNot(HaveOccurred())
+
+		node := test.NodeClaimLinkedNode(nodeClaim)
+		ExpectApplied(ctx, env.Client, node)
+
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
+		ExpectExists(ctx, env.Client, node)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		_, annotationExists := nodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]
+		Expect(annotationExists).To(BeTrue())
+	})
+	It("should not change the annotation if the NodeClaim has a terminationGracePeriod and the annotation already exists", func() {
+		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+		nodeClaim.ObjectMeta.Annotations = map[string]string{
+			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
+		}
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
+		Expect(err).ToNot(HaveOccurred())
+
+		node := test.NodeClaimLinkedNode(nodeClaim)
+		ExpectApplied(ctx, env.Client, node, nodeClaim)
+
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
+		ExpectExists(ctx, env.Client, node)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		Expect(nodeClaim.ObjectMeta.Annotations).To(Equal(map[string]string{
+			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
+		}))
 	})
 })

@@ -46,6 +46,21 @@ type NodeClaimSpec struct {
 	// NodeClassRef is a reference to an object that defines provider specific configuration
 	// +required
 	NodeClassRef *NodeClassReference `json:"nodeClassRef"`
+	// TerminationGracePeriod is the maximum duration the controller will wait before forcefully deleting the pods on a node, measured from when deletion is first initiated.
+	//
+	// Warning: this feature takes precedence over a Pod's terminationGracePeriodSeconds value, and bypasses any blocked PDBs or the karpenter.sh/do-not-disrupt annotation.
+	//
+	// This field is intended to be used by cluster administrators to enforce that nodes can be cycled within a given time period.
+	// When set, drifted nodes will begin draining even if there are pods blocking eviction. Draining will respect PDBs and the do-not-disrupt annotation until the TGP is reached.
+	//
+	// Karpenter will preemptively delete pods so their terminationGracePeriodSeconds align with the node's terminationGracePeriod.
+	// If a pod would be terminated without being granted its full terminationGracePeriodSeconds prior to the node timeout,
+	// that pod will be deleted at T = node timeout - pod terminationGracePeriodSeconds.
+	//
+	// The feature can also be used to allow maximum time limits for long-running jobs which can delay node termination with preStop hooks.
+	// If left undefined, the controller will wait indefinitely for pods to be drained.
+	// +optional
+	TerminationGracePeriod *metav1.Duration `json:"terminationGracePeriod,omitempty"`
 }
 
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values

@@ -473,12 +473,6 @@ func ExpectReconcileSucceeded(ctx context.Context, reconciler reconcile.Reconcil
 	return result
 }
 
-func ExpectReconcileFailed(ctx context.Context, reconciler reconcile.Reconciler, key client.ObjectKey) {
-	GinkgoHelper()
-	_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-	Expect(err).To(HaveOccurred())
-}
-
 func ExpectStatusConditionExists(obj status.Object, t string) status.Condition {
 	GinkgoHelper()
 	conds := obj.GetConditions()

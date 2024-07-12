@@ -349,13 +349,6 @@ func IsInsufficientCapacityError(err error) bool {
 	return errors.As(err, &icErr)
 }
 
-func IgnoreInsufficientCapacityError(err error) error {
-	if IsInsufficientCapacityError(err) {
-		return nil
-	}
-	return err
-}
-
 // NodeClassNotReadyError is an error type returned by CloudProviders when a NodeClass that is used by the launch process doesn't have all its resolved fields
 type NodeClassNotReadyError struct {
 	error
@@ -377,11 +370,4 @@ func IsNodeClassNotReadyError(err error) bool {
 	}
 	var nrError *NodeClassNotReadyError
 	return errors.As(err, &nrError)
-}
-
-func IgnoreNodeClassNotReadyError(err error) error {
-	if IsNodeClassNotReadyError(err) {
-		return nil
-	}
-	return err
 }
