@@ -112,6 +112,10 @@ func (c *EmptyNodeConsolidation) Type() string {
 	return metrics.ConsolidationReason
 }
 
+func (c *EmptyNodeConsolidation) Class() string {
+	return GracefulDisruptionClass
+}
+
 func (c *EmptyNodeConsolidation) ConsolidationType() string {
 	return "empty"
 }

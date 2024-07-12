@@ -584,7 +584,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -648,7 +648,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -675,7 +675,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -739,7 +739,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -766,7 +766,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -830,7 +830,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
 			var wg sync.WaitGroup
@@ -2862,6 +2862,113 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
+		})
+		It("does not consolidate nodes with karpenter.sh/do-not-disrupt on pods when the NodePool's TerminationGracePeriod is not nil", func() {
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			// Block this pod from being disrupted with karpenter.sh/do-not-disrupt
+			pods[0].Annotations = lo.Assign(pods[0].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			pods[1].Annotations = lo.Assign(pods[1].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+			pods[2].Annotations = lo.Assign(pods[2].Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
+
+			nodeClaims[0].Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			nodeClaims[1].Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
+			ExpectSingletonReconciled(ctx, queue)
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
+
+			// we should delete the non-annotated node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		})
+		It("does not consolidate nodes with pods with blocking PDBs when the NodePool's TerminationGracePeriod is not nil", func() {
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+
+			budget := test.PodDisruptionBudget(test.PDBOptions{
+				Labels:         labels,
+				MaxUnavailable: fromInt(0),
+			})
+
+			nodeClaims[0].Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			nodeClaims[1].Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool, budget)
+			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1])
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectTriggerVerifyAction(&wg)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
+			ExpectSingletonReconciled(ctx, queue)
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
+
+			// we should delete the non-annotated node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 		})
 		It("can delete nodes, evicts pods without an ownerRef", func() {
 			// create our RS so we can link a pod to it
