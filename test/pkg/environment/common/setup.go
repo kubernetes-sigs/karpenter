@@ -48,6 +48,13 @@ import (
 const TestingFinalizer = "testing/finalizer"
 
 var (
+	ObjectsToPrint = []client.Object{
+		&corev1.Pod{},
+		&v1.NodePool{},
+		&corev1.Node{},
+		&v1.NodeClaim{},
+		&v1alpha1.KWOKNodeClass{},
+	}
 	CleanableObjects = []client.Object{
 		&corev1.Pod{},
 		&appsv1.Deployment{},
@@ -92,7 +99,6 @@ func (env *Environment) ExpectCleanCluster() {
 		Expect(pods.Items[i].Namespace).ToNot(Equal("default"),
 			fmt.Sprintf("expected no pods in the `default` namespace, found %s/%s", pods.Items[i].Namespace, pods.Items[i].Name))
 	}
-	// TODO @njtran add KWOKNodeClass
 	for _, obj := range []client.Object{&v1.NodePool{}, &v1alpha1.KWOKNodeClass{}} {
 		metaList := &metav1.PartialObjectMetadataList{}
 		gvk := lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme()))
@@ -103,6 +109,9 @@ func (env *Environment) ExpectCleanCluster() {
 }
 
 func (env *Environment) Cleanup() {
+	if !CurrentSpecReport().Failure.IsZero() {
+		env.PrintCluster()
+	}
 	env.TimeIntervalCollector.Start(debug.StageAfterEach)
 	env.CleanupObjects(CleanableObjects...)
 	env.eventuallyExpectScaleDown()
@@ -114,6 +123,22 @@ func (env *Environment) AfterEach() {
 	debug.AfterEach(env.Context)
 	env.TimeIntervalCollector.Record(CurrentSpecReport().LeafNodeText)
 	env.printControllerLogs(&corev1.PodLogOptions{Container: "controller"})
+}
+
+func (env *Environment) PrintCluster() {
+	for _, obj := range ObjectsToPrint {
+		gvk := lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme()))
+		By(fmt.Sprintf("printing %s(s)", gvk.Kind))
+		// This only gets the metadata for the objects since we don't need all the details of the objects
+		metaList := &metav1.PartialObjectMetadataList{}
+		metaList.SetGroupVersionKind(lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme())))
+		Expect(env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel}))).To(Succeed())
+		for _, item := range metaList.Items {
+			fmt.Println(item)
+			fmt.Println()
+		}
+		fmt.Println("---------------------------")
+	}
 }
 
 func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {
