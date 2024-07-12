@@ -42,7 +42,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
-	"sigs.k8s.io/karpenter/pkg/controllers/orb/orbbatcher"
+	"sigs.k8s.io/karpenter/pkg/controllers/orb"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -62,7 +62,7 @@ var (
 	cloudProvider       *fake.CloudProvider
 	prov                *provisioning.Provisioner
 	env                 *test.Environment
-	SIHeap              *orbbatcher.SchedulingInputHeap
+	SIHeap              *orb.SchedulingInputHeap
 	instanceTypeMap     map[string]*cloudprovider.InstanceType
 )
 
@@ -79,7 +79,7 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	SIHeap = orbbatcher.NewSchedulingInputHeap()
+	SIHeap = orb.NewSchedulingInputHeap()
 	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, SIHeap)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)

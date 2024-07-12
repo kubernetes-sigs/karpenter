@@ -52,7 +52,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/orb/orbbatcher"
+	"sigs.k8s.io/karpenter/pkg/controllers/orb"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -83,12 +83,12 @@ type Provisioner struct {
 	volumeTopology *scheduler.VolumeTopology
 	cluster        *state.Cluster
 	recorder       events.Recorder
-	SIheap         *orbbatcher.SchedulingInputHeap
+	SIheap         *orb.SchedulingInputHeap
 	cm             *pretty.ChangeMonitor
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
-	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, SIheap *orbbatcher.SchedulingInputHeap,
+	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, SIheap *orb.SchedulingInputHeap,
 ) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
