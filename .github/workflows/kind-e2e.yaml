@@ -73,7 +73,7 @@ jobs:
     - name: run test analysis
       shell: bash
       run: |
-        python ./karpenter_eval/main.py
+        OUTPUT_DIR=${{ env.OUTPUT_DIR }} python ./karpenter_eval/main.py
     - name: cleanup 
       shell: bash
       run: | 
