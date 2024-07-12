@@ -1,12 +1,11 @@
 name: kind-e2e
 on:
-  # enable running this on merges + presubmits when the action has tests that it will execute
-  # push:
-  #   branches: [main]
-  # pull_request:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 jobs:
-  test-kind:
+  kind-e2e:
     permissions:
       issues: write
     runs-on: ubuntu-latest
@@ -69,8 +68,12 @@ jobs:
       run: |
         OUTPUT_DIR=$(mktemp -d)
         export OUTPUT_DIR
+        echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         make e2etests
-        python ./karpenter_eval/main.py
+    - name: run test analysis
+      shell: bash
+      run: |
+        OUTPUT_DIR=${{ env.OUTPUT_DIR }} python ./karpenter_eval/main.py
     - name: cleanup 
       shell: bash
       run: | 

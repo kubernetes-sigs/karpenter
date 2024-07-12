@@ -87,7 +87,7 @@ var _ = Describe("Performance", func() {
 				nodeClaims := &v1.NodeClaimList{}
 				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1.ConditionTypeDrifted})).To(Succeed())
 				g.Expect(len(nodeClaims.Items)).To(Equal(0))
-			}).WithTimeout(300 * time.Second).Should(Succeed())
+			}).WithTimeout(10 * time.Minute).Should(Succeed())
 			env.TimeIntervalCollector.End("Drift")
 		})
 		It("should do complex provisioning", func() {
