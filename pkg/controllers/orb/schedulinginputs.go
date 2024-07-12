@@ -17,10 +17,16 @@ limitations under the License.
 package orb
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 
 	"github.com/samber/lo"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+
 	//"google.golang.org/protobuf/proto"
 	proto "github.com/gogo/protobuf/proto"
 	v1 "k8s.io/api/core/v1"
@@ -28,15 +34,21 @@ import (
 
 // Timestamp, dynamic inputs (like pending pods, statenodes, etc.)
 type SchedulingInput struct {
-	Timestamp   time.Time
-	PendingPods []*v1.Pod
+	Timestamp     time.Time
+	PendingPods   []*v1.Pod
+	StateNodes    []*state.StateNode
+	InstanceTypes []*cloudprovider.InstanceType
 	//all the other scheduling inputs...
 }
 
 func (si SchedulingInput) String() string {
-	return fmt.Sprintf("Timestamp: %v\nPendingPods:\n%v",
+	return fmt.Sprintf("Scheduled at Time (UTC): %v\n\nPendingPods:\n\n%vStateNodes:\n\n%vInstanceTypes:\n\n%v",
 		si.Timestamp.Format("2006-01-02_15-04-05"),
-		PodsToString(si.PendingPods))
+		PodsToString(si.PendingPods),
+		StateNodesToString(si.StateNodes),
+		InstanceTypesToString(si.InstanceTypes),
+	)
+
 }
 
 // Function takes a slice of pod pointers and returns a string representation of the pods
@@ -117,10 +129,12 @@ func PBToSchedulingInput(timestamp time.Time, data []byte) (SchedulingInput, err
 	return ReconstructedSchedulingInput(timestamp, pods), nil
 }
 
-func NewSchedulingInput(pendingPods []*v1.Pod) SchedulingInput {
+func NewSchedulingInput(pendingPods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes []*cloudprovider.InstanceType) SchedulingInput {
 	return SchedulingInput{
-		Timestamp:   time.Now(),
-		PendingPods: pendingPods,
+		Timestamp:     time.Now(),
+		PendingPods:   pendingPods,
+		StateNodes:    stateNodes,
+		InstanceTypes: instanceTypes,
 	}
 }
 
@@ -130,4 +144,105 @@ func ReconstructedSchedulingInput(timestamp time.Time, pendingPods []*v1.Pod) Sc
 		Timestamp:   timestamp,
 		PendingPods: pendingPods,
 	}
+}
+
+/* The following functions are testing toString functions that will mirror what the serialization
+   deserialization functions will do in protobuf. These are inefficient, but human-readable */
+
+// TODO: This eventually will be "as simple" as reconstructing the data structures from
+// the log data and using K8S and/or Karpenter representation to present as JSON or YAML or something
+
+// This function as a human readable test function for serializing desired pod data
+// It takes in a v1.Pod and gets the string representations of all the fields we care about.
+func PodToString(pod *v1.Pod) string {
+	if pod == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("Name: %s,\nNamespace: %s,\nPhase: %s,\nNodeName: %s", pod.Name, pod.Namespace, pod.Status.Phase, pod.Spec.NodeName)
+}
+
+func PodsToString(pods []*v1.Pod) string {
+	if pods == nil {
+		return "<nil>"
+	}
+	var buf bytes.Buffer
+	for _, pod := range pods {
+		buf.WriteString(PodToString(pod) + "\n") // TODO: Can replace with pod.String() if I want/need
+	}
+	return buf.String()
+}
+
+// Similar function for stateNode
+func StateNodeToString(node *state.StateNode) string {
+	if node == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("Node: %s,\nNodeClaim: %s", NodeToString(node.Node), NodeClaimToString(node.NodeClaim))
+}
+
+func StateNodesToString(nodes []*state.StateNode) string {
+	if nodes == nil {
+		return "<nil>"
+	}
+	var buf bytes.Buffer
+	for _, node := range nodes {
+		buf.WriteString(StateNodeToString(node) + "\n")
+	}
+	return buf.String()
+}
+
+// Similar function for human-readable string serialization of a v1.Node
+func NodeToString(node *v1.Node) string {
+	if node == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("Name: %s,\nStatus: %s,\nNodeName: %s", node.Name, node.Status.Phase, node.Status.NodeInfo.SystemUUID)
+}
+
+// Similar function for NodeClaim
+func NodeClaimToString(nodeClaim *v1beta1.NodeClaim) string {
+	if nodeClaim == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NodeClaimName: %s", nodeClaim.Name)
+}
+
+// Similar for instanceTypes (name, requirements, offerings, capacity, overhead
+func InstanceTypeToString(instanceType *cloudprovider.InstanceType) string {
+	if instanceType == nil {
+		return "<nil>"
+	}
+	// TODO: String print the sub-types, like Offerings, too, all of them
+	return fmt.Sprintf("Name: %s,\nRequirements: %s,\nOfferings: %s", instanceType.Name,
+		RequirementsToString(instanceType.Requirements), OfferingToString(&instanceType.Offerings[0]))
+}
+
+func InstanceTypesToString(instanceTypes []*cloudprovider.InstanceType) string {
+	if instanceTypes == nil {
+		return "<nil>"
+	}
+	var buf bytes.Buffer
+	for _, instanceType := range instanceTypes {
+		buf.WriteString(InstanceTypeToString(instanceType) + "\n")
+	}
+	return buf.String()
+}
+
+// Similar for IT Requirements
+// karpenter.sh/capacity-type In [on-demand spot]
+// topology.k8s.aws/zone-id In [usw2-az1 usw2-az2 usw2-az3],
+// topology.kubernetes.io/zone In [us-west-2a us-west-2b us-west-2c]
+func RequirementsToString(requirements scheduling.Requirements) string {
+	if requirements == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("Requirements: %s, %s, %s", requirements.Get("karpenter.sh/capacity-type"), requirements.Get("topology.k8s.aws/zone-id"), requirements.Get("topology.kubernetes.io/zone"))
+}
+
+// Similar for IT Offerings (Price, Availability)
+func OfferingToString(offering *cloudprovider.Offering) string {
+	if offering == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("Offering Price: %f,\nAvailable: %t", offering.Price, offering.Available)
 }

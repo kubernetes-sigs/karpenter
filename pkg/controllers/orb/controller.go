@@ -18,7 +18,6 @@ package orb
 
 import (
 	"bufio"
-	"bytes"
 	"container/heap"
 	"context"
 	"fmt"
@@ -37,11 +36,6 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 type Controller struct {
@@ -76,11 +70,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			return reconcile.Result{}, err
 		}
 
-		err = c.testReadPVandReconstruct(item)
-		if err != nil {
-			fmt.Println("Error reconstructing from PV:", err)
-			return reconcile.Result{}, err
-		}
+		// err = c.testReadPVandReconstruct(item)
+		// if err != nil {
+		// 	fmt.Println("Error reconstructing from PV:", err)
+		// 	return reconcile.Result{}, err
+		// }
 	}
 
 	fmt.Println("----------- Ending a Reconcile Print from ORB -----------")
@@ -97,83 +91,6 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(c))
 }
 
-/* The following functions are testing toString functions that will mirror what the serialization
-   deserialization functions will do in protobuf. These are inefficient, but human-readable */
-
-// TODO: This eventually will be "as simple" as reconstructing the data structures from
-// the log data and using K8S and/or Karpenter representation to present as JSON or YAML or something
-
-// This function as a human readable test function for serializing desired pod data
-// It takes in a v1.Pod and gets the string representations of all the fields we care about.
-func PodToString(pod *v1.Pod) string {
-	if pod == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("Name: %s, Namespace: %s, Phase: %s, NodeName: %s", pod.Name, pod.Namespace, pod.Status.Phase, pod.Spec.NodeName)
-}
-
-func PodsToString(pods []*v1.Pod) string {
-	if pods == nil {
-		return "<nil>"
-	}
-	var buf bytes.Buffer
-	for _, pod := range pods {
-		buf.WriteString(PodToString(pod) + "\n")
-	}
-	return buf.String()
-}
-
-// Similar function for stateNode
-func StateNodeToString(node *state.StateNode) string {
-	if node == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("Node: %s, NodeClaim: %s", NodeToString(node.Node), NodeClaimToString(node.NodeClaim))
-}
-
-// Similar function for human-readable string serialization of a v1.Node
-func NodeToString(node *v1.Node) string {
-	if node == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("Name: %s, Status: %s, NodeName: %s", node.Name, node.Status.Phase, node.Status.NodeInfo.SystemUUID)
-}
-
-// Similar function for NodeClaim
-func NodeClaimToString(nodeClaim *v1beta1.NodeClaim) string {
-	if nodeClaim == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("NodeClaimName: %s", nodeClaim.Name)
-}
-
-// Similar for instanceTypes (name, requirements, offerings, capacity, overhead
-func InstanceTypeToString(instanceType *cloudprovider.InstanceType) string {
-	if instanceType == nil {
-		return "<nil>"
-	}
-	// TODO: String print the sub-types, like Offerings, too, all of them
-	return fmt.Sprintf("Name: %s, Requirements: %s, Offerings: %s", instanceType.Name,
-		RequirementsToString(&instanceType.Requirements), OfferingToString(&instanceType.Offerings[0]))
-}
-
-// Similar for IT Requirements
-func RequirementsToString(requirements *scheduling.Requirements) string {
-	if requirements == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("Requirements: %s", requirements)
-}
-
-// Similar for IT Offerings (Requirements, Price, Availability)
-func OfferingToString(offering *cloudprovider.Offering) string {
-	if offering == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("Offering Requirements: %s, Price: %f, Available: %t",
-		RequirementsToString(&offering.Requirements), offering.Price, offering.Available)
-}
-
 /* This function saves things to our Persistent Volume */
 // Saves data to PV (S3 Bucket for AWS) via the mounted log path
 // It takes a name of the log file as well as the logline to be logged.
@@ -181,11 +98,14 @@ func OfferingToString(offering *cloudprovider.Offering) string {
 func (c *Controller) SaveToPV(item SchedulingInput) error {
 
 	fmt.Println("Saving Scheduling Input to PV:\n", item.String()) // Test print
-	logdata, err := item.Marshal()
-	if err != nil {
-		fmt.Println("Error converting Scheduling Input to Protobuf:", err)
-		return err
-	}
+	// logdata, err := item.Marshal()
+	// if err != nil {
+	// 	fmt.Println("Error converting Scheduling Input to Protobuf:", err)
+	// 	return err
+	// }
+
+	// Instead of the above, In the interim while I figure out the custom protobuf... Just send string to file
+	logdata := item.String()
 
 	// Timestamp the file
 	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05")
@@ -201,14 +121,21 @@ func (c *Controller) SaveToPV(item SchedulingInput) error {
 	}
 	defer file.Close()
 
-	// Writes data to the file
-	_, err = fmt.Fprintln(file, timestampStr)
-	if err != nil {
-		fmt.Println("Error writing timestamp to file:", err)
-		return err
-	}
+	// // Writes data to the file
+	// _, err = fmt.Fprintln(file, timestampStr)
+	// if err != nil {
+	// 	fmt.Println("Error writing timestamp to file:", err)
+	// 	return err
+	// }
 
-	_, err = file.Write(logdata)
+	// _, err = file.Write(logdata)
+	// if err != nil {
+	// 	fmt.Println("Error writing data to file:", err)
+	// 	return err
+	// }
+
+	// Only here while testing string print
+	_, err = fmt.Fprintln(file, logdata)
 	if err != nil {
 		fmt.Println("Error writing data to file:", err)
 		return err
