@@ -90,10 +90,11 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
 	}
 
-	nodeTerminationTime, err := c.nodeTerminationTime(nodeClaims...)
+	nodeTerminationTime, err := c.nodeTerminationTime(node, nodeClaims...)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+
 	if err := c.terminator.Taint(ctx, node, v1.DisruptionNoScheduleTaint); err != nil {
 		return reconcile.Result{}, fmt.Errorf("tainting node with %s, %w", v1.DisruptionTaintKey, err)
 	}
@@ -176,7 +177,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error 
 	return nil
 }
 
-func (c *Controller) nodeTerminationTime(nodeClaims ...*v1.NodeClaim) (*time.Time, error) {
+func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaims ...*v1.NodeClaim) (*time.Time, error) {
 	if len(nodeClaims) == 0 {
 		return nil, nil
 	}
@@ -184,6 +185,7 @@ func (c *Controller) nodeTerminationTime(nodeClaims ...*v1.NodeClaim) (*time.Tim
 	if !exists {
 		return nil, nil
 	}
+	c.recorder.Publish(terminatorevents.NodeTerminationGracePeriodExpiring(node, expirationTimeString))
 	expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s annotation, %w", v1.NodeClaimTerminationTimestampAnnotationKey, err)

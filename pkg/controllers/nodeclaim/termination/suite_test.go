@@ -311,6 +311,9 @@ var _ = Describe("Termination", func() {
 	})
 	It("should not change the annotation if the NodeClaim has a terminationGracePeriod and the annotation already exists", func() {
 		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+		nodeClaim.ObjectMeta.Annotations = map[string]string{
+			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
+		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
 
@@ -319,10 +322,7 @@ var _ = Describe("Termination", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
-		nodeClaim.ObjectMeta.Annotations = map[string]string{
-			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
-		}
-		ExpectApplied(ctx, env.Client, node)
+		ExpectApplied(ctx, env.Client, node, nodeClaim)
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the node deletion
