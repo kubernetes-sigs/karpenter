@@ -55,11 +55,11 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *Queue, recorde
 // Taint idempotently adds a given taint to a node with a NodeClaim
 func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.Taint) error {
 	stored := node.DeepCopy()
-	// If the node already has the correct taint (key, value, and effect), do nothing.
+	// If the node already has the correct taint (key and effect), do nothing.
 	if _, ok := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
 		return t.MatchTaint(&taint)
 	}); !ok {
-		// Otherwise, if the taint key exists (but with a different value or effect), remove it.
+		// Otherwise, if the taint key exists (but with a different effect), remove it.
 		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
 			return t.Key == taint.Key
 		})
@@ -101,7 +101,7 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 		return podutil.IsWaitingEviction(p, t.clock) && !podutil.IsTerminating(p)
 	})
 	if err := t.DeleteExpiringPods(ctx, podsToDelete, nodeGracePeriodExpirationTime); err != nil {
-		return err
+		return fmt.Errorf("deleting expiring pods, %w", err)
 	}
 
 	// evictablePods are pods that aren't yet terminating are eligible to have the eviction API called against them
@@ -169,7 +169,7 @@ func (t *Terminator) DeleteExpiringPods(ctx context.Context, pods []*corev1.Pod,
 				GracePeriodSeconds: gracePeriodSeconds,
 			}
 			if err := t.kubeClient.Delete(ctx, pod, opts); err != nil && !apierrors.IsNotFound(err) { // ignore 404, not a problem
-				return err // otherwise, bubble up the error
+				return fmt.Errorf("deleting pod, %w", err) // otherwise, bubble up the error
 			}
 			log.FromContext(ctx).WithValues(
 				"namespace", pod.Namespace,

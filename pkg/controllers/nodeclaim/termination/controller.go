@@ -93,7 +93,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 	for _, node := range nodes {
 		err = c.ensureTerminationGracePeriodTerminationTimeAnnotation(ctx, node, nodeClaim)
 		if err != nil {
-			return reconcile.Result{}, err
+			return reconcile.Result{}, fmt.Errorf("adding nodeclaim terminationGracePeriod annotation, %w", err)
 		}
 
 		// If we still get the Node, but it's already marked as terminating, we don't need to call Delete again
