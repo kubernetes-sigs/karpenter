@@ -68,7 +68,7 @@ jobs:
       run: |
         OUTPUT_DIR=$(mktemp -d)
         export OUTPUT_DIR
-        echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"\
+        echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         make e2etests
     - name: run test analysis
       shell: bash
