@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -41,8 +42,10 @@ type SchedulingInput struct {
 	//all the other scheduling inputs...
 }
 
+// TODO: I need to flip the construct here. I should be generating some stripped/minimal subset of these data structures
+// which are already the representation that I'd like to print. i.e. store in memory only what I want to print anyway
 func (si SchedulingInput) String() string {
-	return fmt.Sprintf("Scheduled at Time (UTC): %v\n\nPendingPods:\n\n%vStateNodes:\n\n%vInstanceTypes:\n\n%v",
+	return fmt.Sprintf("Scheduled at Time (UTC): %v\n\nPendingPods: %v\n\nStateNodes: %v\n\nInstanceTypes:%v\n\n",
 		si.Timestamp.Format("2006-01-02_15-04-05"),
 		PodsToString(si.PendingPods),
 		StateNodesToString(si.StateNodes),
@@ -158,7 +161,7 @@ func PodToString(pod *v1.Pod) string {
 	if pod == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Name: %s,\nNamespace: %s,\nPhase: %s,\nNodeName: %s", pod.Name, pod.Namespace, pod.Status.Phase, pod.Spec.NodeName)
+	return fmt.Sprintf("Name: %s,\nNamespace: %s,\nPhase: %s", pod.Name, pod.Namespace, pod.Status.Phase)
 }
 
 func PodsToString(pods []*v1.Pod) string {
@@ -167,7 +170,8 @@ func PodsToString(pods []*v1.Pod) string {
 	}
 	var buf bytes.Buffer
 	for _, pod := range pods {
-		buf.WriteString(PodToString(pod) + "\n") // TODO: Can replace with pod.String() if I want/need
+		buf.WriteString(PodToString(StripPod(pod)) + "\n")
+		//buf.WriteString(PodToString(pod) + "\n") // TODO: Can replace with pod.String() if I want/need
 	}
 	return buf.String()
 }
@@ -196,7 +200,7 @@ func NodeToString(node *v1.Node) string {
 	if node == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Name: %s,\nStatus: %s,\nNodeName: %s", node.Name, node.Status.Phase, node.Status.NodeInfo.SystemUUID)
+	return fmt.Sprintf("Name: %s, Status: %s,", node.Name, node.Status.Phase)
 }
 
 // Similar function for NodeClaim
@@ -245,4 +249,22 @@ func OfferingToString(offering *cloudprovider.Offering) string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("Offering Price: %f,\nAvailable: %t", offering.Price, offering.Available)
+}
+
+// Potential stripping commands
+
+// Strips a Pod to only the constituent parts we care about (i.e. Name, Namespace and Phase)
+func StripPod(pod *v1.Pod) *v1.Pod {
+	strippedPod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pod.Name,
+			Namespace: pod.Namespace,
+		},
+		Status: v1.PodStatus{
+			Phase: pod.Status.Phase,
+		},
+	}
+	//Test Print
+	fmt.Println("Stripped Pod: ", strippedPod.String())
+	return strippedPod
 }
