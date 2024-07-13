@@ -61,5 +61,6 @@ func NewSchedulingInputHeap() *SchedulingInputHeap {
 // Function for logging everything in the Provisioner Scheduler (i.e. pending pods, statenodes...)
 func (h *SchedulingInputHeap) LogProvisioningScheduler(pods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes map[string][]*cloudprovider.InstanceType) {
 	si := NewSchedulingInput(pods, stateNodes, instanceTypes["default"]) // TODO: add all inputs I want to log
+	si = si.Reduce()                                                     // Strip out "unnecessary" parts of the data structure...
 	h.Push(si)                                                           // sends that scheduling input into the data structure to be popped in batch to go to PV as a protobuf
 }

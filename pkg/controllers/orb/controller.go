@@ -97,7 +97,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 // The function opens a file for writing, writes some data to the file, and then closes the file
 func (c *Controller) SaveToPV(item SchedulingInput) error {
 
-	fmt.Println("Saving Scheduling Input to PV:\n", item.String()) // Test print
+	//fmt.Println("Saving Scheduling Input to PV:\n", item.String()) // Test print
 	// logdata, err := item.Marshal()
 	// if err != nil {
 	// 	fmt.Println("Error converting Scheduling Input to Protobuf:", err)

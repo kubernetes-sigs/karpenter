@@ -42,16 +42,24 @@ type SchedulingInput struct {
 	//all the other scheduling inputs...
 }
 
+func (si SchedulingInput) Reduce() SchedulingInput {
+	return SchedulingInput{
+		Timestamp:     si.Timestamp,
+		PendingPods:   reducePods(si.PendingPods),
+		StateNodes:    reduceStateNodes(si.StateNodes),
+		InstanceTypes: reduceInstanceTypes(si.InstanceTypes),
+	}
+}
+
 // TODO: I need to flip the construct here. I should be generating some stripped/minimal subset of these data structures
 // which are already the representation that I'd like to print. i.e. store in memory only what I want to print anyway
 func (si SchedulingInput) String() string {
-	return fmt.Sprintf("Scheduled at Time (UTC): %v\n\nPendingPods: %v\n\nStateNodes: %v\n\nInstanceTypes:%v\n\n",
+	return fmt.Sprintf("Scheduled at Time (UTC): %v\n\nPendingPods:\n%v\n\nStateNodes:\n%v\n\nInstanceTypes:\n%v\n\n",
 		si.Timestamp.Format("2006-01-02_15-04-05"),
 		PodsToString(si.PendingPods),
 		StateNodesToString(si.StateNodes),
 		InstanceTypesToString(si.InstanceTypes),
 	)
-
 }
 
 // Function takes a slice of pod pointers and returns a string representation of the pods
@@ -161,7 +169,7 @@ func PodToString(pod *v1.Pod) string {
 	if pod == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Name: %s,\nNamespace: %s,\nPhase: %s", pod.Name, pod.Namespace, pod.Status.Phase)
+	return fmt.Sprintf("{Name: %s, Namespace: %s, Phase: %s}", pod.Name, pod.Namespace, pod.Status.Phase)
 }
 
 func PodsToString(pods []*v1.Pod) string {
@@ -170,8 +178,7 @@ func PodsToString(pods []*v1.Pod) string {
 	}
 	var buf bytes.Buffer
 	for _, pod := range pods {
-		buf.WriteString(PodToString(StripPod(pod)) + "\n")
-		//buf.WriteString(PodToString(pod) + "\n") // TODO: Can replace with pod.String() if I want/need
+		buf.WriteString(PodToString(pod) + "\n") // TODO: Can replace with pod.String() if I want/need
 	}
 	return buf.String()
 }
@@ -181,7 +188,7 @@ func StateNodeToString(node *state.StateNode) string {
 	if node == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Node: %s,\nNodeClaim: %s", NodeToString(node.Node), NodeClaimToString(node.NodeClaim))
+	return fmt.Sprintf("{Node: %s, NodeClaim: %s}", NodeToString(node.Node), NodeClaimToString(node.NodeClaim))
 }
 
 func StateNodesToString(nodes []*state.StateNode) string {
@@ -200,7 +207,7 @@ func NodeToString(node *v1.Node) string {
 	if node == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Name: %s, Status: %s,", node.Name, node.Status.Phase)
+	return fmt.Sprintf("{Name: %s, Status: %s}", node.Name, node.Status.Phase)
 }
 
 // Similar function for NodeClaim
@@ -208,7 +215,7 @@ func NodeClaimToString(nodeClaim *v1beta1.NodeClaim) string {
 	if nodeClaim == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("NodeClaimName: %s", nodeClaim.Name)
+	return fmt.Sprintf("{NodeClaimName: %s}", nodeClaim.Name)
 }
 
 // Similar for instanceTypes (name, requirements, offerings, capacity, overhead
@@ -217,8 +224,8 @@ func InstanceTypeToString(instanceType *cloudprovider.InstanceType) string {
 		return "<nil>"
 	}
 	// TODO: String print the sub-types, like Offerings, too, all of them
-	return fmt.Sprintf("Name: %s,\nRequirements: %s,\nOfferings: %s", instanceType.Name,
-		RequirementsToString(instanceType.Requirements), OfferingToString(&instanceType.Offerings[0]))
+	return fmt.Sprintf("Name: %s,\nRequirements: %s,\nOffering: %s", instanceType.Name,
+		RequirementsToString(instanceType.Requirements), OfferingsToString(instanceType.Offerings))
 }
 
 func InstanceTypesToString(instanceTypes []*cloudprovider.InstanceType) string {
@@ -240,7 +247,10 @@ func RequirementsToString(requirements scheduling.Requirements) string {
 	if requirements == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Requirements: %s, %s, %s", requirements.Get("karpenter.sh/capacity-type"), requirements.Get("topology.k8s.aws/zone-id"), requirements.Get("topology.kubernetes.io/zone"))
+	capacityType := requirements.Get("karpenter.sh/capacity-type")
+	zoneID := requirements.Get("topology.k8s.aws/zone-id")
+	zone := requirements.Get("topology.kubernetes.io/zone")
+	return fmt.Sprintf("{%s, %s, %s}", capacityType, zoneID, zone)
 }
 
 // Similar for IT Offerings (Price, Availability)
@@ -248,23 +258,119 @@ func OfferingToString(offering *cloudprovider.Offering) string {
 	if offering == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Offering Price: %f,\nAvailable: %t", offering.Price, offering.Available)
+	return fmt.Sprintf("{Requirements: %v, Price: %f, Available: %t}", RequirementsToString(offering.Requirements), offering.Price, offering.Available)
 }
 
-// Potential stripping commands
-
-// Strips a Pod to only the constituent parts we care about (i.e. Name, Namespace and Phase)
-func StripPod(pod *v1.Pod) *v1.Pod {
-	strippedPod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pod.Name,
-			Namespace: pod.Namespace,
-		},
-		Status: v1.PodStatus{
-			Phase: pod.Status.Phase,
-		},
+func OfferingsToString(offerings cloudprovider.Offerings) string {
+	if offerings == nil {
+		return "<nil>"
 	}
-	//Test Print
-	fmt.Println("Stripped Pod: ", strippedPod.String())
-	return strippedPod
+	var buf bytes.Buffer
+	for _, offering := range offerings {
+		buf.WriteString(OfferingToString(&offering) + "\n")
+	}
+	return buf.String()
+}
+
+// InstanceTypes
+
+// Resource reducing commands
+
+// Reduces a Pod to only the constituent parts we care about (i.e. Name, Namespace and Phase)
+func reducePods(pods []*v1.Pod) []*v1.Pod {
+	var strippedPods []*v1.Pod
+
+	for _, pod := range pods {
+		strippedPod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+			},
+			Status: v1.PodStatus{
+				Phase: pod.Status.Phase,
+			},
+		}
+		strippedPods = append(strippedPods, strippedPod)
+	}
+
+	return strippedPods
+}
+
+func reduceStateNodes(nodes []*state.StateNode) []*state.StateNode {
+	var strippedNodes []*state.StateNode
+
+	for _, node := range nodes {
+		if node != nil {
+			strippedNode := &state.StateNode{}
+
+			if node.Node != nil {
+				strippedNode.Node = &v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node.Node.Name,
+					},
+					Status: node.Node.Status,
+				}
+			}
+
+			if node.NodeClaim != nil {
+				strippedNode.NodeClaim = &v1beta1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node.NodeClaim.Name,
+					},
+				}
+			}
+
+			if strippedNode.Node != nil || strippedNode.NodeClaim != nil {
+				strippedNodes = append(strippedNodes, strippedNode)
+			}
+		}
+	}
+	return strippedNodes
+}
+
+func reduceOfferings(offerings cloudprovider.Offerings) cloudprovider.Offerings {
+	var strippedOfferings cloudprovider.Offerings
+
+	for _, offering := range offerings {
+		strippedOffering := &cloudprovider.Offering{
+			Requirements: reduceRequirements(offering.Requirements),
+			Price:        offering.Price,
+			Available:    offering.Available,
+		}
+		strippedOfferings = append(strippedOfferings, *strippedOffering) // TODO am I handling this pointer dereference right?
+	}
+
+	return strippedOfferings
+}
+
+// Grab only these key'd values from requirements... karpenter.sh/capacity-type, topology.k8s.aws/zone-id and topology.kubernetes.io/zone
+// TODO Should these keys be called more generically? i.e. via v1beta1.CapacityTypeLabelKey, v1.LabelTopologyZone or something?
+func reduceRequirements(requirements scheduling.Requirements) scheduling.Requirements {
+	// Create a new map to store the reduced requirements
+	reducedRequirements := make(scheduling.Requirements)
+
+	// Iterate over the requirements map and add the relevant keys and values to the reducedRequirements map
+	for key, value := range requirements {
+		switch key {
+		case "karpenter.sh/capacity-type", "topology.k8s.aws/zone-id", "topology.kubernetes.io/zone":
+			reducedRequirements[key] = value
+		}
+	}
+
+	return reducedRequirements
+}
+
+func reduceInstanceTypes(types []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
+	var strippedTypes []*cloudprovider.InstanceType
+
+	for _, instanceType := range types {
+		strippedType := &cloudprovider.InstanceType{
+			Name:         instanceType.Name,
+			Requirements: reduceRequirements(instanceType.Requirements),
+			Offerings:    reduceOfferings(instanceType.Offerings.Available()),
+		}
+		strippedTypes = append(strippedTypes, strippedType)
+	}
+
+	return strippedTypes
 }
