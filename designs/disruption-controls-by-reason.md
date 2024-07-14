@@ -13,7 +13,7 @@ See further breakdown of some additional scenarios towards the bottom of the doc
 
 ## Clarifying the requirements and behavior 
 **Reason and Budget Definition:** Users should be able to define an reason and a corresponding budget(s).
-**Supported Reasons:** All disruption Reasons affected by the current Budgets implementation (underutilized, empty, expired, drifted) should be supported. 
+**Supported Reasons:** All disruption Reasons affected by the current Budgets implementation (Underutilized, Empty, Drifted) should be supported. 
 **Default Behavior for Unspecified Reasons:** Budgets should continue to support a default behavior for all disruption reasons. 
 
 # API Design
@@ -29,10 +29,10 @@ type Budget struct {
       // If a reason is set, it will only apply to that method. If multiple reasons are specified,
       // this budget will apply to all of them. If a reason is unspecified we will take the min value of this budget and the rest of the active budgets.
       // if an unspecified reason exists we will also override all other reasons with its value if they are smaller than the unspecified reason.
-      // allowed reasons are "underutilized", "expired", "empty", "drifted"
+      // allowed reasons are "Underutilized", "Empty", "Drifted"
       // +kubebuilder:validation:UniqueItems
       // +kubebuilder:validation:MaxItems=4
-      // +kubebuilder:validation:Enum:={"underutilized","expired","empty","drifted"}
+      // +kubebuilder:validation:Enum:={"Underutilized","Empty","Drifted"}
       // +optional
       Reasons []string `json:"reason,omitempty" hash:"ignore"`
       // Nodes dictates the maximum number of NodeClaims owned by this NodePool
@@ -73,7 +73,7 @@ spec: # This is not a complete NodePool Spec.
   disruption:
     budgets:
     - schedule: "* * * * *"
-      reasons: [drifted, underutilized]
+      reasons: [Drifted, Underutilized]
       nodes: 10
     # For all other reasons, only allow 5 nodes to be disrupted at a time
     - nodes: 5
@@ -99,7 +99,7 @@ In this approach, each budget entry specifies a single reason for disruption.
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
       // +optional
-      // +kubebuilder:validation:Enum:={"underutilized","expired","empty","drifted"}
+      // +kubebuilder:validation:Enum:={"Underutilized","Empty","Drifted"}
       Reason string `json:"reason,omitempty" hash:"ignore"`
       // Nodes dictates the maximum number of NodeClaims owned by this NodePool
       // that can be terminating at once. This is calculated by counting nodes that
@@ -194,7 +194,7 @@ spec:
 #### Considerations 
 Some of the API choices for a given reason seem to follow a similar pattern. These include ConsolidateAfter, ExpireAfter. Moreover, when discussing disruption budgets, we talk about adding behavior for each reason. It appears there is a need for disruption controls within the budgets for each reason, not just overall.
 
-This approach aligns well with controls that apply to all existing reasons. The proposal presented here is similar to the one mentioned above in relation to the reasons we allow to be defined (underutilized, drifted, expired, empty).
+This approach aligns well with controls that apply to all existing reasons. The proposal presented here is similar to the one mentioned above in relation to the reasons we allow to be defined (Underutilized, Drifted, Empty).
 
 This proposal is currently scoped for disruptionBudgets by reason. However, we should also consider incorporating other generic disruption controls into the PerReasonControls, even if we do not implement them immediately. Moving ConsolidateAfter and ExpireAfter into the per-reason controls is a significant migration that requires careful planning and its own dedicated design. This proposal simply demonstrates a potential model that highlights the benefits of defining controls at a per-reason level of granularity.
 
@@ -328,10 +328,10 @@ spec: # This is not a complete NodePool Spec.
 ```yaml
 budgets: 
   - nodes: 10
-    reasons: [drifted, underutilized]
+    reasons: [Drifted, Underutilized]
     schedule: "* * * * *"
   - nodes: 5 
-    reasons: [empty] 
+    reasons: [Empty] 
     schedule: "* * * * *" 
 ```
 In the case of a budget like above, default is undefined. Should karpenter assume the user doesn't want to disrupt any other reasons? Or should we assume that if a default is unspecified, they want us to disrupt anyway?  

@@ -115,13 +115,13 @@ spec:
                             description: |-
                               Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
                               Otherwise, this will apply to each reason defined.
-                              allowed reasons are underutilized, empty, and drifted.
+                              allowed reasons are Underutilized, Empty, and Drifted.
                             items:
                               description: DisruptionReason defines valid reasons for disruption budgets.
                               enum:
-                                - underutilized
-                                - empty
-                                - drifted
+                                - Underutilized
+                                - Empty
+                                - Drifted
                               type: string
                             type: array
                           schedule:
@@ -591,13 +591,13 @@ spec:
                             description: |-
                               Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
                               Otherwise, this will apply to each reason defined.
-                              allowed reasons are underutilized, empty, and drifted.
+                              allowed reasons are Underutilized, Empty, and Drifted.
                             items:
                               description: DisruptionReason defines valid reasons for disruption budgets.
                               enum:
-                                - underutilized
-                                - empty
-                                - drifted
+                                - Underutilized
+                                - Empty
+                                - Drifted
                               type: string
                             type: array
                           schedule:
