@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/orb"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 )
 
@@ -72,6 +73,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			return Command{}, scheduling.Results{}, nil
 		}
 		// compute a possible consolidation option
+		ctx = orb.WithSchedulingMetadata(ctx, "single-node-consolidation", time.Now())
 		cmd, results, err := s.computeConsolidation(ctx, candidate)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed computing consolidation")

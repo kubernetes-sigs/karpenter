@@ -18,7 +18,6 @@ package orb
 
 import (
 	"bufio"
-	"container/heap"
 	"context"
 	"fmt"
 	"io"
@@ -39,15 +38,15 @@ import (
 )
 
 type Controller struct {
-	SIheap             *SchedulingInputHeap // Batches logs in a Queue
-	mostRecentFilename string               // The most recently saved filename (for checking for changes)
+	SIheap                    *SchedulingInputHeap // Batches logs in a Queue
+	mostRecentSchedulingInput SchedulingInput      // The most recently saved filename (for checking for changes)
 }
 
 // TODO: add struct elements and their instantiations, when defined
 func NewController(SIheap *SchedulingInputHeap) *Controller {
 	return &Controller{
-		SIheap:             SIheap,
-		mostRecentFilename: "", // Initialize with an empty string
+		SIheap:                    SIheap,
+		mostRecentSchedulingInput: SchedulingInput{},
 		//TODO: this isn't consistent through restarts of Karpenter. Would want a way to pull the most recent. Maybe a metadata file?
 		//      That would have to be a delete/replace since PV files are immutable.
 	}
@@ -62,7 +61,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 	// Pop each scheduling input off my heap (oldest first) and batch log in PV (also loopback test it)
 	for c.SIheap.Len() > 0 {
-		item := heap.Pop(c.SIheap).(SchedulingInput) // Min heap, so always pops the oldest
+		item := c.SIheap.Pop().(SchedulingInput) // Min heap, so always pops the oldest
 
 		err := c.SaveToPV(item)
 		if err != nil {
@@ -104,12 +103,12 @@ func (c *Controller) SaveToPV(item SchedulingInput) error {
 	// 	return err
 	// }
 
-	// Instead of the above, In the interim while I figure out the custom protobuf... Just send string to file
+	// TODO: Instead of the above, In the interim while I figure out the custom protobuf... Just send string to file
 	logdata := item.String()
 
 	// Timestamp the file
 	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05")
-	fileName := fmt.Sprintf("ProvisioningSchedulingInput_%s.log", timestampStr)
+	fileName := fmt.Sprintf("SchedulingInput_%s.log", timestampStr)
 
 	path := filepath.Join("/data", fileName) // mountPath = /data by PVC
 
@@ -121,20 +120,14 @@ func (c *Controller) SaveToPV(item SchedulingInput) error {
 	}
 	defer file.Close()
 
-	// // Writes data to the file
-	// _, err = fmt.Fprintln(file, timestampStr)
-	// if err != nil {
-	// 	fmt.Println("Error writing timestamp to file:", err)
-	// 	return err
-	// }
-
+	// // Writes serialized data to the file
 	// _, err = file.Write(logdata)
 	// if err != nil {
 	// 	fmt.Println("Error writing data to file:", err)
 	// 	return err
 	// }
 
-	// Only here while testing string print
+	// TODO: Uncomment above; Testing Version // only here while testing string print
 	_, err = fmt.Fprintln(file, logdata)
 	if err != nil {
 		fmt.Println("Error writing data to file:", err)
@@ -144,6 +137,8 @@ func (c *Controller) SaveToPV(item SchedulingInput) error {
 	fmt.Println("Data written to S3 bucket successfully!")
 	return nil
 }
+
+// This function tests whether we can read from the PV and reconstruct the data
 
 /* These will be part of the command-line printing representation... */
 
@@ -169,7 +164,7 @@ func PrintPodPB(data []byte) {
 
 // Security Issue Common Weakness Enumeration (CWE)-22,23 Path Traversal
 // They highly recommend sanitizing inputs before accessing that path.
-func (c *Controller) sanitizePath(path string) string {
+func sanitizePath(path string) string {
 	// Remove any leading or trailing slashes, "../" or "./"...
 	path = strings.TrimPrefix(path, "/")
 	path = strings.TrimSuffix(path, "/")
@@ -181,8 +176,8 @@ func (c *Controller) sanitizePath(path string) string {
 }
 
 // Function to pull from an S3 bucket
-func (c *Controller) ReadFromPV(logname string) (time.Time, []byte, error) {
-	sanitizedname := c.sanitizePath(logname)
+func ReadFromPV(logname string) (time.Time, []byte, error) {
+	sanitizedname := sanitizePath(logname)
 	path := filepath.Join("/data", sanitizedname)
 
 	// Open the file for reading
@@ -225,10 +220,10 @@ func (c *Controller) ReadFromPV(logname string) (time.Time, []byte, error) {
 }
 
 // Function for reconstructing inputs
-func (c *Controller) ReconstructSchedulingInput(fileName string) error {
+func ReconstructSchedulingInput(fileName string) error {
 
 	// Read from the PV to check (will be what the ORB tool does from the Command Line)
-	readTimestamp, readdata, err := c.ReadFromPV(fileName)
+	readTimestamp, readdata, err := ReadFromPV(fileName)
 	if err != nil {
 		fmt.Println("Error reading from PV:", err)
 		return err
@@ -245,13 +240,13 @@ func (c *Controller) ReconstructSchedulingInput(fileName string) error {
 	return nil
 }
 
-func (c *Controller) testReadPVandReconstruct(item SchedulingInput) error {
+func testReadPVandReconstruct(item SchedulingInput) error {
 	// We're sort of artificially rebuilding the filename here, just to do a loopback test of sorts.
 	// In reality, we could just pull a file from a known directory
 	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05")
 	fileName := fmt.Sprintf("ProvisioningSchedulingInput_%s.log", timestampStr)
 
-	err := c.ReconstructSchedulingInput(fileName)
+	err := ReconstructSchedulingInput(fileName)
 	if err != nil {
 		fmt.Println("Error reconstructing scheduling input:", err)
 		return err

@@ -35,11 +35,11 @@ import (
 
 // Timestamp, dynamic inputs (like pending pods, statenodes, etc.)
 type SchedulingInput struct {
-	Timestamp     time.Time
+	Timestamp     time.Time // Almost always format to / parse from string, but useful as Time object for comparison
 	PendingPods   []*v1.Pod
 	StateNodes    []*state.StateNode
 	InstanceTypes []*cloudprovider.InstanceType
-	//all the other scheduling inputs...
+	//all the other scheduling inputs... (bindings?)
 }
 
 func (si SchedulingInput) Reduce() SchedulingInput {
