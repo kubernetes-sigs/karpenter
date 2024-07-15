@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
+	"sigs.k8s.io/karpenter/pkg/utils/sharedcache"
 )
 
 // NodeClaim is a set of constraints, compatible pods, and possible instance types that could fulfill these constraints. This
@@ -101,7 +102,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, resources.RequestsForPods(pod))
 
-	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
+	filtered := n.filterInstanceTypesByRequirements(nodeClaimRequirements, requests)
 
 	if len(filtered.remaining) == 0 {
 		// log the total resources being requested (daemonset + the pod)
@@ -239,7 +240,7 @@ func (r filterResults) FailureReason() string {
 }
 
 //nolint:gocyclo
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) filterResults {
+func (n *NodeClaim) filterInstanceTypesByRequirements(requirements scheduling.Requirements, requests v1.ResourceList) filterResults {
 	results := filterResults{
 		requests:        requests,
 		requirementsMet: false,
@@ -251,10 +252,22 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		fitsAndOffering:         false,
 	}
 
-	for _, it := range instanceTypes {
+	for _, it := range n.InstanceTypeOptions {
 		// the tradeoff to not short circuiting on the filtering is that we can report much better error messages
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)
+
+		// update instance type allocatables from cache if available
+		cacheMapKey := fmt.Sprintf(
+			"allocatableCache;%s;%s",
+			n.NodePoolName,
+			it.Name,
+		)
+		cachedAllocatable, ok := sharedcache.SharedCache().Get(cacheMapKey)
+		if ok && cachedAllocatable != nil {
+			it.SetAllocatable(cachedAllocatable.(v1.ResourceList))
+		}
+
 		itFits := fits(it, requests)
 		itHasOffering := it.Offerings.Available().HasCompatible(requirements)
 

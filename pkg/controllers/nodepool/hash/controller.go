@@ -18,6 +18,8 @@ package hash
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -29,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/utils/sharedcache"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
@@ -62,6 +65,12 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	})
 
 	if !equality.Semantic.DeepEqual(stored, np) {
+		// Clear relevant allocatable cache if the hash has changed
+		for cacheKey := range sharedcache.SharedCache().Items() {
+			if strings.HasPrefix(cacheKey, fmt.Sprintf("allocatableCache;%s;", np.Name)) {
+				sharedcache.SharedCache().Delete(cacheKey)
+			}
+		}
 		if err := c.kubeClient.Patch(ctx, np, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}

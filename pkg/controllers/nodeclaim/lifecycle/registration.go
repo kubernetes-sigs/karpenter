@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/utils/sharedcache"
 )
 
 type Registration struct {
@@ -93,6 +94,15 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node) error {
 	stored := node.DeepCopy()
 	controllerutil.AddFinalizer(node, v1.TerminationFinalizer)
+
+	// Update cached allocatables
+	cacheMapKey := fmt.Sprintf(
+		"allocatableCache;%s;%s",
+		nodeClaim.Labels[v1.NodePoolLabelKey],
+		nodeClaim.Labels[corev1.LabelInstanceTypeStable],
+	)
+	sharedcache.SharedCache().Set(cacheMapKey, stored.Status.Allocatable, sharedcache.DefaultSharedCacheTTL)
+	nodeClaim.Status.Allocatable = stored.Status.Allocatable
 
 	node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
 	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels)
