@@ -36,9 +36,9 @@ import (
 // disruption cost is highest, and it approaches zero as the node ages towards its expiration time.
 func LifetimeRemaining(clock clock.Clock, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) float64 {
 	remaining := 1.0
-	if nodePool.Spec.Disruption.ExpireAfter.Duration != nil {
+	if nodePool.Spec.Template.Spec.ExpireAfter.Duration != nil {
 		ageInSeconds := clock.Since(nodeClaim.CreationTimestamp.Time).Seconds()
-		totalLifetimeSeconds := nodePool.Spec.Disruption.ExpireAfter.Duration.Seconds()
+		totalLifetimeSeconds := nodePool.Spec.Template.Spec.ExpireAfter.Duration.Seconds()
 		lifetimeRemainingSeconds := totalLifetimeSeconds - ageInSeconds
 		remaining = lo.Clamp(lifetimeRemainingSeconds/totalLifetimeSeconds, 0.0, 1.0)
 	}

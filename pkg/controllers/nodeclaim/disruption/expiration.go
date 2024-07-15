@@ -38,10 +38,10 @@ type Expiration struct {
 func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	// From here there are three scenarios to handle:
 	// 1. If ExpireAfter is not configured, exit expiration loop
-	if nodePool.Spec.Disruption.ExpireAfter.Duration == nil {
+	if nodeClaim.Spec.ExpireAfter.Duration == nil {
 		return reconcile.Result{}, nil
 	}
-	expirationTime := nodeClaim.CreationTimestamp.Add(*nodePool.Spec.Disruption.ExpireAfter.Duration)
+	expirationTime := nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration)
 	// 2. If the NodeClaim isn't expired leave the reconcile loop.
 	if e.clock.Now().Before(expirationTime) {
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.

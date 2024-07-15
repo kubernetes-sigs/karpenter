@@ -73,7 +73,6 @@ spec:
                 disruption:
                   default:
                     consolidationPolicy: WhenUnderutilized
-                    expireAfter: 720h
                   description: Disruption contains the parameters that relate to Karpenter's disruption logic
                   properties:
                     budgets:
@@ -156,15 +155,6 @@ spec:
                         - WhenEmpty
                         - WhenUnderutilized
                       type: string
-                    expireAfter:
-                      default: 720h
-                      description: |-
-                        ExpireAfter is the duration the controller will wait
-                        before terminating a node, measured from when the node is created. This
-                        is useful to implement features like eventually consistent node upgrade,
-                        memory leak protection, and disruption testing.
-                      pattern: ^(([0-9]+(s|m|h))+)|(Never)$
-                      type: string
                   type: object
                   x-kubernetes-validations:
                     - message: consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized
@@ -223,6 +213,15 @@ spec:
                     spec:
                       description: NodeClaimSpec describes the desired state of the NodeClaim
                       properties:
+                        expireAfter:
+                          default: 720h
+                          description: |-
+                            ExpireAfter is the duration the controller will wait
+                            before terminating a node, measured from when the node is created. This
+                            is useful to implement features like eventually consistent node upgrade,
+                            memory leak protection, and disruption testing.
+                          pattern: ^(([0-9]+(s|m|h))+)|(Never)$
+                          type: string
                         nodeClassRef:
                           description: NodeClassRef is a reference to an object that defines provider specific configuration
                           properties:
@@ -310,6 +309,19 @@ spec:
                               rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt'') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
                             - message: requirements with 'minValues' must have at least that many values specified in the 'values' field
                               rule: 'self.all(x, (x.operator == ''In'' && has(x.minValues)) ? x.values.size() >= x.minValues : true)'
+                        resources:
+                          description: Resources models the resource requirements for the NodeClaim to launch
+                          properties:
+                            requests:
+                              additionalProperties:
+                                anyOf:
+                                  - type: integer
+                                  - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: Requests describes the minimum required resources for the NodeClaim to launch
+                              type: object
+                          type: object
                         startupTaints:
                           description: |-
                             StartupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
@@ -1111,3 +1123,14 @@ spec:
       storage: false
       subresources:
         status: {}
+  conversion:
+    strategy: Webhook
+    webhook:
+      conversionReviewVersions:
+        - v1beta1
+        - v1
+      clientConfig:
+        service:
+          name: karpenter
+          namespace: kube-system
+          port: 8443

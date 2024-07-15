@@ -45,7 +45,6 @@ var _ = Describe("Emptiness", func() {
 				Disruption: v1.Disruption{
 					ConsolidateAfter:    &v1.NillableDuration{Duration: lo.ToPtr(time.Second * 0)},
 					ConsolidationPolicy: v1.ConsolidationPolicyWhenEmpty,
-					ExpireAfter:         v1.NillableDuration{Duration: nil},
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
@@ -285,7 +284,6 @@ var _ = Describe("Emptiness", func() {
 					Disruption: v1.Disruption{
 						ConsolidateAfter:    &v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmpty,
-						ExpireAfter:         v1.NillableDuration{Duration: nil},
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
@@ -356,7 +354,6 @@ var _ = Describe("Emptiness", func() {
 					Disruption: v1.Disruption{
 						ConsolidateAfter:    &v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmpty,
-						ExpireAfter:         v1.NillableDuration{Duration: nil},
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
 						}},

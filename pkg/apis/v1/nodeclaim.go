@@ -61,6 +61,16 @@ type NodeClaimSpec struct {
 	// If left undefined, the controller will wait indefinitely for pods to be drained.
 	// +optional
 	TerminationGracePeriod *metav1.Duration `json:"terminationGracePeriod,omitempty"`
+	// ExpireAfter is the duration the controller will wait
+	// before terminating a node, measured from when the node is created. This
+	// is useful to implement features like eventually consistent node upgrade,
+	// memory leak protection, and disruption testing.
+	// +kubebuilder:default:="720h"
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// +kubebuilder:validation:Type="string"
+	// +kubebuilder:validation:Schemaless
+	// +optional
+	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
 }
 
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values

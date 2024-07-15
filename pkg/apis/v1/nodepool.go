@@ -43,7 +43,7 @@ type NodePoolSpec struct {
 	// +required
 	Template NodeClaimTemplate `json:"template"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
-	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
+	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized"}
 	// +kubebuilder:validation:XValidation:message="consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized",rule="has(self.consolidateAfter) ? self.consolidationPolicy != 'WhenUnderutilized' || self.consolidateAfter == 'Never' : true"
 	// +kubebuilder:validation:XValidation:message="consolidateAfter must be specified with consolidationPolicy=WhenEmpty",rule="self.consolidationPolicy == 'WhenEmpty' ? has(self.consolidateAfter) : true"
 	// +optional
@@ -76,16 +76,6 @@ type Disruption struct {
 	// +kubebuilder:validation:Enum:={WhenEmpty,WhenUnderutilized}
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
-	// ExpireAfter is the duration the controller will wait
-	// before terminating a node, measured from when the node is created. This
-	// is useful to implement features like eventually consistent node upgrade,
-	// memory leak protection, and disruption testing.
-	// +kubebuilder:default:="720h"
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
-	// +kubebuilder:validation:Type="string"
-	// +kubebuilder:validation:Schemaless
-	// +optional
-	ExpireAfter NillableDuration `json:"expireAfter"`
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,

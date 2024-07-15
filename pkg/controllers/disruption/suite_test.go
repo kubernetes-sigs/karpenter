@@ -243,6 +243,9 @@ var _ = Describe("Simulate Scheduling", func() {
 					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
+			Spec: v1.NodeClaimSpec{
+				ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)},
+			},
 			Status: v1.NodeClaimStatus{
 				Allocatable: map[corev1.ResourceName]resource.Quantity{
 					corev1.ResourceCPU:  resource.MustParse("3"),
@@ -275,7 +278,8 @@ var _ = Describe("Simulate Scheduling", func() {
 				Operator: corev1.NodeSelectorOpExists,
 			},
 		})
-		nodePool.Spec.Disruption.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)}
+		nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)}
+
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: nil}
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "3"}}
 		ExpectApplied(ctx, env.Client, nodePool)
