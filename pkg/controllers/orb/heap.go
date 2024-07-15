@@ -18,6 +18,8 @@ package orb
 
 import (
 	"container/heap"
+	"context"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -59,8 +61,53 @@ func NewSchedulingInputHeap() *SchedulingInputHeap {
 }
 
 // Function for logging everything in the Provisioner Scheduler (i.e. pending pods, statenodes...)
-func (h *SchedulingInputHeap) LogProvisioningScheduler(pods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes map[string][]*cloudprovider.InstanceType) {
-	si := NewSchedulingInput(pods, stateNodes, instanceTypes["default"]) // TODO: add all inputs I want to log
-	si = si.Reduce()                                                     // Strip out "unnecessary" parts of the data structure...
-	h.Push(si)                                                           // sends that scheduling input into the data structure to be popped in batch to go to PV as a protobuf
+func (h *SchedulingInputHeap) LogProvisioningScheduler(scheduledTime time.Time, pods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes map[string][]*cloudprovider.InstanceType) {
+	si := NewSchedulingInput(scheduledTime, pods, stateNodes, instanceTypes["default"]) // TODO: add all inputs I want to log
+	si = si.Reduce()                                                                    // Strip out "unnecessary" parts of the data structure...
+	h.Push(si)                                                                          // sends that scheduling input into the data structure to be popped in batch to go to PV as a protobuf
+}
+
+type SchedulingMetadataHeap []SchedulingMetadata
+
+func (h SchedulingMetadataHeap) Len() int {
+	return len(h)
+}
+
+func (h SchedulingMetadataHeap) Less(i, j int) bool {
+	return h[i].Timestamp.Before(h[j].Timestamp)
+}
+
+func (h SchedulingMetadataHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *SchedulingMetadataHeap) Push(x interface{}) {
+	*h = append(*h, x.(SchedulingMetadata))
+}
+
+func (h *SchedulingMetadataHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[:n-1]
+	return x
+}
+
+func NewSchedulingMetadataHeap() *SchedulingMetadataHeap {
+	h := &SchedulingMetadataHeap{}
+	heap.Init(h)
+	return h
+}
+
+// This function will log scheduling action to PV
+func (h *SchedulingMetadataHeap) LogSchedulingAction(ctx context.Context, timestamp time.Time) error {
+	metadata, ok := GetSchedulingMetadata(ctx)
+	if !ok { // Provisioning metadata is not set, set it to the default - normal provisioning action
+		ctx = WithSchedulingMetadata(ctx, "normal-provisioning", timestamp)
+		metadata, _ = GetSchedulingMetadata(ctx) // Get it again to update metadata
+	}
+	h.Push(metadata)
+
+	// TODO: Once we log it, do we need to clear it from the context? Or will it just get overwritten as appropriate anyway?
+	return nil
 }

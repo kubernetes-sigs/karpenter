@@ -42,11 +42,17 @@ const (
 // case "consolidation-simulation":
 // WithSchedulingMetadata returns a new context with the provided provisioning metadata.
 func WithSchedulingMetadata(ctx context.Context, action string, timestamp time.Time) context.Context {
-	metadata := SchedulingMetadata{
-		Action:    action,
-		Timestamp: timestamp,
+	switch action { // Preserves invariant of these actions being only valid keys
+	case "normal-provisioning", "single-node-consolidation", "multi-node-consolidation":
+		metadata := SchedulingMetadata{
+			Action:    action,
+			Timestamp: timestamp,
+		}
+		return context.WithValue(ctx, schedulingMetadataKey, metadata)
+	default:
+		fmt.Println("Invalid scheduling action metadata:", action) //Testing, remove later
+		return ctx
 	}
-	return context.WithValue(ctx, schedulingMetadataKey, metadata)
 }
 
 // GetProvisioningMetadata retrieves the scheduling metadata from the context.
@@ -55,33 +61,61 @@ func GetSchedulingMetadata(ctx context.Context) (SchedulingMetadata, bool) {
 	return metadata, ok
 }
 
-// This function will log scheduling action to PV
-func LogSchedulingAction(ctx context.Context, timestamp time.Time) error {
-	metadata, ok := GetSchedulingMetadata(ctx)
-	if !ok { // Provisioning metadata is not set, set it to the default - normal provisioning action
-		ctx = WithSchedulingMetadata(ctx, "normal-provisioning", timestamp)
-		metadata, _ = GetSchedulingMetadata(ctx) // Get it again to update metadata
+// // This function will log scheduling action to PV
+// func LogSchedulingAction(ctx context.Context, timestamp time.Time) error {
+// 	metadata, ok := GetSchedulingMetadata(ctx)
+// 	if !ok { // Provisioning metadata is not set, set it to the default - normal provisioning action
+// 		ctx = WithSchedulingMetadata(ctx, "normal-provisioning", timestamp)
+// 		metadata, _ = GetSchedulingMetadata(ctx) // Get it again to update metadata
+// 	}
+
+// 	switch metadata.Action { // Regardless of which action, so long as valid, write it.
+// 	case "normal-provisioning", "single-node-consolidation", "multi-node-consolidation":
+// 		fmt.Println("Writing scheduling metadata to PV:", metadata.Action) //Testing, remove later
+// 		err := WriteSchedulingMetadataToPV(metadata)
+// 		if err != nil {
+// 			return err
+// 		}
+// 	default:
+// 		fmt.Println("Invalid scheduling action metadata:", metadata.Action) //Testing, remove later
+// 		return fmt.Errorf("invalid scheduling action metadata: %s", metadata.Action)
+// 	}
+// 	return nil
+
+// 	// TODO: Once we log it, we need to clear it from the context.
+// }
+
+// func WriteSchedulingMetadataToPV(metadata SchedulingMetadata) error {
+// 	timestampStr := metadata.Timestamp.Format("2006-01-02_15-04-05")
+// 	fileName := fmt.Sprintf("SchedulingActionMetadata_%s.log", timestampStr)
+// 	path := filepath.Join("/data", fileName)
+
+// 	file, err := os.Create(path)
+// 	if err != nil {
+// 		fmt.Println("Error opening file:", err)
+// 		return err
+// 	}
+// 	defer file.Close()
+
+// 	_, err = fmt.Fprintln(file, timestampStr+"\t"+metadata.Action)
+// 	if err != nil {
+// 		fmt.Println("Error writing data to file:", err)
+// 		return err
+// 	}
+
+// 	fmt.Println("Metadata written to S3 bucket successfully!")
+// 	return nil
+// }
+
+// Invariant, only called when len > 0
+func WriteSchedulingMetadataHeapToPV(heap *SchedulingMetadataHeap) error {
+	if heap == nil || heap.Len() == 0 {
+		return fmt.Errorf("precondition broken, called with invalid heap or empty heap")
 	}
 
-	switch metadata.Action { // Regardless of which action, so long as valid, write it.
-	case "normal-provisioning", "single-node-consolidation", "multi-node-consolidation":
-		fmt.Println("Writing scheduling metadata to PV:", metadata.Action) //Testing, remove later
-		err := WriteSchedulingMetadataToPV(metadata)
-		if err != nil {
-			return err
-		}
-	default:
-		fmt.Println("Invalid scheduling action metadata:", metadata.Action) //Testing, remove later
-		return fmt.Errorf("invalid scheduling action metadata: %s", metadata.Action)
-	}
-	return nil
-
-	// TODO: Once we log it, we need to clear it from the context.
-}
-
-func WriteSchedulingMetadataToPV(metadata SchedulingMetadata) error {
-	timestampStr := metadata.Timestamp.Format("2006-01-02_15-04-05")
-	fileName := fmt.Sprintf("SchedulingActionMetadata_%s.log", timestampStr)
+	oldestStr := (*heap)[0].Timestamp.Format("2006-01-02_15-04-05")
+	newestStr := (*heap)[len(*heap)-1].Timestamp.Format("2006-01-02_15-04-05")
+	fileName := fmt.Sprintf("SchedulingActionMetadata_%s_to_%s.log", oldestStr, newestStr)
 	path := filepath.Join("/data", fileName)
 
 	file, err := os.Create(path)
@@ -91,10 +125,16 @@ func WriteSchedulingMetadataToPV(metadata SchedulingMetadata) error {
 	}
 	defer file.Close()
 
-	_, err = fmt.Fprintln(file, timestampStr+"\t"+metadata.Action)
-	if err != nil {
-		fmt.Println("Error writing data to file:", err)
-		return err
+	// Pop each scheduling metadata off its heap (oldest first) and batch log to PV.
+	for heap.Len() > 0 {
+		metadata := heap.Pop().(SchedulingMetadata)
+
+		timestampStr := metadata.Timestamp.Format("2006-01-02_15-04-05")
+		_, err = fmt.Fprintln(file, timestampStr+"\t"+metadata.Action)
+		if err != nil {
+			fmt.Println("Error writing data to file:", err)
+			return err
+		}
 	}
 
 	fmt.Println("Metadata written to S3 bucket successfully!")

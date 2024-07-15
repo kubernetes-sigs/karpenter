@@ -84,8 +84,7 @@ func (si *SchedulingInput) Diff(oldSi *SchedulingInput) *SchedulingInput {
 		InstanceTypes: diffInstanceTypes(oldSi.InstanceTypes, si.InstanceTypes),
 	}
 
-	// Test print diff
-	fmt.Println("Diff Scheduling Input is... ", diff.String())
+	fmt.Println("Diff Scheduling Input is... ", diff.String()) // Test print, delete later
 
 	return diff
 }
@@ -365,23 +364,15 @@ func PBToSchedulingInput(timestamp time.Time, data []byte) (SchedulingInput, err
 		return SchedulingInput{}, fmt.Errorf("unmarshaling pod list, %w", err)
 	}
 	pods := lo.ToSlicePtr(podList.Items)
-	return ReconstructedSchedulingInput(timestamp, pods), nil
+	return NewSchedulingInput(timestamp, pods, nil, nil), nil // TODO: update once I figure out serialization
 }
 
-func NewSchedulingInput(pendingPods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes []*cloudprovider.InstanceType) SchedulingInput {
+func NewSchedulingInput(scheduledTime time.Time, pendingPods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes []*cloudprovider.InstanceType) SchedulingInput {
 	return SchedulingInput{
-		Timestamp:     time.Now(),
+		Timestamp:     scheduledTime,
 		PendingPods:   pendingPods,
 		StateNodes:    stateNodes,
 		InstanceTypes: instanceTypes,
-	}
-}
-
-// Reconstruct a scheduling input (presumably from a file)
-func ReconstructedSchedulingInput(timestamp time.Time, pendingPods []*v1.Pod) SchedulingInput {
-	return SchedulingInput{
-		Timestamp:   timestamp,
-		PendingPods: pendingPods,
 	}
 }
 

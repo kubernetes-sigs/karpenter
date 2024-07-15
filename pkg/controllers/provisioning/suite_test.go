@@ -63,6 +63,7 @@ var (
 	prov                *provisioning.Provisioner
 	env                 *test.Environment
 	SIHeap              *orb.SchedulingInputHeap
+	SMHeap              *orb.SchedulingMetadataHeap
 	instanceTypeMap     map[string]*cloudprovider.InstanceType
 )
 
@@ -80,7 +81,7 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	SIHeap = orb.NewSchedulingInputHeap()
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, SIHeap)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, SIHeap, SMHeap)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}

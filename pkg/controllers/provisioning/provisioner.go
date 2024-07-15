@@ -77,28 +77,31 @@ func WithReason(reason string) func(*LaunchOptions) {
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
-	cloudProvider  cloudprovider.CloudProvider
-	kubeClient     client.Client
-	batcher        *Batcher
-	volumeTopology *scheduler.VolumeTopology
-	cluster        *state.Cluster
-	recorder       events.Recorder
-	SIheap         *orb.SchedulingInputHeap
-	cm             *pretty.ChangeMonitor
+	cloudProvider          cloudprovider.CloudProvider
+	kubeClient             client.Client
+	batcher                *Batcher
+	volumeTopology         *scheduler.VolumeTopology
+	cluster                *state.Cluster
+	recorder               events.Recorder
+	schedulingInputHeap    *orb.SchedulingInputHeap
+	schedulingMetadataHeap *orb.SchedulingMetadataHeap
+	cm                     *pretty.ChangeMonitor
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
-	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, SIheap *orb.SchedulingInputHeap,
+	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+	schedulingInputHeap *orb.SchedulingInputHeap, schedulingMetadataHeap *orb.SchedulingMetadataHeap,
 ) *Provisioner {
 	p := &Provisioner{
-		batcher:        NewBatcher(),
-		cloudProvider:  cloudProvider,
-		kubeClient:     kubeClient,
-		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
-		cluster:        cluster,
-		recorder:       recorder,
-		SIheap:         SIheap,
-		cm:             pretty.NewChangeMonitor(),
+		batcher:                NewBatcher(),
+		cloudProvider:          cloudProvider,
+		kubeClient:             kubeClient,
+		volumeTopology:         scheduler.NewVolumeTopology(kubeClient),
+		cluster:                cluster,
+		recorder:               recorder,
+		schedulingInputHeap:    schedulingInputHeap,
+		schedulingMetadataHeap: schedulingMetadataHeap,
+		cm:                     pretty.NewChangeMonitor(),
 	}
 	return p
 }
@@ -309,9 +312,10 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
 
-	fmt.Println("SI Logging from the Provisioner")
-	orb.LogSchedulingAction(ctx, time.Now()) // Warning: TODO Time should be consistent with Log call below.
-	p.SIheap.LogProvisioningScheduler(pods, stateNodes, instanceTypes)
+	// fmt.Println("SI Logging from the Provisioner")
+	scheduledTime := time.Now()
+	p.schedulingMetadataHeap.LogSchedulingAction(ctx, scheduledTime)
+	p.schedulingInputHeap.LogProvisioningScheduler(scheduledTime, pods, stateNodes, instanceTypes)
 
 	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }
