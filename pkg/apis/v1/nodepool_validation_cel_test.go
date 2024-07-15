@@ -237,9 +237,9 @@ var _ = Describe("CEL/Validation", func() {
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		},
-			Entry("should allow disruption reason drifted", DisruptionReasonDrifted),
-			Entry("should allow disruption reason underutilized", DisruptionReasonUnderutilized),
-			Entry("should allow disruption reason empty", DisruptionReasonEmpty),
+			Entry("should allow disruption reason Drifted", DisruptionReasonDrifted),
+			Entry("should allow disruption reason Underutilized", DisruptionReasonUnderutilized),
+			Entry("should allow disruption reason Empty", DisruptionReasonEmpty),
 		)
 
 		DescribeTable("should fail when creating a budget with invalid reasons", func(reason string) {
