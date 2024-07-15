@@ -265,6 +265,7 @@ spec:
 
                     The feature can also be used to allow maximum time limits for long-running jobs which can delay node termination with preStop hooks.
                     If left undefined, the controller will wait indefinitely for pods to be drained.
+                  pattern: ^([0-9]+(s|m|h))+$
                   type: string
               required:
                 - nodeClassRef
@@ -727,6 +728,7 @@ spec:
 
                     The feature can also be used to allow maximum time limits for long-running jobs which can delay node termination with preStop hooks.
                     If left undefined, the controller will wait indefinitely for pods to be drained.
+                  pattern: ^([0-9]+(s|m|h))+$
                   type: string
               required:
                 - nodeClassRef
