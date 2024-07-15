@@ -18,7 +18,10 @@ package orb
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/samber/lo"
@@ -62,7 +65,232 @@ func (si SchedulingInput) String() string {
 	)
 }
 
-// Function takes a slice of pod pointers and returns a string representation of the pods
+// Functions to check the differences in all the fields of a SchedulingInput (except the timestamp)
+// This function takes an old Scheduling Input and a new one and returns a SchedulingInput of only the differences.
+func (si *SchedulingInput) Diff(oldSi *SchedulingInput) *SchedulingInput {
+	pendingPods := diffPods(oldSi.PendingPods, si.PendingPods)
+	stateNodes := diffStateNodes(oldSi.StateNodes, si.StateNodes)
+	instanceTypes := diffInstanceTypes(oldSi.InstanceTypes, si.InstanceTypes)
+
+	// Check if all three are nil
+	if pendingPods == nil && stateNodes == nil && instanceTypes == nil {
+		return nil
+	}
+
+	diff := &SchedulingInput{
+		Timestamp:     time.Now(), // i.e. the time that we got the differences
+		PendingPods:   diffPods(oldSi.PendingPods, si.PendingPods),
+		StateNodes:    diffStateNodes(oldSi.StateNodes, si.StateNodes),
+		InstanceTypes: diffInstanceTypes(oldSi.InstanceTypes, si.InstanceTypes),
+	}
+
+	// Test print diff
+	fmt.Println("Diff Scheduling Input is... ", diff.String())
+
+	return diff
+}
+
+// This is the diffPods function which gets the differences between pods
+func diffPods(oldPods, newPods []*v1.Pod) []*v1.Pod {
+	// Check hashes first
+	if hashPods(oldPods) == hashPods(newPods) {
+		return nil
+	}
+
+	// Convert the slices to sets for efficient difference calculation
+	oldPodSet := make(map[string]struct{}, len(oldPods))
+	for _, pod := range oldPods {
+		oldPodSet[pod.Namespace+"/"+pod.Name] = struct{}{}
+	}
+
+	newPodSet := make(map[string]struct{}, len(newPods))
+	for _, pod := range newPods {
+		newPodSet[pod.Namespace+"/"+pod.Name] = struct{}{}
+	}
+
+	// Find the differences between the sets
+	diff := make([]*v1.Pod, 0)
+	for _, pod := range newPods {
+		if _, exists := oldPodSet[pod.Namespace+"/"+pod.Name]; !exists {
+			diff = append(diff, pod)
+		}
+	}
+
+	return diff
+}
+
+// This is the diffStateNodes function which gets the differences between statenodes
+func diffStateNodes(oldNodes, newNodes []*state.StateNode) []*state.StateNode {
+	if hashStateNodes(oldNodes) == hashStateNodes(newNodes) {
+		return nil
+	}
+
+	// Convert the slices to sets for efficient difference calculation
+	oldNodeSet := make(map[string]struct{}, len(oldNodes))
+	for _, node := range oldNodes {
+		if node != nil {
+			key := getStateNodeKey(node)
+			if key != "" {
+				oldNodeSet[key] = struct{}{}
+			}
+		}
+	}
+
+	newNodeSet := make(map[string]struct{}, len(newNodes))
+	for _, node := range newNodes {
+		if node != nil {
+			key := getStateNodeKey(node)
+			if key != "" {
+				newNodeSet[key] = struct{}{}
+			}
+		}
+	}
+
+	// Find the differences between the sets
+	diff := make([]*state.StateNode, 0)
+	for _, node := range newNodes {
+		if node != nil {
+			key := getStateNodeKey(node)
+			if key != "" {
+				if _, exists := oldNodeSet[key]; !exists {
+					diff = append(diff, node)
+				}
+			}
+		}
+	}
+
+	return diff
+}
+
+func getStateNodeKey(node *state.StateNode) string {
+	if node == nil || (node.Node == nil && node.NodeClaim == nil) {
+		return ""
+	} else if node.Node == nil {
+		return node.NodeClaim.Name
+	} else if node.NodeClaim == nil {
+		return node.Node.Name
+	}
+	return node.Node.Name + "/" + node.NodeClaim.Name
+}
+
+// This is the diffInstanceTypes function which gets the differences between instance types
+func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
+	if hashInstanceTypes(oldTypes) == hashInstanceTypes(newTypes) {
+		return nil
+	}
+
+	// Convert the slices to sets for efficient difference calculation
+	oldTypeSet := make(map[string]struct{}, len(oldTypes))
+	for _, instanceType := range oldTypes {
+		oldTypeSet[instanceType.Name] = struct{}{}
+	}
+
+	newTypeSet := make(map[string]struct{}, len(newTypes))
+	for _, instanceType := range newTypes {
+		newTypeSet[instanceType.Name] = struct{}{}
+	}
+
+	// Find the differences between the sets
+	diff := make([]*cloudprovider.InstanceType, 0)
+	for _, instanceType := range newTypes {
+		if _, exists := oldTypeSet[instanceType.Name]; !exists {
+			diff = append(diff, instanceType)
+		}
+	}
+
+	return diff
+}
+
+func (si SchedulingInput) Hash() string {
+	hasher := sha256.New()
+	hasher.Write([]byte(hashPods(si.PendingPods)))
+	hasher.Write([]byte(hashStateNodes(si.StateNodes)))
+	hasher.Write([]byte(hashInstanceTypes(si.InstanceTypes)))
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func hashPods(pods []*v1.Pod) string {
+	// Convert the slice to a set to handle order
+	podSet := make(map[string]struct{}, len(pods))
+	for _, pod := range pods {
+		podSet[pod.Namespace+"/"+pod.Name] = struct{}{}
+	}
+
+	// Sort the set to ensure consistent ordering
+	podKeys := make([]string, 0, len(podSet))
+	for key := range podSet {
+		podKeys = append(podKeys, key)
+	}
+	sort.Strings(podKeys)
+
+	// Hash the sorted set
+	hasher := sha256.New()
+	for _, key := range podKeys {
+		hasher.Write([]byte(key))
+	}
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func hashStateNodes(nodes []*state.StateNode) string {
+	// Convert the slice to a set to handle order
+	nodeSet := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		var nodeKey string
+		if node != nil {
+			nodeName := ""
+			if node.Node != nil {
+				nodeName = node.Node.Name
+			}
+			nodeClaimName := ""
+			if node.NodeClaim != nil {
+				nodeClaimName = node.NodeClaim.Name
+			}
+			nodeKey = nodeName + "/" + nodeClaimName
+		} else {
+			nodeKey = ""
+		}
+
+		nodeSet[nodeKey] = struct{}{}
+	}
+
+	// Sort the set to ensure consistent ordering
+	nodeKeys := make([]string, 0, len(nodeSet))
+	for key := range nodeSet {
+		nodeKeys = append(nodeKeys, key)
+	}
+	sort.Strings(nodeKeys)
+
+	// Hash the sorted set
+	hasher := sha256.New()
+	for _, key := range nodeKeys {
+		hasher.Write([]byte(key))
+	}
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func hashInstanceTypes(instanceTypes []*cloudprovider.InstanceType) string {
+	// Convert the slice to a set to handle order
+	instanceTypeSet := make(map[string]struct{}, len(instanceTypes))
+	for _, instanceType := range instanceTypes {
+		instanceTypeKey := instanceType.Name
+		// Include additional fields as needed
+		instanceTypeSet[instanceTypeKey] = struct{}{}
+	}
+
+	// Sort the set to ensure consistent ordering
+	instanceTypeKeys := make([]string, 0, len(instanceTypeSet))
+	for key := range instanceTypeSet {
+		instanceTypeKeys = append(instanceTypeKeys, key)
+	}
+	sort.Strings(instanceTypeKeys)
+
+	// Hash the sorted set
+	hasher := sha256.New()
+	for _, key := range instanceTypeKeys {
+		hasher.Write([]byte(key))
+	}
+	return hex.EncodeToString(hasher.Sum(nil))
+}
 
 // Function take a Scheduling Input to []byte, marshalled as a protobuf
 // TODO: With a custom-defined .proto, this will look different.

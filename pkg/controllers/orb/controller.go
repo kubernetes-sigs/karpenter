@@ -63,11 +63,18 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	for c.SIheap.Len() > 0 {
 		item := c.SIheap.Pop().(SchedulingInput) // Min heap, so always pops the oldest
 
-		err := c.SaveToPV(item)
+		// Check if the item has changed since the last time we saved it to PV
+		diffSchedulingInput := item.Diff(&c.mostRecentSchedulingInput)
+		if diffSchedulingInput == nil { // No change, skip saving to PV
+			continue
+		}
+
+		err := c.SaveToPV(*diffSchedulingInput)
 		if err != nil {
 			fmt.Println("Error saving to PV:", err)
 			return reconcile.Result{}, err
 		}
+		c.mostRecentSchedulingInput = item
 
 		// err = c.testReadPVandReconstruct(item)
 		// if err != nil {
