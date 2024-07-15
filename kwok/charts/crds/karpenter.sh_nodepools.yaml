@@ -309,19 +309,6 @@ spec:
                               rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt'') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
                             - message: requirements with 'minValues' must have at least that many values specified in the 'values' field
                               rule: 'self.all(x, (x.operator == ''In'' && has(x.minValues)) ? x.values.size() >= x.minValues : true)'
-                        resources:
-                          description: Resources models the resource requirements for the NodeClaim to launch
-                          properties:
-                            requests:
-                              additionalProperties:
-                                anyOf:
-                                  - type: integer
-                                  - type: string
-                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                                x-kubernetes-int-or-string: true
-                              description: Requests describes the minimum required resources for the NodeClaim to launch
-                              type: object
-                          type: object
                         startupTaints:
                           description: |-
                             StartupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
