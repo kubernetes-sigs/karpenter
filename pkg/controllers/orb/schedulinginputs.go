@@ -103,7 +103,7 @@ func (si SchedulingInput) Reduce() SchedulingInput {
 // TODO: I need to flip the construct here. I should be generating some stripped/minimal subset of these data structures
 // which are already the representation that I'd like to print. i.e. store in memory only what I want to print anyway
 func (si SchedulingInput) String() string {
-	return fmt.Sprintf("Scheduled at Time (UTC): %v\n\nPendingPods:\n%v\n\nStateNodesWithPods:\n%v\n\nInstanceTypes:\n%v\n\n",
+	return fmt.Sprintf("Timestamp (UTC): %v\n\nPendingPods:\n%v\n\nStateNodesWithPods:\n%v\n\nInstanceTypes:\n%v\n\n",
 		si.Timestamp.Format("2006-01-02_15-04-05"),
 		PodsToString(si.PendingPods),
 		StateNodesWithPodsToString(si.StateNodesWithPods),
@@ -139,19 +139,19 @@ func (si *SchedulingInput) Diff(oldSi *SchedulingInput) (*SchedulingInput, *Sche
 		InstanceTypes:      instanceTypesChanged,
 	}
 
-	if pendingPodsAdded == nil && stateNodesAdded == nil && instanceTypesAdded == nil {
+	if len(pendingPodsAdded)+len(stateNodesAdded)+len(instanceTypesAdded) == 0 {
 		diffAdded = nil
 	} else {
 		fmt.Println("Diff Scheduling Input added is... ", diffAdded.String()) // Test print, delete later
 	}
 
-	if pendingPodsRemoved == nil && stateNodesRemoved == nil && instanceTypesRemoved == nil {
+	if len(pendingPodsRemoved)+len(stateNodesRemoved)+len(instanceTypesRemoved) == 0 {
 		diffRemoved = nil
 	} else {
 		fmt.Println("Diff Scheduling Input removed is... ", diffRemoved.String()) // Test print, delete later
 	}
 
-	if pendingPodsChanged == nil && stateNodesChanged == nil && instanceTypesChanged == nil {
+	if len(pendingPodsChanged)+len(stateNodesChanged)+len(instanceTypesChanged) == 0 {
 		diffChanged = nil
 	} else {
 		fmt.Println("Diff Scheduling Input changed is... ", diffChanged.String()) // Test print, delete later
@@ -174,9 +174,9 @@ func diffPods(oldPods, newPods []*v1.Pod) ([]*v1.Pod, []*v1.Pod, []*v1.Pod) {
 	}
 
 	// Find the differences between the sets
-	added := make([]*v1.Pod, 0)
-	removed := make([]*v1.Pod, 0)
-	changed := make([]*v1.Pod, 0)
+	added := []*v1.Pod{}
+	removed := []*v1.Pod{}
+	changed := []*v1.Pod{}
 	for _, newPod := range newPods {
 		oldPod, exists := oldPodSet[newPod.GetName()]
 
@@ -303,9 +303,10 @@ func hasStateNodeWithPodsChanged(oldStateNodeWithPods, newStateNodeWithPods *Sta
 
 // Checking Equality on Fields I've reduced by (i.e. Name Requirements Offerings)
 func hasInstanceTypeChanged(oldInstanceType, newInstanceType *cloudprovider.InstanceType) bool {
-	return !equality.Semantic.DeepEqual(oldInstanceType.Name, newInstanceType.Name) ||
-		!equality.Semantic.DeepEqual(oldInstanceType.Offerings, newInstanceType.Offerings) ||
-		!equality.Semantic.DeepEqual(oldInstanceType.Requirements, newInstanceType.Requirements)
+	return !equality.Semantic.DeepEqual(oldInstanceType.Name, newInstanceType.Name)
+	// || TODO FIX
+	// 	!equality.Semantic.DeepEqual(oldInstanceType.Offerings, newInstanceType.Offerings) ||
+	// 	!equality.Semantic.DeepEqual(oldInstanceType.Requirements, newInstanceType.Requirements)
 }
 
 // Function take a Scheduling Input to []byte, marshalled as a protobuf
