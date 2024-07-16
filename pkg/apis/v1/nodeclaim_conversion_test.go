@@ -100,7 +100,6 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 		cloudProvider.NodeClassGroupVersionKind = gvk
 		ctx = injection.WithNodeClasses(ctx, gvk)
 	})
-
 	It("should convert v1 nodeclaim metadata", func() {
 		v1nodeclaim.ObjectMeta = test.ObjectMeta()
 		Expect(v1nodeclaim.ConvertTo(ctx, v1beta1nodeclaim)).To(Succeed())
@@ -274,6 +273,9 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 				Name: "test-nodepool",
 			},
 			Spec: v1beta1.NodePoolSpec{
+				Disruption: v1beta1.Disruption{
+					ExpireAfter: v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Minute)},
+				},
 				Template: v1beta1.NodeClaimTemplate{
 					Spec: v1beta1.NodeClaimSpec{
 						NodeClassRef: &v1beta1.NodeClassReference{
@@ -316,13 +318,33 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 			},
 		}
 		Expect(env.Client.Create(ctx, v1beta1nodepool)).To(Succeed())
+
 		gvk := lo.Map(cloudProvider.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
 			return object.GVK(nc)
 		})
 		cloudProvider.NodeClassGroupVersionKind = gvk
 		ctx = injection.WithNodeClasses(ctx, gvk)
+		ctx = injection.WithClient(ctx, env.Client)
 	})
-
+	Context("ExpireAfter", func() {
+		It("should convert v1beta1 expireAfter to v1", func() {
+			Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
+			Expect(lo.FromPtr(v1nodeclaim.Spec.ExpireAfter.Duration)).To(Equal(30 * time.Minute))
+		})
+		It("should default the v1beta1 expireAfter to v1 when the nodepool doesn't exist", func() {
+			Expect(env.Client.Delete(ctx, v1beta1nodepool)).To(Succeed())
+			v1beta1nodepool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
+			Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
+			Expect(v1nodeclaim.Spec.ExpireAfter.Duration).To(BeNil())
+		})
+		It("should default the v1beta1 expireAfter to v1 when the nodepool label doesn't exist", func() {
+			delete(v1beta1nodeclaim.Labels, v1beta1.NodePoolLabelKey)
+			v1beta1nodepool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
+			Expect(env.Client.Update(ctx, v1beta1nodepool)).To(Succeed())
+			Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
+			Expect(v1nodeclaim.Spec.ExpireAfter.Duration).To(BeNil())
+		})
+	})
 	It("should convert v1beta1 nodeclaim metadata", func() {
 		v1beta1nodeclaim.ObjectMeta = test.ObjectMeta()
 		Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())

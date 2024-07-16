@@ -140,8 +140,8 @@ func (in *NodePool) ConvertFrom(ctx context.Context, v1beta1np apis.Convertible)
 func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) (string, error) {
 	in.Weight = v1beta1np.Weight
 	in.Limits = Limits(v1beta1np.Limits)
-	in.Disruption.convertFrom(&v1beta1np.Disruption)
 	in.Template.Spec.ExpireAfter = NillableDuration(v1beta1np.Disruption.ExpireAfter)
+	in.Disruption.convertFrom(&v1beta1np.Disruption)
 	return in.Template.convertFrom(ctx, &v1beta1np.Template)
 }
 

@@ -19,7 +19,6 @@ package injection
 import (
 	"context"
 	"flag"
-	"log"
 	"os"
 
 	"github.com/samber/lo"
@@ -71,10 +70,6 @@ func WithClient(ctx context.Context, client client.Client) context.Context {
 
 func GetClient(ctx context.Context) client.Client {
 	c := ctx.Value(clientKey)
-	if c == nil {
-		// This is a developer error if this happens, so we should panic
-		log.Fatal("client doesn't exist in context")
-	}
 	return c.(client.Client)
 }
 
@@ -84,9 +79,5 @@ func WithNodeClasses(ctx context.Context, opts []schema.GroupVersionKind) contex
 
 func GetNodeClasses(ctx context.Context) []schema.GroupVersionKind {
 	retval := ctx.Value(nodeClassKey)
-	if retval == nil {
-		// This is a developer error if this happens, so we should panic
-		log.Fatal("nodeclass doesn't exist in context")
-	}
 	return retval.([]schema.GroupVersionKind)
 }
