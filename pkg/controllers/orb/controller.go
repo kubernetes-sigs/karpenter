@@ -65,8 +65,9 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	for c.schedulingInputHeap.Len() > 0 {
 		currentInput := c.schedulingInputHeap.Pop().(SchedulingInput) // Min heap, so always pops the oldest
 
-		diffScheduledInputAdded := &SchedulingInput{}
-		diffScheduledInputRemoved := &SchedulingInput{}
+		inputDiffAdded := &SchedulingInput{}
+		inputDiffRemoved := &SchedulingInput{}
+		inputDiffChanged := &SchedulingInput{}
 
 		// Check if this is the first time we're receiving input, set the "baseline"
 		if c.mostRecentSchedulingInput == nil {
@@ -76,20 +77,27 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 				return reconcile.Result{}, err
 			}
 		} else { // Check if the scheduling inputs have changed since the last time we saved it to PV
-			diffScheduledInputAdded, diffScheduledInputRemoved = currentInput.Diff(c.mostRecentSchedulingInput)
-			if diffScheduledInputAdded == nil && diffScheduledInputRemoved == nil {
+			inputDiffAdded, inputDiffRemoved, inputDiffChanged = currentInput.Diff(c.mostRecentSchedulingInput)
+			if inputDiffAdded == nil && inputDiffRemoved == nil {
 				fmt.Println("No changes to scheduling inputs since last save.")
 				continue
 			}
-			if diffScheduledInputAdded != nil {
-				err := c.SaveToPV(*diffScheduledInputAdded, "DiffAdded")
+			if inputDiffAdded != nil {
+				err := c.SaveToPV(*inputDiffAdded, "DiffAdded")
 				if err != nil {
 					fmt.Println("Error saving to PV:", err)
 					return reconcile.Result{}, err
 				}
 			}
-			if diffScheduledInputRemoved != nil {
-				err := c.SaveToPV(*diffScheduledInputRemoved, "DiffRemoved")
+			if inputDiffRemoved != nil {
+				err := c.SaveToPV(*inputDiffRemoved, "DiffRemoved")
+				if err != nil {
+					fmt.Println("Error saving to PV:", err)
+					return reconcile.Result{}, err
+				}
+			}
+			if inputDiffChanged != nil {
+				err := c.SaveToPV(*inputDiffChanged, "DiffChanged")
 				if err != nil {
 					fmt.Println("Error saving to PV:", err)
 					return reconcile.Result{}, err
