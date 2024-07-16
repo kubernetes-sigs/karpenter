@@ -104,6 +104,18 @@ func (in *NodeClaim) ConvertFrom(ctx context.Context, from apis.Convertible) err
 	} else {
 		in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatibilityAnnotationKey: kubeletAnnotation})
 	}
+<<<<<<< HEAD
+=======
+	nodePool := &NodePool{}
+	if err := kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+		if errors.IsNotFound(err) {
+			// If the nodepool doesn't exist, fallback to no expiry, and use the CRD default
+			return nil
+		}
+		return fmt.Errorf("getting nodepool, %w", err)
+	}
+	in.Spec.ExpireAfter = NillableDuration(nodePool.Spec.Template.Spec.ExpireAfter)
+>>>>>>> 57379ae (fixTests)
 	return nil
 }
 

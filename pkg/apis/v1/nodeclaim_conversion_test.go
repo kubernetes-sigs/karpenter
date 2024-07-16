@@ -41,30 +41,12 @@ import (
 var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 	var (
 		v1nodepool       *NodePool
-		v1beta1nodepool  *v1beta1.NodePool
 		v1nodeclaim      *NodeClaim
 		v1beta1nodeclaim *v1beta1.NodeClaim
 	)
 
 	BeforeEach(func() {
 		v1nodepool = test.NodePool()
-		v1beta1nodepool = &v1beta1.NodePool{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-nodepool",
-			},
-			Spec: v1beta1.NodePoolSpec{
-				Template: v1beta1.NodeClaimTemplate{
-					Spec: v1beta1.NodeClaimSpec{
-						NodeClassRef: &v1beta1.NodeClassReference{
-							Name:       "test",
-							Kind:       "test-kind",
-							APIVersion: "test-group",
-						},
-						Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{},
-					},
-				},
-			},
-		}
 		v1nodeclaim = &NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -82,7 +64,7 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 		v1beta1nodeclaim = &v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					NodePoolLabelKey: v1beta1nodepool.Name,
+					NodePoolLabelKey: v1nodepool.Name,
 				},
 			},
 			Spec: v1beta1.NodeClaimSpec{
@@ -261,38 +243,19 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 
 var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 	var (
-		v1nodepool       *NodePool
-		v1beta1nodepool  *v1beta1.NodePool
+		v1nodePool       *NodePool
 		v1nodeclaim      *NodeClaim
 		v1beta1nodeclaim *v1beta1.NodeClaim
 	)
 
 	BeforeEach(func() {
-		v1beta1nodepool = &v1beta1.NodePool{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test-nodepool",
-			},
-			Spec: v1beta1.NodePoolSpec{
-				Disruption: v1beta1.Disruption{
-					ExpireAfter: v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Minute)},
-				},
-				Template: v1beta1.NodeClaimTemplate{
-					Spec: v1beta1.NodeClaimSpec{
-						NodeClassRef: &v1beta1.NodeClassReference{
-							Name:       "test",
-							Kind:       "test-kind",
-							APIVersion: "test-group",
-						},
-						Requirements: []v1beta1.NodeSelectorRequirementWithMinValues{},
-					},
-				},
-			},
-		}
-		v1nodepool = test.NodePool()
+		ctx = injection.WithClient(ctx, env.Client)
+		v1nodePool = test.NodePool()
+		v1nodePool.Spec.Template.Spec.ExpireAfter = NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
 		v1nodeclaim = &NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					NodePoolLabelKey: v1nodepool.Name,
+					NodePoolLabelKey: v1nodePool.Name,
 				},
 			},
 			Spec: NodeClaimSpec{
@@ -306,7 +269,7 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 		v1beta1nodeclaim = &v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					NodePoolLabelKey: v1beta1nodepool.Name,
+					NodePoolLabelKey: v1nodePool.Name,
 				},
 			},
 			Spec: v1beta1.NodeClaimSpec{
@@ -317,14 +280,13 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 				},
 			},
 		}
-		Expect(env.Client.Create(ctx, v1beta1nodepool)).To(Succeed())
+		Expect(env.Client.Create(ctx, v1nodePool)).To(Succeed())
 
 		gvk := lo.Map(cloudProvider.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
 			return object.GVK(nc)
 		})
 		cloudProvider.NodeClassGroupVersionKind = gvk
 		ctx = injection.WithNodeClasses(ctx, gvk)
-		ctx = injection.WithClient(ctx, env.Client)
 	})
 	Context("ExpireAfter", func() {
 		It("should convert v1beta1 expireAfter to v1", func() {
@@ -332,15 +294,15 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 			Expect(lo.FromPtr(v1nodeclaim.Spec.ExpireAfter.Duration)).To(Equal(30 * time.Minute))
 		})
 		It("should default the v1beta1 expireAfter to v1 when the nodepool doesn't exist", func() {
-			Expect(env.Client.Delete(ctx, v1beta1nodepool)).To(Succeed())
-			v1beta1nodepool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
+			Expect(env.Client.Delete(ctx, v1nodePool)).To(Succeed())
+			v1nodePool.Spec.Template.Spec.ExpireAfter = NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
 			Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
 			Expect(v1nodeclaim.Spec.ExpireAfter.Duration).To(BeNil())
 		})
 		It("should default the v1beta1 expireAfter to v1 when the nodepool label doesn't exist", func() {
 			delete(v1beta1nodeclaim.Labels, v1beta1.NodePoolLabelKey)
-			v1beta1nodepool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
-			Expect(env.Client.Update(ctx, v1beta1nodepool)).To(Succeed())
+			v1nodePool.Spec.Template.Spec.ExpireAfter = NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
+			Expect(env.Client.Update(ctx, v1nodePool)).To(Succeed())
 			Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
 			Expect(v1nodeclaim.Spec.ExpireAfter.Duration).To(BeNil())
 		})
