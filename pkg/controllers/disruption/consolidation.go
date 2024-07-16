@@ -156,6 +156,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	for _, cn := range candidates {
 		if cn.capacityType != v1.CapacityTypeSpot {
 			allExistingAreSpot = false
+			break
 		}
 	}
 
