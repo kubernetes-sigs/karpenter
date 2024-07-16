@@ -25,7 +25,7 @@ import (
 
 const (
 	Group              = "karpenter.sh"
-	CompatabilityGroup = "compatibility." + Group
+	CompatibilityGroup = "compatibility." + Group
 )
 
 //go:generate controller-gen crd object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
