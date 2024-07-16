@@ -18,57 +18,95 @@ package orb
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	//"google.golang.org/protobuf/proto"
-	proto "github.com/gogo/protobuf/proto"
+
 	v1 "k8s.io/api/core/v1"
 )
 
 // Timestamp, dynamic inputs (like pending pods, statenodes, etc.)
 type SchedulingInput struct {
-	Timestamp     time.Time // Almost always format to / parse from string, but useful as Time object for comparison
-	PendingPods   []*v1.Pod
-	StateNodes    []*state.StateNode
-	InstanceTypes []*cloudprovider.InstanceType
+	Timestamp   time.Time // Almost always format to / parse from string, but useful as Time object for comparison
+	PendingPods []*v1.Pod
+	//stateNodes         []*state.StateNode // This is purely to extract
+	StateNodesWithPods []*StateNodeWithPods
+	InstanceTypes      []*cloudprovider.InstanceType
 	//all the other scheduling inputs... (bindings?)
 }
 
-func (si SchedulingInput) Reduce() SchedulingInput {
-	return SchedulingInput{
-		Timestamp:     si.Timestamp,
-		PendingPods:   reducePods(si.PendingPods),
-		StateNodes:    reduceStateNodes(si.StateNodes),
-		InstanceTypes: reduceInstanceTypes(si.InstanceTypes),
+type StateNodeWithPods struct {
+	Node      *v1.Node
+	NodeClaim *v1beta1.NodeClaim
+	Pods      []*v1.Pod
+}
+
+func getStateNodeWithPods(ctx context.Context, kubeClient client.Client, stateNode *state.StateNode) *StateNodeWithPods {
+	pods, err := stateNode.Pods(ctx, kubeClient)
+	if err != nil {
+		pods = nil
+	}
+	return &StateNodeWithPods{
+		Node:      stateNode.Node,
+		NodeClaim: stateNode.NodeClaim,
+		Pods:      pods,
 	}
 }
 
-// Function does equality for a "reduced" StateNode.
-// A reduced StateNode is equal iff their Node and the Nodeclaim and both internally DeepEqual)
-// Implemented because DeepEqual on StateNode caused "panic: an unexported field was encountered"
-func ReducedStateNodeEquals(oldStateNode *state.StateNode, newStateNode *state.StateNode) bool {
-	return equality.Semantic.DeepEqual(oldStateNode.Node, newStateNode.Node) &&
-		equality.Semantic.DeepEqual(oldStateNode.NodeClaim, newStateNode.NodeClaim)
+// For every stateNode as input, appends to a []*StateNodeWithPods and returns
+func getStateNodesWithPods(ctx context.Context, kubeClient client.Client, stateNodes []*state.StateNode) []*StateNodeWithPods {
+	stateNodesWithPods := []*StateNodeWithPods{}
+	for _, stateNode := range stateNodes {
+		stateNodesWithPods = append(stateNodesWithPods, getStateNodeWithPods(ctx, kubeClient, stateNode))
+	}
+	return stateNodesWithPods
 }
+
+func (snp StateNodeWithPods) GetName() string {
+	if snp.Node == nil {
+		return snp.NodeClaim.GetName()
+	}
+	return snp.Node.GetName()
+}
+
+// Function to create a new SchedulingInput
+
+func (si SchedulingInput) Reduce() SchedulingInput {
+	return SchedulingInput{
+		Timestamp:          si.Timestamp,
+		PendingPods:        reducePods(si.PendingPods),
+		StateNodesWithPods: si.StateNodesWithPods,
+		InstanceTypes:      reduceInstanceTypes(si.InstanceTypes),
+	}
+}
+
+// // Function does equality for a "reduced" StateNode.
+// // A reduced StateNode is equal iff their Node and the Nodeclaim and both internally DeepEqual)
+// // Implemented because DeepEqual on StateNode caused "panic: an unexported field was encountered"
+// func ReducedStateNodeEquals(oldStateNode *state.StateNode, newStateNode *state.StateNode) bool {
+// 	return equality.Semantic.DeepEqual(oldStateNode.Node, newStateNode.Node) &&
+// 		equality.Semantic.DeepEqual(oldStateNode.NodeClaim, newStateNode.NodeClaim)
+// }
 
 // Function does equality for a "reduced" Pod (i.e. equal if the Pod and the Node it's scheduled on are internally DeepEqual)
 
 // TODO: I need to flip the construct here. I should be generating some stripped/minimal subset of these data structures
 // which are already the representation that I'd like to print. i.e. store in memory only what I want to print anyway
 func (si SchedulingInput) String() string {
-	return fmt.Sprintf("Scheduled at Time (UTC): %v\n\nPendingPods:\n%v\n\nStateNodes:\n%v\n\nInstanceTypes:\n%v\n\n",
+	return fmt.Sprintf("Scheduled at Time (UTC): %v\n\nPendingPods:\n%v\n\nStateNodesWithPods:\n%v\n\nInstanceTypes:\n%v\n\n",
 		si.Timestamp.Format("2006-01-02_15-04-05"),
 		PodsToString(si.PendingPods),
-		StateNodesToString(si.StateNodes),
+		StateNodesWithPodsToString(si.StateNodesWithPods),
 		InstanceTypesToString(si.InstanceTypes),
 	)
 }
@@ -77,28 +115,28 @@ func (si SchedulingInput) String() string {
 // This function takes an old Scheduling Input and a new one and returns a SchedulingInput of only the differences.
 func (si *SchedulingInput) Diff(oldSi *SchedulingInput) (*SchedulingInput, *SchedulingInput, *SchedulingInput) {
 	pendingPodsAdded, pendingPodsRemoved, pendingPodsChanged := diffPods(oldSi.PendingPods, si.PendingPods)
-	stateNodesAdded, stateNodesRemoved, stateNodesChanged := diffStateNodes(oldSi.StateNodes, si.StateNodes)
+	stateNodesAdded, stateNodesRemoved, stateNodesChanged := diffStateNodes(oldSi.StateNodesWithPods, si.StateNodesWithPods)
 	instanceTypesAdded, instanceTypesRemoved, instanceTypesChanged := diffInstanceTypes(oldSi.InstanceTypes, si.InstanceTypes)
 
 	diffAdded := &SchedulingInput{
-		Timestamp:     si.Timestamp, // i.e. the time of those (newer) differences
-		PendingPods:   pendingPodsAdded,
-		StateNodes:    stateNodesAdded,
-		InstanceTypes: instanceTypesAdded,
+		Timestamp:          si.Timestamp, // i.e. the time of those (newer) differences
+		PendingPods:        pendingPodsAdded,
+		StateNodesWithPods: stateNodesAdded,
+		InstanceTypes:      instanceTypesAdded,
 	}
 
 	diffRemoved := &SchedulingInput{
-		Timestamp:     si.Timestamp, // i.e. the time of those (newer) differences
-		PendingPods:   pendingPodsRemoved,
-		StateNodes:    stateNodesRemoved,
-		InstanceTypes: instanceTypesRemoved,
+		Timestamp:          si.Timestamp, // i.e. the time of those (newer) differences
+		PendingPods:        pendingPodsRemoved,
+		StateNodesWithPods: stateNodesRemoved,
+		InstanceTypes:      instanceTypesRemoved,
 	}
 
 	diffChanged := &SchedulingInput{
-		Timestamp:     si.Timestamp, // i.e. the time of those (newer) differences
-		PendingPods:   pendingPodsChanged,
-		StateNodes:    stateNodesChanged,
-		InstanceTypes: instanceTypesChanged,
+		Timestamp:          si.Timestamp, // i.e. the time of those (newer) differences
+		PendingPods:        pendingPodsChanged,
+		StateNodesWithPods: stateNodesChanged,
+		InstanceTypes:      instanceTypesChanged,
 	}
 
 	if pendingPodsAdded == nil && stateNodesAdded == nil && instanceTypesAdded == nil {
@@ -165,43 +203,41 @@ func diffPods(oldPods, newPods []*v1.Pod) ([]*v1.Pod, []*v1.Pod, []*v1.Pod) {
 }
 
 // This is the diffStateNodes function which gets the differences between statenodes
-func diffStateNodes(oldStateNodes, newStateNodes []*state.StateNode) ([]*state.StateNode, []*state.StateNode, []*state.StateNode) {
+func diffStateNodes(oldStateNodesWithPods, newStateNodesWithPods []*StateNodeWithPods) ([]*StateNodeWithPods, []*StateNodeWithPods, []*StateNodeWithPods) {
 	// Convert the slices to sets for efficient difference calculation
-	oldNodeSet := make(map[string]*state.StateNode, len(oldStateNodes))
-	for _, stateNode := range oldStateNodes {
-		oldNodeSet[stateNode.Name()] = stateNode
+	oldStateNodeSet := make(map[string]*StateNodeWithPods, len(oldStateNodesWithPods))
+	for _, stateNodeWithPods := range oldStateNodesWithPods {
+		oldStateNodeSet[stateNodeWithPods.GetName()] = stateNodeWithPods
 	}
 
-	newNodeSet := make(map[string]*state.StateNode, len(newStateNodes))
-	for _, stateNode := range newStateNodes {
-		newNodeSet[stateNode.Name()] = stateNode
+	newStateNodeSet := make(map[string]*StateNodeWithPods, len(newStateNodesWithPods))
+	for _, stateNodeWithPods := range newStateNodesWithPods {
+		newStateNodeSet[stateNodeWithPods.GetName()] = stateNodeWithPods
 	}
 
 	// Find the differences between the sets
-	added := make([]*state.StateNode, 0)
-	removed := make([]*state.StateNode, 0)
-	changed := make([]*state.StateNode, 0)
-	for _, newStateNode := range newStateNodes {
-		oldStateNode, exists := oldNodeSet[newStateNode.Name()]
+	added := []*StateNodeWithPods{}
+	removed := []*StateNodeWithPods{}
+	changed := []*StateNodeWithPods{}
+	for _, newStateNodeWithPods := range newStateNodesWithPods {
+		oldStateNodeWithPods, exists := oldStateNodeSet[newStateNodeWithPods.GetName()]
 
 		// If stateNode is new, add to "added"
 		if !exists {
-			added = append(added, newStateNode)
+			added = append(added, newStateNodeWithPods)
 			continue
 		}
 
-		// If stateNode has changed, add the whole changed resource
-		// Simplification / Opportunity to optimize -- Only add sub-field.
-		//    This requires more book-keeping on object reconstruction from logs later on.
-		if hasStateNodeChanged(oldStateNode, newStateNode) {
-			changed = append(changed, newStateNode)
+		// If stateNode has changed, add the whole changed stateNodeWithPods
+		if hasStateNodeWithPodsChanged(oldStateNodeWithPods, newStateNodeWithPods) {
+			changed = append(changed, newStateNodeWithPods)
 		}
 	}
 
-	// Get the remainder "removed" stateNodes
-	for _, oldStateNode := range oldStateNodes {
-		if _, exists := newNodeSet[oldStateNode.Name()]; !exists {
-			removed = append(removed, oldStateNode)
+	// Get the remainder "removed" stateNodesWithPods
+	for _, oldStateNodeWithPods := range oldStateNodesWithPods {
+		if _, exists := newStateNodeSet[oldStateNodeWithPods.GetName()]; !exists {
+			removed = append(removed, oldStateNodeWithPods)
 		}
 	}
 
@@ -224,9 +260,9 @@ func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) ([]*clo
 	}
 
 	// Find the differences between the sets
-	added := make([]*cloudprovider.InstanceType, 0)
-	removed := make([]*cloudprovider.InstanceType, 0)
-	changed := make([]*cloudprovider.InstanceType, 0)
+	added := []*cloudprovider.InstanceType{}
+	removed := []*cloudprovider.InstanceType{}
+	changed := []*cloudprovider.InstanceType{}
 	for _, newType := range newTypes {
 		oldType, exists := oldTypeSet[newType.Name]
 
@@ -260,8 +296,8 @@ func hasPodChanged(oldPod, newPod *v1.Pod) bool {
 	return !equality.Semantic.DeepEqual(oldPod, newPod)
 }
 
-func hasStateNodeChanged(oldStateNode, newStateNode *state.StateNode) bool {
-	return !equality.Semantic.DeepDerivative(oldStateNode, newStateNode)
+func hasStateNodeWithPodsChanged(oldStateNodeWithPods, newStateNodeWithPods *StateNodeWithPods) bool {
+	return !equality.Semantic.DeepEqual(oldStateNodeWithPods, newStateNodeWithPods)
 	// return ReducedStateNodeEquals(oldStateNode, newStateNode)
 }
 
@@ -335,22 +371,25 @@ func (si SchedulingInput) Marshal() ([]byte, error) {
 // 	return schedulingInput, nil
 // }
 
-// Function to do the reverse, take a scheduling input's []byte and unmarshal it back into a SchedulingInput
-func PBToSchedulingInput(timestamp time.Time, data []byte) (SchedulingInput, error) {
-	podList := &v1.PodList{}
-	if err := proto.Unmarshal(data, podList); err != nil {
-		return SchedulingInput{}, fmt.Errorf("unmarshaling pod list, %w", err)
-	}
-	pods := lo.ToSlicePtr(podList.Items)
-	return NewSchedulingInput(timestamp, pods, nil, nil), nil // TODO: update once I figure out serialization
-}
+// // Function to do the reverse, take a scheduling input's []byte and unmarshal it back into a SchedulingInput
+// func PBToSchedulingInput(timestamp time.Time, data []byte) (SchedulingInput, error) {
+// 	podList := &v1.PodList{}
+// 	if err := proto.Unmarshal(data, podList); err != nil {
+// 		return SchedulingInput{}, fmt.Errorf("unmarshaling pod list, %w", err)
+// 	}
+// 	pods := lo.ToSlicePtr(podList.Items)
+// 	return NewSchedulingInput(timestamp, pods, nil, nil), nil // TODO: update once I figure out serialization
+// }
 
-func NewSchedulingInput(scheduledTime time.Time, pendingPods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes []*cloudprovider.InstanceType) SchedulingInput {
+func NewSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
+	pendingPods []*v1.Pod, stateNodes []*state.StateNode,
+	instanceTypes []*cloudprovider.InstanceType) SchedulingInput {
+	stateNodesWithPods := getStateNodesWithPods(ctx, kubeClient, reduceStateNodes(stateNodes))
 	return SchedulingInput{
-		Timestamp:     scheduledTime,
-		PendingPods:   pendingPods,
-		StateNodes:    stateNodes,
-		InstanceTypes: instanceTypes,
+		Timestamp:          scheduledTime,
+		PendingPods:        pendingPods,
+		StateNodesWithPods: stateNodesWithPods,
+		InstanceTypes:      instanceTypes,
 	}
 }
 
@@ -380,21 +419,21 @@ func PodsToString(pods []*v1.Pod) string {
 	return buf.String()
 }
 
-// Similar function for stateNode
-func StateNodeToString(node *state.StateNode) string {
+func StateNodeWithPodsToString(node *StateNodeWithPods) string {
 	if node == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("{Node: %s, NodeClaim: %s}", NodeToString(node.Node), NodeClaimToString(node.NodeClaim))
+	return fmt.Sprintf("{Node: %s, NodeClaim: %s, {Pods: %s}}",
+		NodeToString(node.Node), NodeClaimToString(node.NodeClaim), PodsToString(node.Pods))
 }
 
-func StateNodesToString(nodes []*state.StateNode) string {
+func StateNodesWithPodsToString(nodes []*StateNodeWithPods) string {
 	if nodes == nil {
 		return "<nil>"
 	}
 	var buf bytes.Buffer
 	for _, node := range nodes {
-		buf.WriteString(StateNodeToString(node) + "\n")
+		buf.WriteString(StateNodeWithPodsToString(node) + "\n")
 	}
 	return buf.String()
 }

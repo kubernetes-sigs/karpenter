@@ -22,6 +22,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
@@ -61,10 +62,12 @@ func NewSchedulingInputHeap() *SchedulingInputHeap {
 }
 
 // Function for logging everything in the Provisioner Scheduler (i.e. pending pods, statenodes...)
-func (h *SchedulingInputHeap) LogProvisioningScheduler(scheduledTime time.Time, pods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes map[string][]*cloudprovider.InstanceType) {
-	si := NewSchedulingInput(scheduledTime, pods, stateNodes, instanceTypes["default"]) // TODO: add all inputs I want to log
-	si = si.Reduce()                                                                    // Strip out "unnecessary" parts of the data structure...
-	h.Push(si)                                                                          // sends that scheduling input into the data structure to be popped in batch to go to PV as a protobuf
+// TODO: add all inputs I want to log in New constructor
+func (h *SchedulingInputHeap) LogProvisioningScheduler(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
+	pods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes map[string][]*cloudprovider.InstanceType) {
+	si := NewSchedulingInput(ctx, kubeClient, scheduledTime, pods, stateNodes, instanceTypes["default"])
+	si = si.Reduce() // Strip out "unnecessary" parts of the data structure...
+	h.Push(si)       // sends that scheduling input into the data structure to be popped in batch to go to PV as a protobuf
 }
 
 type SchedulingMetadataHeap []SchedulingMetadata

@@ -262,37 +262,37 @@ func ReadFromPV(logname string) (time.Time, []byte, error) {
 	return timestamp, contents, nil
 }
 
-// Function for reconstructing inputs
-func ReconstructSchedulingInput(fileName string) error {
+// // Function for reconstructing inputs
+// func ReconstructSchedulingInput(fileName string) error {
 
-	// Read from the PV to check (will be what the ORB tool does from the Command Line)
-	readTimestamp, readdata, err := ReadFromPV(fileName)
-	if err != nil {
-		fmt.Println("Error reading from PV:", err)
-		return err
-	}
+// 	// Read from the PV to check (will be what the ORB tool does from the Command Line)
+// 	readTimestamp, readdata, err := ReadFromPV(fileName)
+// 	if err != nil {
+// 		fmt.Println("Error reading from PV:", err)
+// 		return err
+// 	}
 
-	// Protobuff to si
-	si, err := PBToSchedulingInput(readTimestamp, readdata)
-	if err != nil {
-		fmt.Println("Error converting PB to SI:", err)
-		return err
-	}
-	// Print the reconstructed scheduling input
-	fmt.Println("Reconstructed Scheduling Input looks like:\n" + si.String())
-	return nil
-}
+// 	// Protobuff to si
+// 	si, err := PBToSchedulingInput(readTimestamp, readdata)
+// 	if err != nil {
+// 		fmt.Println("Error converting PB to SI:", err)
+// 		return err
+// 	}
+// 	// Print the reconstructed scheduling input
+// 	fmt.Println("Reconstructed Scheduling Input looks like:\n" + si.String())
+// 	return nil
+// }
 
-func testReadPVandReconstruct(item SchedulingInput) error {
-	// We're sort of artificially rebuilding the filename here, just to do a loopback test of sorts.
-	// In reality, we could just pull a file from a known directory
-	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05")
-	fileName := fmt.Sprintf("ProvisioningSchedulingInput_%s.log", timestampStr)
+// func testReadPVandReconstruct(item SchedulingInput) error {
+// 	// We're sort of artificially rebuilding the filename here, just to do a loopback test of sorts.
+// 	// In reality, we could just pull a file from a known directory
+// 	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05")
+// 	fileName := fmt.Sprintf("ProvisioningSchedulingInput_%s.log", timestampStr)
 
-	err := ReconstructSchedulingInput(fileName)
-	if err != nil {
-		fmt.Println("Error reconstructing scheduling input:", err)
-		return err
-	}
-	return nil
-}
+// 	err := ReconstructSchedulingInput(fileName)
+// 	if err != nil {
+// 		fmt.Println("Error reconstructing scheduling input:", err)
+// 		return err
+// 	}
+// 	return nil
+// }
