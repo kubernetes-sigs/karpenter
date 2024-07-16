@@ -127,7 +127,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	fmt.Println("----------- Ending a Reconcile Print from ORB -----------")
 	fmt.Println()
 
-	return reconcile.Result{RequeueAfter: time.Second * 5}, nil
+	return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 }
 
 // TODO: What does this register function do? Is it needed for a controller to work?
