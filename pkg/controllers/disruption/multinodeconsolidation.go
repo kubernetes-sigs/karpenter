@@ -136,7 +136,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
-		ctx = orb.WithSchedulingMetadata(ctx, "multi-node-consolidation", time.Now())
+		ctx = orb.WithSchedulingMetadata(ctx, "multi-node-consolidation", time.Time{}) // Time will get input at scheduling for consistency
 		cmd, results, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
 		if err != nil {
 			return Command{}, scheduling.Results{}, err

@@ -73,7 +73,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			return Command{}, scheduling.Results{}, nil
 		}
 		// compute a possible consolidation option
-		ctx = orb.WithSchedulingMetadata(ctx, "single-node-consolidation", time.Now())
+		ctx = orb.WithSchedulingMetadata(ctx, "single-node-consolidation", time.Time{}) // Time will get input at scheduling for consistency
 		cmd, results, err := s.computeConsolidation(ctx, candidate)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed computing consolidation")

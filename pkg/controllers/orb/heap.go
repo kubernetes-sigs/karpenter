@@ -100,14 +100,16 @@ func NewSchedulingMetadataHeap() *SchedulingMetadataHeap {
 }
 
 // This function will log scheduling action to PV
-func (h *SchedulingMetadataHeap) LogSchedulingAction(ctx context.Context, timestamp time.Time) error {
+func (h *SchedulingMetadataHeap) LogSchedulingAction(ctx context.Context, schedulingTime time.Time) error {
 	metadata, ok := GetSchedulingMetadata(ctx)
+
+	// The resolves the time difference between the start of a consolidation call and the subsequent provisioning scheduling
+	metadata.Timestamp = schedulingTime
+
 	if !ok { // Provisioning metadata is not set, set it to the default - normal provisioning action
-		ctx = WithSchedulingMetadata(ctx, "normal-provisioning", timestamp)
+		ctx = WithSchedulingMetadata(ctx, "normal-provisioning", schedulingTime)
 		metadata, _ = GetSchedulingMetadata(ctx) // Get it again to update metadata
 	}
 	h.Push(metadata)
-
-	// TODO: Once we log it, do we need to clear it from the context? Or will it just get overwritten as appropriate anyway?
 	return nil
 }

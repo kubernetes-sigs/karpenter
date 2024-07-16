@@ -63,25 +63,41 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 	// Pop each scheduling input off my heap (oldest first) and batch log in PV
 	for c.schedulingInputHeap.Len() > 0 {
-		item := c.schedulingInputHeap.Pop().(SchedulingInput) // Min heap, so always pops the oldest
-		diffScheduledInput := &SchedulingInput{}
+		currentInput := c.schedulingInputHeap.Pop().(SchedulingInput) // Min heap, so always pops the oldest
 
-		// Check if the item has changed since the last time we saved it to PV
-		if c.mostRecentSchedulingInput != nil { // If this is not the first time
-			diffScheduledInput = item.Diff(c.mostRecentSchedulingInput)
-			if diffScheduledInput == nil { // No change, skip saving to PV
+		diffScheduledInputAdded := &SchedulingInput{}
+		diffScheduledInputRemoved := &SchedulingInput{}
+
+		// Check if this is the first time we're receiving input, set the "baseline"
+		if c.mostRecentSchedulingInput == nil {
+			err := c.SaveToPV(currentInput, "Baseline")
+			if err != nil {
+				fmt.Println("Error saving to PV:", err)
+				return reconcile.Result{}, err
+			}
+		} else { // Check if the scheduling inputs have changed since the last time we saved it to PV
+			diffScheduledInputAdded, diffScheduledInputRemoved = currentInput.Diff(c.mostRecentSchedulingInput)
+			if diffScheduledInputAdded == nil && diffScheduledInputRemoved == nil {
+				fmt.Println("No changes to scheduling inputs since last save.")
 				continue
 			}
-		} else {
-			diffScheduledInput = &item
+			if diffScheduledInputAdded != nil {
+				err := c.SaveToPV(*diffScheduledInputAdded, "DiffAdded")
+				if err != nil {
+					fmt.Println("Error saving to PV:", err)
+					return reconcile.Result{}, err
+				}
+			}
+			if diffScheduledInputRemoved != nil {
+				err := c.SaveToPV(*diffScheduledInputRemoved, "DiffRemoved")
+				if err != nil {
+					fmt.Println("Error saving to PV:", err)
+					return reconcile.Result{}, err
+				}
+			}
 		}
 
-		err := c.SaveToPV(*diffScheduledInput)
-		if err != nil {
-			fmt.Println("Error saving to PV:", err)
-			return reconcile.Result{}, err
-		}
-		c.mostRecentSchedulingInput = &item
+		c.mostRecentSchedulingInput = &currentInput
 
 		// // (also loopback test it)
 		// err = c.testReadPVandReconstruct(item)
@@ -103,7 +119,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	fmt.Println("----------- Ending a Reconcile Print from ORB -----------")
 	fmt.Println()
 
-	return reconcile.Result{RequeueAfter: time.Second * 30}, nil
+	return reconcile.Result{RequeueAfter: time.Second * 5}, nil
 }
 
 // TODO: What does this register function do? Is it needed for a controller to work?
@@ -114,11 +130,8 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(c))
 }
 
-/* This function saves things to our Persistent Volume */
-// Saves data to PV (S3 Bucket for AWS) via the mounted log path
-// It takes a name of the log file as well as the logline to be logged.
-// The function opens a file for writing, writes some data to the file, and then closes the file
-func (c *Controller) SaveToPV(item SchedulingInput) error {
+// This function saves things to our Persistent Volume, saving data to PV (S3 Bucket for AWS) via the mounted log path
+func (c *Controller) SaveToPV(item SchedulingInput, difftype string) error {
 
 	//fmt.Println("Saving Scheduling Input to PV:\n", item.String()) // Test print
 	// logdata, err := item.Marshal()
@@ -130,11 +143,9 @@ func (c *Controller) SaveToPV(item SchedulingInput) error {
 	// TODO: Instead of the above, In the interim while I figure out the custom protobuf... Just send string to file
 	logdata := item.String()
 
-	// Timestamp the file
 	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05")
-	fileName := fmt.Sprintf("SchedulingInput_%s.log", timestampStr)
-
-	path := filepath.Join("/data", fileName) // mountPath = /data by PVC
+	fileName := fmt.Sprintf("SchedulingInput_%s_%s.log", timestampStr, difftype)
+	path := filepath.Join("/data", fileName) // mountPath := /data in our PVC yaml
 
 	// Opens the mounted volume (S3 Bucket) file at that path
 	file, err := os.Create(path)
