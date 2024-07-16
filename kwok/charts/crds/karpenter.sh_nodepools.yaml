@@ -148,13 +148,15 @@ spec:
                       pattern: ^(([0-9]+(s|m|h))+)|(Never)$
                       type: string
                     consolidationPolicy:
-                      default: WhenUnderutilized
+                      default: WhenUnderutilizedOrCheaper
                       description: |-
                         ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
-                        algorithm. This policy defaults to "WhenUnderutilized" if not specified
+                        algorithm. This policy defaults to "WhenUnderutilizedOrCheaper" if not specified
                       enum:
                         - WhenEmpty
                         - WhenUnderutilized
+                        - WhenCheaper
+                        - WhenUnderutilizedOrCheaper
                       type: string
                     expireAfter:
                       default: 720h

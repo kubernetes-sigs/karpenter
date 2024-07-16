@@ -50,6 +50,7 @@ import (
 
 var _ = Describe("Consolidation", func() {
 	var nodePool *v1.NodePool
+
 	var nodeClaim, spotNodeClaim *v1.NodeClaim
 	var node, spotNode *corev1.Node
 	var labels = map[string]string{
@@ -59,7 +60,7 @@ var _ = Describe("Consolidation", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+					ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilizedOrCheaper,
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
@@ -382,7 +383,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilizedOrCheaper,
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
@@ -447,7 +448,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilizedOrCheaper,
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
 						}},
@@ -511,7 +512,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilizedOrCheaper,
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
@@ -602,7 +603,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilizedOrCheaper,
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
@@ -693,7 +694,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilizedOrCheaper,
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
@@ -784,7 +785,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilizedOrCheaper,
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},

@@ -54,6 +54,13 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	constrainedByBudgets := false
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
+		switch candidate.nodePool.Spec.Disruption.ConsolidationPolicy {
+		case v1.ConsolidationPolicyWhenEmpty:
+			continue
+		case v1.ConsolidationPolicyWhenUnderutilized:
+			continue
+		}
+
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.

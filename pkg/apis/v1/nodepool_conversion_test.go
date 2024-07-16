@@ -81,7 +81,7 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 	It("should convert v1 nodepool metadata", func() {
 		v1nodepool.ObjectMeta = test.ObjectMeta()
 		Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
-		v1beta1nodepool.Annotations = map[string]string{KubeletCompatabilityAnnotationKey: "null"}
+		v1beta1nodepool.Annotations = map[string]string{KubeletCompatabilityAnnotationKey: "null", ConsolidationPolicyCompatabilityAnnotationKey: ""}
 		Expect(v1beta1nodepool.ObjectMeta).To(BeEquivalentTo(v1nodepool.ObjectMeta))
 	})
 	Context("NodePool Spec", func() {
@@ -262,6 +262,11 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 						Expect(v1beta1nodepool.Spec.Disruption.Budgets[i].Reasons).To(BeEquivalentTo(expected))
 					}
 				})
+				It("should convert v1 nodepool consolidationPolicy", func() {
+					v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenCheaper
+					Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+					Expect(v1beta1nodepool.Spec.Disruption.ConsolidationPolicy).To(Equal(v1beta1.ConsolidationPolicyWhenUnderutilized))
+				})
 			})
 		})
 	})
@@ -320,7 +325,7 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 	It("should convert v1beta1 nodepool metadata", func() {
 		v1beta1nodepool.ObjectMeta = test.ObjectMeta()
 		Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
-		v1beta1nodepool.Annotations = map[string]string{KubeletCompatabilityAnnotationKey: "null"}
+		v1beta1nodepool.Annotations = map[string]string{KubeletCompatabilityAnnotationKey: "null", ConsolidationPolicyCompatabilityAnnotationKey: ""}
 		Expect(v1nodepool.ObjectMeta).To(BeEquivalentTo(v1beta1nodepool.ObjectMeta))
 	})
 	Context("NodePool Spec", func() {
@@ -534,6 +539,11 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 						})
 						Expect(v1nodepool.Spec.Disruption.Budgets[i].Reasons).To(BeEquivalentTo(expected))
 					}
+				})
+				It("should convert v1beta1 nodepool consolidationPolicy", func() {
+					v1beta1nodepool.Annotations = map[string]string{ConsolidationPolicyCompatabilityAnnotationKey: string(ConsolidationPolicyWhenCheaper)}
+					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+					Expect(v1nodepool.Spec.Disruption.ConsolidationPolicy).To(Equal(ConsolidationPolicyWhenCheaper))
 				})
 			})
 		})

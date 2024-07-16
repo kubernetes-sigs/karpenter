@@ -44,6 +44,8 @@ func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidat
 	return &MultiNodeConsolidation{consolidation: consolidation}
 }
 
+// ComputeCommand generates a disruption command given candidates
+// nolint:gocyclo
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if m.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
@@ -60,6 +62,13 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	disruptableCandidates := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
 	for _, candidate := range candidates {
+		switch candidate.nodePool.Spec.Disruption.ConsolidationPolicy {
+		case v1.ConsolidationPolicyWhenEmpty:
+			continue
+		case v1.ConsolidationPolicyWhenCheaper:
+			continue
+		}
+
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
 		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonUnderutilized] == 0 {
