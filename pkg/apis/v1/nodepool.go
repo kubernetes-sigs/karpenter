@@ -222,16 +222,11 @@ type NodePool struct {
 const NodePoolHashVersion = "v3"
 
 func (in *NodePool) Hash() string {
-	kubeletHash := lo.Must(hashstructure.Hash(in.Annotations[ProviderCompatabilityAnnotationKey], hashstructure.FormatV2, &hashstructure.HashOptions{
+	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec.Template, hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,
 		IgnoreZeroValue: true,
 		ZeroNil:         true,
-	}))
-	return fmt.Sprintf("%d-%d", lo.Must(hashstructure.Hash(in.Spec.Template, hashstructure.FormatV2, &hashstructure.HashOptions{
-		SlicesAsSets:    true,
-		IgnoreZeroValue: true,
-		ZeroNil:         true,
-	})), kubeletHash)
+	})))
 }
 
 // NodePoolList contains a list of NodePool

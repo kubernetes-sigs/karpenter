@@ -40,6 +40,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -134,7 +135,7 @@ func (env *Environment) PrintCluster() {
 		metaList.SetGroupVersionKind(lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme())))
 		Expect(env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel}))).To(Succeed())
 		for _, item := range metaList.Items {
-			fmt.Println(item)
+			fmt.Println(pretty.Concise(item))
 			fmt.Println()
 		}
 		fmt.Println("---------------------------")
