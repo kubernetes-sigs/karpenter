@@ -40,19 +40,30 @@ func (in *NodePool) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	// Convert v1 status
 	v1beta1NP.Status.Resources = in.Status.Resources
 	v1beta1NP.Status.Conditions = in.Status.Conditions
-	return in.Spec.convertTo(ctx, &v1beta1NP.Spec, in.Annotations[KubeletCompatabilityAnnotationKey])
+	if v1beta1NP.Annotations == nil {
+		v1beta1NP.Annotations = map[string]string{}
+	}
+	return in.Spec.convertTo(ctx, &v1beta1NP.Spec, v1beta1NP.Annotations)
 }
 
-func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec, kubeletAnnotation string) error {
+func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec, annotations map[string]string) error {
 	v1beta1np.Weight = in.Weight
 	v1beta1np.Limits = v1beta1.Limits(in.Limits)
 	in.Disruption.convertTo(&v1beta1np.Disruption)
-	return in.Template.convertTo(ctx, &v1beta1np.Template, kubeletAnnotation)
+	annotations[ConsolidationPolicyCompatabilityAnnotationKey] = string(in.Disruption.ConsolidationPolicy)
+	return in.Template.convertTo(ctx, &v1beta1np.Template, annotations[KubeletCompatabilityAnnotationKey])
 }
 
 func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
 	v1beta1np.ConsolidateAfter = (*v1beta1.NillableDuration)(in.ConsolidateAfter)
-	v1beta1np.ConsolidationPolicy = v1beta1.ConsolidationPolicy(in.ConsolidationPolicy)
+	switch in.ConsolidationPolicy {
+	case ConsolidationPolicyWhenUnderutilizedOrCheaper:
+		fallthrough
+	case ConsolidationPolicyWhenCheaper:
+		v1beta1np.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+	default:
+		v1beta1np.ConsolidationPolicy = v1beta1.ConsolidationPolicy(in.ConsolidationPolicy)
+	}
 	v1beta1np.ExpireAfter = v1beta1.NillableDuration(in.ExpireAfter)
 	v1beta1np.Budgets = lo.Map(in.Budgets, func(v1budget Budget, _ int) v1beta1.Budget {
 		return v1beta1.Budget{
@@ -123,24 +134,37 @@ func (in *NodePool) ConvertFrom(ctx context.Context, v1beta1np apis.Convertible)
 	in.Status.Resources = v1beta1NP.Status.Resources
 	in.Status.Conditions = v1beta1NP.Status.Conditions
 
-	kubeletAnnotation, err := in.Spec.convertFrom(ctx, &v1beta1NP.Spec)
+	kubeletAnnotation, err := in.Spec.convertFrom(ctx, &v1beta1NP.Spec, in.Annotations[ConsolidationPolicyCompatabilityAnnotationKey])
 	if err != nil {
 		return err
 	}
-	in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatabilityAnnotationKey: kubeletAnnotation})
+	in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatabilityAnnotationKey: kubeletAnnotation, ConsolidationPolicyCompatabilityAnnotationKey: string(in.Spec.Disruption.ConsolidationPolicy)})
 	return nil
 }
 
-func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) (string, error) {
+func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec, consolidationPolicy string) (string, error) {
 	in.Weight = v1beta1np.Weight
 	in.Limits = Limits(v1beta1np.Limits)
-	in.Disruption.convertFrom(&v1beta1np.Disruption)
+	in.Disruption.convertFrom(&v1beta1np.Disruption, consolidationPolicy)
 	return in.Template.convertFrom(ctx, &v1beta1np.Template)
 }
 
-func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
+func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption, consolidationPolicy string) {
 	in.ConsolidateAfter = (*NillableDuration)(v1beta1np.ConsolidateAfter)
-	in.ConsolidationPolicy = ConsolidationPolicy(v1beta1np.ConsolidationPolicy)
+	if consolidationPolicy != "" {
+		switch consolidationPolicy {
+		case string(ConsolidationPolicyWhenUnderutilizedOrCheaper):
+			in.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilizedOrCheaper
+		case string(ConsolidationPolicyWhenUnderutilized):
+			in.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
+		case string(ConsolidationPolicyWhenCheaper):
+			in.ConsolidationPolicy = ConsolidationPolicyWhenCheaper
+		case string(ConsolidationPolicyWhenEmpty):
+			in.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
+		}
+	} else {
+		in.ConsolidationPolicy = ConsolidationPolicy(v1beta1np.ConsolidationPolicy)
+	}
 	in.ExpireAfter = NillableDuration(v1beta1np.ExpireAfter)
 	in.Budgets = lo.Map(v1beta1np.Budgets, func(v1beta1budget v1beta1.Budget, _ int) Budget {
 		return Budget{

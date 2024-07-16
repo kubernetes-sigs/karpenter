@@ -546,7 +546,6 @@ var _ = Describe("Disruption Taints", func() {
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptionNoScheduleTaint))
 	})
 	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenUnderutilized
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -1759,7 +1758,7 @@ var _ = Describe("Metrics", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+					ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilizedOrCheaper,
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
