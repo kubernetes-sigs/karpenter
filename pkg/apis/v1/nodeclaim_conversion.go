@@ -36,11 +36,7 @@ func (in *NodeClaim) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	v1beta1NC.ObjectMeta = in.ObjectMeta
 
 	in.Status.convertTo((&v1beta1NC.Status))
-<<<<<<< HEAD
 	return in.Spec.convertTo(ctx, &v1beta1NC.Spec, in.Annotations[KubeletCompatibilityAnnotationKey])
-=======
-	return in.Spec.convertTo(ctx, &v1beta1NC.Spec, in.Annotations[KubeletCompatabilityAnnotationKey])
->>>>>>> 6559419 (conversion)
 }
 
 func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec, kubeletAnnotation string) error {
@@ -104,18 +100,6 @@ func (in *NodeClaim) ConvertFrom(ctx context.Context, from apis.Convertible) err
 	} else {
 		in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatibilityAnnotationKey: kubeletAnnotation})
 	}
-<<<<<<< HEAD
-=======
-	nodePool := &NodePool{}
-	if err := kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-		if errors.IsNotFound(err) {
-			// If the nodepool doesn't exist, fallback to no expiry, and use the CRD default
-			return nil
-		}
-		return fmt.Errorf("getting nodepool, %w", err)
-	}
-	in.Spec.ExpireAfter = NillableDuration(nodePool.Spec.Template.Spec.ExpireAfter)
->>>>>>> 57379ae (fixTests)
 	return nil
 }
 
