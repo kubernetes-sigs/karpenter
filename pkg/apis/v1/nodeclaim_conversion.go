@@ -30,12 +30,17 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
+// convert v1 to v1beta1
 func (in *NodeClaim) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	v1beta1NC := to.(*v1beta1.NodeClaim)
 	v1beta1NC.ObjectMeta = in.ObjectMeta
 
 	in.Status.convertTo((&v1beta1NC.Status))
+<<<<<<< HEAD
 	return in.Spec.convertTo(ctx, &v1beta1NC.Spec, in.Annotations[KubeletCompatibilityAnnotationKey])
+=======
+	return in.Spec.convertTo(ctx, &v1beta1NC.Spec, in.Annotations[KubeletCompatabilityAnnotationKey])
+>>>>>>> 6559419 (conversion)
 }
 
 func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec, kubeletAnnotation string) error {
@@ -84,6 +89,7 @@ func (in *NodeClaimStatus) convertTo(v1beta1nc *v1beta1.NodeClaimStatus) {
 	v1beta1nc.Conditions = in.Conditions
 }
 
+// convert v1beta1 to v1
 func (in *NodeClaim) ConvertFrom(ctx context.Context, from apis.Convertible) error {
 	v1beta1NC := from.(*v1beta1.NodeClaim)
 	in.ObjectMeta = v1beta1NC.ObjectMeta
