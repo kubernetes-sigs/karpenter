@@ -81,6 +81,7 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 		})
 		cloudProvider.NodeClassGroupVersionKind = gvk
 		ctx = injection.WithNodeClasses(ctx, gvk)
+		ctx = injection.WithClient(ctx, env.Client)
 	})
 	It("should convert v1 nodeclaim metadata", func() {
 		v1nodeclaim.ObjectMeta = test.ObjectMeta()
@@ -249,7 +250,6 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 	)
 
 	BeforeEach(func() {
-		ctx = injection.WithClient(ctx, env.Client)
 		v1nodePool = test.NodePool()
 		v1nodePool.Spec.Template.Spec.ExpireAfter = NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
 		v1nodeclaim = &NodeClaim{
@@ -287,6 +287,7 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 		})
 		cloudProvider.NodeClassGroupVersionKind = gvk
 		ctx = injection.WithNodeClasses(ctx, gvk)
+		ctx = injection.WithClient(ctx, env.Client)
 	})
 	Context("ExpireAfter", func() {
 		It("should convert v1beta1 expireAfter to v1", func() {
