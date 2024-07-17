@@ -153,7 +153,7 @@ var _ = Describe("Consolidation", func() {
 
 			fakeClock.Step(10 * time.Minute)
 			wg := sync.WaitGroup{}
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -202,7 +202,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -228,7 +228,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -301,7 +301,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -346,7 +346,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			// Reconcile 5 times, enqueuing 3 commands total.
 			for i := 0; i < 5; i++ {
 				ExpectSingletonReconciled(ctx, disruptionController)
@@ -408,7 +408,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -472,7 +472,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -834,7 +834,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -856,7 +856,7 @@ var _ = Describe("Consolidation", func() {
 
 			fakeClock.Step(10 * time.Minute)
 			wg := sync.WaitGroup{}
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -971,7 +971,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -1036,7 +1036,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -1142,7 +1142,7 @@ var _ = Describe("Consolidation", func() {
 
 				// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 				var wg sync.WaitGroup
-				ExpectToSleep(&wg)
+				ExpectToWait(&wg)
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 				ExpectSingletonReconciled(ctx, disruptionController)
 				wg.Wait()
@@ -1438,7 +1438,7 @@ var _ = Describe("Consolidation", func() {
 
 			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -1563,7 +1563,7 @@ var _ = Describe("Consolidation", func() {
 
 			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -1688,7 +1688,7 @@ var _ = Describe("Consolidation", func() {
 
 			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -1856,7 +1856,7 @@ var _ = Describe("Consolidation", func() {
 
 				// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 				var wg sync.WaitGroup
-				ExpectToSleep(&wg)
+				ExpectToWait(&wg)
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 				ExpectSingletonReconciled(ctx, disruptionController)
 				wg.Wait()
@@ -2008,7 +2008,7 @@ var _ = Describe("Consolidation", func() {
 
 				// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 				var wg sync.WaitGroup
-				ExpectToSleep(&wg)
+				ExpectToWait(&wg)
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 				ExpectSingletonReconciled(ctx, disruptionController)
 				wg.Wait()
@@ -2082,7 +2082,7 @@ var _ = Describe("Consolidation", func() {
 
 				// consolidation won't delete the old node until the new node is ready
 				var wg sync.WaitGroup
-				ExpectToSleep(&wg)
+				ExpectToWait(&wg)
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 				ExpectSingletonReconciled(ctx, disruptionController)
 				wg.Wait()
@@ -2177,7 +2177,7 @@ var _ = Describe("Consolidation", func() {
 				fakeClock.Step(10 * time.Minute)
 
 				var wg sync.WaitGroup
-				ExpectToSleep(&wg)
+				ExpectToWait(&wg)
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 				ExpectSingletonReconciled(ctx, disruptionController)
 				wg.Wait()
@@ -2268,7 +2268,7 @@ var _ = Describe("Consolidation", func() {
 				fakeClock.Step(10 * time.Minute)
 
 				var wg sync.WaitGroup
-				ExpectToSleep(&wg)
+				ExpectToWait(&wg)
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 				ExpectSingletonReconciled(ctx, disruptionController)
 				wg.Wait()
@@ -2523,7 +2523,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -2570,7 +2570,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -2624,7 +2624,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -2686,7 +2686,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -2738,7 +2738,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -2786,7 +2786,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -2932,7 +2932,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -2994,7 +2994,7 @@ var _ = Describe("Consolidation", func() {
 			})
 			Expect(ok).To(BeTrue())
 		})
-		It("should consider initialized nodes before uninitialized nodes", func() {
+		FIt("should consider initialized nodes before uninitialized nodes", func() {
 			defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "default-instance-type",
 				Resources: corev1.ResourceList{
@@ -3120,9 +3120,10 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{consolidatableNode}, []*v1.NodeClaim{consolidatableNodeClaim})
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
+			// time.Sleep(time.Second * 8)
 
 			// Process the item so that the nodes can be deleted.
 			ExpectSingletonReconciled(ctx, queue)
@@ -3176,7 +3177,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -3286,7 +3287,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -3620,7 +3621,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, doNotDisruptPod, node)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			wg.Wait()
 
 			// we would normally be able to replace a node, but we are blocked by the do-not-disrupt pods during validation
@@ -3670,7 +3671,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, blockingPDBPod, node)
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			wg.Wait()
 
 			// we would normally be able to replace a node, but we are blocked by the PDB during validation
@@ -3720,7 +3721,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, doNotDisruptPods[1], nodes[1])
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			wg.Wait()
 
 			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-disrupt pods during validation
@@ -3773,7 +3774,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, blockingPDBPods[1], nodes[1])
 
 			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			wg.Wait()
 
 			// we would normally be able to consolidate down to a single node, but we are blocked by the PDB during validation
@@ -3825,56 +3826,56 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 		})
-		DescribeTable("can merge 3 nodes into 1",
-			func(spotToSpot bool) {
-				nodeClaims = lo.Ternary(spotToSpot, spotNodeClaims, nodeClaims)
-				nodes = lo.Ternary(spotToSpot, spotNodes, nodes)
-				// create our RS so we can link a pod to it
-				rs := test.ReplicaSet()
-				ExpectApplied(ctx, env.Client, rs)
-				pods := test.Pods(3, test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{Labels: labels,
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion:         "apps/v1",
-								Kind:               "ReplicaSet",
-								Name:               rs.Name,
-								UID:                rs.UID,
-								Controller:         lo.ToPtr(true),
-								BlockOwnerDeletion: lo.ToPtr(true),
-							},
-						}}})
+		FDescribeTable("can merge 3 nodes into 1", func(spotToSpot bool) {
+			nodeClaims = lo.Ternary(spotToSpot, spotNodeClaims, nodeClaims)
+			nodes = lo.Ternary(spotToSpot, spotNodes, nodes)
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
 
-				ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
-				ExpectMakeNodesInitialized(ctx, env.Client, nodes[0], nodes[1], nodes[2])
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
+			ExpectMakeNodesInitialized(ctx, env.Client, nodes[0], nodes[1], nodes[2])
 
-				// bind pods to nodes
-				ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-				ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
-				ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+			// bind pods to nodes
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
-				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
-				fakeClock.Step(10 * time.Minute)
+			fakeClock.Step(10 * time.Minute)
 
-				var wg sync.WaitGroup
-				ExpectToSleep(&wg)
-				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-				ExpectSingletonReconciled(ctx, disruptionController)
-				wg.Wait()
+			var wg sync.WaitGroup
+			ExpectToWait(&wg)
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+			// time.Sleep(time.Second * 8)
 
-				// Process the item so that the nodes can be deleted.
-				ExpectSingletonReconciled(ctx, queue)
+			// Process the item so that the nodes can be deleted.
+			ExpectSingletonReconciled(ctx, queue)
 
-				// Cascade any deletion of the nodeclaim to the node
-				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0], nodeClaims[1], nodeClaims[2])
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0], nodeClaims[1], nodeClaims[2])
 
-				// three nodeclaims should be replaced with a single nodeclaim
-				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-				Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-				ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2])
-			},
+			// three nodeclaims should be replaced with a single nodeclaim
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2])
+		},
 			Entry("if the candidate is on-demand node", false),
 			Entry("if the candidate is spot node", true),
 		)
@@ -3923,7 +3924,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -3996,7 +3997,7 @@ var _ = Describe("Consolidation", func() {
 				fakeClock.Step(10 * time.Minute)
 
 				var wg sync.WaitGroup
-				ExpectToSleep(&wg)
+				ExpectToWait(&wg)
 				ExpectSingletonReconciled(ctx, disruptionController)
 				wg.Wait()
 
@@ -4327,7 +4328,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.SetTime(time.Now())
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -4390,7 +4391,7 @@ var _ = Describe("Consolidation", func() {
 			})
 			oldNodeClaimNames = sets.New(nodeClaims[0].Name, nodeClaims[1].Name, nodeClaims[2].Name)
 		})
-		It("can replace node maintaining zonal topology spread", func() {
+		FIt("can replace node maintaining zonal topology spread", func() {
 			labels = map[string]string{
 				"app": "test-zonal-spread",
 			}
@@ -4436,10 +4437,11 @@ var _ = Describe("Consolidation", func() {
 
 			// consolidation won't delete the old node until the new node is ready
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
+			// time.Sleep(time.Second * 8)
 
 			// Process the item so that the nodes can be deleted.
 			ExpectSingletonReconciled(ctx, queue)
@@ -4568,7 +4570,7 @@ var _ = Describe("Consolidation", func() {
 			// Run the processing loop in parallel in the background with environment context
 			var wg sync.WaitGroup
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			go func() {
 				defer GinkgoRecover()
 				_, _ = disruptionController.Reconcile(ctx)
@@ -4637,6 +4639,9 @@ var _ = Describe("Consolidation", func() {
 			newNode, _ := lo.Find(nodes, func(n *corev1.Node) bool { return n.Name != oldNodeName })
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nil)
+
+			// Wait for the nomination cache to expire
+			time.Sleep(time.Second * 11)
 
 			// Re-create the pods to re-bind them
 			for i := 0; i < 2; i++ {

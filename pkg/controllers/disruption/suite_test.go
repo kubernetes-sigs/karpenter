@@ -422,7 +422,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
-		ExpectToSleep(&wg)
+		ExpectToWait(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
@@ -544,7 +544,7 @@ var _ = Describe("Disruption Taints", func() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 		}()
 
@@ -1913,7 +1913,7 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectToSleep(&wg)
+		ExpectToWait(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -1984,7 +1984,7 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectToSleep(&wg)
+		ExpectToWait(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -2056,7 +2056,7 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectToSleep(&wg)
+		ExpectToWait(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -2107,7 +2107,7 @@ func fromInt(i int) *intstr.IntOrString {
 
 // This continually polls the wait group to see if there
 // is a timer waiting, incrementing the clock if not.
-func ExpectToSleep(wg *sync.WaitGroup) {
+func ExpectToWait(wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer GinkgoRecover()

@@ -80,7 +80,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			var wg sync.WaitGroup
-			ExpectToSleep(&wg)
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
