@@ -35,6 +35,7 @@ func (h SchedulingInputHeap) Len() int {
 	return len(h)
 }
 
+// This compares timestamps for a min heap, so that older inputs pop first.
 func (h SchedulingInputHeap) Less(i, j int) bool {
 	return h[i].Timestamp.Before(h[j].Timestamp)
 }

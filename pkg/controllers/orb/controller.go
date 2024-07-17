@@ -63,7 +63,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 	// Pop each scheduling input off my heap (oldest first) and batch log in PV
 	for c.schedulingInputHeap.Len() > 0 {
-		currentInput := c.schedulingInputHeap.Pop().(SchedulingInput) // Min heap, so always pops the oldest
+		currentInput := c.schedulingInputHeap.Pop().(SchedulingInput)
 
 		inputDiffAdded := &SchedulingInput{}
 		inputDiffRemoved := &SchedulingInput{}
@@ -141,14 +141,14 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 func (c *Controller) SaveToPV(item SchedulingInput, difftype string) error {
 
 	//fmt.Println("Saving Scheduling Input to PV:\n", item.String()) // Test print
-	// logdata, err := item.Marshal()
-	// if err != nil {
-	// 	fmt.Println("Error converting Scheduling Input to Protobuf:", err)
-	// 	return err
-	// }
+	logdata, err := item.Marshal()
+	if err != nil {
+		fmt.Println("Error converting Scheduling Input to Protobuf:", err)
+		return err
+	}
 
-	// TODO: Instead of the above, In the interim while I figure out the custom protobuf... Just send string to file
-	logdata := item.String()
+	// // TODO: Instead of the above, In the interim while I figure out the custom protobuf... Just send string to file
+	// logdata := item.String()
 
 	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05Z")
 	fileName := fmt.Sprintf("SchedulingInput_%s_%s.log", difftype, timestampStr)
@@ -162,19 +162,19 @@ func (c *Controller) SaveToPV(item SchedulingInput, difftype string) error {
 	}
 	defer file.Close()
 
-	// // Writes serialized data to the file
-	// _, err = file.Write(logdata)
-	// if err != nil {
-	// 	fmt.Println("Error writing data to file:", err)
-	// 	return err
-	// }
-
-	// TODO: Uncomment above; Testing Version // only here while testing string print
-	_, err = fmt.Fprintln(file, logdata)
+	// Writes serialized data to the file
+	_, err = file.Write(logdata)
 	if err != nil {
 		fmt.Println("Error writing data to file:", err)
 		return err
 	}
+
+	// // TODO: Uncomment above; Testing Version // only here while testing string print
+	// _, err = fmt.Fprintln(file, logdata)
+	// if err != nil {
+	// 	fmt.Println("Error writing data to file:", err)
+	// 	return err
+	// }
 
 	fmt.Printf("%s data written to S3 bucket successfully!\n", difftype)
 	return nil

@@ -23,15 +23,16 @@ import (
 	"fmt"
 	"time"
 
+	// "google.golang.org/protobuf/proto"
+	proto "github.com/gogo/protobuf/proto"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-
-	//"google.golang.org/protobuf/proto"
 
 	v1 "k8s.io/api/core/v1"
 )
@@ -440,10 +441,10 @@ func OfferingsToString(offerings cloudprovider.Offerings) string {
 
 // Reduces a Pod to only the constituent parts we care about (i.e. Name, Namespace and Phase)
 func reducePods(pods []*v1.Pod) []*v1.Pod {
-	var strippedPods []*v1.Pod
+	var reducedPods []*v1.Pod
 
 	for _, pod := range pods {
-		strippedPod := &v1.Pod{
+		reducedPod := &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      pod.Name,
 				Namespace: pod.Namespace,
@@ -452,10 +453,10 @@ func reducePods(pods []*v1.Pod) []*v1.Pod {
 				Phase: pod.Status.Phase,
 			},
 		}
-		strippedPods = append(strippedPods, strippedPod)
+		reducedPods = append(reducedPods, reducedPod)
 	}
 
-	return strippedPods
+	return reducedPods
 }
 
 func reduceStateNodes(nodes []*state.StateNode) []*state.StateNode {
@@ -538,37 +539,109 @@ func reduceInstanceTypes(types []*cloudprovider.InstanceType) []*cloudprovider.I
 }
 
 // Function take a Scheduling Input to []byte, marshalled as a protobuf
-// TODO: With a custom-defined .proto, this will look different.
 func (si SchedulingInput) Marshal() ([]byte, error) {
-	podList := &v1.PodList{
-		Items: make([]v1.Pod, 0, len(si.PendingPods)),
+	preMarshalSI := &pb.SchedulingInput{
+		Timestamp:         si.Timestamp.Format("2006-01-02_15-04-05"),
+		PendingpodData:    getPodsData(si.PendingPods),
+		StatenodesData:    getStateNodeWithPodsData(si.StateNodesWithPods),
+		InstancetypesData: getInstanceTypesData(si.InstanceTypes),
+	}
+	return proto.Marshal(preMarshalSI)
+}
+
+func getPodsData(pods []*v1.Pod) []*pb.ReducedPod {
+	reducedPods := []*pb.ReducedPod{}
+
+	for _, pod := range pods {
+		reducedPod := &pb.ReducedPod{
+			Name:      pod.Name,
+			Namespace: pod.Namespace,
+			Phase:     string(pod.Status.Phase),
+		}
+		reducedPods = append(reducedPods, reducedPod)
 	}
 
-	for _, podPtr := range si.PendingPods {
-		podList.Items = append(podList.Items, *podPtr)
+	return reducedPods
+}
+
+func getNodeData(node *v1.Node) *pb.StateNodeWithPods_ReducedNode {
+	if node == nil {
+		return nil
 	}
-	return podList.Marshal()
 
-	// // Create a slice to store the wire format data
-	// podDataSlice := make([][]byte, 0, len(si.PendingPods))
-
-	// // Iterate over the slice of Pods and marshal each one to its wire format
-	// for _, pod := range si.PendingPods {
-	// 	podData, err := proto.Marshal(pod)
-	// 	if err != nil {
-	// 		fmt.Println("Error marshaling pod:", err)
-	// 		continue
-	// 	}
-	// 	podDataSlice = append(podDataSlice, podData)
+	// nodeStatus, err := node.Status.Marshal()
+	// if err != nil {
+	// 	return nil
 	// }
 
-	// // Create an ORBLogEntry message
-	// entry := &ORBLogEntry{
-	// 	Timestamp:      si.Timestamp.Format("2006-01-02_15-04-05"),
-	// 	PendingpodData: podDataSlice,
-	// }
+	// Create a new instance of the reduced node type
+	reducedNode := &pb.StateNodeWithPods_ReducedNode{
+		Name:       node.Name,
+		Nodestatus: nil,
+	}
 
-	// return proto.Marshal(entry)
+	return reducedNode
+}
+
+func getStateNodeWithPodsData(stateNodeWithPods []*StateNodeWithPods) []*pb.StateNodeWithPods {
+	snpData := []*pb.StateNodeWithPods{}
+
+	for _, snp := range stateNodeWithPods {
+		var nodeClaim *pb.StateNodeWithPods_ReducedNodeClaim
+		if snp.NodeClaim != nil {
+			nodeClaim = &pb.StateNodeWithPods_ReducedNodeClaim{
+				Name: snp.NodeClaim.GetName(),
+			}
+		}
+
+		snpData = append(snpData, &pb.StateNodeWithPods{
+			Node:      getNodeData(snp.Node),
+			NodeClaim: nodeClaim,
+			Pods:      getPodsData(snp.Pods),
+		})
+	}
+
+	return snpData
+}
+
+func getInstanceTypesData(instanceTypes []*cloudprovider.InstanceType) []*pb.ReducedInstanceType {
+	itData := []*pb.ReducedInstanceType{}
+
+	for _, it := range instanceTypes {
+		itData = append(itData, &pb.ReducedInstanceType{
+			Name:         it.Name,
+			Requirements: getRequirementsData(it.Requirements),
+			Offerings:    getOfferingsData(it.Offerings),
+		})
+	}
+
+	return itData
+}
+
+func getRequirementsData(requirements scheduling.Requirements) []*pb.ReducedInstanceType_Requirement {
+	requirementsData := []*pb.ReducedInstanceType_Requirement{}
+
+	for _, requirement := range requirements {
+		requirementsData = append(requirementsData, &pb.ReducedInstanceType_Requirement{
+			Values: requirement.Values(),
+		})
+	}
+
+	return requirementsData
+}
+
+func getOfferingsData(offerings cloudprovider.Offerings) []*pb.ReducedInstanceType_Offering {
+	offeringsData := []*pb.ReducedInstanceType_Offering{}
+
+	for _, offering := range offerings {
+		offeringsData = append(offeringsData, &pb.ReducedInstanceType_Offering{
+			Requirements: getRequirementsData(offering.Requirements),
+			Price:        offering.Price,
+			Available:    offering.Available,
+		})
+	}
+
+	return offeringsData
 }
 
 // func UnmarshalSchedulingInput(data []byte) (*SchedulingInput, error) {
