@@ -64,15 +64,15 @@ var _ = Describe("CEL/Validation", func() {
 	})
 	Context("Disruption", func() {
 		It("should fail on negative expireAfter", func() {
-			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(lo.Must(time.ParseDuration("-1s")))
+			nodePool.Spec.Template.Spec.ExpireAfter.Duration = lo.ToPtr(lo.Must(time.ParseDuration("-1s")))
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should succeed on a disabled expireAfter", func() {
-			nodePool.Spec.Disruption.ExpireAfter.Duration = nil
+			nodePool.Spec.Template.Spec.ExpireAfter.Duration = nil
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should succeed on a valid expireAfter", func() {
-			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(lo.Must(time.ParseDuration("30s")))
+			nodePool.Spec.Template.Spec.ExpireAfter.Duration = lo.ToPtr(lo.Must(time.ParseDuration("30s")))
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should fail on negative consolidateAfter", func() {

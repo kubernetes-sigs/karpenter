@@ -217,9 +217,9 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 				Expect(string(v1beta1nodepool.Spec.Disruption.ConsolidationPolicy)).To(Equal(string(v1nodepool.Spec.Disruption.ConsolidationPolicy)))
 			})
 			It("should convert v1 nodepool ExpireAfter", func() {
-				v1nodepool.Spec.Disruption.ExpireAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
+				v1nodepool.Spec.Template.Spec.ExpireAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
 				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
-				Expect(v1beta1nodepool.Spec.Disruption.ExpireAfter.Duration).To(Equal(v1nodepool.Spec.Disruption.ExpireAfter.Duration))
+				Expect(v1beta1nodepool.Spec.Disruption.ExpireAfter.Duration).To(Equal(v1nodepool.Spec.Template.Spec.ExpireAfter.Duration))
 			})
 			Context("Budgets", func() {
 				It("should convert v1 nodepool nodes", func() {
@@ -492,7 +492,7 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 			It("should convert v1beta1 nodepool ExpireAfter", func() {
 				v1beta1nodepool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
 				Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
-				Expect(v1nodepool.Spec.Disruption.ExpireAfter.Duration).To(Equal(v1beta1nodepool.Spec.Disruption.ExpireAfter.Duration))
+				Expect(v1nodepool.Spec.Template.Spec.ExpireAfter.Duration).To(Equal(v1beta1nodepool.Spec.Disruption.ExpireAfter.Duration))
 			})
 			Context("Budgets", func() {
 				It("should convert v1beta1 nodepool nodes", func() {

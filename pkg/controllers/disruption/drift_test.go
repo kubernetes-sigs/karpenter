@@ -49,7 +49,6 @@ var _ = Describe("Drift", func() {
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
 					ConsolidateAfter: &v1.NillableDuration{Duration: nil},
-					ExpireAfter:      v1.NillableDuration{Duration: nil},
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
@@ -340,11 +339,15 @@ var _ = Describe("Drift", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidateAfter: &v1.NillableDuration{Duration: nil},
-						ExpireAfter:      v1.NillableDuration{Duration: nil},
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
 						}},
+					},
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimSpec{
+							ExpireAfter: v1.NillableDuration{Duration: nil},
+						},
 					},
 				},
 			})
@@ -407,7 +410,6 @@ var _ = Describe("Drift", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidateAfter: &v1.NillableDuration{Duration: nil},
-						ExpireAfter:      v1.NillableDuration{Duration: nil},
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
 						}},

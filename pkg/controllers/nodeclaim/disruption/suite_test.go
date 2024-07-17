@@ -116,7 +116,6 @@ var _ = Describe("Disruption", func() {
 	})
 	It("should remove multiple disruption conditions simultaneously", func() {
 		cp.Drifted = ""
-		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: nil}
 
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
