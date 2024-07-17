@@ -19,6 +19,7 @@ package orb
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -35,20 +36,40 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-// Timestamp, dynamic inputs (like pending pods, statenodes, etc.)
+// These are the inputs to the scheduling function (scheduler.NewSchedule) which change more dynamically
 type SchedulingInput struct {
-	Timestamp   time.Time // Almost always format to / parse from string, but useful as Time object for comparison
-	PendingPods []*v1.Pod
-	//stateNodes         []*state.StateNode // This is purely to extract
+	Timestamp          time.Time
+	PendingPods        []*v1.Pod
 	StateNodesWithPods []*StateNodeWithPods
 	InstanceTypes      []*cloudprovider.InstanceType
-	//all the other scheduling inputs... (bindings?)
+	// TODO: all the other scheduling inputs... (bindings?)
 }
 
+func NewSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
+	pendingPods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes []*cloudprovider.InstanceType) SchedulingInput {
+	return SchedulingInput{
+		Timestamp:          scheduledTime,
+		PendingPods:        pendingPods,
+		StateNodesWithPods: getStateNodesWithPods(ctx, kubeClient, stateNodes),
+		InstanceTypes:      instanceTypes,
+	}
+}
+
+// A stateNode with the Pods it has on it.
 type StateNodeWithPods struct {
 	Node      *v1.Node
 	NodeClaim *v1beta1.NodeClaim
 	Pods      []*v1.Pod
+}
+
+func getStateNodesWithPods(ctx context.Context, kubeClient client.Client, stateNodes []*state.StateNode) []*StateNodeWithPods {
+	stateNodesWithPods := []*StateNodeWithPods{}
+	stateNodes = reduceStateNodes(stateNodes)
+
+	for _, stateNode := range stateNodes {
+		stateNodesWithPods = append(stateNodesWithPods, getStateNodeWithPods(ctx, kubeClient, stateNode))
+	}
+	return stateNodesWithPods
 }
 
 func getStateNodeWithPods(ctx context.Context, kubeClient client.Client, stateNode *state.StateNode) *StateNodeWithPods {
@@ -56,20 +77,12 @@ func getStateNodeWithPods(ctx context.Context, kubeClient client.Client, stateNo
 	if err != nil {
 		pods = nil
 	}
+
 	return &StateNodeWithPods{
 		Node:      stateNode.Node,
 		NodeClaim: stateNode.NodeClaim,
 		Pods:      pods,
 	}
-}
-
-// For every stateNode as input, appends to a []*StateNodeWithPods and returns
-func getStateNodesWithPods(ctx context.Context, kubeClient client.Client, stateNodes []*state.StateNode) []*StateNodeWithPods {
-	stateNodesWithPods := []*StateNodeWithPods{}
-	for _, stateNode := range stateNodes {
-		stateNodesWithPods = append(stateNodesWithPods, getStateNodeWithPods(ctx, kubeClient, stateNode))
-	}
-	return stateNodesWithPods
 }
 
 func (snp StateNodeWithPods) GetName() string {
@@ -79,8 +92,7 @@ func (snp StateNodeWithPods) GetName() string {
 	return snp.Node.GetName()
 }
 
-// Function to create a new SchedulingInput
-
+// Reduce the Scheduling Input down to what's minimally required for re-simulation
 func (si SchedulingInput) Reduce() SchedulingInput {
 	return SchedulingInput{
 		Timestamp:          si.Timestamp,
@@ -89,16 +101,6 @@ func (si SchedulingInput) Reduce() SchedulingInput {
 		InstanceTypes:      reduceInstanceTypes(si.InstanceTypes),
 	}
 }
-
-// // Function does equality for a "reduced" StateNode.
-// // A reduced StateNode is equal iff their Node and the Nodeclaim and both internally DeepEqual)
-// // Implemented because DeepEqual on StateNode caused "panic: an unexported field was encountered"
-// func ReducedStateNodeEquals(oldStateNode *state.StateNode, newStateNode *state.StateNode) bool {
-// 	return equality.Semantic.DeepEqual(oldStateNode.Node, newStateNode.Node) &&
-// 		equality.Semantic.DeepEqual(oldStateNode.NodeClaim, newStateNode.NodeClaim)
-// }
-
-// Function does equality for a "reduced" Pod (i.e. equal if the Pod and the Node it's scheduled on are internally DeepEqual)
 
 // TODO: I need to flip the construct here. I should be generating some stripped/minimal subset of these data structures
 // which are already the representation that I'd like to print. i.e. store in memory only what I want to print anyway
@@ -163,12 +165,12 @@ func (si *SchedulingInput) Diff(oldSi *SchedulingInput) (*SchedulingInput, *Sche
 // This is the diffPods function which gets the differences between pods
 func diffPods(oldPods, newPods []*v1.Pod) ([]*v1.Pod, []*v1.Pod, []*v1.Pod) {
 	// Convert the slices to sets for efficient difference calculation
-	oldPodSet := make(map[string]*v1.Pod, len(oldPods))
+	oldPodSet := map[string]*v1.Pod{}
 	for _, pod := range oldPods {
 		oldPodSet[pod.GetName()] = pod
 	}
 
-	newPodSet := make(map[string]*v1.Pod, len(newPods))
+	newPodSet := map[string]*v1.Pod{}
 	for _, pod := range newPods {
 		newPodSet[pod.GetName()] = pod
 	}
@@ -187,6 +189,8 @@ func diffPods(oldPods, newPods []*v1.Pod) ([]*v1.Pod, []*v1.Pod, []*v1.Pod) {
 		}
 
 		// If pod has changed, add the whole changed pod
+		// Simplification / Opportunity to optimize -- Only add sub-field.
+		//    This requires more book-keeping on object reconstruction from logs later on.
 		if hasPodChanged(oldPod, newPod) {
 			changed = append(changed, newPod)
 		}
@@ -249,12 +253,12 @@ func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) ([]*clo
 	[]*cloudprovider.InstanceType, []*cloudprovider.InstanceType) {
 
 	// Convert the slices to sets for efficient difference calculation
-	oldTypeSet := make(map[string]*cloudprovider.InstanceType, len(oldTypes))
+	oldTypeSet := map[string]*cloudprovider.InstanceType{}
 	for _, instanceType := range oldTypes {
 		oldTypeSet[instanceType.Name] = instanceType
 	}
 
-	newTypeSet := make(map[string]*cloudprovider.InstanceType, len(newTypes))
+	newTypeSet := map[string]*cloudprovider.InstanceType{}
 	for _, instanceType := range newTypes {
 		newTypeSet[instanceType.Name] = instanceType
 	}
@@ -273,8 +277,6 @@ func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) ([]*clo
 		}
 
 		// If instanceType has changed, add the whole changed resource
-		// Simplification / Opportunity to optimize -- Only add sub-field.
-		//    This requires more book-keeping on object reconstruction from logs later on.
 		if hasInstanceTypeChanged(oldType, newType) {
 			changed = append(changed, newType)
 		}
@@ -290,111 +292,33 @@ func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) ([]*clo
 	return added, removed, changed
 }
 
-// Functions to determine if the resource has changed.
-// ? Do I want pointers or not for DeepEqual?
 func hasPodChanged(oldPod, newPod *v1.Pod) bool {
 	return !equality.Semantic.DeepEqual(oldPod, newPod)
 }
 
 func hasStateNodeWithPodsChanged(oldStateNodeWithPods, newStateNodeWithPods *StateNodeWithPods) bool {
 	return !equality.Semantic.DeepEqual(oldStateNodeWithPods, newStateNodeWithPods)
-	// return ReducedStateNodeEquals(oldStateNode, newStateNode)
 }
 
-// Checking Equality on Fields I've reduced by (i.e. Name Requirements Offerings)
+// Checking equality on only fields I've reduced it to (i.e. Name Requirements Offerings)
 func hasInstanceTypeChanged(oldInstanceType, newInstanceType *cloudprovider.InstanceType) bool {
-	return !equality.Semantic.DeepEqual(oldInstanceType.Name, newInstanceType.Name)
-	// || TODO FIX
-	// 	!equality.Semantic.DeepEqual(oldInstanceType.Offerings, newInstanceType.Offerings) ||
-	// 	!equality.Semantic.DeepEqual(oldInstanceType.Requirements, newInstanceType.Requirements)
+	return !equality.Semantic.DeepEqual(oldInstanceType.Name, newInstanceType.Name) ||
+		!equality.Semantic.DeepEqual(oldInstanceType.Offerings, newInstanceType.Offerings) ||
+		!structEqual(oldInstanceType.Requirements, newInstanceType.Requirements)
 }
 
-// Function take a Scheduling Input to []byte, marshalled as a protobuf
-// TODO: With a custom-defined .proto, this will look different.
-func (si SchedulingInput) Marshal() ([]byte, error) {
-	podList := &v1.PodList{
-		Items: make([]v1.Pod, 0, len(si.PendingPods)),
-	}
-
-	for _, podPtr := range si.PendingPods {
-		podList.Items = append(podList.Items, *podPtr)
-	}
-	return podList.Marshal()
-
-	// // Create a slice to store the wire format data
-	// podDataSlice := make([][]byte, 0, len(si.PendingPods))
-
-	// // Iterate over the slice of Pods and marshal each one to its wire format
-	// for _, pod := range si.PendingPods {
-	// 	podData, err := proto.Marshal(pod)
-	// 	if err != nil {
-	// 		fmt.Println("Error marshaling pod:", err)
-	// 		continue
-	// 	}
-	// 	podDataSlice = append(podDataSlice, podData)
-	// }
-
-	// // Create an ORBLogEntry message
-	// entry := &ORBLogEntry{
-	// 	Timestamp:      si.Timestamp.Format("2006-01-02_15-04-05"),
-	// 	PendingpodData: podDataSlice,
-	// }
-
-	// return proto.Marshal(entry)
-}
-
-// func UnmarshalSchedulingInput(data []byte) (*SchedulingInput, error) {
-// 	// Unmarshal the data into an ORBLogEntry struct
-// 	entry := &ORBLogEntry{}
-// 	if err := proto.Unmarshal(data, entry); err != nil {
-// 		return nil, fmt.Errorf("failed to unmarshal ORBLogEntry: %v", err)
-// 	}
-
-// 	// Parse the timestamp
-// 	timestamp, err := time.Parse("2006-01-02_15-04-05", entry.Timestamp)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to parse timestamp: %v", err)
-// 	}
-
-// 	// Unmarshal the PendingpodData into v1.Pod objects
-// 	pendingPods := make([]*v1.Pod, 0, len(entry.PendingpodData))
-// 	for _, podData := range entry.PendingpodData {
-// 		var pod v1.Pod
-// 		if err := proto.Unmarshal(podData, &pod); err != nil {
-// 			return nil, fmt.Errorf("failed to unmarshal pod: %v", err)
-// 		}
-// 		pendingPods = append(pendingPods, &pod)
-// 	}
-
-// 	// Create a new SchedulingInput struct
-// 	schedulingInput := &SchedulingInput{
-// 		Timestamp:   timestamp,
-// 		PendingPods: pendingPods,
-// 	}
-
-// 	return schedulingInput, nil
+// // Equality test for requirements based on the three keys I'm tracking for them, namely
+// // karpenter.sh/capacity-type, topology.k8s.aws/zone-id, topology.kubernetes.io/zone and their values
+// func requirementsEqual(oldrequirements scheduling.Requirements, newrequirements scheduling.Requirements) bool {
+// 	return oldrequirements.Get("karpenter.sh/capacity-type") != newrequirements.Get("karpenter.sh/capacity-type") ||
+// 		oldrequirements.Get("topology.k8s.aws/zone-id") != newrequirements.Get("topology.k8s.aws/zone-id") ||
+// 		oldrequirements.Get("topology.kubernetes.io/zone") != newrequirements.Get("topology.kubernetes.io/zone")
 // }
 
-// // Function to do the reverse, take a scheduling input's []byte and unmarshal it back into a SchedulingInput
-// func PBToSchedulingInput(timestamp time.Time, data []byte) (SchedulingInput, error) {
-// 	podList := &v1.PodList{}
-// 	if err := proto.Unmarshal(data, podList); err != nil {
-// 		return SchedulingInput{}, fmt.Errorf("unmarshaling pod list, %w", err)
-// 	}
-// 	pods := lo.ToSlicePtr(podList.Items)
-// 	return NewSchedulingInput(timestamp, pods, nil, nil), nil // TODO: update once I figure out serialization
-// }
-
-func NewSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
-	pendingPods []*v1.Pod, stateNodes []*state.StateNode,
-	instanceTypes []*cloudprovider.InstanceType) SchedulingInput {
-	stateNodesWithPods := getStateNodesWithPods(ctx, kubeClient, reduceStateNodes(stateNodes))
-	return SchedulingInput{
-		Timestamp:          scheduledTime,
-		PendingPods:        pendingPods,
-		StateNodesWithPods: stateNodesWithPods,
-		InstanceTypes:      instanceTypes,
-	}
+func structEqual(a, b interface{}) bool {
+	aBytes, _ := json.Marshal(a)
+	bBytes, _ := json.Marshal(b)
+	return bytes.Equal(aBytes, bBytes)
 }
 
 /* The following functions are testing toString functions that will mirror what the serialization
@@ -512,8 +436,6 @@ func OfferingsToString(offerings cloudprovider.Offerings) string {
 	return buf.String()
 }
 
-// InstanceTypes
-
 // Resource reducing commands
 
 // Reduces a Pod to only the constituent parts we care about (i.e. Name, Namespace and Phase)
@@ -587,7 +509,7 @@ func reduceOfferings(offerings cloudprovider.Offerings) cloudprovider.Offerings 
 // TODO Should these keys be called more generically? i.e. via v1beta1.CapacityTypeLabelKey, v1.LabelTopologyZone or something?
 func reduceRequirements(requirements scheduling.Requirements) scheduling.Requirements {
 	// Create a new map to store the reduced requirements
-	reducedRequirements := make(scheduling.Requirements)
+	reducedRequirements := scheduling.Requirements{}
 
 	// Iterate over the requirements map and add the relevant keys and values to the reducedRequirements map
 	for key, value := range requirements {
@@ -601,16 +523,92 @@ func reduceRequirements(requirements scheduling.Requirements) scheduling.Require
 }
 
 func reduceInstanceTypes(types []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
-	var strippedTypes []*cloudprovider.InstanceType
+	var reducedInstanceTypes []*cloudprovider.InstanceType
 
 	for _, instanceType := range types {
-		strippedType := &cloudprovider.InstanceType{
+		reducedInstanceType := &cloudprovider.InstanceType{
 			Name:         instanceType.Name,
 			Requirements: reduceRequirements(instanceType.Requirements),
 			Offerings:    reduceOfferings(instanceType.Offerings.Available()),
 		}
-		strippedTypes = append(strippedTypes, strippedType)
+		reducedInstanceTypes = append(reducedInstanceTypes, reducedInstanceType)
 	}
 
-	return strippedTypes
+	return reducedInstanceTypes
 }
+
+// Function take a Scheduling Input to []byte, marshalled as a protobuf
+// TODO: With a custom-defined .proto, this will look different.
+func (si SchedulingInput) Marshal() ([]byte, error) {
+	podList := &v1.PodList{
+		Items: make([]v1.Pod, 0, len(si.PendingPods)),
+	}
+
+	for _, podPtr := range si.PendingPods {
+		podList.Items = append(podList.Items, *podPtr)
+	}
+	return podList.Marshal()
+
+	// // Create a slice to store the wire format data
+	// podDataSlice := make([][]byte, 0, len(si.PendingPods))
+
+	// // Iterate over the slice of Pods and marshal each one to its wire format
+	// for _, pod := range si.PendingPods {
+	// 	podData, err := proto.Marshal(pod)
+	// 	if err != nil {
+	// 		fmt.Println("Error marshaling pod:", err)
+	// 		continue
+	// 	}
+	// 	podDataSlice = append(podDataSlice, podData)
+	// }
+
+	// // Create an ORBLogEntry message
+	// entry := &ORBLogEntry{
+	// 	Timestamp:      si.Timestamp.Format("2006-01-02_15-04-05"),
+	// 	PendingpodData: podDataSlice,
+	// }
+
+	// return proto.Marshal(entry)
+}
+
+// func UnmarshalSchedulingInput(data []byte) (*SchedulingInput, error) {
+// 	// Unmarshal the data into an ORBLogEntry struct
+// 	entry := &ORBLogEntry{}
+// 	if err := proto.Unmarshal(data, entry); err != nil {
+// 		return nil, fmt.Errorf("failed to unmarshal ORBLogEntry: %v", err)
+// 	}
+
+// 	// Parse the timestamp
+// 	timestamp, err := time.Parse("2006-01-02_15-04-05", entry.Timestamp)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to parse timestamp: %v", err)
+// 	}
+
+// 	// Unmarshal the PendingpodData into v1.Pod objects
+// 	pendingPods := make([]*v1.Pod, 0, len(entry.PendingpodData))
+// 	for _, podData := range entry.PendingpodData {
+// 		var pod v1.Pod
+// 		if err := proto.Unmarshal(podData, &pod); err != nil {
+// 			return nil, fmt.Errorf("failed to unmarshal pod: %v", err)
+// 		}
+// 		pendingPods = append(pendingPods, &pod)
+// 	}
+
+// 	// Create a new SchedulingInput struct
+// 	schedulingInput := &SchedulingInput{
+// 		Timestamp:   timestamp,
+// 		PendingPods: pendingPods,
+// 	}
+
+// 	return schedulingInput, nil
+// }
+
+// // Function to do the reverse, take a scheduling input's []byte and unmarshal it back into a SchedulingInput
+// func PBToSchedulingInput(timestamp time.Time, data []byte) (SchedulingInput, error) {
+// 	podList := &v1.PodList{}
+// 	if err := proto.Unmarshal(data, podList); err != nil {
+// 		return SchedulingInput{}, fmt.Errorf("unmarshaling pod list, %w", err)
+// 	}
+// 	pods := lo.ToSlicePtr(podList.Items)
+// 	return NewSchedulingInput(timestamp, pods, nil, nil), nil // TODO: update once I figure out serialization
+// }
