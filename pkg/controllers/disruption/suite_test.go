@@ -185,10 +185,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		for i := 0; i < numNodes; i++ {
 			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 		}
-
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -201,9 +199,6 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: nil}
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, nodes[0])
-
-		// nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
-		// ExpectApplied(ctx, env.Client, nodePool)
 
 		nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, env.Client, cloudProvider)
 		Expect(err).To(Succeed())
@@ -306,11 +301,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodeClaimNames := lo.SliceToMap(nodeClaims, func(nc *v1.NodeClaim) (string, struct{}) {
 			return nc.Name, struct{}{}
 		})
-
-		wg := sync.WaitGroup{}
-		ExpectTriggerVerifyAction(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
 
 		// Expect a replace action
 		ExpectTaintedNodeCount(ctx, env.Client, 1)
@@ -325,10 +316,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		// which needs to be deployed
 		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
-
-		ExpectTriggerVerifyAction(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
 
 		// Another replacement disruption action
 		ncs = ExpectNodeClaims(ctx, env.Client)
@@ -341,9 +329,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
-		ExpectTriggerVerifyAction(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
 
 		// One more replacement disruption action
 		ncs = ExpectNodeClaims(ctx, env.Client)
@@ -357,9 +343,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		// Try one more time, but fail since the budgets only allow 3 disruptions.
-		ExpectTriggerVerifyAction(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
 
 		ncs = ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(13))
@@ -438,7 +422,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
+		ExpectToSleep(&wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
@@ -535,16 +519,7 @@ var _ = Describe("Disruption Taints", func() {
 
 		// inform cluster state about nodes and nodeClaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
-		// Trigger the reconcile loop to start but don't trigger the verify action
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ExpectTriggerVerifyAction(&wg)
-			ExpectSingletonReconciled(ctx, disruptionController)
-		}()
-		wg.Wait()
+		ExpectSingletonReconciled(ctx, disruptionController)
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptionNoScheduleTaint))
 	})
@@ -569,7 +544,7 @@ var _ = Describe("Disruption Taints", func() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ExpectTriggerVerifyAction(&wg)
+			ExpectToSleep(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 		}()
 
@@ -1796,11 +1771,7 @@ var _ = Describe("Metrics", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		fakeClock.Step(10 * time.Minute)
-
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
 			"action": "delete",
@@ -1850,11 +1821,7 @@ var _ = Describe("Metrics", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 		fakeClock.Step(10 * time.Minute)
-
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
 			"action": "delete",
@@ -1904,11 +1871,7 @@ var _ = Describe("Metrics", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		fakeClock.Step(10 * time.Minute)
-
-		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
 			"action": "replace",
@@ -1950,7 +1913,7 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
+		ExpectToSleep(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -2021,7 +1984,7 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
+		ExpectToSleep(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -2093,7 +2056,7 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectTriggerVerifyAction(&wg)
+		ExpectToSleep(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -2144,20 +2107,15 @@ func fromInt(i int) *intstr.IntOrString {
 
 // This continually polls the wait group to see if there
 // is a timer waiting, incrementing the clock if not.
-// If you're seeing goroutine timeouts on suite tests, it's possible
-// another timer was added, or the computation required for a loop is taking more than
-// 20 * 400 milliseconds = 8s to complete, potentially requiring an increase in the
-// duration of the polling period.
-func ExpectTriggerVerifyAction(wg *sync.WaitGroup) {
+func ExpectToSleep(wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
+		defer GinkgoRecover()
 		defer wg.Done()
-		for i := 0; i < 20; i++ {
-			time.Sleep(400 * time.Millisecond)
-			if fakeClock.HasWaiters() {
-				break
-			}
-		}
+		Eventually(func() bool { return fakeClock.HasWaiters() }).
+			WithTimeout(time.Second).
+			WithPolling(time.Millisecond).
+			Should(BeTrue())
 		fakeClock.Step(45 * time.Second)
 	}()
 }
