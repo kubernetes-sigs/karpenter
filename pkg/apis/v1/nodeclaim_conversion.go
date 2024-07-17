@@ -35,7 +35,7 @@ func (in *NodeClaim) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	v1beta1NC.ObjectMeta = in.ObjectMeta
 
 	in.Status.convertTo((&v1beta1NC.Status))
-	return in.Spec.convertTo(ctx, &v1beta1NC.Spec, in.Annotations[KubeletCompatabilityAnnotationKey])
+	return in.Spec.convertTo(ctx, &v1beta1NC.Spec, in.Annotations[KubeletCompatibilityAnnotationKey])
 }
 
 func (in *NodeClaimSpec) convertTo(ctx context.Context, v1beta1nc *v1beta1.NodeClaimSpec, kubeletAnnotation string) error {
@@ -93,8 +93,11 @@ func (in *NodeClaim) ConvertFrom(ctx context.Context, from apis.Convertible) err
 	if err != nil {
 		return err
 	}
-	in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatabilityAnnotationKey: kubeletAnnotation})
-
+	if kubeletAnnotation == "" {
+		in.Annotations = lo.OmitByKeys(in.Annotations, []string{KubeletCompatibilityAnnotationKey})
+	} else {
+		in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatibilityAnnotationKey: kubeletAnnotation})
+	}
 	return nil
 }
 
@@ -124,11 +127,14 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 		Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, nodeclassGroupVersion.Group),
 	}
 
-	kubelet, err := json.Marshal(v1beta1nc.Kubelet)
-	if err != nil {
-		return "", fmt.Errorf("marshaling kubelet config annotation, %w", err)
+	if v1beta1nc.Kubelet != nil {
+		kubelet, err := json.Marshal(v1beta1nc.Kubelet)
+		if err != nil {
+			return "", fmt.Errorf("marshaling kubelet config annotation, %w", err)
+		}
+		return string(kubelet), nil
 	}
-	return string(kubelet), nil
+	return "", nil
 }
 
 func (in *NodeClaimStatus) convertFrom(v1beta1nc *v1beta1.NodeClaimStatus) {

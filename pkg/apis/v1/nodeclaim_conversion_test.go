@@ -103,8 +103,8 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 
 	It("should convert v1 nodeclaim metadata", func() {
 		v1nodeclaim.ObjectMeta = test.ObjectMeta()
-		Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
-		v1beta1nodeclaim.Annotations = lo.Assign(v1beta1nodeclaim.Annotations, map[string]string{KubeletCompatabilityAnnotationKey: "null"})
+		Expect(v1nodeclaim.ConvertTo(ctx, v1beta1nodeclaim)).To(Succeed())
+		v1beta1nodeclaim.Annotations = nil
 		Expect(v1beta1nodeclaim.ObjectMeta).To(BeEquivalentTo(v1nodeclaim.ObjectMeta))
 	})
 	Context("NodeClaim Spec", func() {
@@ -326,7 +326,7 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 	It("should convert v1beta1 nodeclaim metadata", func() {
 		v1beta1nodeclaim.ObjectMeta = test.ObjectMeta()
 		Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
-		v1beta1nodeclaim.Annotations = lo.Assign(v1beta1nodeclaim.Annotations, map[string]string{KubeletCompatabilityAnnotationKey: "null"})
+		v1beta1nodeclaim.Annotations = map[string]string{}
 		Expect(v1nodeclaim.ObjectMeta).To(BeEquivalentTo(v1beta1nodeclaim.ObjectMeta))
 	})
 	Context("NodeClaim Spec", func() {
@@ -425,7 +425,7 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 			Expect(v1nodeclaim.Annotations).To(BeNil())
 			Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
 			kubelet := &v1beta1.KubeletConfiguration{}
-			kubeletString, found := v1nodeclaim.Annotations[KubeletCompatabilityAnnotationKey]
+			kubeletString, found := v1nodeclaim.Annotations[KubeletCompatibilityAnnotationKey]
 			Expect(found).To(BeTrue())
 			err := json.Unmarshal([]byte(kubeletString), kubelet)
 			Expect(err).To(BeNil())
