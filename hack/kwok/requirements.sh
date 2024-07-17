@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 # Requirements Validation 
 
 # Adding validation to both v1 and v1beta1 APIs

@@ -76,7 +76,7 @@ var _ = BeforeEach(func() {
 	nodePool.Spec.Limits = v1.Limits{}
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 	// Set expiration to some high value so that there's age-based ordering for consolidation tests
-	nodePool.Spec.Disruption.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(30 * time.Hour)}
+	nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(30 * time.Hour)}
 })
 
 var _ = AfterEach(func() {

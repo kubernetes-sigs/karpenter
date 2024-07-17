@@ -76,6 +76,8 @@ spec:
               value: "1.19.0-0"
             - name: KARPENTER_SERVICE
               value: {{ include "karpenter.fullname" . }}
+            - name: WEBHOOK_PORT
+              value: "{{ .Values.webhook.port }}"
           {{- with .Values.logLevel }}
             - name: LOG_LEVEL
               value: "{{ . }}"
@@ -117,6 +119,9 @@ spec:
               protocol: TCP
             - name: http
               containerPort: {{ .Values.controller.healthProbe.port }}
+              protocol: TCP
+            - name: https-webhook
+              containerPort: {{ .Values.webhook.port }}
               protocol: TCP
           livenessProbe:
             initialDelaySeconds: 30

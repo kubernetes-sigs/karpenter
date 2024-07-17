@@ -88,11 +88,14 @@ var _ = Describe("Static Drift Hash", func() {
 								Effect: corev1.TaintEffectNoExecute,
 							},
 						},
+						ExpireAfter:            v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)},
+						TerminationGracePeriod: &metav1.Duration{Duration: 5 * time.Minute},
 					},
 				},
 			},
 		})
 	})
+	// TODO we should split this out into a DescribeTable
 	It("should update the drift hash when NodePool static field is updated", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
@@ -103,6 +106,7 @@ var _ = Describe("Static Drift Hash", func() {
 
 		nodePool.Spec.Template.Labels = map[string]string{"keyLabeltest": "valueLabeltest"}
 		nodePool.Spec.Template.Annotations = map[string]string{"keyAnnotation2": "valueAnnotation2", "keyAnnotation": "valueAnnotation"}
+		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
@@ -120,13 +124,13 @@ var _ = Describe("Static Drift Hash", func() {
 		nodePool.Spec.Limits = v1.Limits(corev1.ResourceList{"cpu": resource.MustParse("16")})
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: lo.ToPtr(30 * time.Second)}
-		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(30 * time.Second)
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}}},
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}},
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}}},
 		}
 		nodePool.Spec.Weight = lo.ToPtr(int32(80))
+		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 

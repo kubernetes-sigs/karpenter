@@ -4348,7 +4348,7 @@ var _ = Describe("Consolidation", func() {
 		var nodes []*corev1.Node
 
 		BeforeEach(func() {
-			nodePool.Spec.Disruption.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(3 * time.Second)}
+			nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(3 * time.Second)}
 			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -4357,6 +4357,9 @@ var _ = Describe("Consolidation", func() {
 						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
+				},
+				Spec: v1.NodeClaimSpec{
+					ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(3 * time.Second)},
 				},
 				Status: v1.NodeClaimStatus{
 					Allocatable: map[corev1.ResourceName]resource.Quantity{

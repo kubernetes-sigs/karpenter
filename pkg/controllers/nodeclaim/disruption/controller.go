@@ -45,14 +45,13 @@ type nodeClaimReconciler interface {
 }
 
 // Controller is a disruption controller that adds StatusConditions to nodeclaims when they meet certain disruption conditions
-// e.g. When the NodeClaim has surpassed its owning provisioner's expirationTTL, then it is marked as "Expired" in the StatusConditions
+// e.g. When the NodeClaim has become empty, then it is marked as "Empty" in the StatusConditions
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 
-	drift      *Drift
-	expiration *Expiration
-	emptiness  *Emptiness
+	drift     *Drift
+	emptiness *Emptiness
 }
 
 // NewController constructs a nodeclaim disruption controller
@@ -61,7 +60,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Clu
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		drift:         &Drift{cloudProvider: cloudProvider},
-		expiration:    &Expiration{kubeClient: kubeClient, clock: clk},
 		emptiness:     &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
 	}
 }
@@ -86,7 +84,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	var results []reconcile.Result
 	var errs error
 	reconcilers := []nodeClaimReconciler{
-		c.expiration,
 		c.drift,
 		c.emptiness,
 	}
