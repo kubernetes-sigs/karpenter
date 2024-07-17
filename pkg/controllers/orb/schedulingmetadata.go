@@ -19,8 +19,6 @@ package orb
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 	//"google.golang.org/protobuf/proto"
 )
@@ -57,39 +55,7 @@ func GetSchedulingMetadata(ctx context.Context) (SchedulingMetadata, bool) {
 	return metadata, ok
 }
 
-// Precondition, only called when heap isn't nil, and len > 0
-func WriteSchedulingMetadataHeapToPV(heap *SchedulingMetadataHeap) error {
-	if heap == nil || heap.Len() == 0 {
-		return fmt.Errorf("precondition broken, called with invalid heap or empty heap")
-	}
-
-	oldestStr := (*heap)[0].Timestamp.Format("2006-01-02_15-04-05")
-	newestStr := (*heap)[len(*heap)-1].Timestamp.Format("2006-01-02_15-04-05")
-	fileName := fmt.Sprintf("SchedulingMetadata_%s_to_%s.log", oldestStr, newestStr)
-	path := filepath.Join("/data", fileName)
-
-	file, err := os.Create(path)
-	if err != nil {
-		fmt.Println("Error opening file:", err)
-		return err
-	}
-	defer file.Close()
-
-	// Pop each scheduling metadata off its heap (oldest first) and batch log to PV.
-	for heap.Len() > 0 {
-		metadata := heap.Pop().(SchedulingMetadata)
-
-		timestampStr := metadata.Timestamp.Format("2006-01-02_15-04-05")
-		_, err = fmt.Fprintln(file, timestampStr+"\t"+metadata.Action)
-		if err != nil {
-			fmt.Println("Error writing data to file:", err)
-			return err
-		}
-	}
-
-	fmt.Println("Metadata written to S3 bucket successfully!")
-	return nil
-}
+// Function to unmarshal the metadata
 
 // // Reads in and parses all the scheduling metadata from the file in the PV.
 // // TODO: grab data based on a range of time.Time timestamps from files, via the range in their name.

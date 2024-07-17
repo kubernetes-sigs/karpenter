@@ -104,7 +104,7 @@ func NewSchedulingMetadataHeap() *SchedulingMetadataHeap {
 }
 
 // This function will log scheduling action to PV
-func (h *SchedulingMetadataHeap) LogSchedulingAction(ctx context.Context, schedulingTime time.Time) error {
+func (h *SchedulingMetadataHeap) LogSchedulingAction(ctx context.Context, schedulingTime time.Time) {
 	metadata, ok := GetSchedulingMetadata(ctx)
 
 	// The resolves the time difference between the start of a consolidation call and the subsequent provisioning scheduling
@@ -115,5 +115,4 @@ func (h *SchedulingMetadataHeap) LogSchedulingAction(ctx context.Context, schedu
 		metadata, _ = GetSchedulingMetadata(ctx) // Get it again to update metadata
 	}
 	h.Push(metadata)
-	return nil
 }

@@ -129,33 +129,33 @@ func (si *SchedulingInput) Diff(oldSi *SchedulingInput) (*SchedulingInput, *Sche
 	}
 
 	diffRemoved := &SchedulingInput{
-		Timestamp:          si.Timestamp, // i.e. the time of those (newer) differences
+		Timestamp:          si.Timestamp,
 		PendingPods:        pendingPodsRemoved,
 		StateNodesWithPods: stateNodesRemoved,
 		InstanceTypes:      instanceTypesRemoved,
 	}
 
 	diffChanged := &SchedulingInput{
-		Timestamp:          si.Timestamp, // i.e. the time of those (newer) differences
+		Timestamp:          si.Timestamp,
 		PendingPods:        pendingPodsChanged,
 		StateNodesWithPods: stateNodesChanged,
 		InstanceTypes:      instanceTypesChanged,
 	}
 
 	if len(pendingPodsAdded)+len(stateNodesAdded)+len(instanceTypesAdded) == 0 {
-		diffAdded = nil
+		diffAdded = &SchedulingInput{}
 	} else {
 		fmt.Println("Diff Scheduling Input added is... ", diffAdded.String()) // Test print, delete later
 	}
 
 	if len(pendingPodsRemoved)+len(stateNodesRemoved)+len(instanceTypesRemoved) == 0 {
-		diffRemoved = nil
+		diffRemoved = &SchedulingInput{}
 	} else {
 		fmt.Println("Diff Scheduling Input removed is... ", diffRemoved.String()) // Test print, delete later
 	}
 
 	if len(pendingPodsChanged)+len(stateNodesChanged)+len(instanceTypesChanged) == 0 {
-		diffChanged = nil
+		diffChanged = &SchedulingInput{}
 	} else {
 		fmt.Println("Diff Scheduling Input changed is... ", diffChanged.String()) // Test print, delete later
 	}
@@ -304,7 +304,7 @@ func hasStateNodeWithPodsChanged(oldStateNodeWithPods, newStateNodeWithPods *Sta
 // Checking equality on only fields I've reduced it to (i.e. Name Requirements Offerings)
 func hasInstanceTypeChanged(oldInstanceType, newInstanceType *cloudprovider.InstanceType) bool {
 	return !equality.Semantic.DeepEqual(oldInstanceType.Name, newInstanceType.Name) ||
-		!equality.Semantic.DeepEqual(oldInstanceType.Offerings, newInstanceType.Offerings) ||
+		!structEqual(oldInstanceType.Offerings, newInstanceType.Offerings) ||
 		!structEqual(oldInstanceType.Requirements, newInstanceType.Requirements)
 }
 
@@ -538,17 +538,41 @@ func reduceInstanceTypes(types []*cloudprovider.InstanceType) []*cloudprovider.I
 	return reducedInstanceTypes
 }
 
+// Function to take the 3 Scheduling Input differenced (added, removed and changed) and
+// Marshal them as one "differences" protobuf. This is an abstraction layer for management of
+// differences over time and make reconstruction easier.
+func protoDifferences(DiffAdded SchedulingInput, DiffRemoved SchedulingInput, DiffChanged SchedulingInput) *pb.Differences {
+	return &pb.Differences{
+		Added:   protoSchedulingInput(DiffAdded),
+		Removed: protoSchedulingInput(DiffRemoved),
+		Changed: protoSchedulingInput(DiffChanged),
+	}
+}
+
+func MarshalDifferences(differences *pb.Differences) ([]byte, error) {
+	return proto.Marshal(differences)
+}
+
+// Function to take the 3 Scheduling Input differenced (added, removed and changed) and
+// Marshal them as one "differences" protobuf. This is an abstraction layer for management of
+// differences over time and make reconstruction easier.
+
 // Function take a Scheduling Input to []byte, marshalled as a protobuf
 func (si SchedulingInput) Marshal() ([]byte, error) {
-	preMarshalSI := &pb.SchedulingInput{
+	return proto.Marshal(protoSchedulingInput(si))
+}
+
+func protoSchedulingInput(si SchedulingInput) *pb.SchedulingInput {
+	return &pb.SchedulingInput{
 		Timestamp:         si.Timestamp.Format("2006-01-02_15-04-05"),
 		PendingpodData:    getPodsData(si.PendingPods),
 		StatenodesData:    getStateNodeWithPodsData(si.StateNodesWithPods),
 		InstancetypesData: getInstanceTypesData(si.InstanceTypes),
 	}
-	return proto.Marshal(preMarshalSI)
 }
 
+// TODO: I can't help but think this is the "harder not smarter" approach here.
+// Is there something in pb.go or protobuf that does this automatically?
 func getPodsData(pods []*v1.Pod) []*pb.ReducedPod {
 	reducedPods := []*pb.ReducedPod{}
 
@@ -569,15 +593,15 @@ func getNodeData(node *v1.Node) *pb.StateNodeWithPods_ReducedNode {
 		return nil
 	}
 
-	// nodeStatus, err := node.Status.Marshal()
-	// if err != nil {
-	// 	return nil
-	// }
+	nodeStatus, err := node.Status.Marshal()
+	if err != nil {
+		return nil
+	}
 
 	// Create a new instance of the reduced node type
 	reducedNode := &pb.StateNodeWithPods_ReducedNode{
 		Name:       node.Name,
-		Nodestatus: nil,
+		Nodestatus: nodeStatus,
 	}
 
 	return reducedNode

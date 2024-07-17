@@ -4,6 +4,16 @@ package orb;
 
 option go_package = ".";
 
+message SchedulingInputDifferencesMapping {
+  repeated Differences differences = 1;
+}
+
+message Differences {
+  optional SchedulingInput added = 1;
+  optional SchedulingInput removed = 2;
+  optional SchedulingInput changed = 3;
+}
+
 // TODO: will need to be updated as I continue to update SchedulingInput
 // Anything as bytes are the self-describing wire format provided by K8s
 message SchedulingInput {
@@ -47,5 +57,14 @@ message ReducedInstanceType {
     repeated Requirement requirements = 1;
     double price = 2;
     bool available = 3;
+  }
+}
+
+message SchedulingMetadataMapping {
+  repeated MappingEntry entries = 1;
+
+  message MappingEntry {
+    string action = 1;
+    string timestamp = 2;
   }
 }
