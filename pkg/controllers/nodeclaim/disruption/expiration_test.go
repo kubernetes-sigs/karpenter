@@ -84,13 +84,13 @@ var _ = Describe("Expiration", func() {
 	})
 	It("should not remove the NodeClaims when expiration is disabled", func() {
 		nodeClaim.Spec.ExpireAfter.Duration = nil
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should remove nodeclaims that are expired", func() {
 		nodeClaim.Spec.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
@@ -101,13 +101,13 @@ var _ = Describe("Expiration", func() {
 	})
 	It("should not remove non-expired NodeClaims", func() {
 		nodeClaim.Spec.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should delete NodeClaims if the nodeClaim is expired but the node isn't", func() {
 		nodeClaim.Spec.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
@@ -118,7 +118,7 @@ var _ = Describe("Expiration", func() {
 	})
 	It("should return the requeue interval for the time between now and when the nodeClaim expires", func() {
 		nodeClaim.Spec.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
 
 		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))
 
