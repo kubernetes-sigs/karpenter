@@ -23,7 +23,9 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/apis"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -100,6 +102,26 @@ func (in *NodeClaim) ConvertFrom(ctx context.Context, from apis.Convertible) err
 	} else {
 		in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatibilityAnnotationKey: kubeletAnnotation})
 	}
+	return in.setExpireAfter(ctx, v1beta1NC)
+}
+
+// only need to set expireAfter for v1beta1 to v1
+func (in *NodeClaim) setExpireAfter(ctx context.Context, v1beta1nc *v1beta1.NodeClaim) error {
+	kubeClient := injection.GetClient(ctx)
+	nodePoolName, ok := v1beta1nc.Labels[NodePoolLabelKey]
+	if !ok {
+		// If we don't have a nodepool for this nodeclaim, there's nothing to look up
+		return nil
+	}
+	nodePool := &NodePool{}
+	if err := kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+		if errors.IsNotFound(err) {
+			// If the nodepool doesn't exist, fallback to no expiry, and use the CRD default
+			return nil
+		}
+		return fmt.Errorf("getting nodepool, %w", err)
+	}
+	in.Spec.ExpireAfter = nodePool.Spec.Template.Spec.ExpireAfter
 	return nil
 }
 
