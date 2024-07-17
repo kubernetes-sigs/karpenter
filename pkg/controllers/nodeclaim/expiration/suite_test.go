@@ -36,9 +36,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
-	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/expiration"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
@@ -46,11 +44,9 @@ import (
 )
 
 var ctx context.Context
-var nodeClaimDisruptionController *nodeclaimdisruption.Controller
+var expirationController *expiration.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
-var cluster *state.Cluster
-var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -66,9 +62,7 @@ var _ = BeforeSuite(func() {
 		})
 	}))
 	ctx = options.ToContext(ctx, test.Options())
-	cp = fake.NewCloudProvider()
-	cluster = state.NewCluster(fakeClock, env.Client)
-	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cluster, cp)
+	expirationController = expiration.NewController(fakeClock, env.Client)
 })
 
 var _ = AfterSuite(func() {
@@ -81,8 +75,6 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	cp.Reset()
-	cluster.Reset()
 	ExpectCleanedUp(ctx, env.Client)
 })
 
@@ -107,7 +99,7 @@ var _ = Describe("Expiration", func() {
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 
@@ -124,7 +116,7 @@ var _ = Describe("Expiration", func() {
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated", map[string]string{
@@ -139,7 +131,7 @@ var _ = Describe("Expiration", func() {
 	It("should not remove the NodeClaims when expiration is disabled", func() {
 		nodeClaim.Spec.ExpireAfter.Duration = nil
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should remove nodeclaims that are expired", func() {
@@ -148,7 +140,7 @@ var _ = Describe("Expiration", func() {
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		// with forceful termination, when we see a nodeclaim meets the conditions for expiration
 		// we should remove it
 		ExpectNotFound(ctx, env.Client, nodeClaim)
@@ -156,7 +148,7 @@ var _ = Describe("Expiration", func() {
 	It("should not remove non-expired NodeClaims", func() {
 		nodeClaim.Spec.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should delete NodeClaims if the nodeClaim is expired but the node isn't", func() {
@@ -166,7 +158,7 @@ var _ = Describe("Expiration", func() {
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
 		ExpectApplied(ctx, env.Client, node) // node shouldn't be expired, but nodeClaim will be
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -176,7 +168,7 @@ var _ = Describe("Expiration", func() {
 
 		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))
 
-		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
 	})
 })
