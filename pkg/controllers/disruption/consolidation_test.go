@@ -4358,6 +4358,9 @@ var _ = Describe("Consolidation", func() {
 						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
+				Spec: v1.NodeClaimSpec{
+					ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(3 * time.Second)},
+				},
 				Status: v1.NodeClaimStatus{
 					Allocatable: map[corev1.ResourceName]resource.Quantity{
 						corev1.ResourceCPU:  resource.MustParse("32"),

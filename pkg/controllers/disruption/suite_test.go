@@ -278,7 +278,6 @@ var _ = Describe("Simulate Scheduling", func() {
 				Operator: corev1.NodeSelectorOpExists,
 			},
 		})
-		nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)}
 
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: nil}
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "3"}}

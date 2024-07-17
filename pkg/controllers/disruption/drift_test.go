@@ -56,7 +56,6 @@ var _ = Describe("Drift", func() {
 				},
 			},
 		})
-		nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{Duration: nil}
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{

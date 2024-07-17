@@ -60,7 +60,7 @@ var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
-var _ = Describe("Static Drift Hash", func() {
+var _ = FDescribe("Static Drift Hash", func() {
 	var nodePool *v1.NodePool
 	BeforeEach(func() {
 		nodePool = test.NodePool(v1.NodePool{
@@ -106,6 +106,7 @@ var _ = Describe("Static Drift Hash", func() {
 
 		nodePool.Spec.Template.Labels = map[string]string{"keyLabeltest": "valueLabeltest"}
 		nodePool.Spec.Template.Annotations = map[string]string{"keyAnnotation2": "valueAnnotation2", "keyAnnotation": "valueAnnotation"}
+		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
@@ -123,15 +124,13 @@ var _ = Describe("Static Drift Hash", func() {
 		nodePool.Spec.Limits = v1.Limits(corev1.ResourceList{"cpu": resource.MustParse("16")})
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: lo.ToPtr(30 * time.Second)}
-		// TODO this shouldn't succeed.
-		nodePool.Spec.Template.Spec.ExpireAfter.Duration = lo.ToPtr(1 * time.Second)
-		nodePool.Spec.Template.Spec.TerminationGracePeriod.Duration = 1 * time.Second
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}}},
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}},
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}}},
 		}
 		nodePool.Spec.Weight = lo.ToPtr(int32(80))
+		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
