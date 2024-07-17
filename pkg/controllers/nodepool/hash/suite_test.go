@@ -60,7 +60,7 @@ var _ = AfterSuite(func() {
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
-var _ = FDescribe("Static Drift Hash", func() {
+var _ = Describe("Static Drift Hash", func() {
 	var nodePool *v1.NodePool
 	BeforeEach(func() {
 		nodePool = test.NodePool(v1.NodePool{
