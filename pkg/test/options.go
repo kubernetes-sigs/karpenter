@@ -59,6 +59,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 
 	return &options.Options{
 		ServiceName:          lo.FromPtrOr(opts.ServiceName, ""),
+		DisableWebhook:       lo.FromPtrOr(opts.DisableWebhook, false),
 		WebhookPort:          lo.FromPtrOr(opts.WebhookPort, 8443),
 		MetricsPort:          lo.FromPtrOr(opts.MetricsPort, 8000),
 		WebhookMetricsPort:   lo.FromPtrOr(opts.WebhookMetricsPort, 8001),
