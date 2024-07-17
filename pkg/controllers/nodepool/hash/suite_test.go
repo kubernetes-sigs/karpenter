@@ -124,8 +124,8 @@ var _ = Describe("Static Drift Hash", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: lo.ToPtr(30 * time.Second)}
 		// TODO this shouldn't succeed.
-		nodePool.Spec.Template.Spec.ExpireAfter.Duration = lo.ToPtr(30 * time.Second)
-		nodePool.Spec.Template.Spec.TerminationGracePeriod.Duration = 30 * time.Second
+		nodePool.Spec.Template.Spec.ExpireAfter.Duration = lo.ToPtr(1 * time.Second)
+		nodePool.Spec.Template.Spec.TerminationGracePeriod.Duration = 1 * time.Second
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}}},
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}},

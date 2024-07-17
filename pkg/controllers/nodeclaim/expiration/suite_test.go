@@ -14,23 +14,77 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package disruption_test
+package expiration_test
 
 import (
+	"context"
+	"testing"
 	"time"
 
-	"github.com/samber/lo"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clock "k8s.io/utils/clock/testing"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
+
+	"sigs.k8s.io/karpenter/pkg/apis"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
+	"sigs.k8s.io/karpenter/pkg/test"
 )
+
+var ctx context.Context
+var nodeClaimDisruptionController *nodeclaimdisruption.Controller
+var env *test.Environment
+var fakeClock *clock.FakeClock
+var cluster *state.Cluster
+var cp *fake.CloudProvider
+
+func TestAPIs(t *testing.T) {
+	ctx = TestContextWithLogger(t)
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Disruption")
+}
+
+var _ = BeforeSuite(func() {
+	fakeClock = clock.NewFakeClock(time.Now())
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
+		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Node).Spec.ProviderID}
+		})
+	}))
+	ctx = options.ToContext(ctx, test.Options())
+	cp = fake.NewCloudProvider()
+	cluster = state.NewCluster(fakeClock, env.Client)
+	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cluster, cp)
+})
+
+var _ = AfterSuite(func() {
+	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
+})
+
+var _ = BeforeEach(func() {
+	ctx = options.ToContext(ctx, test.Options())
+	fakeClock.SetTime(time.Now())
+})
+
+var _ = AfterEach(func() {
+	cp.Reset()
+	cluster.Reset()
+	ExpectCleanedUp(ctx, env.Client)
+})
 
 var _ = Describe("Expiration", func() {
 	var nodePool *v1.NodePool
@@ -49,7 +103,7 @@ var _ = Describe("Expiration", func() {
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted metric when expired", func() {
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectApplied(ctx, env.Client, nodeClaim)
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)

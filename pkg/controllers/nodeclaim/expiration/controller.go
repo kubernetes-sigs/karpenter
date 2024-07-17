@@ -14,28 +14,38 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package disruption
+package expiration
 
 import (
 	"context"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
-// Expiration is a nodeclaim sub-controller that adds or removes status conditions on expired nodeclaims based on TTLSecondsUntilExpired
-type Expiration struct {
-	kubeClient client.Client
+// Expiration is a nodeclaim controller that deletes expired nodeclaims based on expireAfter
+type Controller struct {
 	clock      clock.Clock
+	kubeClient client.Client
 }
 
-func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+// NewController constructs a nodeclaim disruption controller
+func NewController(clk clock.Clock, kubeClient client.Client) *Controller {
+	return &Controller{
+		kubeClient: kubeClient,
+		clock:      clk,
+	}
+}
+
+func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	// From here there are three scenarios to handle:
 	// 1. If ExpireAfter is not configured, exit expiration loop
 	if nodeClaim.Spec.ExpireAfter.Duration == nil {
@@ -43,24 +53,32 @@ func (e *Expiration) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeC
 	}
 	expirationTime := nodeClaim.CreationTimestamp.Add(*nodeClaim.Spec.ExpireAfter.Duration)
 	// 2. If the NodeClaim isn't expired leave the reconcile loop.
-	if e.clock.Now().Before(expirationTime) {
+	if c.clock.Now().Before(expirationTime) {
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
-		return reconcile.Result{RequeueAfter: expirationTime.Sub(e.clock.Now())}, nil
+		return reconcile.Result{RequeueAfter: expirationTime.Sub(c.clock.Now())}, nil
 	}
 	// 3. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
-	if err := e.kubeClient.Delete(ctx, nodeClaim); err != nil {
+	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, err
 	}
 	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
 	metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
 		metrics.TypeLabel:     metrics.ExpirationReason,
-		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.NodePoolLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1.NodePoolLabelKey),
 	}).Inc()
 	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
 		metrics.ReasonLabel:       metrics.ExpirationReason,
-		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.NodePoolLabel:     metrics.GetLabelOrDefault(nodeClaim.Labels, v1.NodePoolLabelKey),
 		metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1.CapacityTypeLabelKey),
 	}).Inc()
 	return reconcile.Result{}, nil
+}
+
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	builder := controllerruntime.NewControllerManagedBy(m)
+	return builder.
+		Named("nodeclaim.expiration").
+		For(&v1.NodeClaim{}).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
