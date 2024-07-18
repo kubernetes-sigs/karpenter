@@ -4621,9 +4621,6 @@ var _ = Describe("Consolidation", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nil)
 
-			// Wait for the nomination cache to expire
-			time.Sleep(time.Second * 11)
-
 			// Re-create the pods to re-bind them
 			for i := 0; i < 2; i++ {
 				ExpectDeleted(ctx, env.Client, pods[i])
