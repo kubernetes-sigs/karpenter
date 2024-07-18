@@ -47,7 +47,7 @@ func FilterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 		return pod.ToleratesDisruptionNoScheduleTaint(p)
 	})
 	// Filter out Multi-Attach volumes
-	shouldFilterOutVolume := make(map[string]bool)
+	shouldNotFilterOutVolume := make(map[string]bool)
 	for _, p := range drainablePods {
 		for _, v := range p.Spec.Volumes {
 			pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, p, v)
@@ -55,13 +55,13 @@ func FilterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 				return nil, err
 			}
 			if pvc != nil {
-				shouldFilterOutVolume[pvc.Spec.VolumeName] = CannotMultiAttach(*pvc)
+				shouldNotFilterOutVolume[pvc.Spec.VolumeName] = CannotMultiAttach(*pvc)
 			}
 		}
 	}
 	for i := range volumeAttachments {
 		pvName := volumeAttachments[i].Spec.Source.PersistentVolumeName
-		if pvName != nil && shouldFilterOutVolume[*pvName] {
+		if pvName != nil && shouldNotFilterOutVolume[*pvName] {
 			filteredVolumeAttachments = append(filteredVolumeAttachments, volumeAttachments[i])
 		}
 	}
