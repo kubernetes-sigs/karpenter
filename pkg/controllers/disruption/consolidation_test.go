@@ -2994,7 +2994,7 @@ var _ = Describe("Consolidation", func() {
 			})
 			Expect(ok).To(BeTrue())
 		})
-		FIt("should consider initialized nodes before uninitialized nodes", func() {
+		It("should consider initialized nodes before uninitialized nodes", func() {
 			defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "default-instance-type",
 				Resources: corev1.ResourceList{
@@ -3123,7 +3123,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
-			// time.Sleep(time.Second * 8)
 
 			// Process the item so that the nodes can be deleted.
 			ExpectSingletonReconciled(ctx, queue)
@@ -3826,7 +3825,7 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 		})
-		FDescribeTable("can merge 3 nodes into 1", func(spotToSpot bool) {
+		DescribeTable("can merge 3 nodes into 1", func(spotToSpot bool) {
 			nodeClaims = lo.Ternary(spotToSpot, spotNodeClaims, nodeClaims)
 			nodes = lo.Ternary(spotToSpot, spotNodes, nodes)
 			// create our RS so we can link a pod to it
@@ -3863,7 +3862,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
-			// time.Sleep(time.Second * 8)
 
 			// Process the item so that the nodes can be deleted.
 			ExpectSingletonReconciled(ctx, queue)
@@ -4391,7 +4389,7 @@ var _ = Describe("Consolidation", func() {
 			})
 			oldNodeClaimNames = sets.New(nodeClaims[0].Name, nodeClaims[1].Name, nodeClaims[2].Name)
 		})
-		FIt("can replace node maintaining zonal topology spread", func() {
+		It("can replace node maintaining zonal topology spread", func() {
 			labels = map[string]string{
 				"app": "test-zonal-spread",
 			}
@@ -4441,7 +4439,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
-			// time.Sleep(time.Second * 8)
 
 			// Process the item so that the nodes can be deleted.
 			ExpectSingletonReconciled(ctx, queue)

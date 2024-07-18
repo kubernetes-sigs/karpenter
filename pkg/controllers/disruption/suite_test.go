@@ -2109,12 +2109,15 @@ func fromInt(i int) *intstr.IntOrString {
 // is a timer waiting, incrementing the clock if not.
 func ExpectToWait(wg *sync.WaitGroup) {
 	wg.Add(1)
+	Expect(fakeClock.HasWaiters()).To(BeFalse())
 	go func() {
 		defer GinkgoRecover()
 		defer wg.Done()
 		Eventually(func() bool { return fakeClock.HasWaiters() }).
-			WithTimeout(time.Second).
-			WithPolling(time.Millisecond).
+			// Caution: if another go routine takes longer than this timeout to
+			// wait on the clock, we will deadlock until the test suite timeout
+			WithTimeout(10 * time.Second).
+			WithPolling(10 * time.Millisecond).
 			Should(BeTrue())
 		fakeClock.Step(45 * time.Second)
 	}()
