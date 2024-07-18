@@ -428,4 +428,14 @@ var _ = Describe("Validation", func() {
 			})
 		})
 	})
+	Context("TerminationGracePeriod", func() {
+		It("should succeed on a positive terminationGracePeriod duration", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
+		})
+		It("should fail on a negative terminationGracePeriod duration", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * -30}
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+		})
+	})
 })

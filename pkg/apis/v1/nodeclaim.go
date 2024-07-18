@@ -59,6 +59,8 @@ type NodeClaimSpec struct {
 	//
 	// The feature can also be used to allow maximum time limits for long-running jobs which can delay node termination with preStop hooks.
 	// If left undefined, the controller will wait indefinitely for pods to be drained.
+	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
+	// +kubebuilder:validation:Type="string"
 	// +optional
 	TerminationGracePeriod *metav1.Duration `json:"terminationGracePeriod,omitempty"`
 	// ExpireAfter is the duration the controller will wait

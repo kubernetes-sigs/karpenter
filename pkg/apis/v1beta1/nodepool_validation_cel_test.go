@@ -878,4 +878,14 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 	})
+	Context("TerminationGracePeriod", func() {
+		It("should succeed on a positive terminationGracePeriod duration", func() {
+			nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		It("should fail on a negative terminationGracePeriod duration", func() {
+			nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * -30}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+	})
 })
