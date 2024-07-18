@@ -16,9 +16,11 @@ spec:
       port: {{ .Values.controller.metrics.port }}
       targetPort: http-metrics
       protocol: TCP
+  {{- if .Values.webhook.enabled }}
     - name: https-webhook
       port: {{ .Values.webhook.port }}
       targetPort: https-webhook
       protocol: TCP
+  {{- end }}
   selector:
     {{- include "karpenter.selectorLabels" . | nindent 4 }}

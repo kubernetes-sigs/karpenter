@@ -257,7 +257,7 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 		lo.Must0(o.Manager.Start(ctx))
 	}()
 	if options.FromContext(ctx).DisableWebhook {
-		log.FromContext(ctx).Info("webhook disabled")
+		log.FromContext(ctx).Info("conversion webhooks are disabled")
 	} else {
 		wg.Add(1)
 		go func() {
