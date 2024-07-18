@@ -3619,10 +3619,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, doNotDisruptPod)
 			ExpectManualBinding(ctx, env.Client, doNotDisruptPod, node)
 
-			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectToWait(&wg)
-			wg.Wait()
-
 			// we would normally be able to replace a node, but we are blocked by the do-not-disrupt pods during validation
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
@@ -3669,10 +3665,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, blockingPDBPod, pdb)
 			ExpectManualBinding(ctx, env.Client, blockingPDBPod, node)
 
-			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectToWait(&wg)
-			wg.Wait()
-
 			// we would normally be able to replace a node, but we are blocked by the PDB during validation
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
@@ -3718,10 +3710,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, doNotDisruptPods[0], doNotDisruptPods[1])
 			ExpectManualBinding(ctx, env.Client, doNotDisruptPods[0], nodes[0])
 			ExpectManualBinding(ctx, env.Client, doNotDisruptPods[1], nodes[1])
-
-			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectToWait(&wg)
-			wg.Wait()
 
 			// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-disrupt pods during validation
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
@@ -3771,10 +3759,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, blockingPDBPods[0], blockingPDBPods[1], pdb)
 			ExpectManualBinding(ctx, env.Client, blockingPDBPods[0], nodes[0])
 			ExpectManualBinding(ctx, env.Client, blockingPDBPods[1], nodes[1])
-
-			// Step forward to satisfy the validation timeout and wait for the reconcile to finish
-			ExpectToWait(&wg)
-			wg.Wait()
 
 			// we would normally be able to consolidate down to a single node, but we are blocked by the PDB during validation
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
