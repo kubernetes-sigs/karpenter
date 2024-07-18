@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"time"
 
-	// "google.golang.org/protobuf/proto"
-	proto "github.com/gogo/protobuf/proto"
+	proto "google.golang.org/protobuf/proto"
+	// proto "github.com/gogo/protobuf/proto"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -553,10 +553,6 @@ func MarshalDifferences(differences *pb.Differences) ([]byte, error) {
 	return proto.Marshal(differences)
 }
 
-// Function to take the 3 Scheduling Input differenced (added, removed and changed) and
-// Marshal them as one "differences" protobuf. This is an abstraction layer for management of
-// differences over time and make reconstruction easier.
-
 // Function take a Scheduling Input to []byte, marshalled as a protobuf
 func (si SchedulingInput) Marshal() ([]byte, error) {
 	return proto.Marshal(protoSchedulingInput(si))
@@ -566,9 +562,39 @@ func protoSchedulingInput(si SchedulingInput) *pb.SchedulingInput {
 	return &pb.SchedulingInput{
 		Timestamp:         si.Timestamp.Format("2006-01-02_15-04-05"),
 		PendingpodData:    getPodsData(si.PendingPods),
-		StatenodesData:    getStateNodeWithPodsData(si.StateNodesWithPods),
+		StatenodesData:    getStateNodesWithPodsData(si.StateNodesWithPods),
 		InstancetypesData: getInstanceTypesData(si.InstanceTypes),
 	}
+}
+
+func UnmarshalSchedulingInput(data []byte) (*SchedulingInput, error) {
+	// Unmarshal the data into an ORBLogEntry struct
+	entry := &pb.SchedulingInput{}
+	if err := proto.Unmarshal(data, entry); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal SchedulingInput: %v", err)
+	}
+
+	si, err := reconstructSchedulingInput(entry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct SchedulingInput: %v", err)
+	}
+
+	return si, nil
+}
+
+// Does the reverse of the protoSchedulingInput function
+func reconstructSchedulingInput(pbsi *pb.SchedulingInput) (*SchedulingInput, error) {
+	timestamp, err := time.Parse("2006-01-02_15-04-05", pbsi.GetTimestamp())
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse timestamp: %v", err)
+	}
+
+	return &SchedulingInput{
+		Timestamp:          timestamp,
+		PendingPods:        reconstructPods(pbsi.GetPendingpodData()),
+		StateNodesWithPods: reconstructStateNodesWithPods(pbsi.GetStatenodesData()),
+		InstanceTypes:      reconstructInstanceTypes(pbsi.GetInstancetypesData()),
+	}, nil
 }
 
 // TODO: I can't help but think this is the "harder not smarter" approach here.
@@ -588,36 +614,60 @@ func getPodsData(pods []*v1.Pod) []*pb.ReducedPod {
 	return reducedPods
 }
 
+// Function to do the opposite, that is, to reconstruct a []*v1.Pod from []*pb.ReducedPod data
+func reconstructPods(reducedPods []*pb.ReducedPod) []*v1.Pod {
+	pods := []*v1.Pod{}
+
+	for _, reducedPod := range reducedPods {
+		pods = append(pods, &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      reducedPod.Name,
+				Namespace: reducedPod.Namespace,
+			},
+			Status: v1.PodStatus{
+				Phase: v1.PodPhase(reducedPod.Phase),
+			},
+		})
+	}
+
+	return pods
+}
+
 func getNodeData(node *v1.Node) *pb.StateNodeWithPods_ReducedNode {
 	if node == nil {
 		return nil
 	}
-
 	nodeStatus, err := node.Status.Marshal()
 	if err != nil {
 		return nil
 	}
-
 	// Create a new instance of the reduced node type
 	reducedNode := &pb.StateNodeWithPods_ReducedNode{
 		Name:       node.Name,
 		Nodestatus: nodeStatus,
 	}
-
 	return reducedNode
 }
 
-func getStateNodeWithPodsData(stateNodeWithPods []*StateNodeWithPods) []*pb.StateNodeWithPods {
+func reconstructNode(nodeData *pb.StateNodeWithPods_ReducedNode) *v1.Node {
+	if nodeData == nil {
+		return nil
+	}
+	node := &v1.Node{}
+	node.Status.Unmarshal(nodeData.Nodestatus)
+	return node
+}
+
+func getStateNodesWithPodsData(stateNodesWithPods []*StateNodeWithPods) []*pb.StateNodeWithPods {
 	snpData := []*pb.StateNodeWithPods{}
 
-	for _, snp := range stateNodeWithPods {
+	for _, snp := range stateNodesWithPods {
 		var nodeClaim *pb.StateNodeWithPods_ReducedNodeClaim
 		if snp.NodeClaim != nil {
 			nodeClaim = &pb.StateNodeWithPods_ReducedNodeClaim{
 				Name: snp.NodeClaim.GetName(),
 			}
 		}
-
 		snpData = append(snpData, &pb.StateNodeWithPods{
 			Node:      getNodeData(snp.Node),
 			NodeClaim: nodeClaim,
@@ -626,6 +676,28 @@ func getStateNodeWithPodsData(stateNodeWithPods []*StateNodeWithPods) []*pb.Stat
 	}
 
 	return snpData
+}
+
+func reconstructStateNodesWithPods(snpData []*pb.StateNodeWithPods) []*StateNodeWithPods {
+	stateNodesWithPods := []*StateNodeWithPods{}
+
+	for _, snpData := range snpData {
+		var nodeClaim *v1beta1.NodeClaim
+		if snpData.NodeClaim != nil {
+			nodeClaim = &v1beta1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: snpData.NodeClaim.Name,
+				},
+			}
+		}
+		stateNodesWithPods = append(stateNodesWithPods, &StateNodeWithPods{
+			Node:      reconstructNode(snpData.Node),
+			NodeClaim: nodeClaim,
+			Pods:      reconstructPods(snpData.Pods),
+		})
+	}
+
+	return stateNodesWithPods
 }
 
 func getInstanceTypesData(instanceTypes []*cloudprovider.InstanceType) []*pb.ReducedInstanceType {
@@ -642,23 +714,53 @@ func getInstanceTypesData(instanceTypes []*cloudprovider.InstanceType) []*pb.Red
 	return itData
 }
 
-func getRequirementsData(requirements scheduling.Requirements) []*pb.ReducedInstanceType_Requirement {
-	requirementsData := []*pb.ReducedInstanceType_Requirement{}
+func reconstructInstanceTypes(itData []*pb.ReducedInstanceType) []*cloudprovider.InstanceType {
+	instanceTypes := []*cloudprovider.InstanceType{}
+
+	for _, it := range itData {
+		instanceTypes = append(instanceTypes, &cloudprovider.InstanceType{
+			Name:         it.Name,
+			Requirements: reconstructRequirements(it.Requirements),
+			Offerings:    reconstructOfferings(it.Offerings),
+		})
+	}
+
+	return instanceTypes
+}
+
+func getRequirementsData(requirements scheduling.Requirements) []*pb.ReducedInstanceType_ReducedRequirement {
+	requirementsData := []*pb.ReducedInstanceType_ReducedRequirement{}
 
 	for _, requirement := range requirements {
-		requirementsData = append(requirementsData, &pb.ReducedInstanceType_Requirement{
-			Values: requirement.Values(),
+		requirementsData = append(requirementsData, &pb.ReducedInstanceType_ReducedRequirement{
+			Key:                  requirement.Key,
+			Nodeselectoroperator: string(requirement.Operator()),
+			Values:               requirement.Values(),
 		})
 	}
 
 	return requirementsData
 }
 
-func getOfferingsData(offerings cloudprovider.Offerings) []*pb.ReducedInstanceType_Offering {
-	offeringsData := []*pb.ReducedInstanceType_Offering{}
+func reconstructRequirements(requirementsData []*pb.ReducedInstanceType_ReducedRequirement) scheduling.Requirements {
+	requirements := scheduling.Requirements{}
+
+	for _, requirementData := range requirementsData {
+		requirements.Add(scheduling.NewRequirement(
+			requirementData.Key,
+			v1.NodeSelectorOperator(requirementData.Nodeselectoroperator),
+			requirementData.Values...,
+		))
+	}
+
+	return requirements
+}
+
+func getOfferingsData(offerings cloudprovider.Offerings) []*pb.ReducedInstanceType_ReducedOffering {
+	offeringsData := []*pb.ReducedInstanceType_ReducedOffering{}
 
 	for _, offering := range offerings {
-		offeringsData = append(offeringsData, &pb.ReducedInstanceType_Offering{
+		offeringsData = append(offeringsData, &pb.ReducedInstanceType_ReducedOffering{
 			Requirements: getRequirementsData(offering.Requirements),
 			Price:        offering.Price,
 			Available:    offering.Available,
@@ -668,44 +770,16 @@ func getOfferingsData(offerings cloudprovider.Offerings) []*pb.ReducedInstanceTy
 	return offeringsData
 }
 
-// func UnmarshalSchedulingInput(data []byte) (*SchedulingInput, error) {
-// 	// Unmarshal the data into an ORBLogEntry struct
-// 	entry := &ORBLogEntry{}
-// 	if err := proto.Unmarshal(data, entry); err != nil {
-// 		return nil, fmt.Errorf("failed to unmarshal ORBLogEntry: %v", err)
-// 	}
+func reconstructOfferings(offeringsData []*pb.ReducedInstanceType_ReducedOffering) cloudprovider.Offerings {
+	offerings := cloudprovider.Offerings{}
 
-// 	// Parse the timestamp
-// 	timestamp, err := time.Parse("2006-01-02_15-04-05", entry.Timestamp)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to parse timestamp: %v", err)
-// 	}
+	for _, offeringData := range offeringsData {
+		offerings = append(offerings, cloudprovider.Offering{
+			Requirements: reconstructRequirements(offeringData.Requirements),
+			Price:        offeringData.Price,
+			Available:    offeringData.Available,
+		})
+	}
 
-// 	// Unmarshal the PendingpodData into v1.Pod objects
-// 	pendingPods := make([]*v1.Pod, 0, len(entry.PendingpodData))
-// 	for _, podData := range entry.PendingpodData {
-// 		var pod v1.Pod
-// 		if err := proto.Unmarshal(podData, &pod); err != nil {
-// 			return nil, fmt.Errorf("failed to unmarshal pod: %v", err)
-// 		}
-// 		pendingPods = append(pendingPods, &pod)
-// 	}
-
-// 	// Create a new SchedulingInput struct
-// 	schedulingInput := &SchedulingInput{
-// 		Timestamp:   timestamp,
-// 		PendingPods: pendingPods,
-// 	}
-
-// 	return schedulingInput, nil
-// }
-
-// // Function to do the reverse, take a scheduling input's []byte and unmarshal it back into a SchedulingInput
-// func PBToSchedulingInput(timestamp time.Time, data []byte) (SchedulingInput, error) {
-// 	podList := &v1.PodList{}
-// 	if err := proto.Unmarshal(data, podList); err != nil {
-// 		return SchedulingInput{}, fmt.Errorf("unmarshaling pod list, %w", err)
-// 	}
-// 	pods := lo.ToSlicePtr(podList.Items)
-// 	return NewSchedulingInput(timestamp, pods, nil, nil), nil // TODO: update once I figure out serialization
-// }
+	return offerings
+}

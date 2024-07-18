@@ -1,12 +1,10 @@
 syntax = "proto3";
 
-package orb;
+option go_package = "sigs.k8s.io/karpenter/pkg/controllers/orb/proto";
 
-option go_package = ".";
-
-message SchedulingInputDifferencesMapping {
-  repeated Differences differences = 1;
-}
+// message SchedulingInputDifferencesMapping {
+//   repeated Differences differences = 1;
+// }
 
 message Differences {
   optional SchedulingInput added = 1;
@@ -29,9 +27,10 @@ message ReducedPod {
   string phase = 3;
 }
 
+// A stateNode with the Pods it has on it.
 message StateNodeWithPods {
   optional ReducedNode node = 1;
-  optional ReducedNodeClaim nodeClaim = 2; // might be problematic?
+  optional ReducedNodeClaim nodeClaim = 2;
   repeated ReducedPod pods = 3;
 
   message ReducedNode {
@@ -46,21 +45,23 @@ message StateNodeWithPods {
 
 message ReducedInstanceType {
   string name = 1;
-  repeated Requirement requirements = 2;
-  repeated Offering offerings = 3;
+  repeated ReducedRequirement requirements = 2;
+  repeated ReducedOffering offerings = 3;
 
-  message Requirement {
-    repeated string values = 1;
+  message ReducedRequirement {
+    string key = 1;
+    repeated string values = 2;
+    string nodeselectoroperator = 3;
   }
   
-  message Offering {
-    repeated Requirement requirements = 1;
+  message ReducedOffering {
+    repeated ReducedRequirement requirements = 1;
     double price = 2;
     bool available = 3;
   }
 }
 
-message SchedulingMetadataMapping {
+message SchedulingMetadataMap {
   repeated MappingEntry entries = 1;
 
   message MappingEntry {

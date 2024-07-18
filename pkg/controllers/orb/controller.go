@@ -17,7 +17,6 @@ limitations under the License.
 package orb
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -30,9 +29,8 @@ import (
 
 	"github.com/awslabs/operatorpkg/singleton"
 
-	//"google.golang.org/protobuf/proto"
-	proto "github.com/gogo/protobuf/proto"
-	v1 "k8s.io/api/core/v1"
+	"google.golang.org/protobuf/proto"
+	// proto "github.com/gogo/protobuf/proto"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -65,8 +63,6 @@ func NewController(schedulingInputHeap *SchedulingInputHeap, schedulingMetadataH
 		mostRecentBaseline:     nil,
 		rebaseline:             true,
 		rebaselineThreshold:    initialDeltaThreshold,
-		//TODO: this isn't consistent through restarts of Karpenter. Would want a way to pull the most recent. Maybe a metadata file?
-		//      That would have to be a delete/replace since PV files are immutable.
 	}
 }
 
@@ -86,7 +82,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		if c.mostRecentBaseline == nil || c.rebaseline {
 			err := c.logSchedulingBaselineToPV(currentInput)
 			if err != nil {
-				fmt.Println("Error saving to PV:", err)
+				fmt.Println("Error saving baseline to PV:", err)
 				return reconcile.Result{}, err
 			}
 			c.rebaseline = false
@@ -95,31 +91,24 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			inputDiffAdded, inputDiffRemoved, inputDiffChanged = currentInput.Diff(c.mostRecentBaseline)
 			err := c.logSchedulingDifferencesToPV(*inputDiffAdded, *inputDiffRemoved, *inputDiffChanged, currentInput.Timestamp)
 			if err != nil {
-				fmt.Println("Error saving to PV:", err)
+				fmt.Println("Error saving differences to PV:", err)
 				return reconcile.Result{}, err
 			}
 		}
 
-		// Updates the internal differences every loop, as opposed to every baseline.
-		// This requires reconstruction at an arbitrary time to take in the last baseline and the whole list of changes since then.
-		// A more memory intensive way would be to only internally keep the last baseline printed, than any diff+baseline would be reconstructable.
-		// c.mostRecentSchedulingInput = &currentInput
-
-		// // (also loopback test it)
-		// err := c.testReadPVandReconstruct(item)
-		// if err != nil {
-		// 	fmt.Println("Error reconstructing from PV:", err)
-		// 	return reconcile.Result{}, err
-		// }
-	}
-
-	// Pop each scheduling metadata off its heap (oldest first) and batch log to PV.
-	if c.schedulingMetadataHeap.Len() > 0 {
-		err := c.logSchedulingMetadataToPV(c.schedulingMetadataHeap)
+		// (also loopback test it)
+		err := testReadPVandReconstruct(currentInput.Timestamp)
 		if err != nil {
-			fmt.Println("Error writing scheduling metadata to PV:", err)
+			fmt.Println("Error reconstructing from PV:", err)
 			return reconcile.Result{}, err
 		}
+	}
+
+	// Batch log scheduling metadata to PV.
+	err := c.logSchedulingMetadataToPV(c.schedulingMetadataHeap)
+	if err != nil {
+		fmt.Println("Error writing scheduling metadata to PV:", err)
+		return reconcile.Result{}, err
 	}
 
 	fmt.Println("----------- Ending an ORB Reconcile Cycle -----------")
@@ -150,6 +139,9 @@ func (c *Controller) logSchedulingBaselineToPV(item SchedulingInput) error {
 	fileName := fmt.Sprintf("SchedulingInputBaseline_%s.log", timestampStr)
 	path := filepath.Join("/data", fileName) // mountPath := /data in our PVC yaml
 
+	// // Print string debugging
+	// c.writeStringtoPV(item.String(), path)
+
 	fmt.Println("Writing baseline data to S3 bucket.") // test print / remove later
 	return c.writeToPV(logdata, path)
 }
@@ -177,7 +169,7 @@ func (c *Controller) logSchedulingDifferencesToPV(DiffAdded SchedulingInput, Dif
 
 func (c *Controller) logSchedulingMetadataToPV(heap *SchedulingMetadataHeap) error {
 	if heap == nil || heap.Len() == 0 {
-		return fmt.Errorf("called with invalid heap or empty heap")
+		return nil // Default behavior, log nothing.
 	}
 
 	oldestStr := (*heap)[0].Timestamp.Format("2006-01-02_15-04-05")
@@ -186,10 +178,10 @@ func (c *Controller) logSchedulingMetadataToPV(heap *SchedulingMetadataHeap) err
 	path := filepath.Join("/data", fileName)
 
 	// Pop each scheduling metadata off its heap (oldest first) and batch log to PV.
-	mapping := &pb.SchedulingMetadataMapping{}
+	mapping := &pb.SchedulingMetadataMap{}
 	for heap.Len() > 0 {
 		metadata := heap.Pop().(SchedulingMetadata)
-		entry := &pb.SchedulingMetadataMapping_MappingEntry{
+		entry := &pb.SchedulingMetadataMap_MappingEntry{
 			Action:    metadata.Action,
 			Timestamp: metadata.Timestamp.Format("2006-01-02_15-04-05"),
 		}
@@ -224,6 +216,26 @@ func (c *Controller) writeToPV(logdata []byte, path string) error {
 	return nil
 }
 
+// // For debugging TODO Remove later
+// func (c *Controller) writeStringtoPV(logstring string, path string) error {
+// 	// add .txt to the path file
+// 	path = strings.Replace(path, ".log", ".txt", 1) // .log -> .txt
+
+// 	file, err := os.Create(path)
+// 	if err != nil {
+// 		fmt.Println("Error opening file:", err)
+// 		return err
+// 	}
+// 	defer file.Close()
+
+// 	_, err = io.WriteString(file, logstring)
+// 	if err != nil {
+// 		fmt.Println("Error writing data to file:", err)
+// 		return err
+// 	}
+// 	return nil
+// }
+
 // Functions for a moving average heuristic to decide to rebaseline the files
 func (c *Controller) updateRebaseline(diffSize int) bool {
 	diffSizeFloat := float32(diffSize)
@@ -254,26 +266,6 @@ func (c *Controller) updateThreshold(diffSize, baselineSize float32) {
 
 /* These will be part of the command-line printing representation... */
 
-// For testing, pull pending pod and print as string.
-func UnmarshalPod(data []byte) (*v1.Pod, error) {
-	pod := &v1.Pod{}
-	if err := proto.Unmarshal(data, pod); err != nil {
-		fmt.Println("Error unmarshaling pod:", err)
-		return nil, err
-	}
-	return pod, nil
-}
-
-// Function to unmarshal and print a pod
-func PrintPodPB(data []byte) {
-	pod, err := UnmarshalPod(data)
-	if err != nil {
-		fmt.Println("Error deserializing pod:", err)
-		return
-	}
-	fmt.Println("Pod is: ", PodToString(pod))
-}
-
 // Security Issue Common Weakness Enumeration (CWE)-22,23 Path Traversal
 // They highly recommend sanitizing inputs before accessing that path.
 func sanitizePath(path string) string {
@@ -288,80 +280,69 @@ func sanitizePath(path string) string {
 }
 
 // Function to pull from an S3 bucket
-func ReadFromPV(logname string) (time.Time, []byte, error) {
-	sanitizedname := sanitizePath(logname)
-	path := filepath.Join("/data", sanitizedname)
-
-	// Open the file for reading
+func ReadFromPV(logname string) ([]byte, error) {
+	path := filepath.Join("/data", sanitizePath(logname))
 	file, err := os.Open(path)
 	if err != nil {
 		fmt.Println("Error opening file:", err)
-		return time.Time{}, nil, err
+		return nil, err
 	}
 	defer file.Close()
 
-	// TODO: This will be as simple as an io.ReadAll for all the contents, once I customize an SI .proto
-
-	// Create a new buffered reader
-	reader := bufio.NewReader(file)
-
-	// Read the first line as a string
-	timestampStr, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Println("Error reading timestamp:", err)
-		return time.Time{}, nil, err
-	}
-	timestampStr = strings.TrimSuffix(timestampStr, "\n")
-
-	// Read the remaining bytes
-	// TODO: This will be bytes at a time until a newline, which will follow a schema
-	// defined for Scheduling Inputs in order to best keep track of protobufs and reconstruct
-	contents, err := io.ReadAll(reader)
+	contents, err := io.ReadAll(file)
 	if err != nil {
 		fmt.Println("Error reading file bytes:", err)
-		return time.Time{}, nil, err
+		return nil, err
 	}
-
-	timestamp, err := time.Parse("2006-01-02_15-04-05", timestampStr)
-	if err != nil {
-		fmt.Println("Error parsing timestamp:", err)
-		return time.Time{}, nil, err
-	}
-
-	return timestamp, contents, nil
+	return contents, nil
 }
 
-// // Function for reconstructing inputs
-// func ReconstructSchedulingInput(fileName string) error {
+// Function for reconstructing inputs
+// Read from the PV to check (will be what the ORB tool does from the Command Line)
+func ReconstructSchedulingInput(fileName string) (*SchedulingInput, error) {
+	readdata, err := ReadFromPV(fileName)
+	if err != nil {
+		fmt.Println("Error reading from PV:", err)
+		return nil, err
+	}
 
-// 	// Read from the PV to check (will be what the ORB tool does from the Command Line)
-// 	readTimestamp, readdata, err := ReadFromPV(fileName)
-// 	if err != nil {
-// 		fmt.Println("Error reading from PV:", err)
-// 		return err
-// 	}
+	si, err := UnmarshalSchedulingInput(readdata)
+	if err != nil {
+		fmt.Println("Error converting PB to SI:", err)
+		return nil, err
+	}
 
-// 	// Protobuff to si
-// 	si, err := PBToSchedulingInput(readTimestamp, readdata)
-// 	if err != nil {
-// 		fmt.Println("Error converting PB to SI:", err)
-// 		return err
-// 	}
-// 	// Print the reconstructed scheduling input
-// 	fmt.Println("Reconstructed Scheduling Input looks like:\n" + si.String())
-// 	return nil
-// }
+	return si, nil
+}
 
-// func testReadPVandReconstruct(item SchedulingInput) error {
-// 	// We're sort of artificially rebuilding the filename here, just to do a loopback test of sorts.
-// 	// In reality, we could just pull a file from a known directory
-// 	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05")
-// 	fileName := fmt.Sprintf("ProvisioningSchedulingInput_%s.log", timestampStr)
+func testReadPVandReconstruct(timestamp time.Time) error {
+	// We're sort of artificially rebuilding the filename here, just to do a loopback test of sorts.
+	// In reality, we could just pull a file from a known directory
+	timestampStr := timestamp.Format("2006-01-02_15-04-05")
+	fileName := fmt.Sprintf("SchedulingInputBaseline_%s.log", timestampStr)
 
-// 	err := ReconstructSchedulingInput(fileName)
-// 	if err != nil {
-// 		fmt.Println("Error reconstructing scheduling input:", err)
-// 		return err
-// 	}
-// 	return nil
-// }
+	si, err := ReconstructSchedulingInput(fileName)
+	if err != nil {
+		fmt.Println("Error reconstructing scheduling input:", err)
+		return err
+	}
+
+	fmt.Println("Reconstructed Scheduling Input looks like:\n" + si.String())
+	reconstructedFilename := fmt.Sprintf("ReconstructedSchedulingInput_%s.log", timestampStr)
+	path := filepath.Join("/data", reconstructedFilename)
+	file, err := os.Create(path)
+	if err != nil {
+		fmt.Println("Error creating file:", err)
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.WriteString(si.String())
+	if err != nil {
+		fmt.Println("Error writing reconstruction to file:", err)
+		return err
+	}
+
+	fmt.Println("Reconstruction written to file successfully!")
+	return nil
+}
