@@ -120,7 +120,14 @@ func RequirementsToString(requirements scheduling.Requirements) string {
 	capacityType := requirements.Get("karpenter.sh/capacity-type")
 	zoneID := requirements.Get("topology.k8s.aws/zone-id")
 	zone := requirements.Get("topology.kubernetes.io/zone")
-	return fmt.Sprintf("{%s, %s, %s}", capacityType, zoneID, zone)
+	return fmt.Sprintf("{%s, %s, %s}", RequirementToString(capacityType), RequirementToString(zoneID), RequirementToString(zone))
+}
+
+func RequirementToString(requirement *scheduling.Requirement) string {
+	if requirement == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("{Key: %s, Operator: %s, Values: %v}", requirement.Key, requirement.Operator(), requirement.Values())
 }
 
 // Similar for IT Offerings (Price, Availability)

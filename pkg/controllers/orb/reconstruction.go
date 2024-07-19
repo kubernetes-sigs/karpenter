@@ -24,7 +24,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	// proto "github.com/gogo/protobuf/proto"
 )
 
 // This function tests whether we can read from the PV and reconstruct the data

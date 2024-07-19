@@ -50,8 +50,8 @@ message ReducedInstanceType {
 
   message ReducedRequirement {
     string key = 1;
-    repeated string values = 2;
-    string nodeselectoroperator = 3;
+    string nodeselectoroperator = 2;
+    repeated string values = 3;
   }
   
   message ReducedOffering {
