@@ -151,7 +151,7 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -190,7 +190,7 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -228,7 +228,7 @@ var _ = Describe("Drift", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -366,7 +366,7 @@ var _ = Describe("Drift", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
@@ -427,7 +427,7 @@ var _ = Describe("Drift", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())

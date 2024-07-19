@@ -119,7 +119,7 @@ var _ = Describe("Expiration", func() {
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
-			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated_total", map[string]string{
 				"reason":        "expiration",
 				"nodepool":      nodePool.Name,
 				"capacity_type": nodeClaim.Labels[v1.CapacityTypeLabelKey],

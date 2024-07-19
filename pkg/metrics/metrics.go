@@ -24,6 +24,8 @@ import (
 const (
 	NodeSubsystem      = "nodes"
 	NodeClaimSubsystem = "nodeclaims"
+	NodePoolSubsystem  = "nodepool"
+	PodSubsystem       = "pods"
 )
 
 var (
@@ -44,7 +46,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
-			Name:      "terminated",
+			Name:      "terminated_total",
 			Help:      "Number of nodeclaims terminated in total by Karpenter. Labeled by reason the nodeclaim was terminated and the owning nodepool.",
 		},
 		[]string{
@@ -125,7 +127,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
-			Name:      "terminated",
+			Name:      "terminated_total",
 			Help:      "Number of nodes terminated in total by Karpenter. Labeled by owning nodepool.",
 		},
 		[]string{
