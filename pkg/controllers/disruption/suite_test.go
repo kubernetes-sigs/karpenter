@@ -151,8 +151,7 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 
 	// Reset the metrics collectors
-	disruption.ActionsPerformedCounter.Reset()
-	disruption.NodesDisruptedCounter.Reset()
+	disruption.DecisionsPerformedCounter.Reset()
 	disruption.PodsDisruptedCounter.Reset()
 })
 
@@ -1773,14 +1772,9 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 		ExpectSingletonReconciled(ctx, disruptionController)
 
-		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
+		ExpectMetricCounterValue(disruption.DecisionsPerformedCounter, 1, map[string]string{
 			"action": "delete",
 			"method": "drift",
-		})
-		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 1, map[string]string{
-			"nodepool": nodePool.Name,
-			"action":   "delete",
-			"method":   "drift",
 		})
 		ExpectMetricCounterValue(disruption.PodsDisruptedCounter, 0, map[string]string{
 			"nodepool": nodePool.Name,
@@ -1823,14 +1817,9 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 		ExpectSingletonReconciled(ctx, disruptionController)
 
-		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
+		ExpectMetricCounterValue(disruption.DecisionsPerformedCounter, 1, map[string]string{
 			"action": "delete",
 			"method": "drift",
-		})
-		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 1, map[string]string{
-			"nodepool": nodePool.Name,
-			"action":   "delete",
-			"method":   "drift",
 		})
 		ExpectMetricCounterValue(disruption.PodsDisruptedCounter, 2, map[string]string{
 			"nodepool": nodePool.Name,
@@ -1873,14 +1862,9 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 		ExpectSingletonReconciled(ctx, disruptionController)
 
-		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
+		ExpectMetricCounterValue(disruption.DecisionsPerformedCounter, 1, map[string]string{
 			"action": "replace",
 			"method": "drift",
-		})
-		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 1, map[string]string{
-			"nodepool": nodePool.Name,
-			"action":   "replace",
-			"method":   "drift",
 		})
 		ExpectMetricCounterValue(disruption.PodsDisruptedCounter, 4, map[string]string{
 			"nodepool": nodePool.Name,
@@ -1917,13 +1901,7 @@ var _ = Describe("Metrics", func() {
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
-		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
-			"action":             "delete",
-			"method":             "consolidation",
-			"consolidation_type": "empty",
-		})
-		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 3, map[string]string{
-			"nodepool":           nodePool.Name,
+		ExpectMetricCounterValue(disruption.DecisionsPerformedCounter, 1, map[string]string{
 			"action":             "delete",
 			"method":             "consolidation",
 			"consolidation_type": "empty",
@@ -1988,13 +1966,7 @@ var _ = Describe("Metrics", func() {
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
-		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
-			"action":             "delete",
-			"method":             "consolidation",
-			"consolidation_type": "multi",
-		})
-		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 2, map[string]string{
-			"nodepool":           nodePool.Name,
+		ExpectMetricCounterValue(disruption.DecisionsPerformedCounter, 1, map[string]string{
 			"action":             "delete",
 			"method":             "consolidation",
 			"consolidation_type": "multi",
@@ -2060,13 +2032,7 @@ var _ = Describe("Metrics", func() {
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
-		ExpectMetricCounterValue(disruption.ActionsPerformedCounter, 1, map[string]string{
-			"action":             "replace",
-			"method":             "consolidation",
-			"consolidation_type": "multi",
-		})
-		ExpectMetricCounterValue(disruption.NodesDisruptedCounter, 3, map[string]string{
-			"nodepool":           nodePool.Name,
+		ExpectMetricCounterValue(disruption.DecisionsPerformedCounter, 1, map[string]string{
 			"action":             "replace",
 			"method":             "consolidation",
 			"consolidation_type": "multi",

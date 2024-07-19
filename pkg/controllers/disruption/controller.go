@@ -229,18 +229,12 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	}
 
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
-	ActionsPerformedCounter.With(map[string]string{
+	DecisionsPerformedCounter.With(map[string]string{
 		actionLabel:            string(cmd.Action()),
 		methodLabel:            m.Type(),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
 	for _, cd := range cmd.candidates {
-		NodesDisruptedCounter.With(map[string]string{
-			metrics.NodePoolLabel:  cd.nodePool.Name,
-			actionLabel:            string(cmd.Action()),
-			methodLabel:            m.Type(),
-			consolidationTypeLabel: m.ConsolidationType(),
-		}).Inc()
 		PodsDisruptedCounter.With(map[string]string{
 			metrics.NodePoolLabel:  cd.nodePool.Name,
 			actionLabel:            string(cmd.Action()),
