@@ -64,7 +64,7 @@ func NewSchedulingInputHeap() *SchedulingInputHeap {
 
 // Function for logging everything in the Provisioner Scheduler (i.e. pending pods, statenodes...)
 // TODO: add all inputs I want to log in New constructor
-func (h *SchedulingInputHeap) LogProvisioningScheduler(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
+func (h *SchedulingInputHeap) LogSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
 	pods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes map[string][]*cloudprovider.InstanceType) {
 	si := NewSchedulingInput(ctx, kubeClient, scheduledTime, pods, stateNodes, instanceTypes["default"])
 	h.Push(si) // sends that scheduling input into the data structure to be popped in batch to go to PV as a protobuf

@@ -18,7 +18,6 @@ package orb
 
 import (
 	"context"
-	"fmt"
 	"time"
 	//"google.golang.org/protobuf/proto"
 )
@@ -36,7 +35,7 @@ const (
 
 // WithSchedulingMetadata returns a new context with the provided scheduling metadata.
 func WithSchedulingMetadata(ctx context.Context, action string, timestamp time.Time) context.Context {
-	switch action { // Preserves that these actions being only valid values
+	switch action {
 	case "normal-provisioning", "single-node-consolidation", "multi-node-consolidation":
 		metadata := SchedulingMetadata{
 			Action:    action,
@@ -44,7 +43,6 @@ func WithSchedulingMetadata(ctx context.Context, action string, timestamp time.T
 		}
 		return context.WithValue(ctx, schedulingMetadataKey, metadata)
 	default:
-		fmt.Println("Invalid scheduling action metadata:", action) //Testing, remove later
 		return ctx
 	}
 }

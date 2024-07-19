@@ -312,10 +312,10 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
 
-	// fmt.Println("SI Logging from the Provisioner")
+	// Log scheduling action and scheduling inputs for ORB batcher
 	schedulingTime := time.Now()
 	p.schedulingMetadataHeap.LogSchedulingAction(ctx, schedulingTime)
-	p.schedulingInputHeap.LogProvisioningScheduler(ctx, p.kubeClient, schedulingTime, pods, stateNodes, instanceTypes)
+	p.schedulingInputHeap.LogSchedulingInput(ctx, p.kubeClient, schedulingTime, pods, stateNodes, instanceTypes)
 
 	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }
