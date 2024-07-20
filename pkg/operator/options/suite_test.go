@@ -60,6 +60,7 @@ var _ = Describe("Options", func() {
 		"BATCH_MAX_DURATION",
 		"BATCH_IDLE_DURATION",
 		"FEATURE_GATES",
+		"REGISTRATION_DURATION",
 	}
 
 	BeforeEach(func() {
