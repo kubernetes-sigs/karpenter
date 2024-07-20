@@ -122,6 +122,9 @@ controller:
   healthProbe:
     # -- The container port to use for http health probe.
     port: 8081
+webhook:
+  # -- The container port to use for the webhook.
+  port: 8443
 # -- Global log level, defaults to 'info'
 logLevel: info
 # -- Global Settings to configure Karpenter

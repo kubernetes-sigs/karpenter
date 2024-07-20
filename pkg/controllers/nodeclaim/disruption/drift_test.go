@@ -17,6 +17,8 @@ limitations under the License.
 package disruption_test
 
 import (
+	"time"
+
 	"github.com/imdario/mergo"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -435,6 +437,8 @@ var _ = Describe("Drift", func() {
 									Effect: corev1.TaintEffectNoExecute,
 								},
 							},
+							ExpireAfter:            v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)},
+							TerminationGracePeriod: &metav1.Duration{Duration: 5 * time.Minute},
 						},
 					},
 				},
@@ -467,6 +471,8 @@ var _ = Describe("Drift", func() {
 			Entry("NodeClassRef APIVersion", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{NodeClassRef: &v1.NodeClassReference{Group: "testVersion"}}}}}),
 			Entry("NodeClassRef Name", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{NodeClassRef: &v1.NodeClassReference{Name: "testName"}}}}}),
 			Entry("NodeClassRef Kind", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{NodeClassRef: &v1.NodeClassReference{Kind: "testKind"}}}}}),
+			Entry("ExpireAfter", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(100 * time.Minute)}}}}}),
+			Entry("TerminationGracePeriod", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{TerminationGracePeriod: &metav1.Duration{Duration: 100 * time.Minute}}}}}),
 		)
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodePool", func() {
 			nodePool.ObjectMeta.Annotations = map[string]string{}

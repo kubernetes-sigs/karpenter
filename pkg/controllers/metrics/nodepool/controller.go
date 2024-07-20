@@ -41,16 +41,15 @@ import (
 const (
 	resourceTypeLabel = "resource_type"
 	nodePoolNameLabel = "nodepool"
-	nodePoolSubsystem = "nodepool"
 )
 
 var (
 	limitGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: nodePoolSubsystem,
+			Subsystem: metrics.NodePoolSubsystem,
 			Name:      "limit",
-			Help:      "The nodepool limits are the limits specified on the nodepool that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
+			Help:      "Limits specified on the nodepool that restrict the quantity of resources provisioned. Labeled by nodepool name and resource type.",
 		},
 		[]string{
 			resourceTypeLabel,
@@ -60,9 +59,9 @@ var (
 	usageGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: nodePoolSubsystem,
+			Subsystem: metrics.NodePoolSubsystem,
 			Name:      "usage",
-			Help:      "The nodepool usage is the amount of resources that have been provisioned by a particular nodepool. Labeled by nodepool name and resource type.",
+			Help:      "The amount of resources that have been provisioned for a nodepool. Labeled by nodepool name and resource type.",
 		},
 		[]string{
 			resourceTypeLabel,

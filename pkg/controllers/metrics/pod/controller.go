@@ -58,7 +58,7 @@ var (
 	podGaugeVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
-			Subsystem: "pods",
+			Subsystem: metrics.PodSubsystem,
 			Name:      "state",
 			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, nodepool name, zone, architecture, capacity type, instance type and pod phase.",
 		},
@@ -67,7 +67,7 @@ var (
 	podStartupTimeSummary = prometheus.NewSummary(
 		prometheus.SummaryOpts{
 			Namespace:  "karpenter",
-			Subsystem:  "pods",
+			Subsystem:  metrics.PodSubsystem,
 			Name:       "startup_time_seconds",
 			Help:       "The time from pod creation until the pod is running.",
 			Objectives: metrics.SummaryObjectives(),
