@@ -18,6 +18,7 @@ package lifecycle
 
 import (
 	"context"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
