@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	v1api "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -49,7 +49,7 @@ type SchedulingInput struct {
 // A stateNode with the Pods it has on it.
 type StateNodeWithPods struct {
 	Node      *v1.Node
-	NodeClaim *v1beta1.NodeClaim
+	NodeClaim *v1api.NodeClaim
 	Pods      []*v1.Pod
 }
 
@@ -158,7 +158,7 @@ func reduceStateNodes(nodes []*state.StateNode) []*state.StateNode {
 				}
 			}
 			if node.NodeClaim != nil {
-				reducedStateNode.NodeClaim = &v1beta1.NodeClaim{
+				reducedStateNode.NodeClaim = &v1api.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: node.NodeClaim.Name,
 					},
@@ -340,9 +340,9 @@ func protoStateNodesWithPods(stateNodesWithPods []*StateNodeWithPods) []*pb.Stat
 func reconstructStateNodesWithPods(snpData []*pb.StateNodeWithPods) []*StateNodeWithPods {
 	stateNodesWithPods := []*StateNodeWithPods{}
 	for _, snpData := range snpData {
-		var nodeClaim *v1beta1.NodeClaim
+		var nodeClaim *v1api.NodeClaim
 		if snpData.NodeClaim != nil {
-			nodeClaim = &v1beta1.NodeClaim{
+			nodeClaim = &v1api.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: snpData.NodeClaim.Name,
 				},
