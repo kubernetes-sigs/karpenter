@@ -88,15 +88,8 @@ func (si *SchedulingInput) Reduce() {
 	si.InstanceTypes = reduceInstanceTypes(si.InstanceTypes)
 }
 
-// TODO: I need to flip the construct here. I should be generating some stripped/minimal subset of these data structures
-// which are already the representation that I'd like to print. i.e. store in memory only what I want to print anyway
 func (si SchedulingInput) String() string {
-	return fmt.Sprintf("Timestamp (UTC): %v\n\nPendingPods:\n%v\n\nStateNodesWithPods:\n%v\n\nInstanceTypes:\n%v\n\n",
-		si.Timestamp.Format("2006-01-02_15-04-05"),
-		PodsToString(si.PendingPods),
-		StateNodesWithPodsToString(si.StateNodesWithPods),
-		InstanceTypesToString(si.InstanceTypes),
-	)
+	return protoSchedulingInput(&si).String()
 }
 
 func newStateNodesWithPods(ctx context.Context, kubeClient client.Client, stateNodes []*state.StateNode) []*StateNodeWithPods {
@@ -125,14 +118,30 @@ func reducePods(pods []*v1.Pod) []*v1.Pod {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      pod.Name,
 				Namespace: pod.Namespace,
+				UID:       pod.GetUID(),
 			},
 			Status: v1.PodStatus{
-				Phase: pod.Status.Phase,
+				Phase:      pod.Status.Phase,
+				Conditions: reducePodConditions(pod.Status.Conditions),
 			},
 		}
 		reducedPods = append(reducedPods, reducedPod)
 	}
 	return reducedPods
+}
+
+func reducePodConditions(conditions []v1.PodCondition) []v1.PodCondition {
+	reducedConditions := []v1.PodCondition{}
+	for _, condition := range conditions {
+		reducedCondition := v1.PodCondition{
+			Type:    condition.Type,
+			Status:  condition.Status,
+			Reason:  condition.Reason,
+			Message: condition.Message,
+		}
+		reducedConditions = append(reducedConditions, reducedCondition)
+	}
+	return reducedConditions
 }
 
 func reduceStateNodes(nodes []*state.StateNode) []*state.StateNode {
@@ -227,7 +236,7 @@ func protoSchedulingInput(si *SchedulingInput) *pb.SchedulingInput {
 	return &pb.SchedulingInput{
 		Timestamp:         si.Timestamp.Format("2006-01-02_15-04-05"),
 		PendingpodData:    protoPods(si.PendingPods),
-		Bindings:          protoBindings(si.Bindings),
+		BindingsData:      protoBindings(si.Bindings),
 		StatenodesData:    protoStateNodesWithPods(si.StateNodesWithPods),
 		InstancetypesData: protoInstanceTypes(si.InstanceTypes),
 	}
@@ -243,7 +252,7 @@ func reconstructSchedulingInput(pbsi *pb.SchedulingInput) (*SchedulingInput, err
 		timestamp,
 		reconstructPods(pbsi.GetPendingpodData()),
 		reconstructStateNodesWithPods(pbsi.GetStatenodesData()),
-		reconstructBindings(pbsi.GetBindings()),
+		reconstructBindings(pbsi.GetBindingsData()),
 		reconstructInstanceTypes(pbsi.GetInstancetypesData()),
 	), nil
 }
@@ -252,9 +261,11 @@ func protoPods(pods []*v1.Pod) []*pb.ReducedPod {
 	reducedPods := []*pb.ReducedPod{}
 	for _, pod := range pods {
 		reducedPod := &pb.ReducedPod{
-			Name:      pod.Name,
-			Namespace: pod.Namespace,
-			Phase:     string(pod.Status.Phase),
+			Name:       pod.Name,
+			Namespace:  pod.Namespace,
+			Uid:        string(pod.GetUID()),
+			Phase:      string(pod.Status.Phase),
+			Conditions: protoPodConditions(pod.Status.Conditions),
 		}
 		reducedPods = append(reducedPods, reducedPod)
 	}
@@ -264,45 +275,48 @@ func protoPods(pods []*v1.Pod) []*pb.ReducedPod {
 func reconstructPods(reducedPods []*pb.ReducedPod) []*v1.Pod {
 	pods := []*v1.Pod{}
 	for _, reducedPod := range reducedPods {
-		pods = append(pods, &v1.Pod{
+		pod := &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      reducedPod.Name,
 				Namespace: reducedPod.Namespace,
+				UID:       types.UID(reducedPod.Uid),
 			},
 			Status: v1.PodStatus{
-				Phase: v1.PodPhase(reducedPod.Phase),
+				Phase:      v1.PodPhase(reducedPod.Phase),
+				Conditions: reconstructPodConditions(reducedPod.Conditions),
 			},
-		})
+		}
+		pods = append(pods, pod)
 	}
 	return pods
 }
 
-func protoNode(node *v1.Node) *pb.StateNodeWithPods_ReducedNode {
-	if node == nil {
-		return nil
+func protoPodConditions(conditions []v1.PodCondition) []*pb.ReducedPod_PodCondition {
+	reducedPodConditions := []*pb.ReducedPod_PodCondition{}
+	for _, condition := range conditions {
+		reducedPodCondition := &pb.ReducedPod_PodCondition{
+			Type:    string(condition.Type),
+			Status:  string(condition.Status),
+			Reason:  condition.Reason,
+			Message: condition.Message,
+		}
+		reducedPodConditions = append(reducedPodConditions, reducedPodCondition)
 	}
-	nodeStatus, err := node.Status.Marshal()
-	if err != nil {
-		return nil
-	}
-
-	return &pb.StateNodeWithPods_ReducedNode{
-		Name:       node.Name,
-		Nodestatus: nodeStatus,
-	}
+	return reducedPodConditions
 }
 
-func reconstructNode(nodeData *pb.StateNodeWithPods_ReducedNode) *v1.Node {
-	if nodeData == nil {
-		return nil
+func reconstructPodConditions(reducedPodConditions []*pb.ReducedPod_PodCondition) []v1.PodCondition {
+	podConditions := []v1.PodCondition{}
+	for _, reducedPodCondition := range reducedPodConditions {
+		podCondition := v1.PodCondition{
+			Type:    v1.PodConditionType(reducedPodCondition.Type),
+			Status:  v1.ConditionStatus(reducedPodCondition.Status),
+			Reason:  reducedPodCondition.Reason,
+			Message: reducedPodCondition.Message,
+		}
+		podConditions = append(podConditions, podCondition)
 	}
-	node := &v1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: nodeData.Name,
-		},
-	}
-	node.Status.Unmarshal(nodeData.Nodestatus)
-	return node
+	return podConditions
 }
 
 func protoStateNodesWithPods(stateNodesWithPods []*StateNodeWithPods) []*pb.StateNodeWithPods {
@@ -341,6 +355,34 @@ func reconstructStateNodesWithPods(snpData []*pb.StateNodeWithPods) []*StateNode
 		})
 	}
 	return stateNodesWithPods
+}
+
+func protoNode(node *v1.Node) *pb.StateNodeWithPods_ReducedNode {
+	if node == nil {
+		return nil
+	}
+	nodeStatus, err := node.Status.Marshal()
+	if err != nil {
+		return nil
+	}
+
+	return &pb.StateNodeWithPods_ReducedNode{
+		Name:       node.Name,
+		Nodestatus: nodeStatus,
+	}
+}
+
+func reconstructNode(nodeData *pb.StateNodeWithPods_ReducedNode) *v1.Node {
+	if nodeData == nil {
+		return nil
+	}
+	node := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeData.Name,
+		},
+	}
+	node.Status.Unmarshal(nodeData.Nodestatus)
+	return node
 }
 
 func protoInstanceTypes(instanceTypes []*cloudprovider.InstanceType) []*pb.ReducedInstanceType {

@@ -19,6 +19,8 @@ package orb
 import (
 	"context"
 	"time"
+
+	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
 	//"google.golang.org/protobuf/proto"
 )
 
@@ -51,6 +53,21 @@ func WithSchedulingMetadata(ctx context.Context, action string, timestamp time.T
 func GetSchedulingMetadata(ctx context.Context) (SchedulingMetadata, bool) {
 	metadata, ok := ctx.Value(schedulingMetadataKey).(SchedulingMetadata)
 	return metadata, ok
+}
+
+func protoSchedulingMetadata(metadata SchedulingMetadata) *pb.SchedulingMetadataMap_MappingEntry {
+	return &pb.SchedulingMetadataMap_MappingEntry{
+		Action:    metadata.Action,
+		Timestamp: metadata.Timestamp.Format("2006-01-02_15-04-05"),
+	}
+}
+
+func reconstructSchedulingMetadata(mappingEntry *pb.SchedulingMetadataMap_MappingEntry) SchedulingMetadata {
+	timestamp, _ := time.Parse("2006-01-02_15-04-05", mappingEntry.Timestamp)
+	return SchedulingMetadata{
+		Action:    mappingEntry.Action,
+		Timestamp: timestamp,
+	}
 }
 
 // Function to unmarshal the metadata

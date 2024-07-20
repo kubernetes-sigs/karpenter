@@ -17,6 +17,7 @@ limitations under the License.
 package orb
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -108,5 +109,48 @@ func ReadPVandReconstruct(timestamp time.Time) error {
 	}
 
 	fmt.Println("Reconstruction written to file successfully!")
+	return nil
+}
+
+func DebugWriteSchedulingInputStringToLogFile(item *SchedulingInput, timestampStr string) error {
+	fileNameStringtest := fmt.Sprintf("SchedulingInputBaselineTEST_%s.log", timestampStr)
+	pathStringtest := filepath.Join("/data", fileNameStringtest)
+	file, err := os.Create(pathStringtest)
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.WriteString(item.String())
+	if err != nil {
+		fmt.Println("Error writing data to file:", err)
+		return err
+	}
+
+	return nil
+}
+
+func DebugWriteSchedulingInputToJSONFile(item *SchedulingInput, timestampStr string) error {
+	fileNameJSONtest := fmt.Sprintf("SchedulingInputBaselineTEST_%s.json", timestampStr)
+	pathJSONtest := filepath.Join("/data", fileNameJSONtest)
+	file, err := os.Create(pathJSONtest)
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return err
+	}
+	defer file.Close()
+
+	jsondata, err := json.Marshal(item)
+	if err != nil {
+		fmt.Println("Error marshalling data to JSON:", err)
+		return err
+	}
+	_, err = file.Write(jsondata)
+	if err != nil {
+		fmt.Println("Error writing data to file:", err)
+		return err
+	}
+
 	return nil
 }

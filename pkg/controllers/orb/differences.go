@@ -93,43 +93,53 @@ func (si *SchedulingInput) Diff(oldSi *SchedulingInput) *SchedulingInputDifferen
 	bindingsDiff := diffBindings(oldSi.Bindings, si.Bindings)
 	itDiff := diffInstanceTypes(oldSi.InstanceTypes, si.InstanceTypes)
 
-	// Create a new SchedulingInput with the differences
-	diff := &SchedulingInputDifferences{
-		Added:   NewSchedulingInputReconstruct(si.Timestamp, podDiff.Added, snpDiff.Added, bindingsDiff.Added, itDiff.Added),
-		Removed: NewSchedulingInputReconstruct(si.Timestamp, podDiff.Removed, snpDiff.Removed, bindingsDiff.Removed, itDiff.Removed),
-		Changed: NewSchedulingInputReconstruct(si.Timestamp, podDiff.Changed, snpDiff.Changed, bindingsDiff.Changed, itDiff.Changed),
+	diffAdded := &SchedulingInput{}
+	diffRemoved := &SchedulingInput{}
+	diffChanged := &SchedulingInput{}
+
+	// If there are added differences, include them
+	if len(podDiff.Added) > 0 || len(snpDiff.Added) > 0 || len(bindingsDiff.Added) > 0 || len(itDiff.Added) > 0 {
+		diffAdded = NewSchedulingInputReconstruct(si.Timestamp, podDiff.Added, snpDiff.Added, bindingsDiff.Added, itDiff.Added)
+		fmt.Println("Diff Scheduling Input added is... ", diffAdded.String()) // Test print, delete later
+	}
+	if len(podDiff.Removed) > 0 || len(snpDiff.Removed) > 0 || len(bindingsDiff.Removed) > 0 || len(itDiff.Removed) > 0 {
+		diffRemoved = NewSchedulingInputReconstruct(si.Timestamp, podDiff.Removed, snpDiff.Removed, bindingsDiff.Removed, itDiff.Removed)
+		fmt.Println("Diff Scheduling Input removed is... ", diffRemoved.String()) // Test print, delete later
+	}
+	if len(podDiff.Changed) > 0 || len(snpDiff.Changed) > 0 || len(bindingsDiff.Changed) > 0 || len(itDiff.Changed) > 0 {
+		diffChanged = NewSchedulingInputReconstruct(si.Timestamp, podDiff.Changed, snpDiff.Changed, bindingsDiff.Changed, itDiff.Changed)
+		fmt.Println("Diff Scheduling Input changed is... ", diffChanged.String()) // Test print, delete later
 	}
 
-	fmt.Println("Diff Scheduling Input added is... ", diff.Added.String())     // Test print, delete later
-	fmt.Println("Diff Scheduling Input removed is... ", diff.Removed.String()) // Test print, delete later
-	fmt.Println("Diff Scheduling Input changed is... ", diff.Changed.String()) // Test print, delete later
-
-	return diff
+	return &SchedulingInputDifferences{
+		Added:   diffAdded,
+		Removed: diffRemoved,
+		Changed: diffChanged,
+	}
 }
 
 // This is the diffPods function which gets the differences between pods
 func diffPods(oldPods, newPods []*v1.Pod) PodDifferences {
-	// Reference each pod by its name
-	oldPodSet := map[string]*v1.Pod{}
-	for _, pod := range oldPods {
-		oldPodSet[pod.GetName()] = pod
-	}
-
-	newPodSet := map[string]*v1.Pod{}
-	for _, pod := range newPods {
-		newPodSet[pod.GetName()] = pod
-	}
-
-	// Find the differences between the sets
 	diff := PodDifferences{
 		Added:   []*v1.Pod{},
 		Removed: []*v1.Pod{},
 		Changed: []*v1.Pod{},
 	}
 
+	// Reference each pod by its UID
+	oldPodSet := map[string]*v1.Pod{}
+	for _, pod := range oldPods {
+		oldPodSet[string(pod.GetUID())] = pod
+	}
+
+	newPodSet := map[string]*v1.Pod{}
+	for _, pod := range newPods {
+		newPodSet[string(pod.GetUID())] = pod
+	}
+
 	// Find the added and changed pods
 	for _, newPod := range newPods {
-		oldPod, exists := oldPodSet[newPod.GetName()]
+		oldPod, exists := oldPodSet[string(newPod.GetUID())]
 
 		if !exists {
 			diff.Added = append(diff.Added, newPod)
@@ -143,7 +153,7 @@ func diffPods(oldPods, newPods []*v1.Pod) PodDifferences {
 
 	// Find the removed pods
 	for _, oldPod := range oldPods {
-		if _, exists := newPodSet[oldPod.GetName()]; !exists {
+		if _, exists := newPodSet[string(oldPod.GetUID())]; !exists {
 			diff.Removed = append(diff.Removed, oldPod)
 		}
 	}
@@ -153,7 +163,13 @@ func diffPods(oldPods, newPods []*v1.Pod) PodDifferences {
 
 // This is the diffStateNodes function which gets the differences between statenodes
 func diffStateNodes(oldStateNodesWithPods, newStateNodesWithPods []*StateNodeWithPods) SNPDifferences {
-	// Reference StateNodesWithPods by their name
+	diff := SNPDifferences{
+		Added:   []*StateNodeWithPods{},
+		Removed: []*StateNodeWithPods{},
+		Changed: []*StateNodeWithPods{},
+	}
+
+	// Reference StateNodesWithPods by its name
 	oldStateNodeSet := map[string]*StateNodeWithPods{}
 	for _, stateNodeWithPods := range oldStateNodesWithPods {
 		oldStateNodeSet[stateNodeWithPods.GetName()] = stateNodeWithPods
@@ -164,13 +180,7 @@ func diffStateNodes(oldStateNodesWithPods, newStateNodesWithPods []*StateNodeWit
 		newStateNodeSet[stateNodeWithPods.GetName()] = stateNodeWithPods
 	}
 
-	// Find the differences between the sets
-	diff := SNPDifferences{
-		Added:   []*StateNodeWithPods{},
-		Removed: []*StateNodeWithPods{},
-		Changed: []*StateNodeWithPods{},
-	}
-
+	// Find the added and changed StateNodesWithPods
 	for _, newStateNodeWithPods := range newStateNodesWithPods {
 		oldStateNodeWithPods, exists := oldStateNodeSet[newStateNodeWithPods.GetName()]
 
@@ -181,7 +191,7 @@ func diffStateNodes(oldStateNodesWithPods, newStateNodesWithPods []*StateNodeWit
 		}
 	}
 
-	// Find the removed stateNodes
+	// Find the removed StateNodesWithPods
 	for _, oldStateNodeWithPods := range oldStateNodesWithPods {
 		if _, exists := newStateNodeSet[oldStateNodeWithPods.GetName()]; !exists {
 			diff.Removed = append(diff.Removed, oldStateNodeWithPods)
@@ -198,6 +208,7 @@ func diffBindings(old, new map[types.NamespacedName]string) BindingDifferences {
 		Changed: map[types.NamespacedName]string{},
 	}
 
+	// Find the changed or removed bindings
 	for k, v := range old {
 		if newVal, ok := new[k]; ok {
 			if v != newVal {
@@ -208,6 +219,7 @@ func diffBindings(old, new map[types.NamespacedName]string) BindingDifferences {
 		}
 	}
 
+	// Find the added bindings
 	for k, v := range new {
 		if _, ok := old[k]; !ok {
 			diff.Added[k] = v
@@ -219,6 +231,12 @@ func diffBindings(old, new map[types.NamespacedName]string) BindingDifferences {
 
 // This is the diffInstanceTypes function which gets the differences between instance types
 func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) InstanceTypeDifferences {
+	diff := InstanceTypeDifferences{
+		Added:   []*cloudprovider.InstanceType{},
+		Removed: []*cloudprovider.InstanceType{},
+		Changed: []*cloudprovider.InstanceType{},
+	}
+
 	// Reference InstanceTypes by their Name
 	oldTypeSet := map[string]*cloudprovider.InstanceType{}
 	for _, instanceType := range oldTypes {
@@ -228,13 +246,6 @@ func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) Instanc
 	newTypeSet := map[string]*cloudprovider.InstanceType{}
 	for _, instanceType := range newTypes {
 		newTypeSet[instanceType.Name] = instanceType
-	}
-
-	// Find the differences between the sets
-	diff := InstanceTypeDifferences{
-		Added:   []*cloudprovider.InstanceType{},
-		Removed: []*cloudprovider.InstanceType{},
-		Changed: []*cloudprovider.InstanceType{},
 	}
 
 	// Find the added and changed instance types
@@ -271,21 +282,13 @@ func hasStateNodeWithPodsChanged(oldStateNodeWithPods, newStateNodeWithPods *Sta
 // Checking equality on only fields I've reduced it to (i.e. Name Requirements Offerings)
 func hasInstanceTypeChanged(oldInstanceType, newInstanceType *cloudprovider.InstanceType) bool {
 	return !equality.Semantic.DeepEqual(oldInstanceType.Name, newInstanceType.Name) ||
-		!structEqual(oldInstanceType.Offerings, newInstanceType.Offerings) ||
-		!structEqual(oldInstanceType.Requirements, newInstanceType.Requirements)
+		!structEqualJSON(oldInstanceType.Offerings, newInstanceType.Offerings) || // Cannot deep equal these, they have unexported types
+		!structEqualJSON(oldInstanceType.Requirements, newInstanceType.Requirements)
 }
-
-// // Equality test for requirements based on the three keys I'm tracking for them, namely
-// // karpenter.sh/capacity-type, topology.k8s.aws/zone-id, topology.kubernetes.io/zone and their values
-// func requirementsEqual(oldrequirements scheduling.Requirements, newrequirements scheduling.Requirements) bool {
-// 	return oldrequirements.Get("karpenter.sh/capacity-type") != newrequirements.Get("karpenter.sh/capacity-type") ||
-// 		oldrequirements.Get("topology.k8s.aws/zone-id") != newrequirements.Get("topology.k8s.aws/zone-id") ||
-// 		oldrequirements.Get("topology.kubernetes.io/zone") != newrequirements.Get("topology.kubernetes.io/zone")
-// }
 
 // TODO: Likely inefficient equality checking for nested types Offerings and Requirements,
 // but both have unexported types not compatible with DeepEqual
-func structEqual(a, b interface{}) bool {
+func structEqualJSON(a, b interface{}) bool {
 	aBytes, _ := json.Marshal(a)
 	bBytes, _ := json.Marshal(b)
 	return bytes.Equal(aBytes, bBytes)

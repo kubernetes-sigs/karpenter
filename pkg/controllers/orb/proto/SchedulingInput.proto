@@ -18,14 +18,23 @@ message SchedulingInput {
   string timestamp = 1;
   repeated ReducedPod pendingpod_data = 2;
   repeated StateNodeWithPods statenodes_data = 3;
-  Bindings bindings = 4;
+  Bindings bindings_data = 4;
   repeated ReducedInstanceType instancetypes_data = 5;
 }
 
 message ReducedPod {
   string name = 1;
   string namespace = 2;
-  string phase = 3;
+  string uid = 3;
+  string phase = 4;
+  repeated PodCondition conditions = 5;
+
+  message PodCondition {
+    string type = 1;
+    string status = 2;
+    string reason = 3;
+    string message = 4;
+  }
 }
 
 // A stateNode with the Pods it has on it.

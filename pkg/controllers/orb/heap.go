@@ -25,18 +25,18 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
-// This defines a min-heap of SchedulingInputs by slice,
-// with the Timestamp field defined as the comparator
-type SchedulingInputHeap []SchedulingInput //heaps are thread-safe in container/heap
+// This defines a min-heap of SchedulingInputs by slice, with the Timestamp field defined as the comparator
+type SchedulingInputHeap []SchedulingInput // no mutexes needed, heaps are thread-safe in container/heap
 
 func (h SchedulingInputHeap) Len() int {
 	return len(h)
 }
 
-// This compares timestamps for a min heap, so that older inputs pop first.
+// This compares timestamps for a min heap, so that oldest inputs pop first.
 func (h SchedulingInputHeap) Less(i, j int) bool {
 	return h[i].Timestamp.Before(h[j].Timestamp)
 }
@@ -63,13 +63,12 @@ func NewSchedulingInputHeap() *SchedulingInputHeap {
 	return h
 }
 
-// Function for logging everything in the Provisioner Scheduler (i.e. pending pods, statenodes...)
-// TODO: add all inputs I want to log in New constructor
+// Function for logging scheduling inputs to the Provisioner Scheduler. Batches via a min-heap, ordered by least recent.
 func (h *SchedulingInputHeap) LogSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
 	pods []*v1.Pod, stateNodes []*state.StateNode, bindings map[types.NamespacedName]string, instanceTypes map[string][]*cloudprovider.InstanceType) {
 	si := NewSchedulingInput(ctx, kubeClient, scheduledTime, pods, stateNodes, bindings, instanceTypes["default"])
 	si.Reduce()
-	h.Push(si) // sends that scheduling input into the data structure to be popped in batch to go to PV as a protobuf
+	h.Push(si)
 }
 
 type SchedulingMetadataHeap []SchedulingMetadata
@@ -116,4 +115,14 @@ func (h *SchedulingMetadataHeap) LogSchedulingAction(ctx context.Context, schedu
 		metadata, _ = GetSchedulingMetadata(ctx) // Get it again to update metadata
 	}
 	h.Push(metadata)
+}
+
+func protoSchedulingMetadataMap(heap *SchedulingMetadataHeap) *pb.SchedulingMetadataMap {
+	mapping := &pb.SchedulingMetadataMap{}
+	for heap.Len() > 0 {
+		metadata := heap.Pop().(SchedulingMetadata)
+		entry := protoSchedulingMetadata(metadata)
+		mapping.Entries = append(mapping.Entries, entry)
+	}
+	return mapping
 }
