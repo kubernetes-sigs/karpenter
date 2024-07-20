@@ -18,13 +18,12 @@ package lifecycle
 
 import (
 	"context"
-	"time"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -35,10 +34,6 @@ type Liveness struct {
 	kubeClient client.Client
 }
 
-// registrationTTL is a heuristic time that we expect the node to register within
-// If we don't see the node within this time, then we should delete the NodeClaim and try again
-const registrationTTL = time.Minute * 15
-
 func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	registered := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
 	if registered.IsTrue() {
@@ -48,6 +43,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 		return reconcile.Result{Requeue: true}, nil
 	}
 	// If the Registered statusCondition hasn't gone True during the TTL since we first updated it, we should terminate the NodeClaim
+	registrationTTL := options.FromContext(ctx).RegistrationDuration
 	if l.clock.Since(registered.LastTransitionTime.Time) < registrationTTL {
 		return reconcile.Result{RequeueAfter: registrationTTL - l.clock.Since(registered.LastTransitionTime.Time)}, nil
 	}
