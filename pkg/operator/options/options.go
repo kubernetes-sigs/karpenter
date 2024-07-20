@@ -97,7 +97,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: SpotToSpotConsolidation")
-	fs.DurationVar(&o.RegistrationDuration, "registration-duration", env.WithDefaultDuration("REGISTRATION_DURATION", time.Minute*15), "The maximum time to wait for node registration. If this time is exceeded, NodeClaim will be deleted. Default 15 minute.")
+	fs.DurationVar(&o.RegistrationDuration, "registration-duration", env.WithDefaultDuration("REGISTRATION_DURATION", 15*time.Minute), "The maximum time to wait for node registration. If this time is exceeded, NodeClaim will be deleted. Default 15 minute.")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
