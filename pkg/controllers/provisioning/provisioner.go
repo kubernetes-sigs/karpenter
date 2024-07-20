@@ -315,7 +315,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	// Log scheduling action and scheduling inputs for ORB batcher
 	schedulingTime := time.Now()
 	p.schedulingMetadataHeap.LogSchedulingAction(ctx, schedulingTime)
-	p.schedulingInputHeap.LogSchedulingInput(ctx, p.kubeClient, schedulingTime, pods, stateNodes, instanceTypes)
+	p.schedulingInputHeap.LogSchedulingInput(ctx, p.kubeClient, schedulingTime, pods, stateNodes, p.cluster.GetBindings(), instanceTypes)
 
 	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }

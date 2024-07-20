@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -588,4 +589,11 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
+}
+
+// Returns a read-only copy of the bindings map, and can be used by other components to avoid locking when iterating over the map
+func (c *Cluster) GetBindings() map[types.NamespacedName]string {
+	bindings := map[types.NamespacedName]string{}
+	maps.Copy(bindings, c.bindings)
+	return bindings
 }

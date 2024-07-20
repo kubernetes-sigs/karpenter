@@ -18,7 +18,8 @@ message SchedulingInput {
   string timestamp = 1;
   repeated ReducedPod pendingpod_data = 2;
   repeated StateNodeWithPods statenodes_data = 3;
-  repeated ReducedInstanceType instancetypes_data = 4;
+  Bindings bindings = 4;
+  repeated ReducedInstanceType instancetypes_data = 5;
 }
 
 message ReducedPod {
@@ -68,4 +69,20 @@ message SchedulingMetadataMap {
     string action = 1;
     string timestamp = 2;
   }
+}
+
+// Bindings represents the mapping between a Pod and the node it's bound to.
+message Bindings {
+  repeated Binding binding = 1;
+
+  message Binding {
+    NamespacedName pod_namespaced_name = 1;
+    string node_name = 2;
+  
+      // NamespacedName represents a Kubernetes resource's namespaced name.
+    message NamespacedName {
+      string namespace = 1;
+      string name = 2;
+    }
+  }  
 }

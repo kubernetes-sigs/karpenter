@@ -21,64 +21,95 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
 
 	v1 "k8s.io/api/core/v1"
 )
 
+type SchedulingInputDifferences struct {
+	Added, Removed, Changed *SchedulingInput
+}
+
+type PodDifferences struct {
+	Added, Removed, Changed []*v1.Pod
+}
+
+type SNPDifferences struct {
+	Added, Removed, Changed []*StateNodeWithPods
+}
+
+type BindingDifferences struct {
+	Added, Removed, Changed map[types.NamespacedName]string
+}
+
+type InstanceTypeDifferences struct {
+	Added, Removed, Changed []*cloudprovider.InstanceType
+}
+
+func MarshalDifferences(differences *SchedulingInputDifferences) ([]byte, error) {
+	return proto.Marshal(&pb.Differences{
+		Added:   protoSchedulingInput(differences.Added),
+		Removed: protoSchedulingInput(differences.Removed),
+		Changed: protoSchedulingInput(differences.Changed),
+	})
+}
+
+func UnmarshalDifferences(differencesData []byte) (*SchedulingInputDifferences, error) {
+	differences := &pb.Differences{}
+
+	if err := proto.Unmarshal(differencesData, differences); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Differences: %v", err)
+	}
+
+	added, err := reconstructSchedulingInput(differences.GetAdded())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct Added: %v", err)
+	}
+	removed, err := reconstructSchedulingInput(differences.GetRemoved())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct Removed: %v", err)
+	}
+	changed, err := reconstructSchedulingInput(differences.GetChanged())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct Changed: %v", err)
+	}
+	return &SchedulingInputDifferences{
+		Added:   added,
+		Removed: removed,
+		Changed: changed,
+	}, nil
+}
+
 // Functions to check the differences in all the fields of a SchedulingInput (except the timestamp)
-// This function takes an old Scheduling Input and a new one and returns a SchedulingInput of only the differences.
-func (si *SchedulingInput) Diff(oldSi *SchedulingInput) (*SchedulingInput, *SchedulingInput, *SchedulingInput) {
-	pendingPodsAdded, pendingPodsRemoved, pendingPodsChanged := diffPods(oldSi.PendingPods, si.PendingPods)
-	stateNodesAdded, stateNodesRemoved, stateNodesChanged := diffStateNodes(oldSi.StateNodesWithPods, si.StateNodesWithPods)
-	instanceTypesAdded, instanceTypesRemoved, instanceTypesChanged := diffInstanceTypes(oldSi.InstanceTypes, si.InstanceTypes)
+// TODO: Emptiness checking could be improved, so a lone Timestamp doesn't get logged.
+func (si *SchedulingInput) Diff(oldSi *SchedulingInput) *SchedulingInputDifferences {
+	// Determine the differences in each of the fields of ScheduleInput
+	podDiff := diffPods(oldSi.PendingPods, si.PendingPods)
+	snpDiff := diffStateNodes(oldSi.StateNodesWithPods, si.StateNodesWithPods)
+	bindingsDiff := diffBindings(oldSi.Bindings, si.Bindings)
+	itDiff := diffInstanceTypes(oldSi.InstanceTypes, si.InstanceTypes)
 
-	diffAdded := &SchedulingInput{
-		Timestamp:          si.Timestamp, // i.e. the time of those (newer) differences
-		PendingPods:        pendingPodsAdded,
-		StateNodesWithPods: stateNodesAdded,
-		InstanceTypes:      instanceTypesAdded,
+	// Create a new SchedulingInput with the differences
+	diff := &SchedulingInputDifferences{
+		Added:   NewSchedulingInputReconstruct(si.Timestamp, podDiff.Added, snpDiff.Added, bindingsDiff.Added, itDiff.Added),
+		Removed: NewSchedulingInputReconstruct(si.Timestamp, podDiff.Removed, snpDiff.Removed, bindingsDiff.Removed, itDiff.Removed),
+		Changed: NewSchedulingInputReconstruct(si.Timestamp, podDiff.Changed, snpDiff.Changed, bindingsDiff.Changed, itDiff.Changed),
 	}
 
-	diffRemoved := &SchedulingInput{
-		Timestamp:          si.Timestamp,
-		PendingPods:        pendingPodsRemoved,
-		StateNodesWithPods: stateNodesRemoved,
-		InstanceTypes:      instanceTypesRemoved,
-	}
+	fmt.Println("Diff Scheduling Input added is... ", diff.Added.String())     // Test print, delete later
+	fmt.Println("Diff Scheduling Input removed is... ", diff.Removed.String()) // Test print, delete later
+	fmt.Println("Diff Scheduling Input changed is... ", diff.Changed.String()) // Test print, delete later
 
-	diffChanged := &SchedulingInput{
-		Timestamp:          si.Timestamp,
-		PendingPods:        pendingPodsChanged,
-		StateNodesWithPods: stateNodesChanged,
-		InstanceTypes:      instanceTypesChanged,
-	}
-
-	if len(pendingPodsAdded)+len(stateNodesAdded)+len(instanceTypesAdded) == 0 {
-		diffAdded = &SchedulingInput{}
-	} else {
-		fmt.Println("Diff Scheduling Input added is... ", diffAdded.String()) // Test print, delete later
-	}
-
-	if len(pendingPodsRemoved)+len(stateNodesRemoved)+len(instanceTypesRemoved) == 0 {
-		diffRemoved = &SchedulingInput{}
-	} else {
-		fmt.Println("Diff Scheduling Input removed is... ", diffRemoved.String()) // Test print, delete later
-	}
-
-	if len(pendingPodsChanged)+len(stateNodesChanged)+len(instanceTypesChanged) == 0 {
-		diffChanged = &SchedulingInput{}
-	} else {
-		fmt.Println("Diff Scheduling Input changed is... ", diffChanged.String()) // Test print, delete later
-	}
-
-	return diffAdded, diffRemoved, diffChanged
+	return diff
 }
 
 // This is the diffPods function which gets the differences between pods
-func diffPods(oldPods, newPods []*v1.Pod) ([]*v1.Pod, []*v1.Pod, []*v1.Pod) {
-	// Convert the slices to sets for efficient difference calculation
+func diffPods(oldPods, newPods []*v1.Pod) PodDifferences {
+	// Reference each pod by its name
 	oldPodSet := map[string]*v1.Pod{}
 	for _, pod := range oldPods {
 		oldPodSet[pod.GetName()] = pod
@@ -90,83 +121,105 @@ func diffPods(oldPods, newPods []*v1.Pod) ([]*v1.Pod, []*v1.Pod, []*v1.Pod) {
 	}
 
 	// Find the differences between the sets
-	added := []*v1.Pod{}
-	removed := []*v1.Pod{}
-	changed := []*v1.Pod{}
+	diff := PodDifferences{
+		Added:   []*v1.Pod{},
+		Removed: []*v1.Pod{},
+		Changed: []*v1.Pod{},
+	}
+
+	// Find the added and changed pods
 	for _, newPod := range newPods {
 		oldPod, exists := oldPodSet[newPod.GetName()]
 
-		// If pod is new, add to "added"
 		if !exists {
-			added = append(added, newPod)
-			continue
-		}
-
-		// If pod has changed, add the whole changed pod
-		// Simplification / Opportunity to optimize -- Only add sub-field.
-		//    This requires more book-keeping on object reconstruction from logs later on.
-		if hasPodChanged(oldPod, newPod) {
-			changed = append(changed, newPod)
+			diff.Added = append(diff.Added, newPod)
+		} else if hasPodChanged(oldPod, newPod) {
+			// If pod has changed, add the whole changed pod
+			// Simplification / Opportunity to optimize -- Only add sub-field.
+			//    This requires more book-keeping on object reconstruction from logs later on.
+			diff.Changed = append(diff.Changed, newPod)
 		}
 	}
 
-	// Get the remainder "removed" pods
+	// Find the removed pods
 	for _, oldPod := range oldPods {
 		if _, exists := newPodSet[oldPod.GetName()]; !exists {
-			removed = append(removed, oldPod)
+			diff.Removed = append(diff.Removed, oldPod)
 		}
 	}
 
-	return added, removed, changed
+	return diff
 }
 
 // This is the diffStateNodes function which gets the differences between statenodes
-func diffStateNodes(oldStateNodesWithPods, newStateNodesWithPods []*StateNodeWithPods) ([]*StateNodeWithPods, []*StateNodeWithPods, []*StateNodeWithPods) {
-	// Convert the slices to sets for efficient difference calculation
-	oldStateNodeSet := make(map[string]*StateNodeWithPods, len(oldStateNodesWithPods))
+func diffStateNodes(oldStateNodesWithPods, newStateNodesWithPods []*StateNodeWithPods) SNPDifferences {
+	// Reference StateNodesWithPods by their name
+	oldStateNodeSet := map[string]*StateNodeWithPods{}
 	for _, stateNodeWithPods := range oldStateNodesWithPods {
 		oldStateNodeSet[stateNodeWithPods.GetName()] = stateNodeWithPods
 	}
 
-	newStateNodeSet := make(map[string]*StateNodeWithPods, len(newStateNodesWithPods))
+	newStateNodeSet := map[string]*StateNodeWithPods{}
 	for _, stateNodeWithPods := range newStateNodesWithPods {
 		newStateNodeSet[stateNodeWithPods.GetName()] = stateNodeWithPods
 	}
 
 	// Find the differences between the sets
-	added := []*StateNodeWithPods{}
-	removed := []*StateNodeWithPods{}
-	changed := []*StateNodeWithPods{}
+	diff := SNPDifferences{
+		Added:   []*StateNodeWithPods{},
+		Removed: []*StateNodeWithPods{},
+		Changed: []*StateNodeWithPods{},
+	}
+
 	for _, newStateNodeWithPods := range newStateNodesWithPods {
 		oldStateNodeWithPods, exists := oldStateNodeSet[newStateNodeWithPods.GetName()]
 
-		// If stateNode is new, add to "added"
-		if !exists {
-			added = append(added, newStateNodeWithPods)
-			continue
-		}
-
-		// If stateNode has changed, add the whole changed stateNodeWithPods
-		if hasStateNodeWithPodsChanged(oldStateNodeWithPods, newStateNodeWithPods) {
-			changed = append(changed, newStateNodeWithPods)
+		if !exists { // Same opportunity for optimization as in pods
+			diff.Added = append(diff.Added, newStateNodeWithPods)
+		} else if hasStateNodeWithPodsChanged(oldStateNodeWithPods, newStateNodeWithPods) {
+			diff.Changed = append(diff.Changed, newStateNodeWithPods)
 		}
 	}
 
-	// Get the remainder "removed" stateNodesWithPods
+	// Find the removed stateNodes
 	for _, oldStateNodeWithPods := range oldStateNodesWithPods {
 		if _, exists := newStateNodeSet[oldStateNodeWithPods.GetName()]; !exists {
-			removed = append(removed, oldStateNodeWithPods)
+			diff.Removed = append(diff.Removed, oldStateNodeWithPods)
 		}
 	}
 
-	return added, removed, changed
+	return diff
+}
+
+func diffBindings(old, new map[types.NamespacedName]string) BindingDifferences {
+	diff := BindingDifferences{
+		Added:   map[types.NamespacedName]string{},
+		Removed: map[types.NamespacedName]string{},
+		Changed: map[types.NamespacedName]string{},
+	}
+
+	for k, v := range old {
+		if newVal, ok := new[k]; ok {
+			if v != newVal {
+				diff.Changed[k] = newVal
+			}
+		} else {
+			diff.Removed[k] = v
+		}
+	}
+
+	for k, v := range new {
+		if _, ok := old[k]; !ok {
+			diff.Added[k] = v
+		}
+	}
+
+	return diff
 }
 
 // This is the diffInstanceTypes function which gets the differences between instance types
-func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) ([]*cloudprovider.InstanceType,
-	[]*cloudprovider.InstanceType, []*cloudprovider.InstanceType) {
-
-	// Convert the slices to sets for efficient difference calculation
+func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) InstanceTypeDifferences {
+	// Reference InstanceTypes by their Name
 	oldTypeSet := map[string]*cloudprovider.InstanceType{}
 	for _, instanceType := range oldTypes {
 		oldTypeSet[instanceType.Name] = instanceType
@@ -178,32 +231,31 @@ func diffInstanceTypes(oldTypes, newTypes []*cloudprovider.InstanceType) ([]*clo
 	}
 
 	// Find the differences between the sets
-	added := []*cloudprovider.InstanceType{}
-	removed := []*cloudprovider.InstanceType{}
-	changed := []*cloudprovider.InstanceType{}
+	diff := InstanceTypeDifferences{
+		Added:   []*cloudprovider.InstanceType{},
+		Removed: []*cloudprovider.InstanceType{},
+		Changed: []*cloudprovider.InstanceType{},
+	}
+
+	// Find the added and changed instance types
 	for _, newType := range newTypes {
 		oldType, exists := oldTypeSet[newType.Name]
 
-		// If instanceType is new, add to "added"
 		if !exists {
-			added = append(added, newType)
-			continue
-		}
-
-		// If instanceType has changed, add the whole changed resource
-		if hasInstanceTypeChanged(oldType, newType) {
-			changed = append(changed, newType)
+			diff.Added = append(diff.Added, newType)
+		} else if hasInstanceTypeChanged(oldType, newType) {
+			diff.Changed = append(diff.Changed, newType)
 		}
 	}
 
-	// Get the remainder (removed) types
+	// Find the removed instance types
 	for _, oldType := range oldTypes {
 		if _, exists := newTypeSet[oldType.Name]; !exists {
-			removed = append(removed, oldType)
+			diff.Removed = append(diff.Removed, oldType)
 		}
 	}
 
-	return added, removed, changed
+	return diff
 }
 
 // TODO: change these to checking only reduced-fields, so that DeepEqual isn't required.

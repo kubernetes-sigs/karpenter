@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 /* The following functions are testing toString functions that will mirror what the serialization
@@ -146,5 +147,18 @@ func OfferingsToString(offerings cloudprovider.Offerings) string {
 	for _, offering := range offerings {
 		buf.WriteString(OfferingToString(&offering) + "\n")
 	}
+	return buf.String()
+}
+
+func BindingsToString(bindings map[types.NamespacedName]string) string {
+	var buf bytes.Buffer
+	for podNamespacedName, nodeName := range bindings {
+		buf.WriteString(fmt.Sprintf("{Namespace: %s, Name: %s}: %s,", podNamespacedName.Namespace, podNamespacedName.Name, nodeName))
+	}
+
+	if buf.Len() > 0 {
+		buf.Truncate(buf.Len() - 1) // Remove the trailing ","
+	}
+
 	return buf.String()
 }

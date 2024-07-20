@@ -25,6 +25,7 @@ import (
 	// proto "github.com/gogo/protobuf/proto"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -40,6 +41,7 @@ type SchedulingInput struct {
 	Timestamp          time.Time
 	PendingPods        []*v1.Pod
 	StateNodesWithPods []*StateNodeWithPods
+	Bindings           map[types.NamespacedName]string
 	InstanceTypes      []*cloudprovider.InstanceType
 	// TODO: all the other scheduling inputs... (bindings?)
 }
@@ -52,13 +54,25 @@ type StateNodeWithPods struct {
 }
 
 // Construct and reduce the Scheduling Input down to what's minimally required for re-simulation
-func NewSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
-	pendingPods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes []*cloudprovider.InstanceType) SchedulingInput {
+func NewSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time, pendingPods []*v1.Pod,
+	stateNodes []*state.StateNode, bindings map[types.NamespacedName]string, instanceTypes []*cloudprovider.InstanceType) SchedulingInput {
 	return SchedulingInput{
 		Timestamp:          scheduledTime,
-		PendingPods:        reducePods(pendingPods),
+		PendingPods:        pendingPods,
 		StateNodesWithPods: newStateNodesWithPods(ctx, kubeClient, stateNodes),
-		InstanceTypes:      reduceInstanceTypes(instanceTypes),
+		Bindings:           bindings,
+		InstanceTypes:      instanceTypes,
+	}
+}
+
+func NewSchedulingInputReconstruct(timestamp time.Time, pendingPods []*v1.Pod, stateNodesWithPods []*StateNodeWithPods,
+	bindings map[types.NamespacedName]string, instanceTypes []*cloudprovider.InstanceType) *SchedulingInput {
+	return &SchedulingInput{
+		Timestamp:          timestamp,
+		PendingPods:        pendingPods,
+		StateNodesWithPods: stateNodesWithPods,
+		Bindings:           bindings,
+		InstanceTypes:      instanceTypes,
 	}
 }
 
@@ -67,6 +81,11 @@ func (snp StateNodeWithPods) GetName() string {
 		return snp.NodeClaim.GetName()
 	}
 	return snp.Node.GetName()
+}
+
+func (si *SchedulingInput) Reduce() {
+	si.PendingPods = reducePods(si.PendingPods)
+	si.InstanceTypes = reduceInstanceTypes(si.InstanceTypes)
 }
 
 // TODO: I need to flip the construct here. I should be generating some stripped/minimal subset of these data structures
@@ -186,14 +205,6 @@ func reduceInstanceTypes(its []*cloudprovider.InstanceType) []*cloudprovider.Ins
 /* Functions to convert between SchedulingInputs and the proto-defined version
    Via pairs: Marshal <--> Unmarshal and proto <--> reconstruct */
 
-func MarshalDifferences(DiffAdded *SchedulingInput, DiffRemoved *SchedulingInput, DiffChanged *SchedulingInput) ([]byte, error) {
-	return proto.Marshal(&pb.Differences{
-		Added:   protoSchedulingInput(DiffAdded),
-		Removed: protoSchedulingInput(DiffRemoved),
-		Changed: protoSchedulingInput(DiffChanged),
-	})
-}
-
 func MarshalSchedulingInput(si *SchedulingInput) ([]byte, error) {
 	return proto.Marshal(protoSchedulingInput(si))
 }
@@ -216,6 +227,7 @@ func protoSchedulingInput(si *SchedulingInput) *pb.SchedulingInput {
 	return &pb.SchedulingInput{
 		Timestamp:         si.Timestamp.Format("2006-01-02_15-04-05"),
 		PendingpodData:    protoPods(si.PendingPods),
+		Bindings:          protoBindings(si.Bindings),
 		StatenodesData:    protoStateNodesWithPods(si.StateNodesWithPods),
 		InstancetypesData: protoInstanceTypes(si.InstanceTypes),
 	}
@@ -227,12 +239,13 @@ func reconstructSchedulingInput(pbsi *pb.SchedulingInput) (*SchedulingInput, err
 		return nil, fmt.Errorf("failed to parse timestamp: %v", err)
 	}
 
-	return &SchedulingInput{
-		Timestamp:          timestamp,
-		PendingPods:        reconstructPods(pbsi.GetPendingpodData()),
-		StateNodesWithPods: reconstructStateNodesWithPods(pbsi.GetStatenodesData()),
-		InstanceTypes:      reconstructInstanceTypes(pbsi.GetInstancetypesData()),
-	}, nil
+	return NewSchedulingInputReconstruct(
+		timestamp,
+		reconstructPods(pbsi.GetPendingpodData()),
+		reconstructStateNodesWithPods(pbsi.GetStatenodesData()),
+		reconstructBindings(pbsi.GetBindings()),
+		reconstructInstanceTypes(pbsi.GetInstancetypesData()),
+	), nil
 }
 
 func protoPods(pods []*v1.Pod) []*pb.ReducedPod {
@@ -400,4 +413,31 @@ func reconstructOfferings(offeringsData []*pb.ReducedInstanceType_ReducedOfferin
 		})
 	}
 	return offerings
+}
+
+func protoBindings(bindings map[types.NamespacedName]string) *pb.Bindings {
+	bindingsProto := &pb.Bindings{}
+	for podNamespacedName, nodeName := range bindings {
+		binding := &pb.Bindings_Binding{
+			PodNamespacedName: &pb.Bindings_Binding_NamespacedName{
+				Namespace: podNamespacedName.Namespace,
+				Name:      podNamespacedName.Name,
+			},
+			NodeName: nodeName,
+		}
+		bindingsProto.Binding = append(bindingsProto.Binding, binding)
+	}
+	return bindingsProto
+}
+
+func reconstructBindings(bindingsProto *pb.Bindings) map[types.NamespacedName]string {
+	bindings := map[types.NamespacedName]string{}
+	for _, binding := range bindingsProto.Binding {
+		podNamespacedName := types.NamespacedName{
+			Namespace: binding.PodNamespacedName.Namespace,
+			Name:      binding.PodNamespacedName.Name,
+		}
+		bindings[podNamespacedName] = binding.NodeName
+	}
+	return bindings
 }

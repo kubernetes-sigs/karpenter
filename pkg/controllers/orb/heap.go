@@ -22,6 +22,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -65,8 +66,9 @@ func NewSchedulingInputHeap() *SchedulingInputHeap {
 // Function for logging everything in the Provisioner Scheduler (i.e. pending pods, statenodes...)
 // TODO: add all inputs I want to log in New constructor
 func (h *SchedulingInputHeap) LogSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
-	pods []*v1.Pod, stateNodes []*state.StateNode, instanceTypes map[string][]*cloudprovider.InstanceType) {
-	si := NewSchedulingInput(ctx, kubeClient, scheduledTime, pods, stateNodes, instanceTypes["default"])
+	pods []*v1.Pod, stateNodes []*state.StateNode, bindings map[types.NamespacedName]string, instanceTypes map[string][]*cloudprovider.InstanceType) {
+	si := NewSchedulingInput(ctx, kubeClient, scheduledTime, pods, stateNodes, bindings, instanceTypes["default"])
+	si.Reduce()
 	h.Push(si) // sends that scheduling input into the data structure to be popped in batch to go to PV as a protobuf
 }
 

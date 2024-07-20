@@ -92,8 +92,9 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(c))
 }
 
+// Logs the scheduling inputs from the heap as either a baseline or differences
 func (c *Controller) logSchedulingInputsToPV() error {
-	for c.schedulingInputHeap.Len() > 0 { // Pop each scheduling input off my heap (oldest first) and batch log in PV
+	for c.schedulingInputHeap.Len() > 0 {
 		currentInput := c.schedulingInputHeap.Pop().(SchedulingInput)
 
 		// Set the baseline on initial input or upon rebaselining
@@ -106,8 +107,8 @@ func (c *Controller) logSchedulingInputsToPV() error {
 			c.shouldRebaseline = false
 			c.mostRecentBaseline = &currentInput
 		} else { // Check if the scheduling inputs have changed since the last time we saved it to PV
-			inputDiffAdded, inputDiffRemoved, inputDiffChanged := currentInput.Diff(c.mostRecentBaseline)
-			err := c.logSchedulingDifferencesToPV(inputDiffAdded, inputDiffRemoved, inputDiffChanged, currentInput.Timestamp)
+			inputDifferences := currentInput.Diff(c.mostRecentBaseline)
+			err := c.logSchedulingDifferencesToPV(inputDifferences, currentInput.Timestamp)
 			if err != nil {
 				fmt.Println("Error saving differences to PV:", err)
 				return err
@@ -125,7 +126,6 @@ func (c *Controller) logSchedulingBaselineToPV(item *SchedulingInput) error {
 	}
 	c.baselineSize = len(logdata)
 
-	// Set up file naming schema
 	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05")
 	fileName := fmt.Sprintf("SchedulingInputBaseline_%s.log", timestampStr)
 	path := filepath.Join("/data", fileName)
@@ -151,9 +151,8 @@ func (c *Controller) logSchedulingBaselineToPV(item *SchedulingInput) error {
 }
 
 // TODO: Eventually merge these individual difference prints to all the differences within a batch (similar to metadata)
-func (c *Controller) logSchedulingDifferencesToPV(DiffAdded *SchedulingInput, DiffRemoved *SchedulingInput,
-	DiffChanged *SchedulingInput, timestamp time.Time) error {
-	logdata, err := MarshalDifferences(DiffAdded, DiffRemoved, DiffChanged)
+func (c *Controller) logSchedulingDifferencesToPV(differences *SchedulingInputDifferences, timestamp time.Time) error {
+	logdata, err := MarshalDifferences(differences)
 	if err != nil {
 		fmt.Println("Error converting Scheduling Input to Protobuf:", err)
 		return err
