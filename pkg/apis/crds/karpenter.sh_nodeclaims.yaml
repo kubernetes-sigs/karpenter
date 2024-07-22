@@ -81,6 +81,14 @@ spec:
                     memory leak protection, and disruption testing.
                   pattern: ^(([0-9]+(s|m|h))+)|(Never)$
                   type: string
+                minimumPriceImprovementPercent:
+                  description: |-
+                    MinimumPriceImprovementPercent is the minimum price improvement necessary to disrupt this node, as an integer percentage.
+                    The default is 0%, which maintains the existing consolidation behavior prior to this feature.
+                  format: int32
+                  maximum: 100
+                  minimum: 0
+                  type: integer
                 nodeClassRef:
                   description: NodeClassRef is a reference to an object that defines provider specific configuration
                   properties:

@@ -90,6 +90,28 @@ func Unconsolidatable(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string)
 	}
 }
 
+// PriceThreshold is an event that notes the maximum price threshold that a NodeClaim/Node requires to allow consolidation
+func PriceThreshold(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) []events.Event {
+	return []events.Event{
+		{
+			InvolvedObject: node,
+			Type:           corev1.EventTypeNormal,
+			Reason:         "PriceThreshold",
+			Message:        reason,
+			DedupeValues:   []string{string(node.UID)},
+			DedupeTimeout:  time.Minute * 15,
+		},
+		{
+			InvolvedObject: nodeClaim,
+			Type:           corev1.EventTypeNormal,
+			Reason:         "PriceThreshold",
+			Message:        reason,
+			DedupeValues:   []string{string(nodeClaim.UID)},
+			DedupeTimeout:  time.Minute * 15,
+		},
+	}
+}
+
 // Blocked is an event that informs the user that a NodeClaim/Node combination is blocked on deprovisioning
 // due to the state of the NodeClaim/Node or due to some state of the pods that are scheduled to the NodeClaim/Node
 func Blocked(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) (evs []events.Event) {

@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -149,7 +150,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 
 	// get the current node price based on the offering
 	// fallback if we can't find the specific zonal pricing data
-	candidatePrice, err := getCandidatePrices(candidates)
+	candidatePrice, err := getCandidatePrices(ctx, candidates)
 	if err != nil {
 		return Command{}, pscheduling.Results{}, fmt.Errorf("getting offering price from candidate node, %w", err)
 	}
@@ -285,14 +286,32 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 }
 
 // getCandidatePrices returns the sum of the prices of the given candidates
-func getCandidatePrices(candidates []*Candidate) (float64, error) {
+func getCandidatePrices(ctx context.Context, candidates []*Candidate) (float64, error) {
 	var price float64
 	for _, c := range candidates {
 		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduling.NewLabelRequirements(c.StateNode.Labels()))
 		if len(compatibleOfferings) == 0 {
 			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
 		}
-		price += compatibleOfferings.Cheapest().Price
+
+		// limit maximum candidate replacement price for consideration
+		originalCheapestPrice := compatibleOfferings.Cheapest().Price
+		cheapestConsiderablePrice := originalCheapestPrice
+		if candidates[0].NodeClaim.Spec.MinimumPriceImprovementPercent != nil {
+			candidateMaxPriceFactor := 1 - (float64(*c.NodeClaim.Spec.MinimumPriceImprovementPercent) / 100)
+			cheapestConsiderablePrice *= candidateMaxPriceFactor
+
+			log.FromContext(ctx).WithValues(
+				"originalPrice", originalCheapestPrice,
+				"requiredPrice", cheapestConsiderablePrice,
+				"minimumPriceImprovementPercent", *c.NodeClaim.Spec.MinimumPriceImprovementPercent,
+			).Info("price threshold for consolidation")
+
+			// con.recorder.Publish(disruptionevents.PriceThreshold(c.Node, c.NodeClaim, fmt.Sprintf("PriceThreshold for Consolidation, original price: %v, required price: %v, price factor: %v%",
+			// 	originalCheapestPrice, cheapestConsiderablePrice, *c.NodeClaim.Spec.MinimumPriceImprovementPercent)))
+		}
+
+		price += cheapestConsiderablePrice
 	}
 	return price, nil
 }

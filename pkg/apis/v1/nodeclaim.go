@@ -73,6 +73,12 @@ type NodeClaimSpec struct {
 	// +kubebuilder:validation:Schemaless
 	// +optional
 	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
+	// MinimumPriceImprovementPercent is the minimum price improvement necessary to disrupt this node, as an integer percentage.
+	// The default is 0%, which maintains the existing consolidation behavior prior to this feature.
+	// +kubebuilder:validation:Minimum:=0
+	// +kubebuilder:validation:Maximum:=100
+	// +optional
+	MinimumPriceImprovementPercent *int32 `json:"minimumPriceImprovementPercent,omitempty"`
 }
 
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
