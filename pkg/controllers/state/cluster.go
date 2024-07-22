@@ -208,10 +208,11 @@ func (c *Cluster) IsNodeUnderutilized(providerID string, consolidateAfter time.D
 			lastPodEventTime = c.nodes[providerID].NodeClaim.CreationTimestamp.Time
 		}
 	}
-
-	// If cluster state has an entry, return if it's been long enough since the last pod event:
-	// 1 << 63 - 1 is the value that time.Duration uses as time.Max
-	timeSince := lo.Clamp(c.clock.Since(lastPodEventTime), 0, 1<<63-1)
+	timeSince := c.clock.Since(lastPodEventTime)
+	// If the lastPodEventTime is somehow in the future, treat the duration as 0
+	if timeSince < 0 {
+		timeSince = 0 * time.Second
+	}
 	return timeSince >= consolidateAfter, lo.Clamp(consolidateAfter-c.clock.Since(lastPodEventTime), 0, consolidateAfter)
 }
 
