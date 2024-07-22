@@ -24,7 +24,7 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(disruptionReplacementNodeClaimInitializedHistogram, disruptionReplacementNodeClaimFailedCounter, disruptionQueueDepthGauge)
+	crmetrics.Registry.MustRegister(disruptionReplacementNodeClaimInitializedHistogram, disruptionQueueFailedCounter, disruptionQueueDepthGauge)
 }
 
 const (
@@ -43,12 +43,12 @@ var (
 			Buckets:   metrics.DurationBuckets(),
 		},
 	)
-	disruptionReplacementNodeClaimFailedCounter = prometheus.NewCounterVec(
+	disruptionQueueFailedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
-			Name:      "replacement_nodeclaim_failures_total",
-			Help:      "The number of times that Karpenter failed to launch a replacement node for disruption. Labeled by disruption method.",
+			Name:      "queue_failures_total",
+			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
 		},
 		[]string{methodLabel, consolidationTypeLabel},
 	)
