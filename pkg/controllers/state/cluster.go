@@ -188,11 +188,12 @@ func (c *Cluster) IsNodeNominated(providerID string) bool {
 }
 
 // IsNodeUnderutilized returns true if the last pod event on the node was at least consolidateAfter
-// in the past.
-func (c *Cluster) IsNodeUnderutilized(providerID string, consolidateAfter time.Duration) (bool, time.Duration) {
+// in the past. Also returns a reason to inform the user on how this was calculated.
+func (c *Cluster) IsNodeUnderutilized(providerID string, consolidateAfter time.Duration) (bool, time.Duration, string) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	reason := ""
 	lastPodEventTime, ok := c.lastPodEvents[providerID]
 	if !ok {
 		// If the node doesn't have a pod event, we assume it's because either:
@@ -204,8 +205,10 @@ func (c *Cluster) IsNodeUnderutilized(providerID string, consolidateAfter time.D
 		// 2. When the Node was created
 		if c.clock.Since(c.initTime) < c.clock.Since(c.nodes[providerID].NodeClaim.CreationTimestamp.Time) {
 			lastPodEventTime = c.initTime
+			reason = "karpenter controller initialization time"
 		} else {
 			lastPodEventTime = c.nodes[providerID].NodeClaim.CreationTimestamp.Time
+			reason = "node creation time"
 		}
 	}
 	timeSince := c.clock.Since(lastPodEventTime)
@@ -213,7 +216,9 @@ func (c *Cluster) IsNodeUnderutilized(providerID string, consolidateAfter time.D
 	if timeSince < 0 {
 		timeSince = 0 * time.Second
 	}
-	return timeSince >= consolidateAfter, lo.Clamp(consolidateAfter-c.clock.Since(lastPodEventTime), 0, consolidateAfter)
+	return timeSince >= consolidateAfter,
+		lo.Clamp(consolidateAfter-c.clock.Since(lastPodEventTime), 0, consolidateAfter),
+		lo.Ternary(reason == "", "", "pod events")
 }
 
 // NominateNodeForPod records that a node was the target of a pending pod during a scheduling batch

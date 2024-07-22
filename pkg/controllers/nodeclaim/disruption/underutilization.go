@@ -74,10 +74,11 @@ func (e *Underutilization) Reconcile(ctx context.Context, nodePool *v1.NodePool,
 	}
 
 	// If node is not utilized, clear the condition, and requeue when we expect the node to be underutilized
-	if underutilized, timeLeft := e.cluster.IsNodeUnderutilized(n.Spec.ProviderID, lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration)); !underutilized {
+	if underutilized, timeLeft, reason := e.cluster.IsNodeUnderutilized(n.Spec.ProviderID, lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration)); !underutilized {
 		_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeUnderutilized)
+
 		if hasUnderutilizedCondition {
-			log.FromContext(ctx).V(1).Info("removing underutilization status condition, has recent pod churn")
+			log.FromContext(ctx).V(1).WithValues("calculatedFrom", reason).Info("removing underutilization status condition")
 		}
 		return reconcile.Result{RequeueAfter: timeLeft}, nil
 	}
