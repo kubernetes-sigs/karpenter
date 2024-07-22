@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
@@ -47,6 +48,9 @@ import (
 
 var ctx context.Context
 var nodeClaimDisruptionController *nodeclaimdisruption.Controller
+var nodeStateController *informer.NodeController
+var nodeClaimStateController *informer.NodeClaimController
+var podStateController *informer.PodController
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cluster *state.Cluster
@@ -69,6 +73,9 @@ var _ = BeforeSuite(func() {
 	cp = fake.NewCloudProvider()
 	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cluster, cp)
+	nodeStateController = informer.NewNodeController(env.Client, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
+	podStateController = informer.NewPodController(env.Client, cluster)
 })
 
 var _ = AfterSuite(func() {

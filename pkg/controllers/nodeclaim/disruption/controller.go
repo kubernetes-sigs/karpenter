@@ -50,17 +50,20 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 
-	drift     *Drift
-	emptiness *Emptiness
+	drift            *Drift
+	emptiness        *Emptiness
+	underutilization *Underutilization
 }
 
-// NewController constructs a nodeclaim disruption controller
+// NewController constructs a nodeclaim disruption controller. Note that every sub-controller has a dependency on its nodepool.
+// Disruption mechanisms that don't depend on the nodepool (like expiration), should live elsewhere.
 func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
-		kubeClient:    kubeClient,
-		cloudProvider: cloudProvider,
-		drift:         &Drift{cloudProvider: cloudProvider},
-		emptiness:     &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
+		kubeClient:       kubeClient,
+		cloudProvider:    cloudProvider,
+		drift:            &Drift{cloudProvider: cloudProvider},
+		emptiness:        &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
+		underutilization: &Underutilization{kubeClient: kubeClient, cluster: cluster},
 	}
 }
 
@@ -86,6 +89,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	reconcilers := []nodeClaimReconciler{
 		c.drift,
 		c.emptiness,
+		c.underutilization,
 	}
 	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, nodePool, nodeClaim)

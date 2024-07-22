@@ -27,6 +27,7 @@ const (
 	ConditionTypeInitialized          = "Initialized"
 	ConditionTypeEmpty                = "Empty"
 	ConditionTypeDrifted              = "Drifted"
+	ConditionTypeUnderutilized        = "Underutilized"
 	ConditionTypeTerminating          = "Terminating"
 	ConditionTypeConsistentStateFound = "ConsistentStateFound"
 )

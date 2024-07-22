@@ -37,6 +37,7 @@ const (
 	ExpirationReason    = "expiration"
 	EmptinessReason     = "emptiness"
 	DriftReason         = "drift"
+	UnderutilizedReason = "underutilized"
 )
 
 // DurationBuckets returns a []float64 of default threshold values for duration histograms.
