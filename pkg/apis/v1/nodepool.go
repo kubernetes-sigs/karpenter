@@ -21,6 +21,9 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"time"
+
+	_ "time/tzdata"
 
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/robfig/cron/v3"
@@ -119,6 +122,25 @@ type Budget struct {
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
+	// StartDateTime specifies the specific starting datetime the budget is active, following
+	// the RFC3339 standard of "2006-01-02T15:04:05" - "yyyy-MM-DDTHH:MM:SS".
+	// Timezone here is UTC if no TZ is specified within the spec.
+	// +kubebuilder:validation:Pattern=`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})$`
+	// +kubebuilder:validation:Type="string"
+	// +optional
+	StartDateTime *string `json:"startDateTime,omitempty" hash:"ignore"`
+	// EndDateTime specifies the specific ending datetime the budget is active, following
+	// the RFC3339 standard of "2006-01-02T15:04:05" - "yyyy-MM-DDTHH:MM:SS".
+	// Timezone here is UTC if no TZ is specified within the spec.
+	// +kubebuilder:validation:Pattern=`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})$`
+	// +kubebuilder:validation:Type="string"
+	// +optional
+	EndDateTime *string `json:"endDateTime,omitempty" hash:"ignore"`
+	// TZ specifies the timezone of the budget. Follows the standard IANA "America/New_York" format. If not specified
+	// defaults to "UTC".
+	// +kubebuilder:validation:Type="string"
+	// +optional
+	TZ *string `json:"tz,omitempty" hash:"ignore"`
 }
 
 type ConsolidationPolicy string
@@ -361,6 +383,35 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 	return res, nil
 }
 
+func (in *Budget) IsActiveDateTime(c clock.Clock, loc *time.Location) (bool, error) {
+	if in.StartDateTime != nil {
+		startTime, errST := time.ParseInLocation("2006-01-02T15:04:05", lo.FromPtr(in.StartDateTime), loc)
+		if errST != nil {
+			return false, fmt.Errorf("error parsing start datetime %v: %w", lo.FromPtr(in.StartDateTime), errST)
+		}
+		// Check to see if current datetime is before starting time
+		if !c.Now().In(loc).After(startTime) {
+			return false, nil
+		}
+		// If a defined startDateTime and duration exist, check that case
+		if in.Duration != nil && in.Schedule == nil {
+			if !c.Now().In(loc).Before(startTime.Add(-lo.FromPtr(in.Duration).Duration)) {
+				return false, nil
+			}
+		}
+	}
+	if in.EndDateTime != nil {
+		endTime, errET := time.ParseInLocation("2006-01-02T15:04:05", lo.FromPtr(in.EndDateTime), loc)
+		if errET != nil {
+			return false, fmt.Errorf("error parsing end datetime %v: %w", lo.FromPtr(in.EndDateTime), errET)
+		}
+		if !c.Now().In(loc).Before(endTime) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // IsActive takes a clock as input and returns if a budget is active.
 // It walks back in time the time.Duration associated with the schedule,
 // and checks if the next time the schedule will hit is before the current time.
@@ -368,19 +419,34 @@ func (in *Budget) GetAllowedDisruptions(c clock.Clock, numNodes int) (int, error
 // schedule is active, as any more schedule hits in between would only extend this
 // window. This ensures that any previous schedule hits for a schedule are considered.
 func (in *Budget) IsActive(c clock.Clock) (bool, error) {
-	if in.Schedule == nil && in.Duration == nil {
+	if in.Schedule == nil && in.Duration == nil && in.StartDateTime == nil && in.EndDateTime == nil {
 		return true, nil
 	}
-	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=UTC %s", lo.FromPtr(in.Schedule)))
+	tz := "UTC"
+	if in.TZ != nil {
+		tz = lo.FromPtr(in.TZ)
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return false, fmt.Errorf("error loading timezone %v: %w", tz, err)
+	}
+	isActiveDateTime, err := in.IsActiveDateTime(c, loc)
+	if err != nil {
+		return false, err
+	}
+	if !isActiveDateTime {
+		return false, nil
+	}
+	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=%s %s", tz, lo.FromPtr(in.Schedule)))
 	if err != nil {
 		// Should only occur if there's a discrepancy
 		// with the validation regex and the cron package.
 		return false, fmt.Errorf("invariant violated, invalid cron %s", schedule)
 	}
 	// Walk back in time for the duration associated with the schedule
-	checkPoint := c.Now().UTC().Add(-lo.FromPtr(in.Duration).Duration)
+	checkPoint := c.Now().In(loc).Add(-lo.FromPtr(in.Duration).Duration)
 	nextHit := schedule.Next(checkPoint)
-	return !nextHit.After(c.Now().UTC()), nil
+	return !nextHit.After(c.Now().In(loc)), nil
 }
 
 func GetIntStrFromValue(str string) intstr.IntOrString {

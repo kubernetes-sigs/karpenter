@@ -98,6 +98,13 @@ spec:
                               a 0s at the end.
                             pattern: ^((([0-9]+(h|m))|([0-9]+h[0-9]+m))(0s)?)$
                             type: string
+                          endDateTime:
+                            description: |-
+                              EndDateTime specifies the specific ending datetime the budget is active, following
+                              the RFC3339 standard of "2006-01-02T15:04:05" - "yyyy-MM-DDTHH:MM:SS".
+                              Timezone here is UTC if no TZ is specified within the spec.
+                            pattern: ^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})$
+                            type: string
                           nodes:
                             default: 10%
                             description: |-
@@ -132,6 +139,18 @@ spec:
                               Timezones are not supported.
                               This field is required if Duration is set.
                             pattern: ^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$
+                            type: string
+                          startDateTime:
+                            description: |-
+                              StartDateTime specifies the specific starting datetime the budget is active, following
+                              the RFC3339 standard of "2006-01-02T15:04:05" - "yyyy-MM-DDTHH:MM:SS".
+                              Timezone here is UTC if no TZ is specified within the spec.
+                            pattern: ^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})$
+                            type: string
+                          tz:
+                            description: |-
+                              TZ specifies the timezone of the budget. Follows the standard IANA "America/New_York" format. If not specified
+                              defaults to "UTC".
                             type: string
                         required:
                           - nodes
