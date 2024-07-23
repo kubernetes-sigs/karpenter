@@ -90,7 +90,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.IntVar(&o.KubeClientQPS, "kube-client-qps", env.WithDefaultInt("KUBE_CLIENT_QPS", 200), "The smoothed rate of qps to kube-apiserver")
 	fs.IntVar(&o.KubeClientBurst, "kube-client-burst", env.WithDefaultInt("KUBE_CLIENT_BURST", 300), "The maximum allowed burst of queries to the kube-apiserver")
 	fs.BoolVarWithEnv(&o.EnableProfiling, "enable-profiling", "ENABLE_PROFILING", false, "Enable the profiling on the metric endpoint")
-	fs.BoolVarWithEnv(&o.DisableLeaderElection, "disable-leader-elect", "DISABLE_LEADER_ELECT", false, "Start leader election client and gain leadership before executing the main loop. Enable this when running replicated components for high availability.")
+	fs.BoolVarWithEnv(&o.DisableLeaderElection, "disable-leader-elect", "DISABLE_LEADER_ELECT", false, "Disable the leader election client before executing the main loop. Disable when running replicated components for high availability is not desired.")
 	fs.Int64Var(&o.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
 	fs.StringVar(&o.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", "info"), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
