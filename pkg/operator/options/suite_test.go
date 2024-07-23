@@ -97,7 +97,7 @@ var _ = Describe("Options", func() {
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
 				ServiceName:          lo.ToPtr(""),
-				DisableWebhook:       lo.ToPtr(true),
+				DisableWebhook:       lo.ToPtr(false),
 				WebhookPort:          lo.ToPtr(8443),
 				MetricsPort:          lo.ToPtr(8000),
 				WebhookMetricsPort:   lo.ToPtr(8001),
@@ -120,6 +120,7 @@ var _ = Describe("Options", func() {
 			err := opts.Parse(
 				fs,
 				"--karpenter-service", "cli",
+				"--disable-webhook",
 				"--webhook-port", "0",
 				"--metrics-port", "0",
 				"--webhook-metrics-port", "0",
@@ -220,6 +221,7 @@ var _ = Describe("Options", func() {
 			err := opts.Parse(
 				fs,
 				"--karpenter-service", "cli",
+				"--disable-webhook",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -243,6 +245,19 @@ var _ = Describe("Options", func() {
 			}))
 		})
 	})
+
+	DescribeTable(
+		"should correctly parse boolean values",
+		func(arg string, expected bool) {
+			err := opts.Parse(fs, arg)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(opts.DisableWebhook).To(Equal(expected))
+		},
+		Entry("explicit true", "--disable-webhook=true", true),
+		Entry("explicit false", "--disable-webhook=false", false),
+		Entry("implicit true", "--disable-webhook", true),
+		Entry("implicit false", "", false),
+	)
 
 	Context("Validation", func() {
 		DescribeTable(
@@ -271,6 +286,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA).ToNot(BeNil())
 	Expect(optsB).ToNot(BeNil())
 	Expect(optsA.ServiceName).To(Equal(optsB.ServiceName))
+	Expect(optsA.DisableWebhook).To(Equal(optsB.DisableWebhook))
 	Expect(optsA.WebhookPort).To(Equal(optsB.WebhookPort))
 	Expect(optsA.MetricsPort).To(Equal(optsB.MetricsPort))
 	Expect(optsA.WebhookMetricsPort).To(Equal(optsB.WebhookMetricsPort))

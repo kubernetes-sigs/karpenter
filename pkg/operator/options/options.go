@@ -47,6 +47,7 @@ type FeatureGates struct {
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
 type Options struct {
 	ServiceName          string
+	DisableWebhook       bool
 	WebhookPort          int
 	MetricsPort          int
 	WebhookMetricsPort   int
@@ -81,6 +82,7 @@ func (fs *FlagSet) BoolVarWithEnv(p *bool, name string, envVar string, val bool,
 
 func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.ServiceName, "karpenter-service", env.WithDefaultString("KARPENTER_SERVICE", ""), "The Karpenter Service name for the dynamic webhook certificate")
+	fs.BoolVarWithEnv(&o.DisableWebhook, "disable-webhook", "DISABLE_WEBHOOK", false, "Disable the conversion webhooks")
 	fs.IntVar(&o.WebhookPort, "webhook-port", env.WithDefaultInt("WEBHOOK_PORT", 8443), "The port the webhook endpoint binds to for validation and mutation of resources")
 	fs.IntVar(&o.MetricsPort, "metrics-port", env.WithDefaultInt("METRICS_PORT", 8000), "The port the metric endpoint binds to for operating metrics about the controller itself")
 	fs.IntVar(&o.WebhookMetricsPort, "webhook-metrics-port", env.WithDefaultInt("WEBHOOK_METRICS_PORT", 8001), "The port the webhook metric endpoing binds to for operating metrics about the webhook")
