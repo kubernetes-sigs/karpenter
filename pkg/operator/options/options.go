@@ -46,21 +46,21 @@ type FeatureGates struct {
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
 type Options struct {
-	ServiceName          string
-	DisableWebhook       bool
-	WebhookPort          int
-	MetricsPort          int
-	WebhookMetricsPort   int
-	HealthProbePort      int
-	KubeClientQPS        int
-	KubeClientBurst      int
-	EnableProfiling      bool
+	ServiceName           string
+	DisableWebhook        bool
+	WebhookPort           int
+	MetricsPort           int
+	WebhookMetricsPort    int
+	HealthProbePort       int
+	KubeClientQPS         int
+	KubeClientBurst       int
+	EnableProfiling       bool
 	DisableLeaderElection bool
-	MemoryLimit          int64
-	LogLevel             string
-	BatchMaxDuration     time.Duration
-	BatchIdleDuration    time.Duration
-	FeatureGates         FeatureGates
+	MemoryLimit           int64
+	LogLevel              string
+	BatchMaxDuration      time.Duration
+	BatchIdleDuration     time.Duration
+	FeatureGates          FeatureGates
 }
 
 type FlagSet struct {
