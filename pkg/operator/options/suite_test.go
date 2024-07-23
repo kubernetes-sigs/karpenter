@@ -54,7 +54,7 @@ var _ = Describe("Options", func() {
 		"KUBE_CLIENT_QPS",
 		"KUBE_CLIENT_BURST",
 		"ENABLE_PROFILING",
-		"DISABLE_LEADER_ELECT",
+		"DISABLE_LEADER_ELECTION",
 		"MEMORY_LIMIT",
 		"LOG_LEVEL",
 		"BATCH_MAX_DURATION",
@@ -128,7 +128,7 @@ var _ = Describe("Options", func() {
 				"--kube-client-qps", "0",
 				"--kube-client-burst", "0",
 				"--enable-profiling",
-				"--disable-leader-elect=true",
+				"--disable-leader-election=true",
 				"--memory-limit", "0",
 				"--log-level", "debug",
 				"--batch-max-duration", "5s",
@@ -167,7 +167,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("KUBE_CLIENT_QPS", "0")
 			os.Setenv("KUBE_CLIENT_BURST", "0")
 			os.Setenv("ENABLE_PROFILING", "true")
-			os.Setenv("DISABLE_LEADER_ELECT", "true")
+			os.Setenv("DISABLE_LEADER_ELECTION", "true")
 			os.Setenv("MEMORY_LIMIT", "0")
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
@@ -208,7 +208,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("KUBE_CLIENT_QPS", "0")
 			os.Setenv("KUBE_CLIENT_BURST", "0")
 			os.Setenv("ENABLE_PROFILING", "true")
-			os.Setenv("DISABLE_LEADER_ELECT", "true")
+			os.Setenv("DISABLE_LEADER_ELECTION", "true")
 			os.Setenv("MEMORY_LIMIT", "0")
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
