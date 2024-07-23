@@ -21,18 +21,18 @@ import (
 
 	"github.com/samber/lo"
 
-	"sigs.k8s.io/karpenter/pkg/utils/pod"
-
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
 // FilterVolumeAttachments filters out volumeAttachments that should not block the termination of the passed node
-func FilterVolumeAttachments(ctx context.Context, kubeClient client.Client, node *v1.Node, volumeAttachments []*storagev1.VolumeAttachment) ([]*storagev1.VolumeAttachment, error) {
+func FilterVolumeAttachments(ctx context.Context, kubeClient client.Client, node *v1.Node, volumeAttachments []*storagev1.VolumeAttachment, clk clock.Clock) ([]*storagev1.VolumeAttachment, error) {
 	var filteredVolumeAttachments []*storagev1.VolumeAttachment
 	// No need to filter empty volumeAttachments list
 	if len(volumeAttachments) == 0 {
@@ -43,8 +43,8 @@ func FilterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 	if err != nil {
 		return nil, err
 	}
-	drainablePods := lo.Reject(pods, func(p *v1.Pod, _ int) bool {
-		return pod.ToleratesDisruptionNoScheduleTaint(p)
+	drainablePods := lo.Filter(pods, func(p *v1.Pod, _ int) bool {
+		return pod.IsDrainable(p, clk)
 	})
 	// Filter out Multi-Attach volumes
 	shouldNotFilterOutVolume := make(map[string]bool)

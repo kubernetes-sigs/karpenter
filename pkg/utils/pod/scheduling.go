@@ -137,6 +137,17 @@ func IsStuckTerminating(pod *corev1.Pod, clk clock.Clock) bool {
 	return IsTerminating(pod) && clk.Since(pod.DeletionTimestamp.Time) > time.Minute
 }
 
+// IsDrainable checks if a pod can be drained by Karpenter
+// It checks whether the following is true for the pod:
+// - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
+// - Is not stuck terminating
+// - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
+func IsDrainable(pod *corev1.Pod, clk clock.Clock) bool {
+	return !ToleratesDisruptionNoScheduleTaint(pod) &&
+		!IsStuckTerminating(pod, clk) &&
+		!IsOwnedByNode(pod)
+}
+
 func IsOwnedByStatefulSet(pod *corev1.Pod) bool {
 	return IsOwnedBy(pod, []schema.GroupVersionKind{
 		{Group: "apps", Version: "v1", Kind: "StatefulSet"},

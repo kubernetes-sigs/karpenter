@@ -30,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -52,6 +53,7 @@ import (
 
 // Controller for the resource
 type Controller struct {
+	clock         clock.Clock
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	terminator    *terminator.Terminator
@@ -59,8 +61,9 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) *Controller {
 	return &Controller{
+		clock:         clk,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		terminator:    terminator,
@@ -177,7 +180,7 @@ func (c *Controller) ensureVolumesDetached(ctx context.Context, node *corev1.Nod
 		return false, err
 	}
 	// Filter out volume attachments associated with non-drain-able nodes or multi-attachable volumes
-	filteredVolumeAttachments, err := volumeattachmentutils.FilterVolumeAttachments(ctx, c.kubeClient, node, volumeAttachments)
+	filteredVolumeAttachments, err := volumeattachmentutils.FilterVolumeAttachments(ctx, c.kubeClient, node, volumeAttachments, c.clock)
 	if err != nil {
 		return false, err
 	}
