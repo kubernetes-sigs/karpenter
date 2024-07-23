@@ -267,6 +267,7 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 				return object.GVK(nc)
 			})
 			ctx = injection.WithNodeClasses(ctx, gvk)
+			ctx = injection.WithClient(ctx, o.GetClient())
 			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()
 	}
