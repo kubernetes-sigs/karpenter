@@ -108,16 +108,6 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
-		// It("should fail when not setting consolidateAfter with WhenEmpty", func() {
-		// 	nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
-		// 	nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{}
-		// 	Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		// })
-		// It("should fail when not setting consolidateAfter with WhenUnderutilized", func() {
-		// 	nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
-		// 	nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{}
-		// 	Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		// })
 		It("should fail when creating a budget with an invalid cron", func() {
 			nodePool.Spec.Disruption.Budgets = []Budget{{
 				Nodes:    "10",

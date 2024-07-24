@@ -149,11 +149,9 @@ func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.Node
 }
 
 func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
-	if v1beta1np.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized {
-		in.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Duration(0))}
-	} else {
-		in.ConsolidateAfter = (NillableDuration)(lo.FromPtr(v1beta1np.ConsolidateAfter))
-	}
+	// if consolidationPolicy is WhenUnderutilized, set the v1 duration to 0, otherwise, set to the value of consolidateAfte.
+	in.ConsolidateAfter = lo.Ternary(v1beta1np.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized,
+		NillableDuration{Duration: lo.ToPtr(time.Duration(0))}, (NillableDuration)(lo.FromPtr(v1beta1np.ConsolidateAfter)))
 	in.ConsolidationPolicy = ConsolidationPolicy(v1beta1np.ConsolidationPolicy)
 	in.Budgets = lo.Map(v1beta1np.Budgets, func(v1beta1budget v1beta1.Budget, _ int) Budget {
 		return Budget{
