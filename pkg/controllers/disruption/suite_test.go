@@ -512,7 +512,7 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: nil}
-		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptionNoScheduleTaint)
+		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -520,7 +520,7 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		ExpectSingletonReconciled(ctx, disruptionController)
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
-		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptionNoScheduleTaint))
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 	})
 	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenUnderutilized
@@ -556,7 +556,7 @@ var _ = Describe("Disruption Taints", func() {
 			}
 		}
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
-		Expect(node.Spec.Taints).To(ContainElement(v1.DisruptionNoScheduleTaint))
+		Expect(node.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 
 		createdNodeClaim := lo.Reject(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
 			return nc.Name == nodeClaim.Name
@@ -572,7 +572,7 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectSingletonReconciled(ctx, queue)
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
-		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptionNoScheduleTaint))
+		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 	})
 })
 
@@ -2093,7 +2093,7 @@ func ExpectToWait(wg *sync.WaitGroup) {
 func ExpectTaintedNodeCount(ctx context.Context, c client.Client, numTainted int) []*corev1.Node {
 	GinkgoHelper()
 	tainted := lo.Filter(ExpectNodes(ctx, c), func(n *corev1.Node, _ int) bool {
-		return lo.Contains(n.Spec.Taints, v1.DisruptionNoScheduleTaint)
+		return lo.Contains(n.Spec.Taints, v1.DisruptedNoScheduleTaint)
 	})
 	Expect(len(tainted)).To(Equal(numTainted))
 	return tainted
