@@ -206,7 +206,7 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 			})
 		})
 		Context("Disruption", func() {
-			FIt("should convert v1 nodepool consolidateAfter to nil with WhenUnderutilized", func() {
+			It("should convert v1 nodepool consolidateAfter to nil with WhenUnderutilized", func() {
 				v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
 				v1nodepool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
 				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
