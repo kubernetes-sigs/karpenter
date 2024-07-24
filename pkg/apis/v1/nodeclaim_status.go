@@ -53,7 +53,7 @@ type NodeClaimStatus struct {
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
 	// LastPodEvent is updated with the last time a pod was scheduled
-	// or removed from the node. A node going terminal or terminating
+	// or removed from the node. A pod going terminal or terminating
 	// is also considered as removed.
 	// +optional
 	LastPodEvent metav1.Time `json:"lastPodEvent,omitempty"`

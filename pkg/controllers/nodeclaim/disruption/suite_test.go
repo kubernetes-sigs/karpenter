@@ -94,9 +94,9 @@ var _ = Describe("Disruption", func() {
 				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
 			},
 		})
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 		// set the lastPodEvent to 5 minutes in the past
 		nodeClaim.Status.LastPodEvent.Time = fakeClock.Now().Add(-5 * time.Minute)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 	})
 	It("should set multiple disruption conditions simultaneously", func() {
 		cp.Drifted = "drifted"

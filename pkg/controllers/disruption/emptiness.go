@@ -50,11 +50,8 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.nodePool.Name))...)
 		return false
 	}
-	if len(c.reschedulablePods) != 0 {
-		return false
-	}
-	// return true if consolidatable, since we've checked if the pods are 0
-	return c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
+	// return true if there are no pods and the nodeclaim is consolidatable
+	return len(c.reschedulablePods) == 0 && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
 // ComputeCommand generates a disruption command given candidates

@@ -103,7 +103,7 @@ var _ = Describe("Emptiness", func() {
 			"method":             "consolidation",
 			"consolidation_type": "empty",
 		}
-		FIt("should correctly report eligible nodes", func() {
+		It("should correctly report eligible nodes", func() {
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
@@ -112,7 +112,12 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
+			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
+			var wg sync.WaitGroup
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
 			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, eligibleNodesEmptinessLabels)
 			// delete pod and update cluster state, node should now be disruptable
 			ExpectDeleted(ctx, env.Client, pod)
@@ -155,7 +160,13 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
+			var wg sync.WaitGroup
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
 			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
