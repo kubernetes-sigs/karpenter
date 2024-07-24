@@ -2,7 +2,6 @@ name: kind-e2e
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 jobs:
   kind-e2e:
