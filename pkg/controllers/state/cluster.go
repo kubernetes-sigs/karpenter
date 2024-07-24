@@ -53,9 +53,7 @@ type Cluster struct {
 	nodeNameToProviderID      map[string]string               // node name -> provider id
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
-	lastPodEvents             map[string]time.Time            // provider id -> last time when pod was added/removed
 
-	initTime       time.Time    // time that the cluster state was initialized, used for underutilization calculations after a restart
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
 	// cluster with respect to consolidation. This increases when something has
@@ -75,8 +73,6 @@ func NewCluster(clk clock.Clock, client client.Client) *Cluster {
 		daemonSetPods:             sync.Map{},
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
-		lastPodEvents:             map[string]time.Time{},
-		initTime:                  clk.Now(),
 	}
 }
 
@@ -185,40 +181,6 @@ func (c *Cluster) IsNodeNominated(providerID string) bool {
 		return n.Nominated()
 	}
 	return false
-}
-
-// IsNodeUnderutilized returns true if the last pod event on the node was at least consolidateAfter
-// in the past. Also returns a reason to inform the user on how this was calculated.
-func (c *Cluster) IsNodeUnderutilized(providerID string, consolidateAfter time.Duration) (bool, time.Duration, string) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	reason := ""
-	lastPodEventTime, ok := c.lastPodEvents[providerID]
-	if !ok {
-		// If the node doesn't have a pod event, we assume it's because either:
-		// 1. Karpenter has restarted
-		// 2. No pods have ever scheduled to the node
-		//
-		// So treat the last pod time as the more recent of
-		// 1. When Karpenter restarted
-		// 2. When the Node was created
-		if c.clock.Since(c.initTime) < c.clock.Since(c.nodes[providerID].NodeClaim.CreationTimestamp.Time) {
-			lastPodEventTime = c.initTime
-			reason = "karpenter controller initialization time"
-		} else {
-			lastPodEventTime = c.nodes[providerID].NodeClaim.CreationTimestamp.Time
-			reason = "node creation time"
-		}
-	}
-	timeSince := c.clock.Since(lastPodEventTime)
-	// If the lastPodEventTime is somehow in the future, treat the duration as 0
-	if timeSince < 0 {
-		timeSince = 0 * time.Second
-	}
-	return timeSince >= consolidateAfter,
-		lo.Clamp(consolidateAfter-c.clock.Since(lastPodEventTime), 0, consolidateAfter),
-		lo.Ternary(reason == "", "", "pod events")
 }
 
 // NominateNodeForPod records that a node was the target of a pending pod during a scheduling batch
@@ -383,15 +345,6 @@ func (c *Cluster) Reset() {
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
 	c.daemonSetPods = sync.Map{}
-	c.lastPodEvents = map[string]time.Time{}
-	c.initTime = c.clock.Now()
-}
-
-// Reset the cluster state for unit testing
-func (c *Cluster) SetInitTime(t time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.initTime = t
 }
 
 func (c *Cluster) GetDaemonSetPod(daemonset *appsv1.DaemonSet) *corev1.Pod {
@@ -544,10 +497,7 @@ func (c *Cluster) populateResourceRequests(ctx context.Context, n *StateNode) er
 		if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
 			return err
 		}
-		// if the pod binding is new, cleanup old bindings
-		if oldNodeName, bindingKnown := c.bindings[client.ObjectKeyFromObject(pod)]; !bindingKnown || oldNodeName != pod.Spec.NodeName {
-			c.cleanupOldBindings(pod, oldNodeName)
-		}
+		c.cleanupOldBindings(pod)
 		c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	}
 	return nil
@@ -569,12 +519,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *corev1.Pod) e
 	if err := n.updateForPod(ctx, c.kubeClient, pod); err != nil {
 		return err
 	}
-	// if the pod wasn't binded previously or if the binding was for a different node, the pod is new to the node
-	// this is pod churn on the node, so mark it as the last pod event on the node, and cleanup the old bindings
-	if oldNodeName, bindingKnown := c.bindings[client.ObjectKeyFromObject(pod)]; !bindingKnown || oldNodeName != pod.Spec.NodeName {
-		c.lastPodEvents[providerID] = c.clock.Now()
-		c.cleanupOldBindings(pod, oldNodeName)
-	}
+	c.cleanupOldBindings(pod)
 	c.bindings[client.ObjectKeyFromObject(pod)] = pod.Spec.NodeName
 	return nil
 }
@@ -587,24 +532,27 @@ func (c *Cluster) updateNodeUsageFromPodCompletion(podKey types.NamespacedName) 
 	}
 
 	delete(c.bindings, podKey)
-	providerID := c.nodeNameToProviderID[nodeName]
-	n, ok := c.nodes[providerID]
+	n, ok := c.nodes[c.nodeNameToProviderID[nodeName]]
 	if !ok {
 		// we weren't tracking the node yet, so nothing to do
 		return
 	}
-	// restart underutilization timer for node
-	c.lastPodEvents[providerID] = c.clock.Now()
 	n.cleanupForPod(podKey)
 }
 
-func (c *Cluster) cleanupOldBindings(pod *corev1.Pod, oldNodeName string) {
-	// the pod has switched nodes, this can occur if a pod name was re-used, and it was deleted/re-created rapidly,
-	// binding to a different node the second time
-	if oldNode, ok := c.nodes[c.nodeNameToProviderID[oldNodeName]]; ok {
-		// we were tracking the old node, so we need to reduce its capacity by the amount of the pod that left
-		oldNode.cleanupForPod(client.ObjectKeyFromObject(pod))
-		delete(c.bindings, client.ObjectKeyFromObject(pod))
+func (c *Cluster) cleanupOldBindings(pod *corev1.Pod) {
+	if oldNodeName, bindingKnown := c.bindings[client.ObjectKeyFromObject(pod)]; bindingKnown {
+		if oldNodeName == pod.Spec.NodeName {
+			// we are already tracking the pod binding, so nothing to update
+			return
+		}
+		// the pod has switched nodes, this can occur if a pod name was re-used, and it was deleted/re-created rapidly,
+		// binding to a different node the second time
+		if oldNode, ok := c.nodes[c.nodeNameToProviderID[oldNodeName]]; ok {
+			// we were tracking the old node, so we need to reduce its capacity by the amount of the pod that left
+			oldNode.cleanupForPod(client.ObjectKeyFromObject(pod))
+			delete(c.bindings, client.ObjectKeyFromObject(pod))
+		}
 	}
 	// new pod binding has occurred
 	c.MarkUnconsolidated()

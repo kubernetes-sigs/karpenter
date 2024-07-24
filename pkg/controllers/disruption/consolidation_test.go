@@ -93,6 +93,8 @@ var _ = Describe("Consolidation", func() {
 				Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 			},
 		})
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+		spotNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(true)}}))
 	})
 	Context("Events", func() {
@@ -104,7 +106,6 @@ var _ = Describe("Consolidation", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
 			ExpectSingletonReconciled(ctx, disruptionController)
 			Expect(recorder.Calls("Unconsolidatable")).To(Equal(0))
 		})
@@ -187,6 +188,9 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
 			// create our RS so we can link a pod to it
 			rs = test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
@@ -824,6 +828,7 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
+			nodeClaim2.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		})
 		It("can delete empty nodes", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
@@ -2493,6 +2498,9 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
 		})
 		It("can delete nodes", func() {
 			// create our RS so we can link a pod to it
@@ -3324,6 +3332,9 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
 		})
 		It("should wait for the node TTL for empty nodes before consolidating", func() {
 			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
@@ -3808,6 +3819,12 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
+			for _, nc := range spotNodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
 		})
 		DescribeTable("can merge 3 nodes into 1", func(spotToSpot bool) {
 			nodeClaims = lo.Ternary(spotToSpot, spotNodeClaims, nodeClaims)
@@ -4274,6 +4291,9 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
 		})
 		It("should consider node lifetime remaining when calculating disruption cost", func() {
 			// create our RS so we can link a pod to it
@@ -4372,6 +4392,9 @@ var _ = Describe("Consolidation", func() {
 				v1.CapacityTypeLabelKey:        testZone3Instance.Offerings[0].Requirements.Get(v1.CapacityTypeLabelKey).Any(),
 			})
 			oldNodeClaimNames = sets.New(nodeClaims[0].Name, nodeClaims[1].Name, nodeClaims[2].Name)
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
 		})
 		It("can replace node maintaining zonal topology spread", func() {
 			labels = map[string]string{
