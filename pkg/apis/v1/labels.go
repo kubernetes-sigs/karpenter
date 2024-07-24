@@ -45,11 +45,11 @@ const (
 // Karpenter specific annotations
 const (
 	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
-	ProviderCompatabilityAnnotationKey         = apis.CompatabilityGroup + "/provider"
+	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
 	ManagedByAnnotationKey                     = apis.Group + "/managed-by"
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
-	KubeletCompatabilityAnnotationKey          = apis.CompatabilityGroup + "/v1beta1-kubelet-conversion"
+	KubeletCompatibilityAnnotationKey          = apis.CompatibilityGroup + "/v1beta1-kubelet-conversion"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
 )
 

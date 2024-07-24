@@ -26,12 +26,11 @@ import (
 func init() {
 	crmetrics.Registry.MustRegister(
 		EvaluationDurationHistogram,
-		ActionsPerformedCounter,
-		NodesDisruptedCounter,
+		DecisionsPerformedCounter,
 		PodsDisruptedCounter,
 		EligibleNodesGauge,
 		ConsolidationTimeoutTotalCounter,
-		BudgetsAllowedDisruptionsGauge,
+		NodePoolAllowedDisruptionsGauge,
 	)
 }
 
@@ -53,23 +52,14 @@ var (
 		},
 		[]string{methodLabel, consolidationTypeLabel},
 	)
-	ActionsPerformedCounter = prometheus.NewCounterVec(
+	DecisionsPerformedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: disruptionSubsystem,
-			Name:      "actions_performed_total",
-			Help:      "Number of disruption actions performed. Labeled by disruption action, method, and consolidation type.",
+			Name:      "decisions_total",
+			Help:      "Number of disruption decisions performed. Labeled by disruption action, method, and consolidation type.",
 		},
 		[]string{actionLabel, methodLabel, consolidationTypeLabel},
-	)
-	NodesDisruptedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: disruptionSubsystem,
-			Name:      "nodes_disrupted_total",
-			Help:      "Total number of nodes disrupted. Labeled by NodePool, disruption action, method, and consolidation type.",
-		},
-		[]string{metrics.NodePoolLabel, actionLabel, methodLabel, consolidationTypeLabel},
 	)
 	PodsDisruptedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -98,12 +88,12 @@ var (
 		},
 		[]string{consolidationTypeLabel},
 	)
-	BudgetsAllowedDisruptionsGauge = prometheus.NewGaugeVec(
+	NodePoolAllowedDisruptionsGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: disruptionSubsystem,
-			Name:      "budgets_allowed_disruptions",
-			Help:      "The number of nodes for a given NodePool that can be disrupted at a point in time. Labeled by NodePool. Note that allowed disruptions can change very rapidly, as new nodes may be created and others may be deleted at any point.",
+			Subsystem: metrics.NodePoolSubsystem,
+			Name:      "allowed_disruptions",
+			Help:      "The number of nodes for a given NodePool that can be concurrently disrupting at a point in time. Labeled by NodePool. Note that allowed disruptions can change very rapidly, as new nodes may be created and others may be deleted at any point.",
 		},
 		[]string{metrics.NodePoolLabel, metrics.ReasonLabel},
 	)

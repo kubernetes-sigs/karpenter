@@ -241,9 +241,9 @@ var _ = Describe("CEL/Validation", func() {
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		},
-			Entry("should allow disruption reason drifted", DisruptionReasonDrifted),
-			Entry("should allow disruption reason underutilized", DisruptionReasonUnderutilized),
-			Entry("should allow disruption reason empty", DisruptionReasonEmpty),
+			Entry("should allow disruption reason Drifted", DisruptionReasonDrifted),
+			Entry("should allow disruption reason Underutilized", DisruptionReasonUnderutilized),
+			Entry("should allow disruption reason Empty", DisruptionReasonEmpty),
 		)
 
 		DescribeTable("should fail when creating a budget with invalid reasons", func(reason string) {
@@ -875,6 +875,16 @@ var _ = Describe("CEL/Validation", func() {
 	Context("Resources", func() {
 		It("should not allow resources to be set", func() {
 			nodePool.Spec.Template.Spec.Resources = ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")}}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+	})
+	Context("TerminationGracePeriod", func() {
+		It("should succeed on a positive terminationGracePeriod duration", func() {
+			nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+		})
+		It("should fail on a negative terminationGracePeriod duration", func() {
+			nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * -30}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 	})

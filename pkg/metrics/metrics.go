@@ -24,6 +24,8 @@ import (
 const (
 	NodeSubsystem      = "nodes"
 	NodeClaimSubsystem = "nodeclaims"
+	NodePoolSubsystem  = "nodepool"
+	PodSubsystem       = "pods"
 )
 
 var (
@@ -31,7 +33,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
-			Name:      "created",
+			Name:      "created_total",
 			Help:      "Number of nodeclaims created in total by Karpenter. Labeled by reason the nodeclaim was created and the owning nodepool.",
 		},
 		[]string{
@@ -44,7 +46,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
-			Name:      "terminated",
+			Name:      "terminated_total",
 			Help:      "Number of nodeclaims terminated in total by Karpenter. Labeled by reason the nodeclaim was terminated and the owning nodepool.",
 		},
 		[]string{
@@ -57,7 +59,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
-			Name:      "launched",
+			Name:      "launched_total",
 			Help:      "Number of nodeclaims launched in total by Karpenter. Labeled by the owning nodepool.",
 		},
 		[]string{
@@ -68,7 +70,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
-			Name:      "registered",
+			Name:      "registered_total",
 			Help:      "Number of nodeclaims registered in total by Karpenter. Labeled by the owning nodepool.",
 		},
 		[]string{
@@ -79,7 +81,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
-			Name:      "initialized",
+			Name:      "initialized_total",
 			Help:      "Number of nodeclaims initialized in total by Karpenter. Labeled by the owning nodepool.",
 		},
 		[]string{
@@ -90,7 +92,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
-			Name:      "disrupted",
+			Name:      "disrupted_total",
 			Help:      "Number of nodeclaims disrupted in total by Karpenter. Labeled by disruption type of the nodeclaim and the owning nodepool.",
 		},
 		[]string{
@@ -102,7 +104,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
-			Name:      "drifted",
+			Name:      "drifted_total",
 			Help:      "Number of nodeclaims drifted reasons in total by Karpenter. Labeled by drift type of the nodeclaim and the owning nodepool.",
 		},
 		[]string{
@@ -114,7 +116,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
-			Name:      "created",
+			Name:      "created_total",
 			Help:      "Number of nodes created in total by Karpenter. Labeled by owning nodepool.",
 		},
 		[]string{
@@ -125,7 +127,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
-			Name:      "terminated",
+			Name:      "terminated_total",
 			Help:      "Number of nodes terminated in total by Karpenter. Labeled by owning nodepool.",
 		},
 		[]string{

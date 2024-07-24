@@ -40,20 +40,22 @@ func (in *NodePool) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	// Convert v1 status
 	v1beta1NP.Status.Resources = in.Status.Resources
 	v1beta1NP.Status.Conditions = in.Status.Conditions
-	return in.Spec.convertTo(ctx, &v1beta1NP.Spec, in.Annotations[KubeletCompatabilityAnnotationKey])
+	return in.Spec.convertTo(ctx, &v1beta1NP.Spec, in.Annotations[KubeletCompatibilityAnnotationKey])
 }
 
 func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec, kubeletAnnotation string) error {
 	v1beta1np.Weight = in.Weight
 	v1beta1np.Limits = v1beta1.Limits(in.Limits)
 	in.Disruption.convertTo(&v1beta1np.Disruption)
+	// Set the expireAfter to the nodeclaim template's expireAfter.
+	// Don't convert terminationGracePeriod, as this is only included in v1.
+	v1beta1np.Disruption.ExpireAfter = v1beta1.NillableDuration(in.Template.Spec.ExpireAfter)
 	return in.Template.convertTo(ctx, &v1beta1np.Template, kubeletAnnotation)
 }
 
 func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
 	v1beta1np.ConsolidateAfter = (*v1beta1.NillableDuration)(in.ConsolidateAfter)
 	v1beta1np.ConsolidationPolicy = v1beta1.ConsolidationPolicy(in.ConsolidationPolicy)
-	v1beta1np.ExpireAfter = v1beta1.NillableDuration(in.ExpireAfter)
 	v1beta1np.Budgets = lo.Map(in.Budgets, func(v1budget Budget, _ int) v1beta1.Budget {
 		return v1beta1.Budget{
 			Reasons: lo.Map(v1budget.Reasons, func(reason DisruptionReason, _ int) v1beta1.DisruptionReason {
@@ -127,13 +129,18 @@ func (in *NodePool) ConvertFrom(ctx context.Context, v1beta1np apis.Convertible)
 	if err != nil {
 		return err
 	}
-	in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatabilityAnnotationKey: kubeletAnnotation})
+	if kubeletAnnotation == "" {
+		in.Annotations = lo.OmitByKeys(in.Annotations, []string{KubeletCompatibilityAnnotationKey})
+	} else {
+		in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatibilityAnnotationKey: kubeletAnnotation})
+	}
 	return nil
 }
 
 func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) (string, error) {
 	in.Weight = v1beta1np.Weight
 	in.Limits = Limits(v1beta1np.Limits)
+	in.Template.Spec.ExpireAfter = NillableDuration(v1beta1np.Disruption.ExpireAfter)
 	in.Disruption.convertFrom(&v1beta1np.Disruption)
 	return in.Template.convertFrom(ctx, &v1beta1np.Template)
 }
@@ -141,7 +148,6 @@ func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.Node
 func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
 	in.ConsolidateAfter = (*NillableDuration)(v1beta1np.ConsolidateAfter)
 	in.ConsolidationPolicy = ConsolidationPolicy(v1beta1np.ConsolidationPolicy)
-	in.ExpireAfter = NillableDuration(v1beta1np.ExpireAfter)
 	in.Budgets = lo.Map(v1beta1np.Budgets, func(v1beta1budget v1beta1.Budget, _ int) Budget {
 		return Budget{
 			Reasons: lo.Map(v1beta1budget.Reasons, func(reason v1beta1.DisruptionReason, _ int) DisruptionReason {
@@ -187,9 +193,13 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 		Group: lo.Ternary(v1beta1np.Spec.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, nodeclassGroupVersion.Group),
 	}
 
-	kubelet, err := json.Marshal(v1beta1np.Spec.Kubelet)
-	if err != nil {
-		return "", fmt.Errorf("marshaling kubelet config annotation, %w", err)
+	if v1beta1np.Spec.Kubelet != nil {
+		kubelet, err := json.Marshal(v1beta1np.Spec.Kubelet)
+		if err != nil {
+			return "", fmt.Errorf("marshaling kubelet config annotation, %w", err)
+		}
+		return string(kubelet), nil
 	}
-	return string(kubelet), nil
+
+	return "", nil
 }

@@ -29,6 +29,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -40,6 +41,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -48,6 +50,13 @@ import (
 const TestingFinalizer = "testing/finalizer"
 
 var (
+	ObjectListsToPrint = []client.ObjectList{
+		&corev1.PodList{},
+		&v1.NodePoolList{},
+		&corev1.NodeList{},
+		&v1.NodeClaimList{},
+		&v1alpha1.KWOKNodeClassList{},
+	}
 	CleanableObjects = []client.Object{
 		&corev1.Pod{},
 		&appsv1.Deployment{},
@@ -92,7 +101,6 @@ func (env *Environment) ExpectCleanCluster() {
 		Expect(pods.Items[i].Namespace).ToNot(Equal("default"),
 			fmt.Sprintf("expected no pods in the `default` namespace, found %s/%s", pods.Items[i].Namespace, pods.Items[i].Name))
 	}
-	// TODO @njtran add KWOKNodeClass
 	for _, obj := range []client.Object{&v1.NodePool{}, &v1alpha1.KWOKNodeClass{}} {
 		metaList := &metav1.PartialObjectMetadataList{}
 		gvk := lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme()))
@@ -103,6 +111,9 @@ func (env *Environment) ExpectCleanCluster() {
 }
 
 func (env *Environment) Cleanup() {
+	if !CurrentSpecReport().Failure.IsZero() {
+		env.PrintCluster()
+	}
 	env.TimeIntervalCollector.Start(debug.StageAfterEach)
 	env.CleanupObjects(CleanableObjects...)
 	env.eventuallyExpectScaleDown()
@@ -114,6 +125,21 @@ func (env *Environment) AfterEach() {
 	debug.AfterEach(env.Context)
 	env.TimeIntervalCollector.Record(CurrentSpecReport().LeafNodeText)
 	env.printControllerLogs(&corev1.PodLogOptions{Container: "controller"})
+}
+
+func (env *Environment) PrintCluster() {
+	for _, obj := range ObjectListsToPrint {
+		gvk := lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme()))
+		By(fmt.Sprintf("printing %s(s)", gvk.Kind))
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk)
+		Expect(env.Client.List(env, list, client.HasLabels([]string{test.DiscoveryLabel}))).To(Succeed())
+		for _, item := range list.Items {
+			fmt.Println(pretty.Concise(item))
+			fmt.Println()
+		}
+		fmt.Println("---------------------------")
+	}
 }
 
 func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {

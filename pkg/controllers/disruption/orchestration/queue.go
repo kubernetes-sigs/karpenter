@@ -202,7 +202,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		failedLaunches := lo.Filter(cmd.Replacements, func(r Replacement, _ int) bool {
 			return !r.Initialized
 		})
-		disruptionReplacementNodeClaimFailedCounter.With(map[string]string{
+		disruptionQueueFailedCounter.With(map[string]string{
 			methodLabel:            cmd.method,
 			consolidationTypeLabel: cmd.consolidationType,
 		}).Add(float64(len(failedLaunches)))

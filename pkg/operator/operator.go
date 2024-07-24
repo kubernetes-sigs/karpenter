@@ -150,7 +150,7 @@ func NewOperator() (context.Context, *Operator) {
 	// Manager
 	mgrOpts := ctrl.Options{
 		Logger:                        logging.IgnoreDebugEvents(logger),
-		LeaderElection:                options.FromContext(ctx).EnableLeaderElection,
+		LeaderElection:                !options.FromContext(ctx).DisableLeaderElection,
 		LeaderElectionID:              "karpenter-leader-election",
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionNamespace:       system.Namespace(),
@@ -219,9 +219,6 @@ func NewOperator() (context.Context, *Operator) {
 		return []string{o.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
 	}), "failed to setup nodepool nodeclassref name indexer")
 
-	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
-		return lo.Ternary(mgr.GetCache().WaitForCacheSync(req.Context()), nil, fmt.Errorf("failed to sync caches"))
-	}))
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
 
@@ -241,9 +238,11 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...controlle
 }
 
 func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.ControllerConstructor) *Operator {
-	o.webhooks = append(o.webhooks, ctors...)
-	lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
-	lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
+	if !options.FromContext(ctx).DisableWebhook {
+		o.webhooks = append(o.webhooks, ctors...)
+		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
+		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
+	}
 	return o
 }
 
@@ -254,15 +253,20 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 		defer wg.Done()
 		lo.Must0(o.Manager.Start(ctx))
 	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// Taking the first supported NodeClass to be the default NodeClass
-		gvk := lo.Map(cp.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
-			return object.GVK(nc)
-		})
-		ctx = injection.WithNodeClasses(ctx, gvk)
-		webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
-	}()
+	if options.FromContext(ctx).DisableWebhook {
+		log.FromContext(ctx).Info("conversion webhooks are disabled")
+	} else {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Taking the first supported NodeClass to be the default NodeClass
+			gvk := lo.Map(cp.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
+				return object.GVK(nc)
+			})
+			ctx = injection.WithNodeClasses(ctx, gvk)
+			ctx = injection.WithClient(ctx, o.GetClient())
+			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
+		}()
+	}
 	wg.Wait()
 }
