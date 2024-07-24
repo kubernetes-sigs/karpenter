@@ -68,7 +68,7 @@ var (
 		prometheus.SummaryOpts{
 			Namespace:  "karpenter",
 			Subsystem:  metrics.PodSubsystem,
-			Name:       "startup_time_seconds",
+			Name:       "startup_duration_seconds",
 			Help:       "The time from pod creation until the pod is running.",
 			Objectives: metrics.SummaryObjectives(),
 		},
