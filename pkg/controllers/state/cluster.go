@@ -510,8 +510,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *corev1.Pod) e
 	if pod.Spec.NodeName == "" {
 		return nil
 	}
-	providerID := c.nodeNameToProviderID[pod.Spec.NodeName]
-	n, ok := c.nodes[providerID]
+	n, ok := c.nodes[c.nodeNameToProviderID[pod.Spec.NodeName]]
 	if !ok {
 		// the node must exist for us to update the resource requests on the node
 		return errors.NewNotFound(schema.GroupResource{Resource: "Node"}, pod.Spec.NodeName)
