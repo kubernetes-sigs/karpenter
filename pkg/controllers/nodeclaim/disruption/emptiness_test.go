@@ -51,7 +51,7 @@ var _ = Describe("Emptiness", func() {
 		})
 	})
 	Context("Metrics", func() {
-		It("should fire a karpenter_nodeclaims_disrupted metric when empty", func() {
+		It("should fire a karpenter_nodeclaims_disrupted_total metric when empty", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
@@ -60,7 +60,7 @@ var _ = Describe("Emptiness", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted_total", map[string]string{
 				"type":     "emptiness",
 				"nodepool": nodePool.Name,
 			})
