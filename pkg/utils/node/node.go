@@ -77,9 +77,8 @@ func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*cor
 	}), nil
 }
 
-// GetVolumeAttachments grabs all volumeAttachments of passed node
+// GetVolumeAttachments grabs all volumeAttachments associated with the passed node
 func GetVolumeAttachments(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*storagev1.VolumeAttachment, error) {
-	var volumeAttachments []*storagev1.VolumeAttachment
 	var volumeAttachmentList storagev1.VolumeAttachmentList
 	if err := kubeClient.List(ctx, &volumeAttachmentList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
 		// If there have not been any volumeAttachments, index may not exist. Therefore, fall back to default List
@@ -87,12 +86,9 @@ func GetVolumeAttachments(ctx context.Context, kubeClient client.Client, node *c
 			return nil, fmt.Errorf("listing volumeattachments, %w", err)
 		}
 	}
-	for i := range volumeAttachmentList.Items {
-		if volumeAttachmentList.Items[i].Spec.NodeName == node.Name {
-			volumeAttachments = append(volumeAttachments, &volumeAttachmentList.Items[i])
-		}
-	}
-	return volumeAttachments, nil
+	return lo.FilterMap(volumeAttachmentList.Items, func(v storagev1.VolumeAttachment, _ int) (*storagev1.VolumeAttachment, bool) {
+		return &v, v.Spec.NodeName == node.Name
+	}), nil
 }
 
 func GetCondition(n *corev1.Node, match corev1.NodeConditionType) corev1.NodeCondition {
