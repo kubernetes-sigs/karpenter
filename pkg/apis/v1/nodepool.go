@@ -43,7 +43,6 @@ type NodePoolSpec struct {
 	// +required
 	Template NodeClaimTemplate `json:"template"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
-	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized"}
 	// +optional
 	Disruption Disruption `json:"disruption"`
 	// Limits define a set of bounds for provisioning capacity.
@@ -67,7 +66,7 @@ type Disruption struct {
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +required
-	ConsolidateAfter *NillableDuration `json:"consolidateAfter,omitempty"`
+	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenUnderutilized" if not specified
 	// +kubebuilder:default:="WhenUnderutilized"

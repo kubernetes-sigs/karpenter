@@ -99,7 +99,7 @@ var _ = Describe("Consolidation", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmpty", func() {
 			pod := test.Pod()
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
-			nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: lo.ToPtr(time.Minute)}
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: lo.ToPtr(time.Minute)}
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -110,7 +110,7 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
 			pod := test.Pod()
-			nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{}
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{}
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -557,7 +557,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
 			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 			Expect(err).To(Succeed())
 
@@ -618,7 +618,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			emptyConsolidation := disruption.NewEmptyNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
 			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 			Expect(err).To(Succeed())
 

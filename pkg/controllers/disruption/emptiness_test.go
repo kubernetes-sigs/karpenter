@@ -43,7 +43,7 @@ var _ = Describe("Emptiness", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidateAfter:    &v1.NillableDuration{Duration: lo.ToPtr(time.Second * 0)},
+					ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Second * 0)},
 					ConsolidationPolicy: v1.ConsolidationPolicyWhenEmpty,
 					// Disrupt away!
 					Budgets: []v1.Budget{{
@@ -69,12 +69,12 @@ var _ = Describe("Emptiness", func() {
 				},
 			},
 		})
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeEmpty)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 	})
 	Context("Events", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenUnderutilized", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenUnderutilized
-			nodePool.Spec.Disruption.ConsolidateAfter = nil
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))}
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -87,7 +87,7 @@ var _ = Describe("Emptiness", func() {
 			Expect(recorder.Calls("Unconsolidatable")).To(Equal(0))
 		})
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
-			nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{}
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{}
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -95,7 +95,7 @@ var _ = Describe("Emptiness", func() {
 
 			// We get six calls here because we have Nodes and NodeClaims that fired for this event
 			// and each of the consolidation mechanisms specifies that this event should be fired
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(2))
+			Expect(recorder.Calls("Unconsolidatable")).To(Equal(6))
 		})
 	})
 	Context("Metrics", func() {
@@ -146,7 +146,7 @@ var _ = Describe("Emptiness", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeEmpty)
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -187,7 +187,7 @@ var _ = Describe("Emptiness", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeEmpty)
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -229,7 +229,7 @@ var _ = Describe("Emptiness", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeEmpty)
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -254,7 +254,7 @@ var _ = Describe("Emptiness", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidateAfter:    &v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmpty,
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
@@ -292,7 +292,7 @@ var _ = Describe("Emptiness", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeEmpty)
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -320,7 +320,7 @@ var _ = Describe("Emptiness", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidateAfter:    &v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmpty,
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
@@ -357,7 +357,7 @@ var _ = Describe("Emptiness", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeEmpty)
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -399,7 +399,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("should ignore nodes without the empty status condition", func() {
-			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeEmpty)
+			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
@@ -442,7 +442,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
 		It("should ignore nodes with the empty status condition set to false", func() {
-			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeEmpty, "NotEmpty", "NotEmpty")
+			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeConsolidatable, "NotEmpty", "NotEmpty")
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -54,7 +55,12 @@ func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePo
 }
 
 func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
-	v1beta1np.ConsolidateAfter = (*v1beta1.NillableDuration)(in.ConsolidateAfter)
+	// If the v1 nodepool is WhenUnderutilized, the v1beta1 nodepool should have an unset consolidateAfter
+	if in.ConsolidationPolicy == ConsolidationPolicyWhenUnderutilized {
+		v1beta1np.ConsolidateAfter = &v1beta1.NillableDuration{}
+	} else {
+		v1beta1np.ConsolidateAfter = (*v1beta1.NillableDuration)(lo.ToPtr(in.ConsolidateAfter))
+	}
 	v1beta1np.ConsolidationPolicy = v1beta1.ConsolidationPolicy(in.ConsolidationPolicy)
 	v1beta1np.Budgets = lo.Map(in.Budgets, func(v1budget Budget, _ int) v1beta1.Budget {
 		return v1beta1.Budget{
@@ -146,7 +152,11 @@ func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.Node
 }
 
 func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
-	in.ConsolidateAfter = (*NillableDuration)(v1beta1np.ConsolidateAfter)
+	if v1beta1np.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized {
+		in.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Duration(0))}
+	} else {
+		in.ConsolidateAfter = (NillableDuration)(lo.FromPtr(v1beta1np.ConsolidateAfter))
+	}
 	in.ConsolidationPolicy = ConsolidationPolicy(v1beta1np.ConsolidationPolicy)
 	in.Budgets = lo.Map(v1beta1np.Budgets, func(v1beta1budget v1beta1.Budget, _ int) Budget {
 		return Budget{

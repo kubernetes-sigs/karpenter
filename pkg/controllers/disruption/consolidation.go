@@ -91,11 +91,12 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 	if cn.nodePool.Spec.Disruption.ConsolidationPolicy != v1.ConsolidationPolicyWhenUnderutilized {
 		return false
 	}
-	if cn.nodePool.Spec.Disruption.ConsolidateAfter != nil && cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
+	if cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.nodePool.Name))...)
 		return false
 	}
-	return true
+	// return true if consolidatable
+	return cn.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
 // sortCandidates sorts candidates by disruption cost (where the lowest disruption cost is first) and returns the result

@@ -19,15 +19,15 @@ package v1
 import (
 	"github.com/awslabs/operatorpkg/status"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
 	ConditionTypeLaunched             = "Launched"
 	ConditionTypeRegistered           = "Registered"
 	ConditionTypeInitialized          = "Initialized"
-	ConditionTypeEmpty                = "Empty"
+	ConditionTypeConsolidatable       = "Consolidatable"
 	ConditionTypeDrifted              = "Drifted"
-	ConditionTypeUnderutilized        = "Underutilized"
 	ConditionTypeTerminating          = "Terminating"
 	ConditionTypeConsistentStateFound = "ConsistentStateFound"
 )
@@ -52,6 +52,11 @@ type NodeClaimStatus struct {
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
+	// LastPodEvent is updated with the last time a pod was scheduled
+	// or removed from the node. A node going terminal or terminating
+	// is also considered as removed.
+	// +optional
+	LastPodEvent metav1.Time `json:"lastPodEvent,omitempty"`
 }
 
 func (in *NodeClaim) StatusConditions() status.ConditionSet {

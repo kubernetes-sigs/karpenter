@@ -195,7 +195,7 @@ var _ = Describe("Simulate Scheduling", func() {
 				},
 			},
 		})
-		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: nil}
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: nil}
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, nodes[0])
 
@@ -273,7 +273,7 @@ var _ = Describe("Simulate Scheduling", func() {
 			},
 		})
 
-		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: nil}
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: nil}
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "3"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 
@@ -511,8 +511,8 @@ var _ = Describe("Disruption Taints", func() {
 				},
 			},
 		})
-		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: nil}
-		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: nil}
+		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptionNoScheduleTaint)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
