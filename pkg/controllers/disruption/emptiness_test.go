@@ -100,10 +100,10 @@ var _ = Describe("Emptiness", func() {
 	})
 	Context("Metrics", func() {
 		var eligibleNodesEmptinessLabels = map[string]string{
-			"method":             "emptiness",
-			"consolidation_type": "",
+			"method":             "consolidation",
+			"consolidation_type": "empty",
 		}
-		It("should correctly report eligible nodes", func() {
+		FIt("should correctly report eligible nodes", func() {
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)

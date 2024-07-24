@@ -78,7 +78,7 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 		log.FromContext(ctx).V(1).Info("marking consolidatable")
 
 		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:     metrics.ConsolidatableReason,
+			metrics.TypeLabel:     metrics.ConsolidationReason,
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		}).Inc()
 	}
