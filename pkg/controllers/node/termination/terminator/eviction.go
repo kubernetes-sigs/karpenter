@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/metrics"
+
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -90,10 +92,15 @@ type Queue struct {
 
 func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	queue := &Queue{
-		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay)),
-		set:                   sets.New[QueueKey](),
-		kubeClient:            kubeClient,
-		recorder:              recorder,
+		RateLimitingInterface: workqueue.NewRateLimitingQueueWithConfig(
+			workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay),
+			workqueue.RateLimitingQueueConfig{
+				Name:            "eviction.workqueue",
+				MetricsProvider: metrics.WorkqueueMetricsProvider{},
+			}),
+		set:        sets.New[QueueKey](),
+		kubeClient: kubeClient,
+		recorder:   recorder,
 	}
 	return queue
 }
@@ -128,8 +135,6 @@ func (q *Queue) Has(pod *corev1.Pod) bool {
 
 func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "eviction-queue")
-
-	EvictionQueueDepth.Set(float64(q.RateLimitingInterface.Len()))
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
@@ -198,6 +203,11 @@ func (q *Queue) Reset() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	q.RateLimitingInterface = workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay))
+	q.RateLimitingInterface = workqueue.NewRateLimitingQueueWithConfig(
+		workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay),
+		workqueue.RateLimitingQueueConfig{
+			Name:            "eviction.workqueue",
+			MetricsProvider: metrics.WorkqueueMetricsProvider{},
+		})
 	q.set = sets.New[QueueKey]()
 }
