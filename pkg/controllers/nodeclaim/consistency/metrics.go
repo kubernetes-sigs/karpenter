@@ -36,7 +36,7 @@ var consistencyErrors = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: consistencySubsystem,
-		Name:      "errors",
+		Name:      "errors_total",
 		Help:      "Number of consistency checks that have failed.",
 	},
 	[]string{checkLabel},
