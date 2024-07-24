@@ -107,7 +107,7 @@ var _ = Describe("GarbageCollection", func() {
 			ExpectObjectReconciled(ctx, env.Client, garbageCollectionController, badLease)
 			ExpectNotFound(ctx, env.Client, badLease)
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_leases_deleted", map[string]string{})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_leases_deleted_total", map[string]string{})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1.0))
 
