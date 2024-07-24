@@ -17,7 +17,10 @@ Karpenter will **not** be changing its API group or resource kind as part of the
 1. Apply the updated NodePool, NodeClaim, and EC2NodeClass CRDs, which will contain a `v1` versions listed under the `versions` section of the CustomResourceDefinition
 2. Upgrade Karpenter controller to its `v1` version. This version of Karpenter will start reasoning in terms of the `v1` API schema in its API requests. Resources will be converted from the v1beta1 to the v1 version at runtime, using conversion webhooks shipped by the upstream Karpenter project and the Cloud Providers (for NodeClass changes).
 3. Users update their `v1beta1` manifests that they are applying through IaC or GitOps to use the new `v1` version.
-4. Karpenter drops the `v1beta1` version from the `CustomResourceDefinition` and the conversion webhooks on the next minor version release of Karpenter, leaving no webhooks and only the `v1` version still present
+   1. Users that are using multiple NodePools with different kubeletConfigurations that reference the same NodeClasses will need to perform migration from a single NodeClass to multiple NodeClasses. Karpenter v1 [shifts the kubeletConfiguration into the NodeClass API](#moving-spectemplatespeckubelet-into-the-nodeclass) which does not make it possible to represent this many-to-one relationship anymore.
+4. Users remove any conversion annotations from their v1 resources.
+   1. When Karpenter converts from v1beta1 to v1, it maintains round-trippability between the old resource version and the new resource version. To maintain this with schema changes like the `kubeletConfiguration` move, it leverages annotations on the NodePool (e.g. `compatability.karpenter.sh/v1beta1-kubelet-conversion`) to maintain the v1beta1 data. It will be a strict requirement to remove these annotations from the NodePool before upgrading to v1.1.x+.
+5. Karpenter drops the `v1beta1` version from the `CustomResourceDefinition` and the conversion webhooks on the next minor version release of Karpenter, leaving no webhooks and only the `v1` version still present
 
 ## NodePool API
 
@@ -49,20 +52,21 @@ spec:
           operator: In
           values: ["c", "m", "r"]
           minValues: 2 # Alpha field, added for spot best practices support
+      expireAfter: 720h | Never
+      terminationGracePeriod: 1d
   disruption:
     budgets:
       - nodes: 0
         schedule: "0 10 * * mon-fri"
         duration: 16h
         reasons:
-          - drifted
-          - expired
+          - Drifted
+          - Expired
       - nodes: 100%
         reasons:
-          - empty
+          - Empty
       - nodes: "10%"
       - nodes: 5
-    expireAfter: 720h | Never
     consolidationPolicy: WhenUnderutilized | WhenEmpty
     consolidateAfter: 1m | Never # Added to allow additional control over consolidation aggressiveness
   weight: 10
@@ -78,6 +82,7 @@ status:
       status: "True"
       type: Ready
   resources:
+    nodes: "5"
     cpu: "20"
     memory: "8192Mi"
     ephemeral-storage: "100Gi"
@@ -87,9 +92,9 @@ status:
 
 Defaults are unchanged in the v1 API version but are included in the API proposal for completeness.
 
-`disruption.budgets` : `{"nodes": "10%"}`
-`disruption.expireAfter`: `30d/720h`
-`disruption.consolidationPolicy`: `WhenUnderutilized`
+- `disruption.budgets` : `{"nodes": "10%"}`
+- `disruption.expireAfter`: `30d/720h`
+- `disruption.consolidationPolicy`: `WhenUnderutilized`
 
 ### Printer Columns
 
@@ -131,7 +136,23 @@ fallback  default    100    True   2d7h          5   30Gi
 
 #### Moving `spec.template.spec.kubelet` to NodeClass
 
+**Category:** Breaking
+
 We are shifting the `spec.template.spec.kubelet` section from the NodePool and NodeClaim into the EC2NodeClass. This is called out in more detail in [Moving spec.template.spec.kubelet into the EC2NodeClass](#moving-spectemplatespeckubelet-into-the-nodeclass) which is covered in the EC2NodeClass section below.
+
+#### Add `spec.template.spec.terminationGracePeriod`
+
+**Category:** Stability
+
+[Users have asked for the ability to configure a max drain timeout](https://github.com/kubernetes-sigs/karpenter/issues/743) for their nodes. This avoids nodes staying stuck in a draining state on the cluster due to fully blocking PDBs or `karpenter.sh/do-not-disrupt` pods. Starting in v1, we will support a feature that will allow you to configure this max time (called `terminationGracePeriod`). This field will be part of the NodeClaim object and will be static for the lifetime of the NodeClaim. You can template this field onto NodeClaims that are created by NodePools through the `spec.template.spec.terminationGracePeriod` field. 
+
+#### Moving `spec.disruption.expireAfter` to `spec.template.spec.expireAfter`
+
+**Category:** Breaking
+
+In general, we are viewing NodeClaim resources as standalone entities that manage the lifecycle of Nodes on their own. Similar to deployments, NodePools orchestrate the creation and removal of these NodeClaims, but it's still possible to manually create NodeClaims similar to how you can manually create pods.
+
+Like `terminationGracePeriod`, we can view the `expireAfter` value for a NodeClaim as a standalone value for the NodeClaim, absent any ownership from any NodePool. As a result, as part of v1, `expireAfter` will appear as part of the NodeClaim spec and can be set as a template field for NodeClaims that are generated by a NodePool through the `spec.template.spec.expireAfter` field.
 
 #### Status Conditions
 
@@ -159,7 +180,7 @@ conditions:
     message: "NodeClaim hasn't succeeded launch"
 ```
 
-#### Add `consolidateAfter`
+#### Add `consolidateAfter` for `consolidationPolicy: WhenUnderutilized`
 
 **Category:** Stability
 
@@ -220,6 +241,8 @@ spec:
     requests:
       cpu: "20"
       memory: "8192Mi"
+  expireAfter: 720h | Never
+  terminationGracePeriod: 1d
 status:
   allocatable:
     cpu: 1930m
@@ -480,7 +503,7 @@ default  True   2d8h   KarpenterNodeRole-test-cluster
 
 Defining the complete set of status condition types that we will include on v1 launch is **out of scope** of this document and will be defined with more granularly in Karpenter’s Observability design. Minimally for v1, we will add a `Ready` condition so that we can determine whether a EC2NodeClass can be used by a NodePool during scheduling. More robustly, we will define status conditions that ensure that each required “concept” that’s needed for an instance launch is resolved e.g. InstanceProfile resolved, Subnet resolved, Security Groups resolved, etc.
 
-#### Require AMISelectorTerms and Drop `amiFamily`
+#### Require AMISelectorTerms
 
 **Category:** Stability, Breaking
 
@@ -497,6 +520,8 @@ We no longer want to deal with potential confusion around whether nodes will get
 When the KubeletConfiguration was first introduced into the NodePool, the assumption was that the kubelet configuration is a common interface and that every Cloud Provider supports the same set of kubelet configuration fields.
 
 This turned out not to be the case in reality. For instance, Cloud Providers like Azure [do not support configuring the kubelet configuration through the NodePool API](https://learn.microsoft.com/en-us/azure/aks/node-autoprovision?tabs=azure-cli#:~:text=Kubelet%20configuration%20through%20Node%20pool%20configuration%20is%20not%20supported). Kwok also has no need for the Kubelet API. Shifting these fields into the NodeClass API allows CloudProvider to pick on a case-by-case basis what kind of configuration they want to support through the Kubernetes API.
+
+For more details on the need for shifting this field from the NodePool to the NodeClass, see [the conversation in the #karpenter-dev chat](https://kubernetes.slack.com/archives/C04JW2J5J5P/p1709226455964629).
 
 #### Disable IMDS Access from Containers by Default
 

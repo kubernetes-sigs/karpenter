@@ -16,18 +16,21 @@ This list represents the minimal set of changes that are needed to ensure proper
 
 1. [v1 APIs](#v1-apis)
 2. [Stabilize Observability (metrics, status, eventing)](#stabilize-observability--metrics-status-eventing-)
-3. [Stabilize Karpenter’s Tainting Logic](#stabilize-karpenters-tainting-logic)
-4. [Wait for Instance Termination on NodeClaim/Node Deletion](#wait-for-instance-termination-on-nodeclaimnode-deletion)
-5. [Drift Hash Breaking Change Handling](#drift-hash-breaking-change-handling)
-6. [Removing Ubuntu AMIFamily](#removing-ubuntu-amifamily-aws-cloudprovider)
-7. [Introduce ConsolidateAfter for Consolidation Controls](#introduce-consolidateafter-for-consolidation-controls)
-8. [Define SemVer Versioning Policy for kubernetes-sigs/karpenter Library](#define-semver-versioning-policy-for-kubernetes-sigskarpenter-library)
-9. [NodeClaim Conceptual Documentation](#nodeclaim-conceptual-documentation)
-10. [Drop Knative References from the Code](#drop-knative-references-from-the-code)
-11. [Migrate Knative Webhook away from Karpenter](#migrate-knative-webhook-away-from-karpenter)
-12. [Karpenter Global Logging Configuration Changes](#karpenter-global-logging-configuration-changes-aws-cloudprovider)
-13. [Promoting Drift Feature to Stable](#promoting-drift-feature-to-stable)
-14. [Removing Implicit ENI Public IP Configuration](#removing-implicit-eni-public-ip-configuration-aws-cloudprovider)
+3. [Update `karpenter.sh/disruption=disrupting:NoSchedule` taint to `karpenter.sh/disrupted:NoSchedule`](#update-karpentershdisruptiondisruptingnoschedule-taint-to-karpentershdisruptednoschedule)
+4. [Add the `karpenter.sh/unregistered:NoExecute` taint on registration](#add-the-karpentershunregisterednoexecute-taint-on-registration)
+5. [Wait for Instance Termination on NodeClaim/Node Deletion](#wait-for-instance-termination-on-nodeclaimnode-deletion)
+6. [Drift Hash Breaking Change Handling](#drift-hash-breaking-change-handling)
+7. [Removing Ubuntu AMIFamily](#removing-ubuntu-amifamily-aws-cloudprovider)
+8. [Introduce ConsolidateAfter for Consolidation Controls](#introduce-consolidateafter-for-consolidation-controls)
+9. [Change Expiration from Graceful to Forceful](#change-expiration-from-graceful-to-forceful)
+10. [Define SemVer Versioning Policy for kubernetes-sigs/karpenter Library](#define-semver-versioning-policy-for-kubernetes-sigskarpenter-library)
+11. [NodeClaim Conceptual Documentation](#nodeclaim-conceptual-documentation)
+12. [Drop Knative References from the Code](#drop-knative-references-from-the-code)
+13. [Migrate Knative Webhook away from Karpenter](#migrate-knative-webhook-away-from-karpenter)
+14. [Change default TopologySpreadConstraint policy for Deployment from `ScheduleAnyways` to `DoNotSchedule`](#change-default-topologyspreadconstraint-policy-for-karpenter-deployment-from-scheduleanyways-to-donotschedule-aws-cloudprovider)
+15. [Karpenter Global Logging Configuration Changes](#karpenter-global-logging-configuration-changes-aws-cloudprovider)
+16. [Promoting Drift Feature to Stable](#promoting-drift-feature-to-stable)
+17. [Removing Implicit ENI Public IP Configuration](#removing-implicit-eni-public-ip-configuration-aws-cloudprovider)
 
 ### v1 APIs
 
@@ -45,24 +48,35 @@ For Karpenter to be considered v1, the CustomResources that are shipped with an 
 
 Karpenter needs to stabalize a set of metrics, status conditions, and events that can be relied-upon for monitoring. The design for these metrics, status conditions and events will be added in a separate RFC.
 
-### Stabilize Karpenter’s Tainting Logic
+### Update `karpenter.sh/disruption=disrupting:NoSchedule` taint to `karpenter.sh/disrupted:NoSchedule`
 
 **Issue Ref:** https://github.com/kubernetes-sigs/karpenter/issues/624, https://github.com/kubernetes-sigs/karpenter/issues/1049
 
 **Category:** Breaking
 
-Karpenter currently applies the `karpenter.sh/disruption=disrupting:NoSchedule` taint to cordon nodes during disruption. Karpenter will expand upon it's tainting behaior, in addition to updating the current cordon taint to match the format of new taints. The following taints will be used:
-
-|Taint|Description|
-|karpenter.sh/disruption:NoSchedule|Added to any node disrupted by Karpenter. This is either added before the drain begins for forceful disruption, or before the pre-spin of replacement nodes beings for voluntary disruption|
-|karpenter.sh/candidate:PreferNoSchedule|Added to all voluntary disruption candidates (consolidation / drift) to reduce the chance of pods scheduling to soon to be disrupted nodes|
-|karpenter.sh/unregistered:NoExecute|Added to the nodes on startup and removed once all user defined labels and taints have propagated to the node|
+Karpenter currently uses the `karpenter.sh/disruption` key with the `disrupting` value to signal when nodes are actively being disrupted by the disruption controller. This key was originally added with a value because it was assumed that we would expand upon this taint with additional values over time. As part of the v1 stability, we now realize that this behavior is inconsistent with the usage of taint keys in Kubernetes generally. Rather than keeping the `karpenter.sh/disruption` key and differentiating based on values, we will be creating different taint keys for each unique action that Karpenter takes (e.g. `karpenter.sh/disrupted` and `karpenter.sh/unregistered`) This update also changes the taint key from `karpenter.sh/disrupting` to `karpenter.sh/disrupted`. 
 
 #### Tasks
 
-- [ ] Design and implement candidate tainting logic for NodeClaims that are drifted, empty, underutilized, etc.
-- [ ] Re-design the `karpenter.sh/disruption` taint to not differ only by value (`karpenter.sh/disruption=candidate` and `karpenter.sh/disruption=disrupting` ) but to be completely different taints so that the taints can have separate controllers managing them
-- [ ] Add the `karpenter.sh/unregistered` taint to nodes on startup to prevent pods from scheduling to the nodes while Karpenter hasn’t propagated the labels down to the nodes yet
+- [ ] Update the `karpenter.sh/disruption=disrupting:NoSchedule` taint to be `karpenter.sh/disrupted:NoSchedule`
+
+### Add the `karpenter.sh/unregistered:NoExecute` taint on registration
+
+**Issue Ref:** https://github.com/kubernetes-sigs/karpenter/issues/624, https://github.com/kubernetes-sigs/karpenter/issues/1049
+
+**Category:** Breaking
+
+Karpenter currently adds taints, labels, and annotations to nodes from the NodeClaim when nodes register with the cluster. This is done without restricting pods from scheduling to the node which means that for any labels or taints that aren't present on the node on startup, this process or registration can break scheduling compatability.
+
+For instance, a pod may not tolerate a specific taint that was configured in the NodeClaim template, but the taint did not appear on the node immediately on startup, meaning that the pod was able to successfully schedule when it shouldn't have been able to.
+
+To mitigate this, Karpenter is introducing the `karpenter.sh/unregistered:NoExecute` taint at v1. Nodes registering with Karpenter will be required to have this taint present on their nodes when the node first joins. Karpenter will propagate lables, annotations, and taints, and remove this `karpenter.sh/unregistered` taint simultaneously, allowing Karpenter to ensure that pods will not schedule against the node before it has had a chance to add configuration.
+
+#### Tasks
+
+- [ ] Add `karpenter.sh/unregistered:NoExecute` taint into the cloudprovider bootstrap config (Kubelet's `--register-with-taints` parameter)
+- [ ] Remove the `karpenter.sh/unregistered:NoExecute` taint as part of the NodeClaim lifecycle registration flow
+- [ ] Validate the `karpenter.sh/unregistered:NoExecute` taint exists for nodes owned by Karpenter
 
 ### Wait for Instance Termination on NodeClaim/Node Deletion
 
@@ -115,7 +129,7 @@ Users who still want to use Ubuntu can still use a Custom AMIFamily with amiSele
 
 **Issue Ref(s):** https://github.com/kubernetes-sigs/karpenter/issues/735
 
-**Category****:** Breaking, Stability
+**Category**: Breaking, Stability
 
 Karpenter currently evaluates all forms of disruption in a synchronous loop, starting with expiration, drift, emptiness, and considering consolidation and multi-node consolidation *only* if the other conditions are not satisfied. Consolidation performs scheduling simulations on the cluster and evaluates if there are any opportunities to save money by removing nodes or replacing nodes on the cluster.
 
@@ -126,6 +140,19 @@ Users have asked that we make this a configurable field so that they can tweak w
 #### Tasks
 
 - [ ] Design and implement a `spec.consolidateAfter` field for the v1 NodePool API, reworking our synchronous wait to ensure that waiting for nodes that haven’t reached the end of their `consolidateAfter` timeframe doesn’t block other disruption evaluation
+
+### Change Expiration from Graceful to Forceful
+
+**Issue/RFC Ref:** https://github.com/kubernetes-sigs/karpenter/pull/1303
+
+**Category:** Breaking
+
+Users care about the removal of their nodes within a certain timeframe due to security requirements. Budgets, `karpenter.sh/do-not-disrupt` pods and blocking PDBs should not stop us from starting the drain of the node after it exceeds its expireAfter value. Once a node has begun evicting, it will remain on the cluster up to its t`erminationGracePeriod` duration (assuming there are blocking PDBs or pods that are running with the `karpenter.sh/do-not-disrupt` annotation) and then be removed.
+
+#### Tasks
+
+- [ ] Remove expiration from the graceful disruption controller
+- [ ] Perform a direct NodeClaim deletion when a Node has exceeded its expireAfter lifetime value
 
 ### Define SemVer Versioning Policy for `kubernetes-sigs/karpenter` Library
 
@@ -190,6 +217,35 @@ Karpenter supported drift in its alpha state from v0.21-v0.32. During alpha, we 
 
 Since the feature is such a fundamental part to how the declarative state of Karpenter functions, we will promote drift to stable at Karpenter v1.
 
+#### Tasks
+
+- [ ] Remove `Drift` as a feature flag, always enabling it in Karpenter
+
+### Change default TopologySpreadConstraint policy for Deployment from `ScheduleAnyways` to `DoNotSchedule` [AWS CloudProvider]
+
+**Category:** Stability, Breaking
+
+Karpenter ships by default with multiple replicas and leader election enabled to ensure that it can run in HA (High Availability) mode. This ensures that if a pod goes down due to an outage, the other pod is able to recover quickly by shifting the leader election over.
+
+Karpenter currently uses the `ScheduleAnyways` zonal topologySpreadConstraint to spread its Karpenter deployment across zones. Because this is a preference, this doesn't guarantee that pods will end up in different zones, meaning that, if there is a zonal outage, multiple replicas won't increase resiliency.
+
+```yaml
+topologySpreadConstraints:
+  - labelSelector:
+      matchLabels:
+        app.kubernetes.io/instance: karpenter
+        app.kubernetes.io/name: karpenter
+    maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyways
+```
+
+As part of v1, we are changing our default from `ScheduleAnyways` to `DoNotSchedule` to enforce stronger best practices by default to ensure that Karpenter can recover quickly in the event of a zonal outage. Users who still want the old behavior can opt back into `ScheduleAnyways` by overriding the default TopologySpreadConstraint.
+
+#### Tasks
+
+- [ ] Update Karpenter's zonal topologySpreadConstraint from `whenUnsatisfiable: ScheduleAnyways` to `whenUnsatisfiable: DoNotSchedule`
+
 ### Karpenter Global Logging Configuration Changes [AWS CloudProvider]
 
 **Issue Ref(s):** https://github.com/aws/karpenter-provider-aws/issues/5352
@@ -210,5 +266,5 @@ Karpenter currently supports checking the subnets that your instance request is 
 
 #### Tasks
 
-- [ ] Remove the `[CheckAnyPublicIPAssociations](https://github.com/aws/karpenter-provider-aws/blob/ea8ea0ecb042f4143e2948d4e299e169671841fe/pkg/providers/subnet/subnet.go#L97)` call in our launch template creation at v1
+- [ ] Remove the [`CheckAnyPublicIPAssociations`](https://github.com/aws/karpenter-provider-aws/blob/ea8ea0ecb042f4143e2948d4e299e169671841fe/pkg/providers/subnet/subnet.go#L97) call in our launch template creation at v1
 
