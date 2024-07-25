@@ -25,7 +25,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
@@ -96,6 +95,9 @@ var _ = Describe("PodEvents", func() {
 					corev1.LabelInstanceTypeStable: "default-instance-type", // need the instance type for the cluster state update
 				},
 			},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
 		})
 		pod = test.Pod(test.PodOptions{
 			NodeName: node.Name,
@@ -107,230 +109,61 @@ var _ = Describe("PodEvents", func() {
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Status.LastPodEvent).To(BeEquivalentTo(pod.CreationTimestamp))
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(pod.CreationTimestamp.Time))
+	})
+	It("should not set the nodeclaim lastPodEvent for a node that Karpenter doesn't own", func() {
+		delete(node.Labels, v1.NodePoolLabelKey)
+		ExpectApplied(ctx, env.Client, nodePool, node, pod)
+		fakeClock.SetTime(pod.CreationTimestamp.Time)
+		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
+
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeZero())
 	})
 	It("should not set the nodeclaim lastPodEvent when the node does not exist", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, pod)
 		fakeClock.SetTime(pod.CreationTimestamp.Time)
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Status.LastPodEvent).To(BeEquivalentTo(pod.CreationTimestamp))
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeZero())
 	})
 	It("should not set the nodeclaim lastPodEvent when the nodeclaim does not exist", func() {
 		ExpectApplied(ctx, env.Client, nodePool, node, pod)
 		fakeClock.SetTime(pod.CreationTimestamp.Time)
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Status.LastPodEvent).To(BeEquivalentTo(pod.CreationTimestamp))
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, podEventsController, pod)
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeZero())
 	})
 	It("should only set the nodeclaim lastPodEvent when it hasn't been set before", func() {
-		ExpectApplied(ctx, env.Client, nodePool, node, pod)
+		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
 		fakeClock.SetTime(pod.CreationTimestamp.Time)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Status.LastPodEvent.Time).ToNot(BeZero())
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(pod.CreationTimestamp.Time))
 
 		fakeClock.Step(5 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(pod.CreationTimestamp.Time))
 	})
 	It("should only set the nodeclaim lastPodEvent once within the dedupe timeframe", func() {
-		ExpectApplied(ctx, env.Client, nodePool, node, pod)
+		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
 		fakeClock.SetTime(pod.CreationTimestamp.Time)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Status.LastPodEvent).To(BeEquivalentTo(pod.CreationTimestamp.Time))
-		lastPodEventTime := nodeClaim.Status.LastPodEvent
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(pod.CreationTimestamp.Time))
+		lastPodEventTime := nodeClaim.Status.LastPodEventTime.Time
 
 		fakeClock.Step(5 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Status.LastPodEvent).To(BeEquivalentTo(lastPodEventTime))
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(lastPodEventTime))
 
 		fakeClock.Step(5 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Status.LastPodEvent).ToNot(BeEquivalentTo(lastPodEventTime))
-	})
-
-	It("should mark NodeClaims as empty that have only pods in terminating state", func() {
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-
-		// Pod owned by a Deployment
-		pods := test.Pods(3, test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
-					},
-				},
-			},
-			NodeName:   node.Name,
-			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
-		})
-		ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
-
-		for _, p := range pods {
-			// Trigger an eviction to set the deletion timestamp but not delete the pod
-			ExpectEvicted(ctx, env.Client, p)
-			ExpectExists(ctx, env.Client, p)
-		}
-
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
-	})
-	It("should mark NodeClaims as empty that have only DaemonSet pods", func() {
-		ds := test.DaemonSet()
-		ExpectApplied(ctx, env.Client, ds)
-
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-
-		// Pod owned by a DaemonSet
-		pod = test.Pod(test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "DaemonSet",
-						Name:               ds.Name,
-						UID:                ds.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
-					},
-				},
-			},
-			NodeName:   node.Name,
-			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
-		})
-		ExpectApplied(ctx, env.Client, pod)
-
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
-	})
-	It("should remove the status condition from the nodeClaim when emptiness is disabled", func() {
-		nodePool.Spec.Disruption.ConsolidateAfter.Duration = nil
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
-	})
-	It("should remove the status condition from the nodeClaim when the nodeClaim initialization condition is unknown", func() {
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-		nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeInitialized)
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
-	})
-	It("should remove the status condition from the nodeClaim when the nodeClaim initialization condition is false", func() {
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "NotInitialized", "NotInitialized")
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
-	})
-	It("should remove the status condition from the nodeClaim when the node doesn't exist", func() {
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
-	})
-	It("should remove the status condition from non-empty NodeClaims", func() {
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-
-		ExpectApplied(ctx, env.Client, test.Pod(test.PodOptions{
-			NodeName:   node.Name,
-			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
-		}))
-
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
-	})
-	It("should remove the status condition from NodeClaims that have a StatefulSet pod in terminating state", func() {
-		ss := test.StatefulSet()
-		ExpectApplied(ctx, env.Client, ss)
-
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-
-		// Pod owned by a StatefulSet
-		pod = test.Pod(test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "StatefulSet",
-						Name:               ss.Name,
-						UID:                ss.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
-					},
-				},
-			},
-			NodeName:   node.Name,
-			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
-		})
-		ExpectApplied(ctx, env.Client, pod)
-
-		// Trigger an eviction to set the deletion timestamp but not delete the pod
-		ExpectEvicted(ctx, env.Client, pod)
-		ExpectExists(ctx, env.Client, pod)
-
-		// The node isn't empty even though it only has terminating pods
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
-	})
-	It("should remove the status condition when the cluster state node is nominated", func() {
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-
-		result := ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-		Expect(result.RequeueAfter).To(Equal(time.Second * 30))
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
+		Expect(nodeClaim.Status.LastPodEventTime.Time).ToNot(BeEquivalentTo(lastPodEventTime))
 	})
 })

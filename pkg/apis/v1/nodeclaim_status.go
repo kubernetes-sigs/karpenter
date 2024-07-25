@@ -52,11 +52,11 @@ type NodeClaimStatus struct {
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
-	// LastPodEvent is updated with the last time a pod was scheduled
+	// LastPodEventTime is updated with the last time a pod was scheduled
 	// or removed from the node. A pod going terminal or terminating
 	// is also considered as removed.
 	// +optional
-	LastPodEvent metav1.Time `json:"lastPodEvent,omitempty"`
+	LastPodEventTime metav1.Time `json:"lastPodEvent,omitempty"`
 }
 
 func (in *NodeClaim) StatusConditions() status.ConditionSet {

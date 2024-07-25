@@ -95,7 +95,8 @@ var _ = Describe("Disruption", func() {
 			},
 		})
 		// set the lastPodEvent to 5 minutes in the past
-		nodeClaim.Status.LastPodEvent.Time = fakeClock.Now().Add(-5 * time.Minute)
+		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
+		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 	})
 	It("should set multiple disruption conditions simultaneously", func() {

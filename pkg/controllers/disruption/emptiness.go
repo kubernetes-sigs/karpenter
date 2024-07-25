@@ -125,7 +125,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 }
 
 func (e *Emptiness) Type() string {
-	return metrics.ConsolidationReason
+	return metrics.EmptinessReason
 }
 
 func (e *Emptiness) Class() string {

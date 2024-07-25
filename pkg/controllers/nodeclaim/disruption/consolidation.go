@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
-// Consolidation is a nodeclaim sub-controller that adds or removes status conditions on empty nodeclaims based on TTLSecondsAfterConsolidatable
+// Consolidation is a nodeclaim sub-controller that adds or removes status conditions on empty nodeclaims based on consolidateAfter
 type Consolidation struct {
 	kubeClient client.Client
 	clock      clock.Clock
@@ -41,38 +41,38 @@ type Consolidation struct {
 func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	hasConsolidatableCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable) != nil
 
-	// 1. If Consolidation isn't enabled, remove the underutilization status condition
+	// 1. If Consolidation isn't enabled, remove the consolidatable status condition
 	if nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
 		if hasConsolidatableCondition {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
-			log.FromContext(ctx).V(1).Info("removing underutilization status condition, underutilization is disabled")
+			log.FromContext(ctx).V(1).Info("removing consolidatable status condition, consolidation is disabled")
 		}
 		return reconcile.Result{}, nil
 	}
 	initialized := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
-	// 2. If NodeClaim is not initialized, remove the underutilization status condition
+	// 2. If NodeClaim is not initialized, remove the consolidatable status condition
 	if !initialized.IsTrue() {
 		if hasConsolidatableCondition {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
-			log.FromContext(ctx).V(1).Info("removing underutilization status condition, isn't initialized")
+			log.FromContext(ctx).V(1).Info("removing consolidatable status condition, isn't initialized")
 		}
 		return reconcile.Result{}, nil
 	}
 
 	// If the lastPodEvent is zero, use the time that the nodeclaim was initialized, as that's when Karpenter recognizes that pods could have started scheduling
-	timeToCheck := lo.Ternary(!nodeClaim.Status.LastPodEvent.IsZero(), nodeClaim.Status.LastPodEvent.Time, initialized.LastTransitionTime.Time)
+	timeToCheck := lo.Ternary(!nodeClaim.Status.LastPodEventTime.IsZero(), nodeClaim.Status.LastPodEventTime.Time, initialized.LastTransitionTime.Time)
 
 	// Consider a node consolidatable by looking at the lastPodEvent status field on the nodeclaim.
 	if c.clock.Since(timeToCheck) < lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration) {
-		_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
 		if hasConsolidatableCondition {
+			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
 			log.FromContext(ctx).V(1).Info("removing consolidatable status condition")
 		}
-		underutilizedTime := nodeClaim.Status.LastPodEvent.Add(lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration))
-		return reconcile.Result{RequeueAfter: time.Until(underutilizedTime)}, nil
+		consolidatableTime := nodeClaim.Status.LastPodEventTime.Add(lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration))
+		return reconcile.Result{RequeueAfter: time.Until(consolidatableTime)}, nil
 	}
 
-	// 6. Otherwise, add the underutilization status condition
+	// 6. Otherwise, add the consolidatable status condition
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 	if !hasConsolidatableCondition {
 		log.FromContext(ctx).V(1).Info("marking consolidatable")

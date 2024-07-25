@@ -23,7 +23,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -67,7 +66,7 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 
 	node := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
+		return reconcile.Result{}, fmt.Errorf("getting node, %w", err)
 	}
 
 	// If the node isn't owned by Karpenter, don't do anything
@@ -76,30 +75,25 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 	}
 
 	// If there's no associated node claim, it's not a karpenter owned node.
-	nodeClaims, err := nodeutils.GetNodeClaims(ctx, node, c.kubeClient)
+	nc, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("getting nodeclaims for node, %w", err))
+		// if the nodeclaim doesn't exist, or has duplicates,
+		if nodeutils.IsDuplicateNodeClaimError(err) || nodeutils.IsNodeClaimNotFoundError(err) {
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, fmt.Errorf("getting nodeclaims for node, %w", err)
 	}
 
-	if len(nodeClaims) != 1 {
-		return reconcile.Result{}, fmt.Errorf("node %s did not have singular nodeclaim representation", node.Name)
-	}
-
-	nc := nodeClaims[0]
 	stored := nc.DeepCopy()
-
 	// If we've set the lastPodEvent before and it hasn't been before the timeout, don't do anything
-	if !nc.Status.LastPodEvent.Time.IsZero() && c.clock.Since(nc.Status.LastPodEvent.Time) < dedupeTimeout {
+	if !nc.Status.LastPodEventTime.Time.IsZero() && c.clock.Since(nc.Status.LastPodEventTime.Time) < dedupeTimeout {
 		return reconcile.Result{}, nil
 	} else {
 		// otherwise, set the pod event time to now
-		nc.Status.LastPodEvent.Time = c.clock.Now()
+		nc.Status.LastPodEventTime.Time = c.clock.Now()
 	}
 	if !equality.Semantic.DeepEqual(stored, nc) {
 		if err := c.kubeClient.Status().Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
-			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
-			}
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
@@ -127,7 +121,7 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 			// If the pod is deleted, but wasn't already treated as terminal or terminating
 			DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
 				pod := (e.Object).(*corev1.Pod)
-				return pod.Spec.NodeName != "" && !podutils.IsTerminal(pod) && !podutils.IsTerminating(pod)
+				return pod.Spec.NodeName != ""
 			},
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
