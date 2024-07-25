@@ -510,6 +510,7 @@ func (c *Cluster) updateNodeUsageFromPod(ctx context.Context, pod *corev1.Pod) e
 	if pod.Spec.NodeName == "" {
 		return nil
 	}
+
 	n, ok := c.nodes[c.nodeNameToProviderID[pod.Spec.NodeName]]
 	if !ok {
 		// the node must exist for us to update the resource requests on the node
