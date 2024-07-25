@@ -24,7 +24,7 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(disruptionReplacementNodeClaimInitializedHistogram, disruptionQueueFailedCounter, disruptionQueueDepthGauge)
+	crmetrics.Registry.MustRegister(disruptionReplacementNodeClaimInitializedHistogram, disruptionQueueFailedCounter)
 }
 
 const (
@@ -51,13 +51,5 @@ var (
 			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
 		},
 		[]string{methodLabel, consolidationTypeLabel},
-	)
-	disruptionQueueDepthGauge = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: disruptionSubsystem,
-			Name:      "queue_depth",
-			Help:      "The number of commands currently being waited on in the disruption orchestration queue.",
-		},
 	)
 )
