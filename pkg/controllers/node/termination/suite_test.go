@@ -97,7 +97,6 @@ var _ = Describe("Termination", func() {
 		// Reset the metrics collectors
 		metrics.NodesTerminatedCounter.Reset()
 		termination.TerminationSummary.Reset()
-		terminator.EvictionQueueDepth.Set(0)
 	})
 
 	Context("Reconciliation", func() {
@@ -805,12 +804,13 @@ var _ = Describe("Termination", func() {
 			}})
 			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
 
+			wqDepthBefore, _ := FindMetricWithLabelValues("karpenter_workqueue_depth", map[string]string{"name": "eviction.workqueue"})
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue) // Reconcile the queue so that we set the metric
-
-			ExpectMetricGaugeValue(terminator.EvictionQueueDepth, 5, map[string]string{})
+			wqDepthAfter, ok := FindMetricWithLabelValues("karpenter_workqueue_depth", map[string]string{"name": "eviction.workqueue"})
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(wqDepthAfter.GetGauge().Value) - lo.FromPtr(wqDepthBefore.GetGauge().Value)).To(BeNumerically("==", 5))
 		})
 	})
 })

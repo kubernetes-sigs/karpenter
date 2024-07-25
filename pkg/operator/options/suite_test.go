@@ -99,7 +99,7 @@ var _ = Describe("Options", func() {
 				ServiceName:           lo.ToPtr(""),
 				DisableWebhook:        lo.ToPtr(false),
 				WebhookPort:           lo.ToPtr(8443),
-				MetricsPort:           lo.ToPtr(8000),
+				MetricsPort:           lo.ToPtr(8080),
 				WebhookMetricsPort:    lo.ToPtr(8001),
 				HealthProbePort:       lo.ToPtr(8081),
 				KubeClientQPS:         lo.ToPtr(200),

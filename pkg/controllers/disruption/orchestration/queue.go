@@ -115,13 +115,18 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	provisioner *provisioning.Provisioner,
 ) *Queue {
 	queue := &Queue{
-		RateLimitingInterface: workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay)),
-		providerIDToCommand:   map[string]*Command{},
-		kubeClient:            kubeClient,
-		recorder:              recorder,
-		cluster:               cluster,
-		clock:                 clock,
-		provisioner:           provisioner,
+		RateLimitingInterface: workqueue.NewRateLimitingQueueWithConfig(
+			workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay),
+			workqueue.RateLimitingQueueConfig{
+				Name:            "disruption.workqueue",
+				MetricsProvider: metrics.WorkqueueMetricsProvider{},
+			}),
+		providerIDToCommand: map[string]*Command{},
+		kubeClient:          kubeClient,
+		recorder:            recorder,
+		cluster:             cluster,
+		clock:               clock,
+		provisioner:         provisioner,
 	}
 	return queue
 }
@@ -164,11 +169,6 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 
 func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "disruption.queue")
-
-	// The queue depth is the number of commands currently being considered.
-	// This should not use the RateLimitingInterface.Len() method, as this does not include
-	// commands that haven't completed their requeue backoff.
-	disruptionQueueDepthGauge.Set(float64(len(lo.Uniq(lo.Values(q.providerIDToCommand)))))
 
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously retrying, there should be
