@@ -126,7 +126,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	// In order for stateful pods to smoothly migrate from the terminating Node, we wait for VolumeAttachments
 	// of drain-able pods to be cleaned up before terminating the node and removing it from the cluster.
 	// However, if TerminationGracePeriod is configured for node, and we are past that period, we will skip waiting.
-	if nodeTerminationTime == nil || time.Now().Before(*nodeTerminationTime) {
+	if nodeTerminationTime == nil || c.clock.Now().Before(*nodeTerminationTime) {
 		areVolumesDetached, err := c.ensureVolumesDetached(ctx, node)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("ensuring no volume attachments, %w", err)
