@@ -32,7 +32,6 @@ const (
 	CapacityTypeLabel = "capacity_type"
 
 	// Reasons for CREATE/DELETE shared metrics
-	EmptinessReason     = "emptiness"
 	ConsolidationReason = "consolidation"
 	ProvisioningReason  = "provisioning"
 	ExpirationReason    = "expiration"

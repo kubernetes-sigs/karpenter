@@ -56,9 +56,9 @@ var _ = Describe("Emptiness", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.NodePoolLabelKey:            nodePool.Name,
-					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					corev1.LabelInstanceTypeStable: leastExpensiveSpotInstance.Name,
+					v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
 			},
 			Status: v1.NodeClaimStatus{
@@ -99,10 +99,6 @@ var _ = Describe("Emptiness", func() {
 		})
 	})
 	Context("Metrics", func() {
-		var eligibleNodesEmptinessLabels = map[string]string{
-			"method":             "consolidation",
-			"consolidation_type": "empty",
-		}
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
@@ -112,18 +108,25 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
-			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
-			var wg sync.WaitGroup
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, map[string]string{
+				"method":             "consolidation",
+				"consolidation_type": "empty",
+			})
+
+			ExpectDeleted(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
 			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
-			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, eligibleNodesEmptinessLabels)
-			// delete pod and update cluster state, node should now be disruptable
-			ExpectDeleted(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
-			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, eligibleNodesEmptinessLabels)
+			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, map[string]string{
+				"method":             "consolidation",
+				"consolidation_type": "empty",
+			})
 		})
 	})
 	Context("Budgets", func() {
@@ -135,9 +138,9 @@ var _ = Describe("Emptiness", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1.NodeClaimStatus{
@@ -182,9 +185,9 @@ var _ = Describe("Emptiness", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1.NodeClaimStatus{
@@ -224,9 +227,9 @@ var _ = Describe("Emptiness", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+						corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 					},
 				},
 				Status: v1.NodeClaimStatus{
@@ -286,9 +289,9 @@ var _ = Describe("Emptiness", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
 							v1.NodePoolLabelKey:            np.Name,
-							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+							corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
 					Status: v1.NodeClaimStatus{
@@ -351,9 +354,9 @@ var _ = Describe("Emptiness", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
 							v1.NodePoolLabelKey:            np.Name,
-							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+							corev1.LabelInstanceTypeStable: leastExpensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        leastExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+							corev1.LabelTopologyZone:       leastExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 						},
 					},
 					Status: v1.NodeClaimStatus{

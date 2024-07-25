@@ -64,6 +64,7 @@ var _ = Describe("Consolidation", func() {
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
 					}},
+					ConsolidateAfter: v1.NillableDuration{Duration: lo.ToPtr(0 * time.Second)},
 				},
 			},
 		})
@@ -123,7 +124,7 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 	Context("Metrics", func() {
-		var consolidationTypes = []string{"empty", "single", "multi"}
+		var consolidationTypes = []string{"single", "multi"}
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -4577,7 +4578,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectToWait(&wg)
 			go func() {
 				defer GinkgoRecover()
-				_, _ = disruptionController.Reconcile(ctx)
+				ExpectSingletonReconciled(ctx, disruptionController)
 			}()
 			wg.Wait()
 
