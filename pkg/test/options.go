@@ -40,8 +40,8 @@ type OptionsFields struct {
 	DisableLeaderElection *bool
 	MemoryLimit           *int64
 	LogLevel              *string
-  LogOutputPaths       *string
-	LogErrorOutputPaths  *string
+	LogOutputPaths        *string
+	LogErrorOutputPaths   *string
 	BatchMaxDuration      *time.Duration
 	BatchIdleDuration     *time.Duration
 	FeatureGates          FeatureGates
@@ -72,8 +72,8 @@ func Options(overrides ...OptionsFields) *options.Options {
 		DisableLeaderElection: lo.FromPtrOr(opts.DisableLeaderElection, false),
 		MemoryLimit:           lo.FromPtrOr(opts.MemoryLimit, -1),
 		LogLevel:              lo.FromPtrOr(opts.LogLevel, ""),
-    LogOutputPaths:       lo.FromPtrOr(opts.LogOutputPaths, "stdout"),
-		LogErrorOutputPaths:  lo.FromPtrOr(opts.LogErrorOutputPaths, "stderr"),
+		LogOutputPaths:        lo.FromPtrOr(opts.LogOutputPaths, "stdout"),
+		LogErrorOutputPaths:   lo.FromPtrOr(opts.LogErrorOutputPaths, "stderr"),
 		BatchMaxDuration:      lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
 		BatchIdleDuration:     lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
 		FeatureGates: options.FeatureGates{
