@@ -56,7 +56,7 @@ type NodeClaimStatus struct {
 	// or removed from the node. A pod going terminal or terminating
 	// is also considered as removed.
 	// +optional
-	LastPodEventTime metav1.Time `json:"lastPodEvent,omitempty"`
+	LastPodEventTime metav1.Time `json:"lastPodEventTime,omitempty"`
 }
 
 func (in *NodeClaim) StatusConditions() status.ConditionSet {

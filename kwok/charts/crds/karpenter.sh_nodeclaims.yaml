@@ -367,7 +367,7 @@ spec:
                 imageID:
                   description: ImageID is an identifier for the image that runs on the node
                   type: string
-                lastPodEvent:
+                lastPodEventTime:
                   description: |-
                     LastPodEventTime is updated with the last time a pod was scheduled
                     or removed from the node. A pod going terminal or terminating
