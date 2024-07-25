@@ -54,7 +54,7 @@ var _ = Describe("Options", func() {
 		"KUBE_CLIENT_QPS",
 		"KUBE_CLIENT_BURST",
 		"ENABLE_PROFILING",
-		"LEADER_ELECT",
+		"DISABLE_LEADER_ELECTION",
 		"MEMORY_LIMIT",
 		"LOG_LEVEL",
 		"BATCH_MAX_DURATION",
@@ -96,20 +96,20 @@ var _ = Describe("Options", func() {
 			err := opts.Parse(fs)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
-				ServiceName:          lo.ToPtr(""),
-				DisableWebhook:       lo.ToPtr(false),
-				WebhookPort:          lo.ToPtr(8443),
-				MetricsPort:          lo.ToPtr(8080),
-				WebhookMetricsPort:   lo.ToPtr(8001),
-				HealthProbePort:      lo.ToPtr(8081),
-				KubeClientQPS:        lo.ToPtr(200),
-				KubeClientBurst:      lo.ToPtr(300),
-				EnableProfiling:      lo.ToPtr(false),
-				EnableLeaderElection: lo.ToPtr(true),
-				MemoryLimit:          lo.ToPtr[int64](-1),
-				LogLevel:             lo.ToPtr("info"),
-				BatchMaxDuration:     lo.ToPtr(10 * time.Second),
-				BatchIdleDuration:    lo.ToPtr(time.Second),
+				ServiceName:           lo.ToPtr(""),
+				DisableWebhook:        lo.ToPtr(false),
+				WebhookPort:           lo.ToPtr(8443),
+				MetricsPort:           lo.ToPtr(8080),
+				WebhookMetricsPort:    lo.ToPtr(8001),
+				HealthProbePort:       lo.ToPtr(8081),
+				KubeClientQPS:         lo.ToPtr(200),
+				KubeClientBurst:       lo.ToPtr(300),
+				EnableProfiling:       lo.ToPtr(false),
+				DisableLeaderElection: lo.ToPtr(false),
+				MemoryLimit:           lo.ToPtr[int64](-1),
+				LogLevel:              lo.ToPtr("info"),
+				BatchMaxDuration:      lo.ToPtr(10 * time.Second),
+				BatchIdleDuration:     lo.ToPtr(time.Second),
 				FeatureGates: test.FeatureGates{
 					SpotToSpotConsolidation: lo.ToPtr(false),
 				},
@@ -128,7 +128,7 @@ var _ = Describe("Options", func() {
 				"--kube-client-qps", "0",
 				"--kube-client-burst", "0",
 				"--enable-profiling",
-				"--leader-elect=false",
+				"--disable-leader-election=true",
 				"--memory-limit", "0",
 				"--log-level", "debug",
 				"--batch-max-duration", "5s",
@@ -137,20 +137,20 @@ var _ = Describe("Options", func() {
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
-				ServiceName:          lo.ToPtr("cli"),
-				DisableWebhook:       lo.ToPtr(true),
-				WebhookPort:          lo.ToPtr(0),
-				MetricsPort:          lo.ToPtr(0),
-				WebhookMetricsPort:   lo.ToPtr(0),
-				HealthProbePort:      lo.ToPtr(0),
-				KubeClientQPS:        lo.ToPtr(0),
-				KubeClientBurst:      lo.ToPtr(0),
-				EnableProfiling:      lo.ToPtr(true),
-				EnableLeaderElection: lo.ToPtr(false),
-				MemoryLimit:          lo.ToPtr[int64](0),
-				LogLevel:             lo.ToPtr("debug"),
-				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
-				BatchIdleDuration:    lo.ToPtr(5 * time.Second),
+				ServiceName:           lo.ToPtr("cli"),
+				DisableWebhook:        lo.ToPtr(true),
+				WebhookPort:           lo.ToPtr(0),
+				MetricsPort:           lo.ToPtr(0),
+				WebhookMetricsPort:    lo.ToPtr(0),
+				HealthProbePort:       lo.ToPtr(0),
+				KubeClientQPS:         lo.ToPtr(0),
+				KubeClientBurst:       lo.ToPtr(0),
+				EnableProfiling:       lo.ToPtr(true),
+				DisableLeaderElection: lo.ToPtr(true),
+				MemoryLimit:           lo.ToPtr[int64](0),
+				LogLevel:              lo.ToPtr("debug"),
+				BatchMaxDuration:      lo.ToPtr(5 * time.Second),
+				BatchIdleDuration:     lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
@@ -167,7 +167,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("KUBE_CLIENT_QPS", "0")
 			os.Setenv("KUBE_CLIENT_BURST", "0")
 			os.Setenv("ENABLE_PROFILING", "true")
-			os.Setenv("LEADER_ELECT", "false")
+			os.Setenv("DISABLE_LEADER_ELECTION", "true")
 			os.Setenv("MEMORY_LIMIT", "0")
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
@@ -180,20 +180,20 @@ var _ = Describe("Options", func() {
 			err := opts.Parse(fs)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
-				ServiceName:          lo.ToPtr("env"),
-				DisableWebhook:       lo.ToPtr(true),
-				WebhookPort:          lo.ToPtr(0),
-				MetricsPort:          lo.ToPtr(0),
-				WebhookMetricsPort:   lo.ToPtr(0),
-				HealthProbePort:      lo.ToPtr(0),
-				KubeClientQPS:        lo.ToPtr(0),
-				KubeClientBurst:      lo.ToPtr(0),
-				EnableProfiling:      lo.ToPtr(true),
-				EnableLeaderElection: lo.ToPtr(false),
-				MemoryLimit:          lo.ToPtr[int64](0),
-				LogLevel:             lo.ToPtr("debug"),
-				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
-				BatchIdleDuration:    lo.ToPtr(5 * time.Second),
+				ServiceName:           lo.ToPtr("env"),
+				DisableWebhook:        lo.ToPtr(true),
+				WebhookPort:           lo.ToPtr(0),
+				MetricsPort:           lo.ToPtr(0),
+				WebhookMetricsPort:    lo.ToPtr(0),
+				HealthProbePort:       lo.ToPtr(0),
+				KubeClientQPS:         lo.ToPtr(0),
+				KubeClientBurst:       lo.ToPtr(0),
+				EnableProfiling:       lo.ToPtr(true),
+				DisableLeaderElection: lo.ToPtr(true),
+				MemoryLimit:           lo.ToPtr[int64](0),
+				LogLevel:              lo.ToPtr("debug"),
+				BatchMaxDuration:      lo.ToPtr(5 * time.Second),
+				BatchIdleDuration:     lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
@@ -208,7 +208,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("KUBE_CLIENT_QPS", "0")
 			os.Setenv("KUBE_CLIENT_BURST", "0")
 			os.Setenv("ENABLE_PROFILING", "true")
-			os.Setenv("LEADER_ELECT", "false")
+			os.Setenv("DISABLE_LEADER_ELECTION", "true")
 			os.Setenv("MEMORY_LIMIT", "0")
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
@@ -225,20 +225,20 @@ var _ = Describe("Options", func() {
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
-				ServiceName:          lo.ToPtr("cli"),
-				DisableWebhook:       lo.ToPtr(true),
-				WebhookPort:          lo.ToPtr(0),
-				MetricsPort:          lo.ToPtr(0),
-				WebhookMetricsPort:   lo.ToPtr(0),
-				HealthProbePort:      lo.ToPtr(0),
-				KubeClientQPS:        lo.ToPtr(0),
-				KubeClientBurst:      lo.ToPtr(0),
-				EnableProfiling:      lo.ToPtr(true),
-				EnableLeaderElection: lo.ToPtr(false),
-				MemoryLimit:          lo.ToPtr[int64](0),
-				LogLevel:             lo.ToPtr("debug"),
-				BatchMaxDuration:     lo.ToPtr(5 * time.Second),
-				BatchIdleDuration:    lo.ToPtr(5 * time.Second),
+				ServiceName:           lo.ToPtr("cli"),
+				DisableWebhook:        lo.ToPtr(true),
+				WebhookPort:           lo.ToPtr(0),
+				MetricsPort:           lo.ToPtr(0),
+				WebhookMetricsPort:    lo.ToPtr(0),
+				HealthProbePort:       lo.ToPtr(0),
+				KubeClientQPS:         lo.ToPtr(0),
+				KubeClientBurst:       lo.ToPtr(0),
+				EnableProfiling:       lo.ToPtr(true),
+				DisableLeaderElection: lo.ToPtr(true),
+				MemoryLimit:           lo.ToPtr[int64](0),
+				LogLevel:              lo.ToPtr("debug"),
+				BatchMaxDuration:      lo.ToPtr(5 * time.Second),
+				BatchIdleDuration:     lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
@@ -294,7 +294,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.KubeClientQPS).To(Equal(optsB.KubeClientQPS))
 	Expect(optsA.KubeClientBurst).To(Equal(optsB.KubeClientBurst))
 	Expect(optsA.EnableProfiling).To(Equal(optsB.EnableProfiling))
-	Expect(optsA.EnableLeaderElection).To(Equal(optsB.EnableLeaderElection))
+	Expect(optsA.DisableLeaderElection).To(Equal(optsB.DisableLeaderElection))
 	Expect(optsA.MemoryLimit).To(Equal(optsB.MemoryLimit))
 	Expect(optsA.LogLevel).To(Equal(optsB.LogLevel))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))

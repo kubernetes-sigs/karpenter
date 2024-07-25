@@ -147,5 +147,5 @@ func GetLabelOrDefault(labels map[string]string, key string) string {
 func init() {
 	crmetrics.Registry.MustRegister(NodeClaimsCreatedCounter, NodeClaimsTerminatedCounter, NodeClaimsLaunchedCounter,
 		NodeClaimsRegisteredCounter, NodeClaimsInitializedCounter, NodeClaimsDisruptedCounter, NodeClaimsDriftedCounter,
-		NodesCreatedCounter, NodesTerminatedCounter)
+		NodesCreatedCounter, NodesTerminatedCounter, workqueueDepth, workqueueAdds, workqueueLatency, workDuration, workqueueUnfinished, workqueueLongestRunningProcessor, workqueueRetries)
 }
