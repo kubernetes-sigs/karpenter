@@ -152,6 +152,7 @@ func IsOwnedByStatefulSet(pod *corev1.Pod) bool {
 func IsOwnedByDaemonSet(pod *corev1.Pod) bool {
 	return IsOwnedBy(pod, []schema.GroupVersionKind{
 		{Group: "apps", Version: "v1", Kind: "DaemonSet"},
+		{Group: "apps.kruise.io", Version: "v1alpha1", Kind: "DaemonSet"},
 	})
 }
 
