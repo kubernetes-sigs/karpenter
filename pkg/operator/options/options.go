@@ -61,7 +61,7 @@ type Options struct {
 	BatchMaxDuration      time.Duration
 	BatchIdleDuration     time.Duration
 	FeatureGates          FeatureGates
-	RegistrationDuration time.Duration
+	RegistrationDuration  time.Duration
 }
 
 type FlagSet struct {

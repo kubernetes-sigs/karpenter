@@ -43,7 +43,7 @@ type OptionsFields struct {
 	BatchMaxDuration      *time.Duration
 	BatchIdleDuration     *time.Duration
 	FeatureGates          FeatureGates
-	RegistrationDuration time.Duration
+	RegistrationDuration  *time.Duration
 }
 
 type FeatureGates struct {
