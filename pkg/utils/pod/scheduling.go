@@ -146,6 +146,7 @@ func IsStuckTerminating(pod *corev1.Pod, clk clock.Clock) bool {
 func IsOwnedByStatefulSet(pod *corev1.Pod) bool {
 	return IsOwnedBy(pod, []schema.GroupVersionKind{
 		{Group: "apps", Version: "v1", Kind: "StatefulSet"},
+		{Group: "apps.kruise.io", Version: "v1beta1", Kind: "StatefulSet"},
 	})
 }
 
