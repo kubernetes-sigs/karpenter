@@ -95,8 +95,8 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, err
 	}
 
-	if err := c.terminator.Taint(ctx, node, v1.DisruptionNoScheduleTaint); err != nil {
-		return reconcile.Result{}, fmt.Errorf("tainting node with %s, %w", v1.DisruptionTaintKey, err)
+	if err := c.terminator.Taint(ctx, node, v1.DisruptedNoScheduleTaint); err != nil {
+		return reconcile.Result{}, fmt.Errorf("tainting node with %s, %w", v1.DisruptedTaintKey, err)
 	}
 	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {

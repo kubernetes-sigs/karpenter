@@ -182,7 +182,7 @@ var _ = Describe("Termination", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podSkip := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []corev1.Toleration{{Key: v1.DisruptionTaintKey, Operator: corev1.TolerationOpEqual, Effect: v1.DisruptionNoScheduleTaint.Effect, Value: v1.DisruptionNoScheduleTaint.Value}},
+				Tolerations: []corev1.Toleration{{Key: v1.DisruptedTaintKey, Operator: corev1.TolerationOpEqual, Effect: v1.DisruptedNoScheduleTaint.Effect, Value: v1.DisruptedNoScheduleTaint.Value}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podSkip)
@@ -212,7 +212,7 @@ var _ = Describe("Termination", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podSkip := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []corev1.Toleration{{Key: v1.DisruptionTaintKey, Operator: corev1.TolerationOpExists, Effect: v1.DisruptionNoScheduleTaint.Effect}},
+				Tolerations: []corev1.Toleration{{Key: v1.DisruptedTaintKey, Operator: corev1.TolerationOpExists, Effect: v1.DisruptedNoScheduleTaint.Effect}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podSkip)
@@ -818,7 +818,7 @@ var _ = Describe("Termination", func() {
 func ExpectNodeWithNodeClaimDraining(c client.Client, nodeName string) *corev1.Node {
 	GinkgoHelper()
 	node := ExpectNodeExists(ctx, c, nodeName)
-	Expect(node.Spec.Taints).To(ContainElement(v1.DisruptionNoScheduleTaint))
+	Expect(node.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 	Expect(lo.Contains(node.Finalizers, v1.TerminationFinalizer)).To(BeTrue())
 	Expect(node.DeletionTimestamp).ToNot(BeNil())
 	return node
