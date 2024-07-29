@@ -66,7 +66,7 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 
 	node := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node); err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting node, %w", err)
+		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
 	}
 
 	// If the node isn't owned by Karpenter, don't do anything
@@ -77,7 +77,7 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 	// If there's no associated node claim, it's not a karpenter owned node.
 	nc, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
-		// if the nodeclaim doesn't exist, or has duplicates,
+		// if the nodeclaim doesn't exist, or has duplicates, ignore.
 		if nodeutils.IsDuplicateNodeClaimError(err) || nodeutils.IsNodeClaimNotFoundError(err) {
 			return reconcile.Result{}, nil
 		}
@@ -88,10 +88,9 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 	// If we've set the lastPodEvent before and it hasn't been before the timeout, don't do anything
 	if !nc.Status.LastPodEventTime.Time.IsZero() && c.clock.Since(nc.Status.LastPodEventTime.Time) < dedupeTimeout {
 		return reconcile.Result{}, nil
-	} else {
-		// otherwise, set the pod event time to now
-		nc.Status.LastPodEventTime.Time = c.clock.Now()
 	}
+	// otherwise, set the pod event time to now
+	nc.Status.LastPodEventTime.Time = c.clock.Now()
 	if !equality.Semantic.DeepEqual(stored, nc) {
 		if err := c.kubeClient.Status().Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -117,11 +116,6 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 				terminating := (newPod.Spec.NodeName != "" && !podutils.IsTerminating(oldPod) && podutils.IsTerminating(newPod))
 				// return true if it was bound to a node, went terminal, or went terminating
 				return bound || terminal || terminating
-			},
-			// If the pod is deleted, but wasn't already treated as terminal or terminating
-			DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
-				pod := (e.Object).(*corev1.Pod)
-				return pod.Spec.NodeName != ""
 			},
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

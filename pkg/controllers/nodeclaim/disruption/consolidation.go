@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -69,7 +68,7 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 			log.FromContext(ctx).V(1).Info("removing consolidatable status condition")
 		}
 		consolidatableTime := nodeClaim.Status.LastPodEventTime.Add(lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration))
-		return reconcile.Result{RequeueAfter: time.Until(consolidatableTime)}, nil
+		return reconcile.Result{RequeueAfter: consolidatableTime.Sub(c.clock.Now())}, nil
 	}
 
 	// 6. Otherwise, add the consolidatable status condition

@@ -92,7 +92,7 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		return false
 	}
 	if cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.nodePool.Name))...)
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has non-empty consolidation disabled", cn.nodePool.Name))...)
 		return false
 	}
 	// return true if consolidatable
