@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -123,4 +124,8 @@ func (d *Drift) Class() string {
 
 func (d *Drift) ConsolidationType() string {
 	return ""
+}
+
+func (d *Drift) EvictionReason(nodeClaim *v1.NodeClaim) string {
+	return fmt.Sprintf("node %s drifted", nodeClaim.Status.NodeName)
 }
