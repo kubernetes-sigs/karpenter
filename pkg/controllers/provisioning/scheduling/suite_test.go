@@ -1091,6 +1091,126 @@ var _ = Context("Scheduling", func() {
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
+			It("Should learn true allocatable and prevent continuous node creation when resources are overestimated", func() {
+				// Simulate overestimation by setting empty overhead
+				instanceType := &cloudprovider.InstanceType{
+					Name: "overestimated-instance",
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("4"),
+						corev1.ResourceMemory: resource.MustParse("16Gi"),
+						corev1.ResourcePods:   resource.MustParse("10"),
+					},
+					Overhead: &cloudprovider.InstanceTypeOverhead{},
+					Offerings: []cloudprovider.Offering{
+						{
+							Requirements: pscheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
+							Price:        0.5,
+							Available:    true,
+						},
+					},
+				}
+
+				nodeClaimTemplate := &scheduling.NodeClaimTemplate{
+					NodePoolName:        nodePool.Name,
+					InstanceTypeOptions: cloudprovider.InstanceTypes{instanceType},
+					Requirements:        pscheduling.NewRequirements(pscheduling.NewRequirement(v1.NodePoolLabelKey, corev1.NodeSelectorOpIn, nodePool.Name)),
+				}
+
+				// Create a pod that just fits the overestimated resources
+				pod := test.Pod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3.4"), corev1.ResourceMemory: resource.MustParse("15Gi")},
+					},
+				})
+
+				allocatableCache := cache.New(time.Hour*24, time.Hour)
+
+				// Attempt to schedule the pod
+				firstNodeClaim := scheduling.NewNodeClaim(nodeClaimTemplate, &scheduling.Topology{}, corev1.ResourceList{}, []*cloudprovider.InstanceType{instanceType}, allocatableCache)
+				err := firstNodeClaim.Add(pod)
+
+				// Expect pod to be scheduled for the first time
+				Expect(err).ShouldNot(HaveOccurred())
+
+				// Simulate node creation and actual resource discovery
+				// Update the shared cache with actual allocatable
+				actualAllocatable := corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("3"),
+					corev1.ResourceMemory: resource.MustParse("14Gi"),
+					corev1.ResourcePods:   resource.MustParse("10"),
+				}
+
+				cacheKey := fmt.Sprintf("allocatableCache;%s;%s", nodePool.Name, instanceType.Name)
+				allocatableCache.Set(cacheKey, actualAllocatable, cache.DefaultExpiration)
+
+				// Should fail to schedule the pod again
+				secondNodeClaim := scheduling.NewNodeClaim(nodeClaimTemplate, &scheduling.Topology{}, corev1.ResourceList{}, []*cloudprovider.InstanceType{instanceType}, allocatableCache)
+				err = secondNodeClaim.Add(pod)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("no instance type satisfied resources"))
+
+				// Verify that the allocatable used was the actual allocatable, not the overestimated one
+				cachedAllocatable, found := allocatableCache.Get(cacheKey)
+				Expect(found).To(BeTrue())
+				ExpectResources(cachedAllocatable.(corev1.ResourceList), actualAllocatable)
+			})
+			It("should learn true allocatable resources when resources are underestimated", func() {
+				// Simulate underestimation by increasing reserved to 6Gi
+				instanceType := &cloudprovider.InstanceType{
+					Name:     "underestimated-instance",
+					Capacity: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("16Gi")},
+					Overhead: &cloudprovider.InstanceTypeOverhead{
+						KubeReserved:      corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")},
+						SystemReserved:    corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")},
+						EvictionThreshold: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")},
+					},
+					Offerings: []cloudprovider.Offering{
+						{
+							Requirements: pscheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
+							Price:        0.5,
+							Available:    true,
+						},
+					},
+				}
+
+				nodeClaimTemplate := &scheduling.NodeClaimTemplate{
+					NodePoolName:        nodePool.Name,
+					InstanceTypeOptions: cloudprovider.InstanceTypes{instanceType},
+					Requirements:        pscheduling.NewRequirements(pscheduling.NewRequirement(v1.NodePoolLabelKey, corev1.NodeSelectorOpIn, nodePool.Name)),
+				}
+
+				// Create a pod that doesn't fit the underestimated resources but would fit the actual resources
+				pod := test.Pod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3.5"), corev1.ResourceMemory: resource.MustParse("14Gi")},
+					},
+				})
+
+				allocatableCache := cache.New(time.Hour*24, time.Hour)
+
+				// Initially, scheduling should fail
+				firstNodeClaim := scheduling.NewNodeClaim(nodeClaimTemplate, &scheduling.Topology{}, corev1.ResourceList{}, []*cloudprovider.InstanceType{instanceType}, allocatableCache)
+				err := firstNodeClaim.Add(pod)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("no instance type satisfied resources"))
+
+				// Simulate discovery of actual resources
+				// Update the shared cache with actual allocatable
+				actualAllocatable := corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("3.8"),
+					corev1.ResourceMemory: resource.MustParse("15Gi"),
+					corev1.ResourcePods:   resource.MustParse("10"),
+				}
+
+				cacheMapKey := fmt.Sprintf("allocatableCache;%s;%s", nodePool.Name, instanceType.Name)
+				allocatableCache.Set(cacheMapKey, actualAllocatable, cache.DefaultExpiration)
+
+				// Attempt to schedule the pod again
+				secondNodeClaim := scheduling.NewNodeClaim(nodeClaimTemplate, &scheduling.Topology{}, corev1.ResourceList{}, []*cloudprovider.InstanceType{instanceType}, allocatableCache)
+				err = secondNodeClaim.Add(pod)
+
+				Expect(err).NotTo(HaveOccurred())
+			})
 		})
 	})
 
