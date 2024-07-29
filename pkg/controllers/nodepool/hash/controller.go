@@ -31,8 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/patrickmn/go-cache"
+
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/utils/sharedcache"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
@@ -41,11 +42,13 @@ import (
 // The hash is placed in the metadata for increased observability and should be found on each object.
 type Controller struct {
 	kubeClient client.Client
+	cache      *cache.Cache
 }
 
-func NewController(kubeClient client.Client) *Controller {
+func NewController(kubeClient client.Client, sharedCache *cache.Cache) *Controller {
 	return &Controller{
 		kubeClient: kubeClient,
+		cache:      sharedCache,
 	}
 }
 
@@ -67,9 +70,9 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 	if !equality.Semantic.DeepEqual(stored, np) {
 		// Clear relevant allocatable cache if the hash has changed
-		for cacheKey := range sharedcache.SharedCache().Items() {
+		for cacheKey := range c.cache.Items() {
 			if strings.HasPrefix(cacheKey, fmt.Sprintf("allocatableCache;%s;", np.Name)) {
-				sharedcache.SharedCache().Delete(cacheKey)
+				c.cache.Delete(cacheKey)
 				log.FromContext(ctx).WithValues("NodePool", np.Name).Info("Cleared allocatable cache")
 			}
 		}

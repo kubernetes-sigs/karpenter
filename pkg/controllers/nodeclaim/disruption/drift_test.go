@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/imdario/mergo"
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -403,7 +404,7 @@ var _ = Describe("Drift", func() {
 		var nodePoolController *hash.Controller
 		BeforeEach(func() {
 			cp.Drifted = ""
-			nodePoolController = hash.NewController(env.Client)
+			nodePoolController = hash.NewController(env.Client, cache.New(time.Hour*24, time.Hour))
 			nodePool = &v1.NodePool{
 				ObjectMeta: nodePool.ObjectMeta,
 				Spec: v1.NodePoolSpec{

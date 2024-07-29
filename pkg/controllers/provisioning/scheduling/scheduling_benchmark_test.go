@@ -30,6 +30,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -176,8 +177,8 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	scheduler := scheduling.NewScheduler(client, []*v1.NodePool{nodePool},
 		cluster, nil, topology,
 		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil,
-		events.NewRecorder(&record.FakeRecorder{}))
-
+		events.NewRecorder(&record.FakeRecorder{}),
+		cache.New(time.Hour*24, time.Hour))
 	b.ResetTimer()
 	// Pack benchmark
 	start := time.Now()

@@ -17,6 +17,8 @@ limitations under the License.
 package controllers
 
 import (
+	"time"
+
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/utils/clock"
@@ -26,6 +28,8 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
+
+	"github.com/patrickmn/go-cache"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -60,7 +64,9 @@ func NewControllers(
 ) []controller.Controller {
 
 	cluster := state.NewCluster(clock, kubeClient)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster)
+	sharedCache := cache.New(time.Hour*24, time.Hour)
+
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, sharedCache)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
 
@@ -69,7 +75,7 @@ func NewControllers(
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewPodController(kubeClient, p),
 		provisioning.NewNodeController(kubeClient, p),
-		nodepoolhash.NewController(kubeClient),
+		nodepoolhash.NewController(kubeClient, sharedCache),
 		expiration.NewController(clock, kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
@@ -84,7 +90,7 @@ func NewControllers(
 		nodepoolcounter.NewController(kubeClient, cluster),
 		nodepoolvalidation.NewController(kubeClient),
 		nodeclaimconsistency.NewController(clock, kubeClient, recorder),
-		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, sharedCache),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewController(kubeClient, cloudProvider, recorder),
 		nodeclaimdisruption.NewController(clock, kubeClient, cluster, cloudProvider),

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -35,11 +36,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
-	"sigs.k8s.io/karpenter/pkg/utils/sharedcache"
 )
 
 type Registration struct {
 	kubeClient client.Client
+	cache      cache.Cache
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
@@ -101,10 +102,10 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 		nodeClaim.Labels[v1.NodePoolLabelKey],
 		nodeClaim.Labels[corev1.LabelInstanceTypeStable],
 	)
-	cacheValue, found := sharedcache.SharedCache().Get(cacheMapKey)
+	cacheValue, found := r.cache.Get(cacheMapKey)
 	if !found || !equality.Semantic.DeepEqual(cacheValue.(corev1.ResourceList), nodeClaim.Status.Allocatable) {
 		log.FromContext(ctx).WithValues("NodePool", nodeClaim.Labels[v1.NodePoolLabelKey]).Info(fmt.Sprintf("Settings %s to allocatable cache for nodepool", nodeClaim.Labels[corev1.LabelInstanceTypeStable]))
-		sharedcache.SharedCache().Set(cacheMapKey, stored.Status.Allocatable, sharedcache.DefaultSharedCacheTTL)
+		r.cache.Set(cacheMapKey, stored.Status.Allocatable, cache.DefaultExpiration)
 	}
 
 	nodeClaim.Status.Allocatable = stored.Status.Allocatable

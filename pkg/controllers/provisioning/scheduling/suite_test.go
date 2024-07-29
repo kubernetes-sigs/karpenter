@@ -30,8 +30,10 @@ import (
 
 	"github.com/awslabs/operatorpkg/status"
 
+	"github.com/patrickmn/go-cache"
 	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
+
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -98,7 +100,7 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, cache.New(time.Hour*24, time.Hour))
 })
 
 var _ = AfterSuite(func() {

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -28,7 +29,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
-	"sigs.k8s.io/karpenter/pkg/utils/sharedcache"
 )
 
 // NodeClaim is a set of constraints, compatible pods, and possible instance types that could fulfill these constraints. This
@@ -44,7 +44,7 @@ type NodeClaim struct {
 
 var nodeID int64
 
-func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *NodeClaim {
+func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType, sharedCache *cache.Cache) *NodeClaim {
 	// Copy the template, and add hostname
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
@@ -54,6 +54,7 @@ func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daem
 	template.Requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
 	template.InstanceTypeOptions = instanceTypes
 	template.Spec.Resources.Requests = daemonResources
+	template.cache = sharedCache
 
 	return &NodeClaim{
 		NodeClaimTemplate: template,
@@ -263,7 +264,7 @@ func (n *NodeClaim) filterInstanceTypesByRequirements(requirements scheduling.Re
 			n.NodePoolName,
 			it.Name,
 		)
-		cachedAllocatable, ok := sharedcache.SharedCache().Get(cacheMapKey)
+		cachedAllocatable, ok := n.cache.Get(cacheMapKey)
 		if ok && cachedAllocatable != nil {
 			it.SetAllocatable(cachedAllocatable.(v1.ResourceList))
 		}
