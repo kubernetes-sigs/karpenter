@@ -681,7 +681,7 @@ func (env *Environment) EventuallyExpectEmpty(nodeClaims ...*v1.NodeClaim) {
 	Eventually(func(g Gomega) {
 		for _, nc := range nodeClaims {
 			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
-			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
+			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 		}
 	}).Should(Succeed())
 }

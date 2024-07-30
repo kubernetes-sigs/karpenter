@@ -61,8 +61,8 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	}
 	// 2. Otherwise, if the NodeClaim isn't drifted, but has the status condition, remove it.
 	if driftedReason == "" {
-		_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeDrifted)
 		if hasDriftedCondition {
+			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeDrifted)
 			log.FromContext(ctx).V(1).Info("removing drifted status condition, not drifted")
 		}
 		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil

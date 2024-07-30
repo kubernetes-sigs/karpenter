@@ -18,6 +18,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -29,6 +30,54 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
+
+// NodeClaimNotFoundError is an error returned when no v1.NodeClaims are found matching the passed providerID
+type NodeClaimNotFoundError struct {
+	ProviderID string
+}
+
+func (e *NodeClaimNotFoundError) Error() string {
+	return fmt.Sprintf("no nodeclaims found for provider id '%s'", e.ProviderID)
+}
+
+func IsNodeClaimNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	nnfErr := &NodeClaimNotFoundError{}
+	return errors.As(err, &nnfErr)
+}
+
+func IgnoreNodeClaimNotFoundError(err error) error {
+	if !IsNodeClaimNotFoundError(err) {
+		return err
+	}
+	return nil
+}
+
+// DuplicateNodeClaimError is an error returned when multiple v1.NodeClaims are found matching the passed providerID
+type DuplicateNodeClaimError struct {
+	ProviderID string
+}
+
+func (e *DuplicateNodeClaimError) Error() string {
+	return fmt.Sprintf("multiple found for provider id '%s'", e.ProviderID)
+}
+
+func IsDuplicateNodeClaimError(err error) bool {
+	if err == nil {
+		return false
+	}
+	dnErr := &DuplicateNodeClaimError{}
+	return errors.As(err, &dnErr)
+}
+
+func IgnoreDuplicateNodeClaimError(err error) error {
+	if !IsDuplicateNodeClaimError(err) {
+		return err
+	}
+	return nil
+}
 
 // GetPods grabs all pods that are currently bound to the passed nodes
 func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
@@ -52,6 +101,24 @@ func GetNodeClaims(ctx context.Context, node *corev1.Node, kubeClient client.Cli
 		return nil, fmt.Errorf("listing nodeClaims, %w", err)
 	}
 	return lo.ToSlicePtr(nodeClaimList.Items), nil
+}
+
+// NodeForNodeClaim is a helper function that takes a v1.NodeClaim and attempts to find the matching corev1.Node by its providerID
+// This function will return errors if:
+//  1. No corev1.Nodes match the v1.NodeClaim providerID
+//  2. Multiple corev1.Nodes match the v1.NodeClaim providerID
+func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (*v1.NodeClaim, error) {
+	nodes, err := GetNodeClaims(ctx, node, c)
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) > 1 {
+		return nil, &DuplicateNodeClaimError{ProviderID: node.Spec.ProviderID}
+	}
+	if len(nodes) == 0 {
+		return nil, &DuplicateNodeClaimError{ProviderID: node.Spec.ProviderID}
+	}
+	return nodes[0], nil
 }
 
 // GetReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria

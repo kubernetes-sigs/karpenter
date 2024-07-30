@@ -367,6 +367,13 @@ spec:
                 imageID:
                   description: ImageID is an identifier for the image that runs on the node
                   type: string
+                lastPodEventTime:
+                  description: |-
+                    LastPodEventTime is updated with the last time a pod was scheduled
+                    or removed from the node. A pod going terminal or terminating
+                    is also considered as removed.
+                  format: date-time
+                  type: string
                 nodeName:
                   description: NodeName is the name of the corresponding node object
                   type: string

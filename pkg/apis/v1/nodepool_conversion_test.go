@@ -206,8 +206,15 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 			})
 		})
 		Context("Disruption", func() {
-			It("should convert v1 nodepool consolidateAfter", func() {
-				v1nodepool.Spec.Disruption.ConsolidateAfter = &NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
+			It("should convert v1 nodepool consolidateAfter to nil with WhenUnderutilized", func() {
+				v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
+				v1nodepool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
+				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+				Expect(v1beta1nodepool.Spec.Disruption.ConsolidateAfter).To(BeNil())
+			})
+			It("should convert v1 nodepool consolidateAfter with WhenEmpty", func() {
+				v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
+				v1nodepool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
 				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
 				Expect(lo.FromPtr(v1beta1nodepool.Spec.Disruption.ConsolidateAfter.Duration)).To(Equal(lo.FromPtr(v1nodepool.Spec.Disruption.ConsolidateAfter.Duration)))
 			})
@@ -479,7 +486,14 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 			})
 		})
 		Context("Disruption", func() {
-			It("should convert v1beta1 nodepool consolidateAfter", func() {
+			It("should convert v1beta1 nodepool consolidateAfter to 0 for WhenUnderutilized", func() {
+				v1beta1nodepool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+				v1beta1nodepool.Spec.Disruption.ConsolidateAfter = nil
+				Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+				Expect(lo.FromPtr(v1nodepool.Spec.Disruption.ConsolidateAfter.Duration)).To(BeEquivalentTo(0))
+			})
+			It("should convert v1beta1 nodepool consolidateAfter for WhenEmpty", func() {
+				v1beta1nodepool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
 				v1beta1nodepool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
 				Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
 				Expect(v1nodepool.Spec.Disruption.ConsolidateAfter.Duration).To(Equal(v1beta1nodepool.Spec.Disruption.ConsolidateAfter.Duration))

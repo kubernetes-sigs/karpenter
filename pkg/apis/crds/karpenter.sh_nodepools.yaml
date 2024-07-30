@@ -71,8 +71,6 @@ spec:
                 from a combination of nodepool and pod scheduling constraints.
               properties:
                 disruption:
-                  default:
-                    consolidationPolicy: WhenUnderutilized
                   description: Disruption contains the parameters that relate to Karpenter's disruption logic
                   properties:
                     budgets:
@@ -155,12 +153,9 @@ spec:
                         - WhenEmpty
                         - WhenUnderutilized
                       type: string
+                  required:
+                    - consolidateAfter
                   type: object
-                  x-kubernetes-validations:
-                    - message: consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized
-                      rule: 'has(self.consolidateAfter) ? self.consolidationPolicy != ''WhenUnderutilized'' || self.consolidateAfter == ''Never'' : true'
-                    - message: consolidateAfter must be specified with consolidationPolicy=WhenEmpty
-                      rule: 'self.consolidationPolicy == ''WhenEmpty'' ? has(self.consolidateAfter) : true'
                 limits:
                   additionalProperties:
                     anyOf:
