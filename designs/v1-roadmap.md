@@ -119,7 +119,7 @@ Users have asked that we make this a configurable field so that they can tweak w
 
 **Category:** Breaking
 
-Users care about the removal of their nodes within a certain timeframe due to security requirements. Budgets, `karpenter.sh/do-not-disrupt` pods and blocking PDBs should not stop us from starting the drain of the node after it exceeds its expireAfter value. Once a node has begun evicting, it will remain on the cluster up to its t`erminationGracePeriod` duration (assuming there are blocking PDBs or pods that are running with the `karpenter.sh/do-not-disrupt` annotation) and then be removed.
+Users care about the removal of their nodes within a certain timeframe due to security requirements. Budgets, `karpenter.sh/do-not-disrupt` pods and blocking PDBs should not stop us from starting the drain of the node after it exceeds its expireAfter value. Once a node has begun evicting, it will remain on the cluster up to its `terminationGracePeriod` duration (assuming there are blocking PDBs or pods that are running with the `karpenter.sh/do-not-disrupt` annotation) and then be removed.
 
 #### Tasks
 
