@@ -302,7 +302,7 @@ var _ = Describe("Drift", func() {
 
 			nodes = ExpectNodes(ctx, env.Client)
 			Expect(len(lo.Filter(nodes, func(nc *corev1.Node, _ int) bool {
-				return lo.Contains(nc.Spec.Taints, v1.DisruptionNoScheduleTaint)
+				return lo.Contains(nc.Spec.Taints, v1.DisruptedNoScheduleTaint)
 			}))).To(Equal(3))
 			// Execute all commands in the queue, only deleting 3 nodes
 			for i := 0; i < 5; i++ {
@@ -765,7 +765,7 @@ var _ = Describe("Drift", func() {
 			ExpectSingletonReconciled(ctx, queue)
 			// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
 			node = ExpectExists(ctx, env.Client, node)
-			Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptionNoScheduleTaint))
+			Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
 		It("can replace drifted nodes with multiple nodes", func() {
 			currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
