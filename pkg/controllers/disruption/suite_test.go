@@ -158,7 +158,14 @@ var _ = AfterEach(func() {
 var _ = Describe("Simulate Scheduling", func() {
 	var nodePool *v1.NodePool
 	BeforeEach(func() {
-		nodePool = test.NodePool()
+		nodePool = test.NodePool(v1.NodePool{
+			Spec: v1.NodePoolSpec{
+				Disruption: v1.Disruption{
+					ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
+					ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+				},
+			},
+		})
 	})
 	It("should allow pods on deleting nodes to reschedule to uninitialized nodes", func() {
 		numNodes := 10
