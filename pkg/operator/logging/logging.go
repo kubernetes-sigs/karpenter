@@ -43,14 +43,6 @@ func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 		// Webhooks are deprecated, so support for changing their log level is also deprecated
 		logLevel = lo.Must(zap.ParseAtomicLevel(l))
 	}
-	outputPaths := []string{"stdout"}
-	if o := options.FromContext(ctx).LogOutputPaths; o != "" {
-		outputPaths = strings.Split(o, ",")
-	}
-	errorPaths := []string{"stderr"}
-	if e := options.FromContext(ctx).LogErrorOutputPaths; e != "" {
-		errorPaths = strings.Split(e, ",")
-	}
 	return zap.Config{
 		Level:             logLevel,
 		Development:       false,
@@ -75,8 +67,8 @@ func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 			EncodeDuration: zapcore.StringDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		},
-		OutputPaths:      outputPaths,
-		ErrorOutputPaths: errorPaths,
+		OutputPaths:      strings.Split(options.FromContext(ctx).LogOutputPaths, ","),
+		ErrorOutputPaths: strings.Split(options.FromContext(ctx).LogErrorOutputPaths, ","),
 	}
 }
 
