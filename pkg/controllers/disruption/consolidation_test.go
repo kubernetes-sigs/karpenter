@@ -384,6 +384,7 @@ var _ = Describe("Consolidation", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
@@ -420,6 +421,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -449,6 +451,7 @@ var _ = Describe("Consolidation", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
 						}},
@@ -484,6 +487,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -513,6 +517,7 @@ var _ = Describe("Consolidation", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
@@ -548,6 +553,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -632,6 +638,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -718,6 +725,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -804,6 +812,7 @@ var _ = Describe("Consolidation", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
@@ -2782,6 +2791,7 @@ var _ = Describe("Consolidation", func() {
 						},
 					},
 				})
+				m.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 				ExpectApplied(ctx, env.Client, pods[i], m, n)
 				ExpectManualBinding(ctx, env.Client, pods[i], n)
 
@@ -2811,6 +2821,7 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
+			consolidatableNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 
 			// create a new RS so we can link a pod to it
 			rs = test.ReplicaSet()
