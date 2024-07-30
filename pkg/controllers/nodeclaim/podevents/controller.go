@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -67,11 +66,6 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 	node := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
-	}
-
-	// If the node isn't owned by Karpenter, don't do anything
-	if _, ok := node.Labels[v1.NodePoolLabelKey]; !ok {
-		return reconcile.Result{}, nil
 	}
 
 	// If there's no associated node claim, it's not a karpenter owned node.

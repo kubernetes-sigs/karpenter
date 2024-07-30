@@ -71,7 +71,6 @@ var _ = Describe("Emptiness", func() {
 				},
 			},
 			Status: v1.NodeClaimStatus{
-				ProviderID: test.RandomProviderID(),
 				Allocatable: map[corev1.ResourceName]resource.Quantity{
 					corev1.ResourceCPU:  resource.MustParse("32"),
 					corev1.ResourcePods: resource.MustParse("100"),
@@ -81,33 +80,7 @@ var _ = Describe("Emptiness", func() {
 		nodeClaim, nodeClaim2 = nodeClaims[0], nodeClaims[1]
 		node, node2 = nodes[0], nodes[1]
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-	})
-	Context("Events", func() {
-		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenUnderutilized", func() {
-			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenUnderutilized
-			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))}
-			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
-
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
-			var wg sync.WaitGroup
-			ExpectToWait(&wg)
-			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
-
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(0))
-		})
-		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
-			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{}
-			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
-
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
-
-			// We get six calls here because we have Nodes and NodeClaims that fired for this event
-			// and each of the consolidation mechanisms specifies that this event should be fired
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(6))
-		})
+		nodeClaim2.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 	})
 	Context("Metrics", func() {
 		It("should correctly report eligible nodes", func() {
@@ -261,7 +234,12 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			wg := sync.WaitGroup{}
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
 			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
@@ -324,7 +302,11 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			wg := sync.WaitGroup{}
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
@@ -389,7 +371,12 @@ var _ = Describe("Emptiness", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			wg := sync.WaitGroup{}
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
@@ -411,7 +398,11 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectToWait(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
 			ExpectSingletonReconciled(ctx, queue)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -487,6 +478,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
 		fakeClock.Step(10 * time.Minute)
+
 		wg := sync.WaitGroup{}
 		ExpectToWait(&wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
