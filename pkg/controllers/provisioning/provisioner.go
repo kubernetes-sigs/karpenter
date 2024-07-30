@@ -25,6 +25,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
+	"k8s.io/utils/clock"
 
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
@@ -85,11 +86,9 @@ type Provisioner struct {
 	cm             *pretty.ChangeMonitor
 }
 
-func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
-	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
-) *Provisioner {
+func NewProvisioner(clk clock.Clock, kubeClient client.Client, recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Provisioner {
 	p := &Provisioner{
-		batcher:        NewBatcher[types.UID](),
+		batcher:        NewBatcher[types.UID](clk),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
 		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
