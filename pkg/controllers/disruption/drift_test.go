@@ -49,7 +49,6 @@ var _ = Describe("Drift", func() {
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
 					ConsolidateAfter: &v1.NillableDuration{Duration: nil},
-					ExpireAfter:      v1.NillableDuration{Duration: nil},
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
@@ -96,11 +95,7 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
-			wg := sync.WaitGroup{}
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
-
 			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, eligibleNodesLabels)
 
 			// remove the do-not-disrupt annotation to make the node eligible for drift and update cluster state
@@ -109,10 +104,7 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
-
 			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, eligibleNodesLabels)
 		})
 	})
@@ -157,13 +149,9 @@ var _ = Describe("Drift", func() {
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
 
-			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -200,13 +188,9 @@ var _ = Describe("Drift", func() {
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
 
-			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -243,13 +227,8 @@ var _ = Describe("Drift", func() {
 			}
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
-
-			metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -316,17 +295,14 @@ var _ = Describe("Drift", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			// Reconcile 5 times, enqueuing 3 commands total.
 			for i := 0; i < 5; i++ {
 				ExpectSingletonReconciled(ctx, disruptionController)
 			}
-			wg.Wait()
 
 			nodes = ExpectNodes(ctx, env.Client)
 			Expect(len(lo.Filter(nodes, func(nc *corev1.Node, _ int) bool {
-				return lo.Contains(nc.Spec.Taints, v1.DisruptionNoScheduleTaint)
+				return lo.Contains(nc.Spec.Taints, v1.DisruptedNoScheduleTaint)
 			}))).To(Equal(3))
 			// Execute all commands in the queue, only deleting 3 nodes
 			for i := 0; i < 5; i++ {
@@ -340,11 +316,15 @@ var _ = Describe("Drift", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidateAfter: &v1.NillableDuration{Duration: nil},
-						ExpireAfter:      v1.NillableDuration{Duration: nil},
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
 						}},
+					},
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimSpec{
+							ExpireAfter: v1.NillableDuration{Duration: nil},
+						},
 					},
 				},
 			})
@@ -383,14 +363,10 @@ var _ = Describe("Drift", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
 
 			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
@@ -407,7 +383,6 @@ var _ = Describe("Drift", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidateAfter: &v1.NillableDuration{Duration: nil},
-						ExpireAfter:      v1.NillableDuration{Duration: nil},
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
 						}},
@@ -449,14 +424,10 @@ var _ = Describe("Drift", func() {
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
 
 			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_disruption_budgets_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
@@ -468,7 +439,6 @@ var _ = Describe("Drift", func() {
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 	})
-
 	Context("Drift", func() {
 		It("should continue to the next drifted node if the first cannot reschedule all pods", func() {
 			pod := test.Pod(test.PodOptions{
@@ -517,7 +487,6 @@ var _ = Describe("Drift", func() {
 
 			// disruption won't delete the old node until the new node is ready
 			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -650,12 +619,7 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
-
 			// Process the item so that the nodes can be deleted.
 			ExpectSingletonReconciled(ctx, queue)
 			// Cascade any deletion of the nodeClaim to the node
@@ -694,11 +658,7 @@ var _ = Describe("Drift", func() {
 
 			// inform cluster state about nodes and nodeClaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
 			ExpectSingletonReconciled(ctx, queue)
@@ -743,7 +703,6 @@ var _ = Describe("Drift", func() {
 
 			// disruption won't delete the old nodeClaim until the new nodeClaim is ready
 			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -797,15 +756,16 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
+			// Wait > 5 seconds for eventual consistency hack in orchestration.Queue
+			fakeClock.Step(5*time.Second + time.Nanosecond*1)
 			ExpectSingletonReconciled(ctx, queue)
 			// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
 			node = ExpectExists(ctx, env.Client, node)
-			Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptionNoScheduleTaint))
+			Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
 		It("can replace drifted nodes with multiple nodes", func() {
 			currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -887,7 +847,6 @@ var _ = Describe("Drift", func() {
 
 			// disruption won't delete the old node until the new node is ready
 			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 3)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -963,7 +922,6 @@ var _ = Describe("Drift", func() {
 
 			// disruption won't delete the old node until the new node is ready
 			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
@@ -987,12 +945,7 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			fakeClock.Step(10 * time.Minute)
-
-			var wg sync.WaitGroup
-			ExpectTriggerVerifyAction(&wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			wg.Wait()
-
 			// Process the item so that the nodes can be deleted.
 			ExpectSingletonReconciled(ctx, queue)
 			// Cascade any deletion of the nodeClaim to the node

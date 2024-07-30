@@ -28,7 +28,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
-			Name:      "leases_deleted",
+			Name:      "leases_deleted_total",
 			Help:      "Number of deleted leaked leases.",
 		},
 		[]string{},

@@ -509,7 +509,7 @@ func (env *Environment) ConsistentlyExpectDisruptionsWithNodeCount(disruptingNod
 
 		nodes = lo.Filter(nodeList.Items, func(n corev1.Node, _ int) bool {
 			_, ok := lo.Find(n.Spec.Taints, func(t corev1.Taint) bool {
-				return v1.IsDisruptingTaint(t)
+				return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
 			})
 			return ok
 		})

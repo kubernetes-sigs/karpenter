@@ -29,6 +29,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -49,12 +50,12 @@ import (
 const TestingFinalizer = "testing/finalizer"
 
 var (
-	ObjectsToPrint = []client.Object{
-		&corev1.Pod{},
-		&v1.NodePool{},
-		&corev1.Node{},
-		&v1.NodeClaim{},
-		&v1alpha1.KWOKNodeClass{},
+	ObjectListsToPrint = []client.ObjectList{
+		&corev1.PodList{},
+		&v1.NodePoolList{},
+		&corev1.NodeList{},
+		&v1.NodeClaimList{},
+		&v1alpha1.KWOKNodeClassList{},
 	}
 	CleanableObjects = []client.Object{
 		&corev1.Pod{},
@@ -127,14 +128,13 @@ func (env *Environment) AfterEach() {
 }
 
 func (env *Environment) PrintCluster() {
-	for _, obj := range ObjectsToPrint {
+	for _, obj := range ObjectListsToPrint {
 		gvk := lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme()))
 		By(fmt.Sprintf("printing %s(s)", gvk.Kind))
-		// This only gets the metadata for the objects since we don't need all the details of the objects
-		metaList := &metav1.PartialObjectMetadataList{}
-		metaList.SetGroupVersionKind(lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme())))
-		Expect(env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel}))).To(Succeed())
-		for _, item := range metaList.Items {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk)
+		Expect(env.Client.List(env, list, client.HasLabels([]string{test.DiscoveryLabel}))).To(Succeed())
+		for _, item := range list.Items {
 			fmt.Println(pretty.Concise(item))
 			fmt.Println()
 		}

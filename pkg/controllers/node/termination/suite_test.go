@@ -97,7 +97,6 @@ var _ = Describe("Termination", func() {
 		// Reset the metrics collectors
 		metrics.NodesTerminatedCounter.Reset()
 		termination.TerminationSummary.Reset()
-		terminator.EvictionQueueDepth.Set(0)
 	})
 
 	Context("Reconciliation", func() {
@@ -183,7 +182,7 @@ var _ = Describe("Termination", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podSkip := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []corev1.Toleration{{Key: v1.DisruptionTaintKey, Operator: corev1.TolerationOpEqual, Effect: v1.DisruptionNoScheduleTaint.Effect, Value: v1.DisruptionNoScheduleTaint.Value}},
+				Tolerations: []corev1.Toleration{{Key: v1.DisruptedTaintKey, Operator: corev1.TolerationOpEqual, Effect: v1.DisruptedNoScheduleTaint.Effect, Value: v1.DisruptedNoScheduleTaint.Value}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podSkip)
@@ -213,7 +212,7 @@ var _ = Describe("Termination", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podSkip := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []corev1.Toleration{{Key: v1.DisruptionTaintKey, Operator: corev1.TolerationOpExists, Effect: v1.DisruptionNoScheduleTaint.Effect}},
+				Tolerations: []corev1.Toleration{{Key: v1.DisruptedTaintKey, Operator: corev1.TolerationOpExists, Effect: v1.DisruptedNoScheduleTaint.Effect}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podSkip)
@@ -786,7 +785,7 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated_total", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
 		})
@@ -805,12 +804,13 @@ var _ = Describe("Termination", func() {
 			}})
 			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
 
+			wqDepthBefore, _ := FindMetricWithLabelValues("karpenter_workqueue_depth", map[string]string{"name": "eviction.workqueue"})
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue) // Reconcile the queue so that we set the metric
-
-			ExpectMetricGaugeValue(terminator.EvictionQueueDepth, 5, map[string]string{})
+			wqDepthAfter, ok := FindMetricWithLabelValues("karpenter_workqueue_depth", map[string]string{"name": "eviction.workqueue"})
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(wqDepthAfter.GetGauge().Value) - lo.FromPtr(wqDepthBefore.GetGauge().Value)).To(BeNumerically("==", 5))
 		})
 	})
 })
@@ -818,7 +818,7 @@ var _ = Describe("Termination", func() {
 func ExpectNodeWithNodeClaimDraining(c client.Client, nodeName string) *corev1.Node {
 	GinkgoHelper()
 	node := ExpectNodeExists(ctx, c, nodeName)
-	Expect(node.Spec.Taints).To(ContainElement(v1.DisruptionNoScheduleTaint))
+	Expect(node.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 	Expect(lo.Contains(node.Finalizers, v1.TerminationFinalizer)).To(BeTrue())
 	Expect(node.DeletionTimestamp).ToNot(BeNil())
 	return node

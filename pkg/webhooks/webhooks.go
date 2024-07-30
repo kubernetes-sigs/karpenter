@@ -81,12 +81,13 @@ func NewWebhooks() []knativeinjection.ControllerConstructor {
 
 func NewCRDConversionWebhook(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	nodeclassCtx := injection.GetNodeClasses(ctx)
+	client := injection.GetClient(ctx)
 	return conversion.NewConversionController(
 		ctx,
 		"/conversion/karpenter.sh",
 		ConversionResource,
 		func(ctx context.Context) context.Context {
-			return injection.WithNodeClasses(ctx, nodeclassCtx)
+			return injection.WithClient(injection.WithNodeClasses(ctx, nodeclassCtx), client)
 		},
 	)
 }

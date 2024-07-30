@@ -19,6 +19,7 @@ package v1_test
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 
@@ -220,6 +221,16 @@ var _ = Describe("Validation", func() {
 				req = append(req, NodeSelectorRequirementWithMinValues{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: test.RandomName(), Operator: v1.NodeSelectorOpIn, Values: []string{test.RandomName()}}})
 			}
 			nodeClaim.Spec.Requirements = req
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
+		})
+	})
+	Context("TerminationGracePeriod", func() {
+		It("should succeed on a positive terminationGracePeriod duration", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
+		})
+		It("should fail on a negative terminationGracePeriod duration", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * -30}
 			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
 		})
 	})
