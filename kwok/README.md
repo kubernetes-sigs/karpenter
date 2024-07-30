@@ -5,13 +5,24 @@ Before using the kwok provider, make sure that you don't have an installed versi
 ## Requirements
 - Have an image repository that you can build, push, and pull images from.
   - For an example on how to set up an image repository refer to [karpenter.sh](https://karpenter.sh/docs/contributing/development-guide/#environment-specific-setup)
+  - When working with a Kind cluster, run
+  ```bash
+  export KWOK_REPO=kind.local
+  ```
 - Have a cluster that you can install Karpenter on to.
   - For an example on how to make a cluster in AWS, refer to [karpenter.sh](https://karpenter.sh/docs/getting-started/getting-started-with-karpenter/)
+  - For an example on how to make a cluster with Kind, refer to [kind.sigs.k8s.io](https://kind.sigs.k8s.io/docs/user/quick-start/)
 
 ## Installing
+- When using an AWS cluster, run:
 ```bash
 make install-kwok
 make apply
+```
+- When using a Kind cluster, run:
+```bash
+make install-kwok
+make apply-with-kind
 ```
 
 ## Create a NodePool
