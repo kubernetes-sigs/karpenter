@@ -365,7 +365,7 @@ var _ = Describe("Termination", func() {
 			daemonEvict := test.DaemonSet()
 			daemonNodeCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-node-critical"}})
 			daemonClusterCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-cluster-critical"}})
-			ExpectApplied(ctx, env.Client, node, nodeClaim, daemonEvict, daemonNodeCritical, daemonClusterCritical)
+			ExpectApplied(ctx, env.Client, daemonEvict, daemonNodeCritical, daemonClusterCritical)
 
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podDaemonEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
@@ -400,47 +400,90 @@ var _ = Describe("Termination", func() {
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectPodExists(ctx, env.Client, podEvict.Name, podEvict.Namespace)
-			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
-			// Expect node to exist and be draining
-			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
-			// Expect podEvict to be evicting, and delete it
-			EventuallyExpectTerminating(ctx, env.Client, podEvict)
-			ExpectDeleted(ctx, env.Client, podEvict)
+			for _, podGroup := range [][]*corev1.Pod{{podEvict}, {podDaemonEvict}, {podNodeCritical, podClusterCritical}, {podDaemonNodeCritical, podDaemonClusterCritical}} {
+				for _, p := range podGroup {
+					ExpectPodExists(ctx, env.Client, p.Name, p.Namespace)
+				}
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+				for range podGroup {
+					ExpectSingletonReconciled(ctx, queue)
+				}
+				EventuallyExpectTerminating(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
+				ExpectDeleted(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
+			}
 
-			// Expect the noncritical Daemon pod to be evicted
+			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectPodExists(ctx, env.Client, podDaemonEvict.Name, podDaemonEvict.Namespace)
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
-			EventuallyExpectTerminating(ctx, env.Client, podDaemonEvict)
-			ExpectDeleted(ctx, env.Client, podDaemonEvict)
-
-			// Expect the critical pods to be evicted and deleted
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectPodExists(ctx, env.Client, podNodeCritical.Name, podNodeCritical.Namespace)
-			ExpectPodExists(ctx, env.Client, podClusterCritical.Name, podClusterCritical.Namespace)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should evict pods in order and wait until pods are fully deleted", func() {
+			daemonEvict := test.DaemonSet()
+			daemonNodeCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-node-critical"}})
+			daemonClusterCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-cluster-critical"}})
+			ExpectApplied(ctx, env.Client, daemonEvict, daemonNodeCritical, daemonClusterCritical)
 
-			EventuallyExpectTerminating(ctx, env.Client, podNodeCritical, podClusterCritical)
-			ExpectDeleted(ctx, env.Client, podNodeCritical)
-			ExpectDeleted(ctx, env.Client, podClusterCritical)
+			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			podDaemonEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "DaemonSet",
+				Name:               daemonEvict.Name,
+				UID:                daemonEvict.UID,
+				Controller:         lo.ToPtr(true),
+				BlockOwnerDeletion: lo.ToPtr(true),
+			}}}})
+			podNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			podClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
+			podDaemonNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "DaemonSet",
+				Name:               daemonNodeCritical.Name,
+				UID:                daemonNodeCritical.UID,
+				Controller:         lo.ToPtr(true),
+				BlockOwnerDeletion: lo.ToPtr(true),
+			}}}})
+			podDaemonClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "apps/v1",
+				Kind:               "DaemonSet",
+				Name:               daemonClusterCritical.Name,
+				UID:                daemonClusterCritical.UID,
+				Controller:         lo.ToPtr(true),
+				BlockOwnerDeletion: lo.ToPtr(true),
+			}}}})
 
-			// Expect the critical daemon pods to be evicted and deleted
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectPodExists(ctx, env.Client, podDaemonNodeCritical.Name, podDaemonNodeCritical.Namespace)
-			ExpectPodExists(ctx, env.Client, podDaemonClusterCritical.Name, podDaemonClusterCritical.Namespace)
-			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podNodeCritical, podClusterCritical, podDaemonEvict, podDaemonNodeCritical, podDaemonClusterCritical)
 
-			EventuallyExpectTerminating(ctx, env.Client, podDaemonNodeCritical, podDaemonClusterCritical)
-			ExpectDeleted(ctx, env.Client, podDaemonNodeCritical)
-			ExpectDeleted(ctx, env.Client, podDaemonClusterCritical)
+			// Trigger Termination Controller
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+			podGroups := [][]*corev1.Pod{{podEvict}, {podDaemonEvict}, {podNodeCritical, podClusterCritical}, {podDaemonNodeCritical, podDaemonClusterCritical}}
+			for i, podGroup := range podGroups {
+				node = ExpectNodeExists(ctx, env.Client, node.Name)
+				for _, p := range podGroup {
+					ExpectPodExists(ctx, env.Client, p.Name, p.Namespace)
+				}
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+				for range podGroup {
+					ExpectSingletonReconciled(ctx, queue)
+				}
+				// Start draining the pod group, but don't complete it yet
+				EventuallyExpectTerminating(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
+
+				// Look at the next pod group and ensure that none of the pods have started terminating on it
+				if i != len(podGroups)-1 {
+					for range podGroups[i+1] {
+						ExpectSingletonReconciled(ctx, queue)
+					}
+					ConsistentlyExpectNotTerminating(ctx, env.Client, lo.Map(podGroups[i+1], func(p *corev1.Pod, _ int) client.Object { return p })...)
+				}
+				// Expect that the pods are deleted -- which should unblock the next pod group
+				ExpectDeleted(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
+			}
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)

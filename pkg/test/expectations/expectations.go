@@ -691,6 +691,7 @@ func ExpectEvicted(ctx context.Context, c client.Client, pods ...*corev1.Pod) {
 }
 
 // EventuallyExpectTerminating ensures that the deletion timestamp is eventually set
+// We need this since there is some propagation time for the eviction API to set the deletionTimestamp
 func EventuallyExpectTerminating(ctx context.Context, c client.Client, objs ...client.Object) {
 	GinkgoHelper()
 
@@ -699,5 +700,18 @@ func EventuallyExpectTerminating(ctx context.Context, c client.Client, objs ...c
 			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
 			g.Expect(obj.GetDeletionTimestamp().IsZero()).ToNot(BeTrue())
 		}
-	}, ReconcilerPropagationTime, RequestInterval).Should(Succeed())
+	}, time.Second).Should(Succeed())
+}
+
+// ConsistentlyExpectNotTerminating ensures that the deletion timestamp is not set
+// We need this since there is some propagation time for the eviction API to set the deletionTimestamp
+func ConsistentlyExpectNotTerminating(ctx context.Context, c client.Client, objs ...client.Object) {
+	GinkgoHelper()
+
+	Consistently(func(g Gomega) {
+		for _, obj := range objs {
+			g.Expect(c.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
+			g.Expect(obj.GetDeletionTimestamp().IsZero()).To(BeTrue())
+		}
+	}, time.Second).Should(Succeed())
 }

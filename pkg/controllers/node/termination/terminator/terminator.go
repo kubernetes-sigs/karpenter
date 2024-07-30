@@ -18,6 +18,7 @@ package terminator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -96,30 +97,27 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
-
 	podsToDelete := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
 		return podutil.IsWaitingEviction(p, t.clock) && !podutil.IsTerminating(p)
 	})
 	if err := t.DeleteExpiringPods(ctx, podsToDelete, nodeGracePeriodExpirationTime); err != nil {
 		return fmt.Errorf("deleting expiring pods, %w", err)
 	}
-
-	// evictablePods are pods that aren't yet terminating are eligible to have the eviction API called against them
-	evictablePods := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p) })
-	t.Evict(evictablePods)
-
-	// podsWaitingEvictionCount is the number of pods that either haven't had eviction called against them yet
-	// or are still actively terminating and haven't exceeded their termination grace period yet
-	podsWaitingEvictionCount := lo.CountBy(pods, func(p *corev1.Pod) bool { return podutil.IsWaitingEviction(p, t.clock) })
-	if podsWaitingEvictionCount > 0 {
-		return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", len(pods)))
+	// Monitor pods in pod groups that either haven't been evicted or are actively evicting
+	podGroups := t.groupPodsByPriority(lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsWaitingEviction(p, t.clock) }))
+	for _, group := range podGroups {
+		if len(group) > 0 {
+			// Only add pods to the eviction queue that haven't been evicted yet
+			t.evictionQueue.Add(lo.Filter(group, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p) })...)
+			return NewNodeDrainError(errors.New("pods are waiting to be evicted"))
+		}
 	}
 	return nil
 }
 
-func (t *Terminator) Evict(pods []*corev1.Pod) {
+func (t *Terminator) groupPodsByPriority(pods []*corev1.Pod) [][]*corev1.Pod {
 	// 1. Prioritize noncritical pods, non-daemon pods https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
-	var criticalNonDaemon, criticalDaemon, nonCriticalNonDaemon, nonCriticalDaemon []*corev1.Pod
+	var nonCriticalNonDaemon, nonCriticalDaemon, criticalNonDaemon, criticalDaemon []*corev1.Pod
 	for _, pod := range pods {
 		if pod.Spec.PriorityClassName == "system-cluster-critical" || pod.Spec.PriorityClassName == "system-node-critical" {
 			if podutil.IsOwnedByDaemonSet(pod) {
@@ -135,25 +133,7 @@ func (t *Terminator) Evict(pods []*corev1.Pod) {
 			}
 		}
 	}
-
-	// EvictInOrder evicts only the first list of pods which is not empty
-	// future Evict calls will catch later lists of pods that were not initially evicted
-	t.EvictInOrder(
-		nonCriticalNonDaemon,
-		nonCriticalDaemon,
-		criticalNonDaemon,
-		criticalDaemon,
-	)
-}
-
-func (t *Terminator) EvictInOrder(pods ...[]*corev1.Pod) {
-	for _, podList := range pods {
-		if len(podList) > 0 {
-			// evict the first list of pods that is not empty, ignore the rest
-			t.evictionQueue.Add(podList...)
-			return
-		}
-	}
+	return [][]*corev1.Pod{nonCriticalNonDaemon, nonCriticalDaemon, criticalNonDaemon, criticalDaemon}
 }
 
 func (t *Terminator) DeleteExpiringPods(ctx context.Context, pods []*corev1.Pod, nodeGracePeriodTerminationTime *time.Time) error {
