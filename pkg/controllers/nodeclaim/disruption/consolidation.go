@@ -67,7 +67,7 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
 			log.FromContext(ctx).V(1).Info("removing consolidatable status condition")
 		}
-		consolidatableTime := nodeClaim.Status.LastPodEventTime.Add(lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration))
+		consolidatableTime := timeToCheck.Add(lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration))
 		return reconcile.Result{RequeueAfter: consolidatableTime.Sub(c.clock.Now())}, nil
 	}
 
