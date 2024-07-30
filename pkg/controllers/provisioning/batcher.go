@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/clock"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
@@ -31,15 +32,17 @@ import (
 // maximum batch duration.
 type Batcher[T comparable] struct {
 	trigger chan struct{}
+	clk     clock.Clock
 
 	mu               sync.RWMutex
 	triggeredOnElems sets.Set[T]
 }
 
 // NewBatcher is a constructor for the Batcher
-func NewBatcher[T comparable]() *Batcher[T] {
+func NewBatcher[T comparable](clk clock.Clock) *Batcher[T] {
 	return &Batcher[T]{
 		trigger:          make(chan struct{}, 1),
+		clk:              clk,
 		triggeredOnElems: sets.New[T](),
 	}
 }
@@ -76,23 +79,23 @@ func (b *Batcher[T]) Wait(ctx context.Context) bool {
 	select {
 	case <-b.trigger:
 		// start the batching window after the first item is received
-	case <-time.After(1 * time.Second):
+	case <-b.clk.After(1 * time.Second):
 		// If no pods, bail to the outer controller framework to refresh the context
 		return false
 	}
-	timeout := time.NewTimer(options.FromContext(ctx).BatchMaxDuration)
-	idle := time.NewTimer(options.FromContext(ctx).BatchIdleDuration)
+	timeout := b.clk.NewTimer(options.FromContext(ctx).BatchMaxDuration)
+	idle := b.clk.NewTimer(options.FromContext(ctx).BatchIdleDuration)
 	for {
 		select {
 		case <-b.trigger:
 			// correct way to reset an active timer per docs
 			if !idle.Stop() {
-				<-idle.C
+				<-idle.C()
 			}
 			idle.Reset(options.FromContext(ctx).BatchIdleDuration)
-		case <-timeout.C:
+		case <-timeout.C():
 			return true
-		case <-idle.C:
+		case <-idle.C():
 			return true
 		}
 	}
