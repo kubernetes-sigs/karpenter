@@ -364,6 +364,7 @@ var _ = Describe("Simulate Scheduling", func() {
 				},
 			},
 		})
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		labels := map[string]string{
 			"app": "test",
 		}

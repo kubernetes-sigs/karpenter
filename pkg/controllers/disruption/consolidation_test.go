@@ -3502,11 +3502,9 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
-			for _, nc := range nodeClaims {
-				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-			}
-			for _, nc := range spotNodeClaims {
-				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			for i := range nodeClaims {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+				spotNodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 			}
 		})
 		DescribeTable("can merge 3 nodes into 1", func(spotToSpot bool) {
