@@ -26,6 +26,7 @@ This list represents the minimal set of changes that are needed to ensure proper
 10. [NodeClaim Conceptual Documentation](#nodeclaim-conceptual-documentation)
 11. [Drop Knative References from the Code](#drop-knative-references-from-the-code)
 12. [Migrate Knative Webhook away from Karpenter](#drop-knative-webhook-from-karpenter)
+13. [Karpenter Global Logging Configuration Changes](#karpenter-global-logging-configuration-changes)
 13. [Promoting Drift Feature to Stable](#promoting-drift-feature-to-stable)
 
 ### v1 APIs
@@ -188,6 +189,18 @@ As part of Karpenter completely removing its dependency on Knative, Karpenter ne
 #### Tasks
 
 - [ ] Drop the webhook, removing the `knative/pkg` dependency from the Karpenter controller package
+
+### Karpenter Global Logging Configuration Changes
+
+**Issue Ref(s):** https://github.com/aws/karpenter-provider-aws/issues/5352
+
+**Category:** Planned Deprecations, Breaking
+
+Dropping our global logging configuration was a planned deprecation at v1beta1 and we will continue by fully dropping support for the ConfigMap-based configuration for our logging at v1.
+
+#### Tasks
+
+- [ ] Remove logging configuration (only allow LOG_LEVEL, potentially LOG_ENCODING if users request it)
 
 ### Promoting Drift Feature to Stable
 
