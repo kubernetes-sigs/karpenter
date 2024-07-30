@@ -515,7 +515,7 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: nil}
-		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptionNoScheduleTaint)
+		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -1793,12 +1793,12 @@ var _ = Describe("Metrics", func() {
 		})
 	})
 	It("should fire metrics for single node delete disruption", func() {
-		nodeClaims, nodes := nodeClaims[:2], nodes[:2]
+		nodeClaims, nodes = nodeClaims[:2], nodes[:2]
 		pods := test.Pods(4, test.PodOptions{})
 
 		// only allow one node to be disruptable
 		nodeClaims[0].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-		nodeClaims[1].StatusConditions().Clear(v1.ConditionTypeConsolidatable)
+		Expect(nodeClaims[1].StatusConditions().Clear(v1.ConditionTypeConsolidatable)).To(Succeed())
 
 		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
 

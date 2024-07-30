@@ -55,7 +55,7 @@ func IsReschedulable(pod *corev1.Pod) bool {
 // - Does not have the "karpenter.sh/do-not-disrupt=true" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls)
 func IsEvictable(pod *corev1.Pod) bool {
 	return IsActive(pod) &&
-		!ToleratesDisruptionNoScheduleTaint(pod) &&
+		!ToleratesDisruptedNoScheduleTaint(pod) &&
 		!IsOwnedByNode(pod) &&
 		!HasDoNotDisrupt(pod)
 }
@@ -69,7 +69,7 @@ func IsEvictable(pod *corev1.Pod) bool {
 func IsWaitingEviction(pod *corev1.Pod, clk clock.Clock) bool {
 	return !IsTerminal(pod) &&
 		!IsStuckTerminating(pod, clk) &&
-		!ToleratesDisruptionNoScheduleTaint(pod) &&
+		!ToleratesDisruptedNoScheduleTaint(pod) &&
 		// Mirror pods cannot be deleted through the API server since they are created and managed by kubelet
 		// This means they are effectively read-only and can't be controlled by API server calls
 		// https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#drain
@@ -174,8 +174,8 @@ func HasDoNotDisrupt(pod *corev1.Pod) bool {
 	return pod.Annotations[v1.DoNotDisruptAnnotationKey] == "true"
 }
 
-// ToleratesDisruptionNoScheduleTaint returns true if the pod tolerates karpenter.sh/disruption:NoSchedule=Disrupting taint
-func ToleratesDisruptionNoScheduleTaint(pod *corev1.Pod) bool {
+// ToleratesDisruptedNoScheduleTaint returns true if the pod tolerates karpenter.sh/disrupted:NoSchedule taint
+func ToleratesDisruptedNoScheduleTaint(pod *corev1.Pod) bool {
 	return scheduling.Taints([]corev1.Taint{v1.DisruptedNoScheduleTaint}).Tolerates(pod) == nil
 }
 
