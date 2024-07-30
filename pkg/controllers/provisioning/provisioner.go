@@ -87,7 +87,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	clock clock.Clock,
 ) *Provisioner {
 	p := &Provisioner{
-		batcher:        NewBatcher[types.UID](),
+		batcher:        NewBatcher[types.UID](clock),
 		cloudProvider:  cloudProvider,
 		kubeClient:     kubeClient,
 		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
