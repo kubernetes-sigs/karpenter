@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1
 
 import (
 	"context"
@@ -43,9 +43,6 @@ type NodePoolSpec struct {
 	// +required
 	Template NodeClaimTemplate `json:"template"`
 	// Disruption contains the parameters that relate to Karpenter's disruption logic
-	// +kubebuilder:default={"consolidationPolicy": "WhenUnderutilized", "expireAfter": "720h"}
-	// +kubebuilder:validation:XValidation:message="consolidateAfter cannot be combined with consolidationPolicy=WhenUnderutilized",rule="has(self.consolidateAfter) ? self.consolidationPolicy != 'WhenUnderutilized' || self.consolidateAfter == 'Never' : true"
-	// +kubebuilder:validation:XValidation:message="consolidateAfter must be specified with consolidationPolicy=WhenEmpty",rule="self.consolidationPolicy == 'WhenEmpty' ? has(self.consolidateAfter) : true"
 	// +optional
 	Disruption Disruption `json:"disruption"`
 	// Limits define a set of bounds for provisioning capacity.
@@ -68,24 +65,14 @@ type Disruption struct {
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
-	// +optional
-	ConsolidateAfter *NillableDuration `json:"consolidateAfter,omitempty"`
+	// +required
+	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenUnderutilized" if not specified
 	// +kubebuilder:default:="WhenUnderutilized"
 	// +kubebuilder:validation:Enum:={WhenEmpty,WhenUnderutilized}
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
-	// ExpireAfter is the duration the controller will wait
-	// before terminating a node, measured from when the node is created. This
-	// is useful to implement features like eventually consistent node upgrade,
-	// memory leak protection, and disruption testing.
-	// +kubebuilder:default:="720h"
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
-	// +kubebuilder:validation:Type="string"
-	// +kubebuilder:validation:Schemaless
-	// +optional
-	ExpireAfter NillableDuration `json:"expireAfter"`
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,
@@ -100,6 +87,11 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
+	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
+	// Otherwise, this will apply to each reason defined.
+	// allowed reasons are Underutilized, Empty, and Drifted.
+	// +optional
+	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
 	// that can be terminating at once. This is calculated by counting nodes that
 	// have a deletion timestamp set, or are actively being deleted by Karpenter.
@@ -134,6 +126,21 @@ type ConsolidationPolicy string
 const (
 	ConsolidationPolicyWhenEmpty         ConsolidationPolicy = "WhenEmpty"
 	ConsolidationPolicyWhenUnderutilized ConsolidationPolicy = "WhenUnderutilized"
+)
+
+// DisruptionReason defines valid reasons for disruption budgets.
+// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
+type DisruptionReason string
+
+const (
+	DisruptionReasonUnderutilized DisruptionReason = "Underutilized"
+	DisruptionReasonEmpty         DisruptionReason = "Empty"
+	DisruptionReasonDrifted       DisruptionReason = "Drifted"
+)
+
+var (
+	// DisruptionReasons is a list of all valid reasons for disruption budgets.
+	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonEmpty, DisruptionReasonDrifted}
 )
 
 type Limits v1.ResourceList
@@ -176,10 +183,14 @@ type ObjectMeta struct {
 
 // NodePool is the Schema for the NodePools API
 // +kubebuilder:object:root=true
-// +kubebuilder:storageversion
 // +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter
 // +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClassRef.name",description=""
-// +kubebuilder:printcolumn:name="Weight",type="string",JSONPath=".spec.weight",priority=1,description=""
+// +kubebuilder:printcolumn:name="Nodes",type="string",JSONPath=".status.resources.nodes",description=""
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
+// +kubebuilder:printcolumn:name="Weight",type="integer",JSONPath=".spec.weight",priority=1,description=""
+// +kubebuilder:printcolumn:name="CPU",type="string",JSONPath=".status.resources.cpu",priority=1,description=""
+// +kubebuilder:printcolumn:name="Memory",type="string",JSONPath=".status.resources.memory",priority=1,description=""
 // +kubebuilder:subresource:status
 type NodePool struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -194,7 +205,7 @@ type NodePool struct {
 // 1. A field changes its default value for an existing field that is already hashed
 // 2. A field is added to the hash calculation with an already-set value
 // 3. A field is removed from the hash calculations
-const NodePoolHashVersion = "v2"
+const NodePoolHashVersion = "v3"
 
 func (in *NodePool) Hash() string {
 	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec.Template, hashstructure.FormatV2, &hashstructure.HashOptions{
@@ -229,30 +240,37 @@ func (nl *NodePoolList) OrderByWeight() {
 	})
 }
 
-// MustGetAllowedDisruptions calls GetAllowedDisruptions and returns 0 if the error is not nil. This reduces the
-// amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptions()
+// MustGetAllowedDisruptions calls GetAllowedDisruptionsByReason if the error is not nil. This reduces the
+// amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptionsByReason()
 // to bubble up any errors in validation.
-func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) int {
-	val, err := in.GetAllowedDisruptions(ctx, c, numNodes)
+func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) map[DisruptionReason]int {
+	allowedDisruptions, err := in.GetAllowedDisruptionsByReason(ctx, c, numNodes)
 	if err != nil {
-		return 0
+		return map[DisruptionReason]int{}
 	}
-	return val
+	return allowedDisruptions
 }
 
-// GetAllowedDisruptions returns the minimum allowed disruptions across all disruption budgets for a given node pool.
-// This will return an error if there is a configuration error with any budget's node or schedule values.
-func (in *NodePool) GetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) (int, error) {
-	minVal := math.MaxInt32
+// GetAllowedDisruptionsByReason returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
+func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
 	var multiErr error
-	for i := range in.Spec.Disruption.Budgets {
-		val, err := in.Spec.Disruption.Budgets[i].GetAllowedDisruptions(c, numNodes)
+	allowedDisruptions := map[DisruptionReason]int{}
+	for _, reason := range WellKnownDisruptionReasons {
+		allowedDisruptions[reason] = math.MaxInt32
+	}
+
+	for _, budget := range in.Spec.Disruption.Budgets {
+		val, err := budget.GetAllowedDisruptions(c, numNodes)
 		if err != nil {
 			multiErr = multierr.Append(multiErr, err)
 		}
-		minVal = lo.Ternary(val < minVal, val, minVal)
+		// If reasons is nil, it applies to all well known disruption reasons
+		for _, reason := range lo.Ternary(budget.Reasons == nil, WellKnownDisruptionReasons, budget.Reasons) {
+			allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], val})
+		}
 	}
-	return minVal, multiErr
+
+	return allowedDisruptions, multiErr
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison
