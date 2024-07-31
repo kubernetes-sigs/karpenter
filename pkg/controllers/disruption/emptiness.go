@@ -45,7 +45,7 @@ func NewEmptiness(c consolidation) *Emptiness {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	// If consolidation is disabled, don't do anything. This emptiness should run for both WhenEmpty and WhenUnderutilized
+	// If consolidation is disabled, don't do anything. This emptiness should run for both WhenEmpty and WhenEmptyOrUnderutilized
 	if c.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
 		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.nodePool.Name))...)
 		return false

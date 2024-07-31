@@ -124,8 +124,8 @@ type Budget struct {
 type ConsolidationPolicy string
 
 const (
-	ConsolidationPolicyWhenEmpty         ConsolidationPolicy = "WhenEmpty"
-	ConsolidationPolicyWhenUnderutilized ConsolidationPolicy = "WhenUnderutilized"
+	ConsolidationPolicyWhenEmpty                ConsolidationPolicy = "WhenEmpty"
+	ConsolidationPolicyWhenEmptyOrUnderutilized ConsolidationPolicy = "WhenEmptyOrUnderutilized"
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.

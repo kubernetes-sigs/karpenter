@@ -95,12 +95,12 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should succeed when setting consolidateAfter with consolidationPolicy=WhenUnderutilized", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("30s")))}
-			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
+			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmptyOrUnderutilized
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should succeed when setting consolidateAfter to 'Never' with consolidationPolicy=WhenUnderutilized", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: nil}
-			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
+			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmptyOrUnderutilized
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should succeed when setting consolidateAfter to 'Never' with consolidationPolicy=WhenEmpty", func() {

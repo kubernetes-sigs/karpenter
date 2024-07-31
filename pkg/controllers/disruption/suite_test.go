@@ -162,7 +162,7 @@ var _ = Describe("Simulate Scheduling", func() {
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
 					ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
-					ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+					ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 				},
 			},
 		})
@@ -534,7 +534,7 @@ var _ = Describe("Disruption Taints", func() {
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 	})
 	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenUnderutilized
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -1750,7 +1750,7 @@ var _ = Describe("Metrics", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+					ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 					ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 					// Disrupt away!
 					Budgets: []v1.Budget{{
