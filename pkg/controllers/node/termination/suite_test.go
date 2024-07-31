@@ -798,7 +798,7 @@ var _ = Describe("Termination", func() {
 						OwnerReferences: defaultOwnerRefs,
 					},
 					Tolerations: []corev1.Toleration{{
-						Key:      v1.DisruptionTaintKey,
+						Key:      v1.DisruptedTaintKey,
 						Operator: corev1.TolerationOpExists,
 					}},
 					PersistentVolumeClaims: []string{pvc.Name},
