@@ -95,7 +95,7 @@ type PersistentVolumeClaimOptions struct {
 	metav1.ObjectMeta
 	StorageClassName *string
 	VolumeName       string
-	Resources        v1.ResourceRequirements
+	Resources        v1.VolumeResourceRequirements
 }
 
 func PersistentVolumeClaim(overrides ...PersistentVolumeClaimOptions) *v1.PersistentVolumeClaim {
@@ -106,7 +106,7 @@ func PersistentVolumeClaim(overrides ...PersistentVolumeClaimOptions) *v1.Persis
 		}
 	}
 	if len(options.Resources.Requests) == 0 {
-		options.Resources = v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1Gi")}}
+		options.Resources = v1.VolumeResourceRequirements{Requests: v1.ResourceList{v1.ResourceStorage: resource.MustParse("1Gi")}}
 	}
 	return &v1.PersistentVolumeClaim{
 		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
