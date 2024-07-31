@@ -23,16 +23,19 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -51,8 +54,9 @@ type CloudProvider struct {
 	NextCreateErr      error
 	DeleteCalls        []*v1beta1.NodeClaim
 
-	CreatedNodeClaims map[string]*v1beta1.NodeClaim
-	Drifted           cloudprovider.DriftReason
+	CreatedNodeClaims         map[string]*v1beta1.NodeClaim
+	Drifted                   cloudprovider.DriftReason
+	NodeClassGroupVersionKind []schema.GroupVersionKind
 }
 
 func NewCloudProvider() *CloudProvider {
@@ -77,6 +81,13 @@ func (c *CloudProvider) Reset() {
 	c.NextCreateErr = nil
 	c.DeleteCalls = []*v1beta1.NodeClaim{}
 	c.Drifted = "drifted"
+	c.NodeClassGroupVersionKind = []schema.GroupVersionKind{
+		{
+			Group:   "",
+			Version: "",
+			Kind:    "",
+		},
+	}
 }
 
 func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1beta1.NodeClaim) (*v1beta1.NodeClaim, error) {
@@ -236,4 +247,14 @@ func (c *CloudProvider) IsDrifted(context.Context, *v1beta1.NodeClaim) (cloudpro
 // Name returns the CloudProvider implementation name.
 func (c *CloudProvider) Name() string {
 	return "fake"
+}
+
+func (c *CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
+	return []schema.GroupVersionKind{
+		{
+			Group:   object.GVK(&v1alpha1.TestNodeClass{}).Group,
+			Version: object.GVK(&v1alpha1.TestNodeClass{}).Version,
+			Kind:    object.GVK(&v1alpha1.TestNodeClass{}).Kind,
+		},
+	}
 }

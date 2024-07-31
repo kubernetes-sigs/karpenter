@@ -26,6 +26,7 @@ import (
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -55,6 +56,9 @@ type CloudProvider interface {
 	IsDrifted(context.Context, *v1beta1.NodeClaim) (DriftReason, error)
 	// Name returns the CloudProvider implementation name.
 	Name() string
+	// GetSupportedNodeClasses returns CloudProvider NodeClass that implements status.Object
+	// NOTE: It returns a list where the first element should be the default NodeClass
+	GetSupportedNodeClasses() []schema.GroupVersionKind
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
