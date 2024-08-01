@@ -24,17 +24,20 @@ import (
 	"math/rand"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 func NewCloudProvider(ctx context.Context, kubeClient client.Client, instanceTypes []*cloudprovider.InstanceType) *CloudProvider {
@@ -116,6 +119,16 @@ func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *v1beta1.NodeCla
 
 func (c CloudProvider) Name() string {
 	return "kwok"
+}
+
+func (c *CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
+	return []schema.GroupVersionKind{
+		{
+			Group:   object.GVK(&v1alpha1.TestNodeClass{}).Group,
+			Version: object.GVK(&v1alpha1.TestNodeClass{}).Version,
+			Kind:    object.GVK(&v1alpha1.TestNodeClass{}).Kind,
+		},
+	}
 }
 
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {

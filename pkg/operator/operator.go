@@ -54,6 +54,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -191,9 +192,6 @@ func NewOperator() (context.Context, *Operator) {
 		return []string{o.(*v1beta1.NodeClaim).Status.ProviderID}
 	}), "failed to setup nodeclaim provider id indexer")
 
-	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
-		return lo.Ternary(mgr.GetCache().WaitForCacheSync(req.Context()), nil, fmt.Errorf("failed to sync caches"))
-	}))
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
 
@@ -221,7 +219,7 @@ func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.C
 	return o
 }
 
-func (o *Operator) Start(ctx context.Context) {
+func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
@@ -234,6 +232,9 @@ func (o *Operator) Start(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Taking the first supported NodeClass to be the default NodeClass
+			ctx = injection.WithNodeClasses(ctx, cp.GetSupportedNodeClasses())
+			ctx = injection.WithClient(ctx, o.GetClient())
 			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()
 	}
