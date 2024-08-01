@@ -45,34 +45,30 @@ type Initialization struct {
 // c) all extended resources have been registered
 // This method handles both nil nodepools and nodes without extended resources gracefully.
 func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue() {
-		return reconcile.Result{}, nil
-	}
-	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue() {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "NotLaunched", "Node not launched")
+	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsUnknown() {
 		return reconcile.Result{}, nil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
 	node, err := nodeclaimutil.NodeForNodeClaim(ctx, i.kubeClient, nodeClaim)
 	if err != nil {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "NodeNotFound", "Node not registered with cluster")
+		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeInitialized, "NodeNotFound", "Node not registered with cluster")
 		return reconcile.Result{}, nil //nolint:nilerr
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
 	if nodeutil.GetCondition(node, corev1.NodeReady).Status != corev1.ConditionTrue {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "NodeNotReady", "Node status is NotReady")
+		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeInitialized, "NodeNotReady", "Node status is NotReady")
 		return reconcile.Result{}, nil
 	}
 	if taint, ok := StartupTaintsRemoved(node, nodeClaim); !ok {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "StartupTaintsExist", fmt.Sprintf("StartupTaint %q still exists", formatTaint(taint)))
+		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeInitialized, "StartupTaintsExist", fmt.Sprintf("StartupTaint %q still exists", formatTaint(taint)))
 		return reconcile.Result{}, nil
 	}
 	if taint, ok := KnownEphemeralTaintsRemoved(node); !ok {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "KnownEphemeralTaintsExist", fmt.Sprintf("KnownEphemeralTaint %q still exists", formatTaint(taint)))
+		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeInitialized, "KnownEphemeralTaintsExist", fmt.Sprintf("KnownEphemeralTaint %q still exists", formatTaint(taint)))
 		return reconcile.Result{}, nil
 	}
 	if name, ok := RequestedResourcesRegistered(node, nodeClaim); !ok {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "ResourceNotRegistered", fmt.Sprintf("Resource %q was requested but not registered", name))
+		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeInitialized, "ResourceNotRegistered", fmt.Sprintf("Resource %q was requested but not registered", name))
 		return reconcile.Result{}, nil
 	}
 	stored := node.DeepCopy()

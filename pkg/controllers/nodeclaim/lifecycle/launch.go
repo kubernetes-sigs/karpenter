@@ -43,7 +43,7 @@ type Launch struct {
 }
 
 func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue() {
+	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsUnknown() {
 		return reconcile.Result{}, nil
 	}
 
@@ -60,11 +60,8 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 	} else {
 		created, err = l.launchNodeClaim(ctx, nodeClaim)
 	}
-	// Either the Node launch failed or the Node was deleted due to InsufficientCapacity/NotFound
+	// Either the Node launch failed or the Node was deleted due to InsufficientCapacity/NodClassNotReady/NotFound
 	if err != nil || created == nil {
-		if cloudprovider.IsNodeClassNotReadyError(err) {
-			return reconcile.Result{Requeue: true}, nil
-		}
 		return reconcile.Result{}, err
 	}
 	l.cache.SetDefault(string(nodeClaim.UID), created)
@@ -91,11 +88,18 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 			}).Inc()
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
-			l.recorder.Publish(NodeClassNotReadyEvent(nodeClaim, err))
-			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
-			return nil, fmt.Errorf("launching nodeclaim, %w", err)
+			log.FromContext(ctx).Error(err, "failed launching nodeclaim")
+			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
+				return nil, client.IgnoreNotFound(err)
+			}
+			metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
+				metrics.ReasonLabel:       "nodeclass_not_ready",
+				metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+			}).Inc()
+			return nil, nil
 		default:
-			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
+			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
 			return nil, fmt.Errorf("launching nodeclaim, %w", err)
 		}
 	}
