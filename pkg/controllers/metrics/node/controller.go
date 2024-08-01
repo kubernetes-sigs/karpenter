@@ -47,7 +47,7 @@ const (
 )
 
 var (
-	allocatableGaugeVec = prometheus.NewGaugeVec(
+	allocatable = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
 			Subsystem: "nodes",
@@ -56,7 +56,7 @@ var (
 		},
 		nodeLabelNames(),
 	)
-	podRequestsGaugeVec = prometheus.NewGaugeVec(
+	totalPodRequests = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
 			Subsystem: "nodes",
@@ -65,7 +65,7 @@ var (
 		},
 		nodeLabelNames(),
 	)
-	podLimitsGaugeVec = prometheus.NewGaugeVec(
+	totalPodLimits = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
 			Subsystem: "nodes",
@@ -74,7 +74,7 @@ var (
 		},
 		nodeLabelNames(),
 	)
-	daemonRequestsGaugeVec = prometheus.NewGaugeVec(
+	totalDaemonRequests = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
 			Subsystem: "nodes",
@@ -83,7 +83,7 @@ var (
 		},
 		nodeLabelNames(),
 	)
-	daemonLimitsGaugeVec = prometheus.NewGaugeVec(
+	totalDaemonLimits = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
 			Subsystem: "nodes",
@@ -92,7 +92,7 @@ var (
 		},
 		nodeLabelNames(),
 	)
-	overheadGaugeVec = prometheus.NewGaugeVec(
+	systemOverhead = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
 			Subsystem: "nodes",
@@ -117,12 +117,12 @@ func nodeLabelNames() []string {
 
 func init() {
 	crmetrics.Registry.MustRegister(
-		allocatableGaugeVec,
-		podRequestsGaugeVec,
-		podLimitsGaugeVec,
-		daemonRequestsGaugeVec,
-		daemonLimitsGaugeVec,
-		overheadGaugeVec,
+		allocatable,
+		totalPodRequests,
+		totalPodLimits,
+		totalDaemonRequests,
+		totalDaemonLimits,
+		systemOverhead,
 	)
 }
 
@@ -159,12 +159,12 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]corev1.ResourceList{
-		overheadGaugeVec:       resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
-		podRequestsGaugeVec:    resources.Subtract(n.PodRequests(), n.DaemonSetRequests()),
-		podLimitsGaugeVec:      resources.Subtract(n.PodLimits(), n.DaemonSetLimits()),
-		daemonRequestsGaugeVec: n.DaemonSetRequests(),
-		daemonLimitsGaugeVec:   n.DaemonSetLimits(),
-		allocatableGaugeVec:    n.Node.Status.Allocatable,
+		systemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
+		totalPodRequests:    resources.Subtract(n.PodRequests(), n.DaemonSetRequests()),
+		totalPodLimits:      resources.Subtract(n.PodLimits(), n.DaemonSetLimits()),
+		totalDaemonRequests: n.DaemonSetRequests(),
+		totalDaemonLimits:   n.DaemonSetLimits(),
+		allocatable:         n.Node.Status.Allocatable,
 	} {
 		for resourceName, quantity := range resourceList {
 			res = append(res, &metrics.StoreMetric{

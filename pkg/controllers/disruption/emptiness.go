@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 // Emptiness is a subreconciler that deletes empty candidates.
@@ -124,8 +123,8 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	return cmd, scheduling.Results{}, nil
 }
 
-func (e *Emptiness) Type() string {
-	return metrics.ConsolidationReason
+func (e *Emptiness) Reason() v1.DisruptionReason {
+	return v1.DisruptionReasonEmpty
 }
 
 func (e *Emptiness) Class() string {

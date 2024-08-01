@@ -303,7 +303,7 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	}
 	for _, m := range results.NewNodeClaims {
 		// TODO: Check the error on the provisioner launch
-		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisioningReason))
+		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
 		if err != nil {
 			return bindings
 		}

@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/metrics"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -81,6 +83,7 @@ var _ = Describe("Emptiness", func() {
 		node, node2 = nodes[0], nodes[1]
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		nodeClaim2.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+		disruption.EligibleNodes.Reset()
 	})
 	Context("Metrics", func() {
 		It("should correctly report eligible nodes", func() {
@@ -93,9 +96,8 @@ var _ = Describe("Emptiness", func() {
 
 			fakeClock.Step(10 * time.Minute)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, map[string]string{
-				"method":             "consolidation",
-				"consolidation_type": "empty",
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
+				metrics.ReasonLabel: string(v1.DisruptionReasonEmpty),
 			})
 
 			ExpectDeleted(ctx, env.Client, pod)
@@ -107,9 +109,8 @@ var _ = Describe("Emptiness", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
-			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, map[string]string{
-				"method":             "consolidation",
-				"consolidation_type": "empty",
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
+				metrics.ReasonLabel: string(v1.DisruptionReasonEmpty),
 			})
 		})
 	})
@@ -152,7 +153,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -194,7 +195,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -240,7 +241,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -309,7 +310,7 @@ var _ = Describe("Emptiness", func() {
 			wg.Wait()
 
 			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
@@ -378,7 +379,7 @@ var _ = Describe("Emptiness", func() {
 			wg.Wait()
 
 			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())

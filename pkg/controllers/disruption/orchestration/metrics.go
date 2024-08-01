@@ -24,32 +24,23 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(disruptionReplacementNodeClaimInitializedHistogram, disruptionQueueFailedCounter)
+	crmetrics.Registry.MustRegister(disruptionQueueFailuresTotal)
 }
 
 const (
-	disruptionSubsystem    = "disruption"
-	methodLabel            = "method"
-	consolidationTypeLabel = "consolidation_type"
+	voluntaryDisruptionSubsystem = "voluntary_disruption"
+	consolidationTypeLabel       = "consolidation_type"
+	decisionLabel                = "decision"
 )
 
 var (
-	disruptionReplacementNodeClaimInitializedHistogram = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: disruptionSubsystem,
-			Name:      "replacement_nodeclaim_initialized_seconds",
-			Help:      "Amount of time required for a replacement nodeclaim to become initialized.",
-			Buckets:   metrics.DurationBuckets(),
-		},
-	)
-	disruptionQueueFailedCounter = prometheus.NewCounterVec(
+	disruptionQueueFailuresTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
-			Subsystem: disruptionSubsystem,
+			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "queue_failures_total",
 			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
 		},
-		[]string{methodLabel, consolidationTypeLabel},
+		[]string{decisionLabel, metrics.ReasonLabel, consolidationTypeLabel},
 	)
 )

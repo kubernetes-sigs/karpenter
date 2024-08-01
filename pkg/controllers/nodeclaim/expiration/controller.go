@@ -63,14 +63,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
-	metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
-		metrics.TypeLabel:     metrics.ExpirationReason,
-		metrics.NodePoolLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1.NodePoolLabelKey),
-	}).Inc()
-	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
-		metrics.ReasonLabel:       metrics.ExpirationReason,
-		metrics.NodePoolLabel:     metrics.GetLabelOrDefault(nodeClaim.Labels, v1.NodePoolLabelKey),
-		metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1.CapacityTypeLabelKey),
+	metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
+		metrics.ReasonLabel:       metrics.ExpiredReason,
+		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	}).Inc()
 	return reconcile.Result{}, nil
 }

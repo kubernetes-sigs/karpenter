@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/metrics"
+
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -92,6 +94,7 @@ var _ = Describe("Expiration", func() {
 				ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
 			},
 		})
+		metrics.NodeClaimsDisruptedTotal.Reset()
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
@@ -103,14 +106,12 @@ var _ = Describe("Expiration", func() {
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted_total", map[string]string{
-				"type":     "expiration",
-				"nodepool": nodePool.Name,
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel: metrics.ExpiredReason,
+				"nodepool":          nodePool.Name,
 			})
-			Expect(found).To(BeTrue())
-			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
 		})
-		It("should fire a karpenter_nodeclaims_terminated metric when expired", func() {
+		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
 			nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeSpot
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
@@ -119,13 +120,10 @@ var _ = Describe("Expiration", func() {
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
-			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated_total", map[string]string{
-				"reason":        "expiration",
-				"nodepool":      nodePool.Name,
-				"capacity_type": nodeClaim.Labels[v1.CapacityTypeLabelKey],
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel: metrics.ExpiredReason,
+				"nodepool":          nodePool.Name,
 			})
-			Expect(found).To(BeTrue())
-			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
 		})
 	})
 	It("should not remove the NodeClaims when expiration is disabled", func() {
