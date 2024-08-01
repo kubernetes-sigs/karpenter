@@ -68,9 +68,9 @@ type Disruption struct {
 	// +required
 	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
-	// algorithm. This policy defaults to "WhenUnderutilized" if not specified
-	// +kubebuilder:default:="WhenUnderutilized"
-	// +kubebuilder:validation:Enum:={WhenEmpty,WhenUnderutilized}
+	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified
+	// +kubebuilder:default:="WhenEmptyOrUnderutilized"
+	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized}
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
 	// Budgets is a list of Budgets.
@@ -124,8 +124,8 @@ type Budget struct {
 type ConsolidationPolicy string
 
 const (
-	ConsolidationPolicyWhenEmpty         ConsolidationPolicy = "WhenEmpty"
-	ConsolidationPolicyWhenUnderutilized ConsolidationPolicy = "WhenUnderutilized"
+	ConsolidationPolicyWhenEmpty                ConsolidationPolicy = "WhenEmpty"
+	ConsolidationPolicyWhenEmptyOrUnderutilized ConsolidationPolicy = "WhenEmptyOrUnderutilized"
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.

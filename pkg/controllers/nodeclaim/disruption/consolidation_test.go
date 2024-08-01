@@ -37,7 +37,7 @@ var _ = Describe("Underutilized", func() {
 	var nodeClaim *v1.NodeClaim
 	BeforeEach(func() {
 		nodePool = test.NodePool()
-		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenUnderutilized
+		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: lo.ToPtr(1 * time.Minute)}
 		nodeClaim, _ = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{

@@ -59,7 +59,7 @@ var _ = Describe("Consolidation", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+					ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
@@ -99,8 +99,8 @@ var _ = Describe("Consolidation", func() {
 		ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{SpotToSpotConsolidation: lo.ToPtr(true)}}))
 	})
 	Context("Events", func() {
-		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenUnderutilized", func() {
-			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenUnderutilized
+		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmptyOrUnderutilized", func() {
+			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
 			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))}
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
 
@@ -383,7 +383,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
@@ -450,7 +450,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
@@ -516,7 +516,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
@@ -601,7 +601,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
@@ -688,7 +688,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
@@ -775,7 +775,7 @@ var _ = Describe("Consolidation", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidationPolicy: v1.ConsolidationPolicyWhenUnderutilized,
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
