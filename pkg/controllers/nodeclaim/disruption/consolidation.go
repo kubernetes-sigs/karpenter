@@ -19,7 +19,6 @@ package disruption
 import (
 	"context"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 // Consolidation is a nodeclaim sub-controller that adds or removes status conditions on empty nodeclaims based on consolidateAfter
@@ -75,11 +73,6 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 	if !hasConsolidatableCondition {
 		log.FromContext(ctx).V(1).Info("marking consolidatable")
-
-		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:     metrics.ConsolidationReason,
-			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-		}).Inc()
 	}
 	return reconcile.Result{}, nil
 }

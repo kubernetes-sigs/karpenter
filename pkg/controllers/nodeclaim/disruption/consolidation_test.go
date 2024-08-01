@@ -52,19 +52,6 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
 		ExpectApplied(ctx, env.Client, nodeClaim, nodePool)
 	})
-	Context("Metrics", func() {
-		It("should fire a karpenter_nodeclaims_disrupted metric when consolidatable", func() {
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
-			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted_total", map[string]string{
-				"type":     "consolidation",
-				"nodepool": nodePool.Name,
-			})
-			Expect(found).To(BeTrue())
-			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
-		})
-	})
 	It("should mark NodeClaims as consolidatable", func() {
 		// set the lastPodEvent as now, so it's first marked as not consolidatable
 		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()

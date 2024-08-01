@@ -95,8 +95,8 @@ var _ = Describe("Termination", func() {
 		queue.Reset()
 
 		// Reset the metrics collectors
-		metrics.NodesTerminatedCounter.Reset()
-		termination.TerminationSummary.Reset()
+		metrics.NodesTerminatedTotal.Reset()
+		termination.TerminationDurationSeconds.Reset()
 	})
 
 	Context("Reconciliation", func() {
@@ -773,7 +773,7 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_duration_seconds", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(m.GetSummary().GetSampleCount()).To(BeNumerically("==", 1))
 		})

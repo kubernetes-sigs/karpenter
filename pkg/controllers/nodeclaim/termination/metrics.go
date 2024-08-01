@@ -24,10 +24,10 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(InstanceTerminationDuration, NodeClaimTerminationDuration)
+	crmetrics.Registry.MustRegister(InstanceTerminationDurationSeconds, NodeClaimTerminationDurationSeconds)
 }
 
-var InstanceTerminationDuration = prometheus.NewHistogramVec(
+var InstanceTerminationDurationSeconds = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: metrics.NodeClaimSubsystem,
@@ -38,7 +38,7 @@ var InstanceTerminationDuration = prometheus.NewHistogramVec(
 	[]string{metrics.NodePoolLabel},
 )
 
-var NodeClaimTerminationDuration = prometheus.NewHistogramVec(
+var NodeClaimTerminationDurationSeconds = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: metrics.NodeClaimSubsystem,

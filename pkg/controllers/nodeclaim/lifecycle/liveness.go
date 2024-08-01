@@ -56,10 +56,10 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("terminating due to registration ttl")
-	metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+	metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
 		metrics.ReasonLabel:       "liveness",
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1.CapacityTypeLabelKey),
+		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	}).Inc()
 
 	return reconcile.Result{}, nil

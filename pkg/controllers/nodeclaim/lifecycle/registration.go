@@ -81,10 +81,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
 	nodeClaim.Status.NodeName = node.Name
 
-	metrics.NodeClaimsRegisteredCounter.With(prometheus.Labels{
-		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-	}).Inc()
-	metrics.NodesCreatedCounter.With(prometheus.Labels{
+	metrics.NodesCreatedTotal.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 	}).Inc()
 	return reconcile.Result{}, nil

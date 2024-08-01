@@ -70,10 +70,6 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 	l.cache.SetDefault(string(nodeClaim.UID), created)
 	nodeClaim = PopulateNodeClaimDetails(nodeClaim, created)
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
-	metrics.NodeClaimsLaunchedCounter.With(prometheus.Labels{
-		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-	}).Inc()
-
 	return reconcile.Result{}, nil
 }
 
@@ -88,10 +84,10 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
 			}
-			metrics.NodeClaimsTerminatedCounter.With(prometheus.Labels{
+			metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
 				metrics.ReasonLabel:       "insufficient_capacity",
 				metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-				metrics.CapacityTypeLabel: metrics.GetLabelOrDefault(nodeClaim.Labels, v1.CapacityTypeLabelKey),
+				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 			}).Inc()
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
