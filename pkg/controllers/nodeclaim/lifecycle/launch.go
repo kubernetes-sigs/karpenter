@@ -60,7 +60,7 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 	} else {
 		created, err = l.launchNodeClaim(ctx, nodeClaim)
 	}
-	// Either the Node launch failed or the Node was deleted due to InsufficientCapacity/NodClassNotReady/NotFound
+	// Either the Node launch failed or the Node was deleted due to InsufficientCapacity/NodeClassNotReady/NotFound
 	if err != nil || created == nil {
 		return reconcile.Result{}, err
 	}
