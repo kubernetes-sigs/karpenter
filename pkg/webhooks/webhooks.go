@@ -39,10 +39,13 @@ import (
 	"knative.dev/pkg/webhook/certificates"
 	"knative.dev/pkg/webhook/configmaps"
 	"knative.dev/pkg/webhook/resourcesemantics"
+	"knative.dev/pkg/webhook/resourcesemantics/conversion"
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
@@ -59,7 +62,42 @@ func NewWebhooks() []knativeinjection.ControllerConstructor {
 		certificates.NewController,
 		NewCRDValidationWebhook,
 		NewConfigValidationWebhook,
+		NewCRDConversionWebhook,
 	}
+}
+
+var (
+	ConversionResource = map[schema.GroupKind]conversion.GroupKindConversion{
+		v1beta1.SchemeGroupVersion.WithKind("NodePool").GroupKind(): {
+			DefinitionName: "nodepools.karpenter.sh",
+			HubVersion:     "v1",
+			Zygotes: map[string]conversion.ConvertibleObject{
+				"v1":      &v1.NodePool{},
+				"v1beta1": &v1beta1.NodePool{},
+			},
+		},
+		v1beta1.SchemeGroupVersion.WithKind("NodeClaim").GroupKind(): {
+			DefinitionName: "nodeclaims.karpenter.sh",
+			HubVersion:     "v1",
+			Zygotes: map[string]conversion.ConvertibleObject{
+				"v1":      &v1.NodeClaim{},
+				"v1beta1": &v1beta1.NodeClaim{},
+			},
+		},
+	}
+)
+
+func NewCRDConversionWebhook(ctx context.Context, _ configmap.Watcher) *controller.Impl {
+	nodeclassCtx := injection.GetNodeClasses(ctx)
+	client := injection.GetClient(ctx)
+	return conversion.NewConversionController(
+		ctx,
+		"/conversion/karpenter.sh",
+		ConversionResource,
+		func(ctx context.Context) context.Context {
+			return injection.WithClient(injection.WithNodeClasses(ctx, nodeclassCtx), client)
+		},
+	)
 }
 
 func NewCRDValidationWebhook(ctx context.Context, _ configmap.Watcher) *controller.Impl {

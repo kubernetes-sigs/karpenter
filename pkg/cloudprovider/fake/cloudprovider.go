@@ -23,6 +23,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/utils/functional"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -248,5 +250,11 @@ func (c *CloudProvider) Name() string {
 }
 
 func (c *CloudProvider) GetSupportedNodeClasses() []schema.GroupVersionKind {
-	return c.NodeClassGroupVersionKind
+	return []schema.GroupVersionKind{
+		{
+			Group:   object.GVK(&v1alpha1.TestNodeClass{}).Group,
+			Version: object.GVK(&v1alpha1.TestNodeClass{}).Version,
+			Kind:    object.GVK(&v1alpha1.TestNodeClass{}).Kind,
+		},
+	}
 }
