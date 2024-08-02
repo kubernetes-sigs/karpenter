@@ -17,7 +17,6 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -26,7 +25,6 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -100,11 +98,6 @@ type Disruption struct {
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
-	// Otherwise, this will apply to each reason defined.
-	// allowed reasons are Underutilized, Empty, and Drifted.
-	// +optional
-	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
 	// that can be terminating at once. This is calculated by counting nodes that
 	// have a deletion timestamp set, or are actively being deleted by Karpenter.
@@ -139,21 +132,6 @@ type ConsolidationPolicy string
 const (
 	ConsolidationPolicyWhenEmpty         ConsolidationPolicy = "WhenEmpty"
 	ConsolidationPolicyWhenUnderutilized ConsolidationPolicy = "WhenUnderutilized"
-)
-
-// DisruptionReason defines valid reasons for disruption budgets.
-// +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
-type DisruptionReason string
-
-const (
-	DisruptionReasonUnderutilized DisruptionReason = "Underutilized"
-	DisruptionReasonEmpty         DisruptionReason = "Empty"
-	DisruptionReasonDrifted       DisruptionReason = "Drifted"
-)
-
-var (
-	// DisruptionReasons is a list of all valid reasons for disruption budgets.
-	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonEmpty, DisruptionReasonDrifted}
 )
 
 type Limits v1.ResourceList
@@ -246,39 +224,6 @@ func (nl *NodePoolList) OrderByWeight() {
 		}
 		return weightA > weightB
 	})
-}
-
-// MustGetAllowedDisruptions calls GetAllowedDisruptionsByReason if the error is not nil. This reduces the
-// amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptionsByReason()
-// to bubble up any errors in validation.
-func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) map[DisruptionReason]int {
-	allowedDisruptions, err := in.GetAllowedDisruptionsByReason(ctx, c, numNodes)
-	if err != nil {
-		return map[DisruptionReason]int{}
-	}
-	return allowedDisruptions
-}
-
-// GetAllowedDisruptionsByReason returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
-func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
-	var multiErr error
-	allowedDisruptions := map[DisruptionReason]int{}
-	for _, reason := range WellKnownDisruptionReasons {
-		allowedDisruptions[reason] = math.MaxInt32
-	}
-
-	for _, budget := range in.Spec.Disruption.Budgets {
-		val, err := budget.GetAllowedDisruptions(c, numNodes)
-		if err != nil {
-			multiErr = multierr.Append(multiErr, err)
-		}
-		// If reasons is nil, it applies to all well known disruption reasons
-		for _, reason := range lo.Ternary(budget.Reasons == nil, WellKnownDisruptionReasons, budget.Reasons) {
-			allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], val})
-		}
-	}
-
-	return allowedDisruptions, multiErr
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison

@@ -62,9 +62,6 @@ func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
 		nil, (*v1beta1.NillableDuration)(lo.ToPtr(in.ConsolidateAfter)))
 	v1beta1np.Budgets = lo.Map(in.Budgets, func(v1budget Budget, _ int) v1beta1.Budget {
 		return v1beta1.Budget{
-			Reasons: lo.Map(v1budget.Reasons, func(reason DisruptionReason, _ int) v1beta1.DisruptionReason {
-				return v1beta1.DisruptionReason(reason)
-			}),
 			Nodes:    v1budget.Nodes,
 			Schedule: v1budget.Schedule,
 			Duration: v1budget.Duration,
@@ -157,9 +154,6 @@ func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
 		ConsolidationPolicyWhenEmptyOrUnderutilized, ConsolidationPolicy(v1beta1np.ConsolidationPolicy))
 	in.Budgets = lo.Map(v1beta1np.Budgets, func(v1beta1budget v1beta1.Budget, _ int) Budget {
 		return Budget{
-			Reasons: lo.Map(v1beta1budget.Reasons, func(reason v1beta1.DisruptionReason, _ int) DisruptionReason {
-				return DisruptionReason(reason)
-			}),
 			Nodes:    v1beta1budget.Nodes,
 			Schedule: v1beta1budget.Schedule,
 			Duration: v1beta1budget.Duration,
