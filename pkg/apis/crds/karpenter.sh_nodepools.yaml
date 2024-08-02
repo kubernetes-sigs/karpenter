@@ -145,13 +145,13 @@ spec:
                       pattern: ^(([0-9]+(s|m|h))+)|(Never)$
                       type: string
                     consolidationPolicy:
-                      default: WhenUnderutilized
+                      default: WhenEmptyOrUnderutilized
                       description: |-
                         ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
                         algorithm. This policy defaults to "WhenUnderutilized" if not specified
                       enum:
                         - WhenEmpty
-                        - WhenUnderutilized
+                        - WhenEmptyOrUnderutilized
                       type: string
                   required:
                     - consolidateAfter
@@ -206,7 +206,10 @@ spec:
                               rule: self.all(x, x != "kubernetes.io/hostname")
                       type: object
                     spec:
-                      description: NodeClaimSpec describes the desired state of the NodeClaim
+                      description: |-
+                        NodeClaimTemplateSpec describes the desired state of the NodeClaim in the Nodepool
+                        NodeClaimTemplateSpec is used in the NodePool's NodeClaimTemplate, with the resource requests omitted since
+                        users are not able to set resource requests in the NodePool.
                       properties:
                         expireAfter:
                           default: 720h
@@ -866,7 +869,7 @@ spec:
                               - key
                               - operator
                             type: object
-                          maxItems: 30
+                          maxItems: 100
                           type: array
                           x-kubernetes-validations:
                             - message: requirements with operator 'In' must have a value defined
