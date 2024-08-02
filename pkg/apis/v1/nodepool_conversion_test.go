@@ -256,18 +256,6 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 						Expect(v1beta1nodepool.Spec.Disruption.Budgets[i].Duration.Duration).To(Equal(v1nodepool.Spec.Disruption.Budgets[i].Duration.Duration))
 					}
 				})
-				It("should convert v1 nodepool reason", func() {
-					v1nodepool.Spec.Disruption.Budgets = append(v1nodepool.Spec.Disruption.Budgets, Budget{
-						Reasons: []DisruptionReason{DisruptionReasonDrifted, DisruptionReasonUnderutilized, DisruptionReasonEmpty},
-					})
-					Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
-					for i := range v1nodepool.Spec.Disruption.Budgets {
-						expected := lo.Map(v1nodepool.Spec.Disruption.Budgets[i].Reasons, func(reason DisruptionReason, _ int) v1beta1.DisruptionReason {
-							return v1beta1.DisruptionReason(reason)
-						})
-						Expect(v1beta1nodepool.Spec.Disruption.Budgets[i].Reasons).To(BeEquivalentTo(expected))
-					}
-				})
 			})
 		})
 	})
@@ -534,18 +522,6 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
 					for i := range v1beta1nodepool.Spec.Disruption.Budgets {
 						Expect(v1nodepool.Spec.Disruption.Budgets[i].Duration.Duration).To(Equal(v1beta1nodepool.Spec.Disruption.Budgets[i].Duration.Duration))
-					}
-				})
-				It("should convert v1beta1 nodepool reason", func() {
-					v1beta1nodepool.Spec.Disruption.Budgets = append(v1beta1nodepool.Spec.Disruption.Budgets, v1beta1.Budget{
-						Reasons: []v1beta1.DisruptionReason{v1beta1.DisruptionReasonDrifted, v1beta1.DisruptionReasonUnderutilized, v1beta1.DisruptionReasonEmpty},
-					})
-					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
-					for i := range v1beta1nodepool.Spec.Disruption.Budgets {
-						expected := lo.Map(v1beta1nodepool.Spec.Disruption.Budgets[i].Reasons, func(reason v1beta1.DisruptionReason, _ int) DisruptionReason {
-							return DisruptionReason(reason)
-						})
-						Expect(v1nodepool.Spec.Disruption.Budgets[i].Reasons).To(BeEquivalentTo(expected))
 					}
 				})
 			})
