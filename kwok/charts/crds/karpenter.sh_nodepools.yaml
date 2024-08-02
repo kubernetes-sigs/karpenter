@@ -206,7 +206,10 @@ spec:
                               rule: self.all(x, x != "kubernetes.io/hostname")
                       type: object
                     spec:
-                      description: NodeClaimSpec describes the desired state of the NodeClaim
+                      description: |-
+                        NodeClaimTemplateSpec describes the desired state of the NodeClaim in the Nodepool
+                        NodeClaimTemplateSpec is used in the NodePool's NodeClaimTemplate, with the resource requests omitted since
+                        users are not able to set resource requests in the NodePool.
                       properties:
                         expireAfter:
                           default: 720h

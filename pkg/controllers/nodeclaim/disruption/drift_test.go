@@ -363,7 +363,7 @@ var _ = Describe("Drift", func() {
 								"keyLabel2": "valueLabel2",
 							},
 						},
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: nodePool.Spec.Template.Spec.Requirements,
 							NodeClassRef: &v1.NodeClassReference{
 								Kind:  "fakeKind",
@@ -411,13 +411,13 @@ var _ = Describe("Drift", func() {
 			},
 			Entry("Annoations", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{"keyAnnotationTest": "valueAnnotationTest"}}}}}),
 			Entry("Labels", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
-			Entry("Taints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{Taints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),
-			Entry("StartupTaints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{StartupTaints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),
-			Entry("NodeClassRef APIVersion", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{NodeClassRef: &v1.NodeClassReference{Group: "testVersion"}}}}}),
-			Entry("NodeClassRef Name", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{NodeClassRef: &v1.NodeClassReference{Name: "testName"}}}}}),
-			Entry("NodeClassRef Kind", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{NodeClassRef: &v1.NodeClassReference{Kind: "testKind"}}}}}),
-			Entry("ExpireAfter", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(100 * time.Minute)}}}}}),
-			Entry("TerminationGracePeriod", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimSpec{TerminationGracePeriod: &metav1.Duration{Duration: 100 * time.Minute}}}}}),
+			Entry("Taints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Taints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),
+			Entry("StartupTaints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{StartupTaints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),
+			Entry("NodeClassRef APIVersion", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Group: "testVersion"}}}}}),
+			Entry("NodeClassRef Name", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Name: "testName"}}}}}),
+			Entry("NodeClassRef Kind", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Kind: "testKind"}}}}}),
+			Entry("ExpireAfter", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(100 * time.Minute)}}}}}),
+			Entry("TerminationGracePeriod", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{TerminationGracePeriod: &metav1.Duration{Duration: 100 * time.Minute}}}}}),
 		)
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodePool", func() {
 			nodePool.ObjectMeta.Annotations = map[string]string{}

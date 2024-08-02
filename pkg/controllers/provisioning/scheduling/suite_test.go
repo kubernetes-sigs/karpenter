@@ -126,7 +126,7 @@ var _ = Context("Scheduling", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
-					Spec: v1.NodeClaimSpec{
+					Spec: v1.NodeClaimTemplateSpec{
 						Requirements: []v1.NodeSelectorRequirementWithMinValues{
 							{
 								NodeSelectorRequirement: corev1.NodeSelectorRequirement{
