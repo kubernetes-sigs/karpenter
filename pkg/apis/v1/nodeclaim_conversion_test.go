@@ -49,7 +49,7 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 			ObjectMeta: test.ObjectMeta(),
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
+					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
 							Name: "default",
 						},
@@ -263,7 +263,7 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 			ObjectMeta: test.ObjectMeta(),
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
+					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
 							Name: "default",
 						},
