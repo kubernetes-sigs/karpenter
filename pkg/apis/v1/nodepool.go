@@ -229,13 +229,6 @@ func (in *NodeClaimTemplateSpec) ToNodeClaimSpec() *NodeClaimSpec {
 	}
 }
 
-// NodeClaimTemplateWithResources is used in scheduling simulations
-type NodeClaimTemplateWithResources struct {
-	ObjectMeta `json:"metadata,omitempty"`
-	// +required
-	Spec NodeClaimSpec `json:"spec"`
-}
-
 type ObjectMeta struct {
 	// Map of string keys and values that can be used to organize and categorize
 	// (scope and select) objects. May match selectors of replication controllers

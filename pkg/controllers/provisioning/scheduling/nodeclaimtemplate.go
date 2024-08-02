@@ -29,6 +29,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
+// NodeClaimTemplateWithResources is used in scheduling simulations
+type NodeClaimTemplateWithResources struct {
+	v1.ObjectMeta `json:"metadata,omitempty"`
+	// +required
+	Spec v1.NodeClaimSpec `json:"spec"`
+}
+
 // MaxInstanceTypes is a constant that restricts the number of instance types to be sent for launch. Note that this
 // is intentionally changed to var just to help in testing the code.
 var MaxInstanceTypes = 60
@@ -37,7 +44,7 @@ var MaxInstanceTypes = 60
 // the fields in NodePool. These structs are maintained separately in order
 // for fields like Requirements to be able to be stored more efficiently.
 type NodeClaimTemplate struct {
-	v1.NodeClaimTemplateWithResources
+	NodeClaimTemplateWithResources
 
 	NodePoolName        string
 	InstanceTypeOptions cloudprovider.InstanceTypes
@@ -46,7 +53,7 @@ type NodeClaimTemplate struct {
 
 func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 	nct := &NodeClaimTemplate{
-		NodeClaimTemplateWithResources: v1.NodeClaimTemplateWithResources{
+		NodeClaimTemplateWithResources: NodeClaimTemplateWithResources{
 			ObjectMeta: nodePool.Spec.Template.ObjectMeta,
 			Spec:       *nodePool.Spec.Template.Spec.ToNodeClaimSpec(),
 		},
