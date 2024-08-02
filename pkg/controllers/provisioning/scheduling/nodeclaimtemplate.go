@@ -37,7 +37,7 @@ var MaxInstanceTypes = 60
 // the fields in NodePool. These structs are maintained separately in order
 // for fields like Requirements to be able to be stored more efficiently.
 type NodeClaimTemplate struct {
-	v1.NodeClaimTemplate
+	v1.NodeClaimTemplateWithResources
 
 	NodePoolName        string
 	InstanceTypeOptions cloudprovider.InstanceTypes
@@ -46,9 +46,12 @@ type NodeClaimTemplate struct {
 
 func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 	nct := &NodeClaimTemplate{
-		NodeClaimTemplate: nodePool.Spec.Template,
-		NodePoolName:      nodePool.Name,
-		Requirements:      scheduling.NewRequirements(),
+		NodeClaimTemplateWithResources: v1.NodeClaimTemplateWithResources{
+			ObjectMeta: nodePool.Spec.Template.ObjectMeta,
+			Spec:       *nodePool.Spec.Template.Spec.ToNodeClaimSpec(),
+		},
+		NodePoolName: nodePool.Name,
+		Requirements: scheduling.NewRequirements(),
 	}
 	nct.Labels = lo.Assign(nct.Labels, map[string]string{v1.NodePoolLabelKey: nodePool.Name})
 	nct.Requirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(nct.Spec.Requirements...).Values()...)

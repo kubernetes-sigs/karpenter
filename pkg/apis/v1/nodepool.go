@@ -162,6 +162,12 @@ func (l Limits) ExceededBy(resources v1.ResourceList) error {
 type NodeClaimTemplate struct {
 	ObjectMeta `json:"metadata,omitempty"`
 	// +required
+	Spec NodeClaimSpecWithoutResources `json:"spec"`
+}
+
+type NodeClaimTemplateWithResources struct {
+	ObjectMeta `json:"metadata,omitempty"`
+	// +required
 	Spec NodeClaimSpec `json:"spec"`
 }
 

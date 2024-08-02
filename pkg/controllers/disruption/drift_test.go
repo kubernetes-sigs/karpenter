@@ -323,7 +323,7 @@ var _ = Describe("Drift", func() {
 						}},
 					},
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimSpecWithoutResources{
 							ExpireAfter: v1.NillableDuration{Duration: nil},
 						},
 					},

@@ -44,7 +44,7 @@ var _ = Describe("CEL/Validation", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
+					Spec: NodeClaimSpecWithoutResources{
 						NodeClassRef: &NodeClassReference{
 							Kind: "NodeClaim",
 							Name: "default",
