@@ -75,18 +75,6 @@ type NodeClaimSpec struct {
 	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
 }
 
-// This is used to convert between the Nodepool NodeClaimTemplate's NodeClaimSpec to the NodeClaim's NodeClaimSpec.
-func (in *NodeClaimSpec) ToNodeClaimTemplateSpec() *NodeClaimTemplateSpec {
-	return &NodeClaimTemplateSpec{
-		Taints:                 in.Taints,
-		StartupTaints:          in.StartupTaints,
-		Requirements:           in.Requirements,
-		NodeClassRef:           in.NodeClassRef,
-		TerminationGracePeriod: in.TerminationGracePeriod,
-		ExpireAfter:            in.ExpireAfter,
-	}
-}
-
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
 // and minValues that represent the requirement to have at least that many values.
 type NodeSelectorRequirementWithMinValues struct {
