@@ -75,6 +75,7 @@ type NodeClaimSpec struct {
 	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
 }
 
+// This is used to convert between the NodeClaim's NodeClaimSpec to the Nodepool NodeClaimTemplate's NodeClaimSpec.
 func (in *NodeClaimSpecWithoutResources) ToNodeClaimSpec() *NodeClaimSpec {
 	return &NodeClaimSpec{
 		Taints:                 in.Taints,
@@ -86,6 +87,7 @@ func (in *NodeClaimSpecWithoutResources) ToNodeClaimSpec() *NodeClaimSpec {
 	}
 }
 
+// This is used to convert between the Nodepool NodeClaimTemplate's NodeClaimSpec to the NodeClaim's NodeClaimSpec.
 func (in *NodeClaimSpec) ToNodeClaimSpecWithoutResources() *NodeClaimSpecWithoutResources {
 	return &NodeClaimSpecWithoutResources{
 		Taints:                 in.Taints,
@@ -97,7 +99,9 @@ func (in *NodeClaimSpec) ToNodeClaimSpecWithoutResources() *NodeClaimSpecWithout
 	}
 }
 
-// NodeClaimSpec describes the desired state of the NodeClaim
+// NodeClaimSpecWithoutResources describes the desired state of the NodeClaim in the Nodepool
+// NodeClaimSpecWithoutResources is used in the NodePool's NodeClaimTemplate, with the resource requests omitted since
+// users are not able to set resource requests in the NodePool.
 type NodeClaimSpecWithoutResources struct {
 	// Taints will be applied to the NodeClaim's node.
 	// +optional

@@ -165,6 +165,7 @@ type NodeClaimTemplate struct {
 	Spec NodeClaimSpecWithoutResources `json:"spec"`
 }
 
+// NodeClaimTemplateWithResources is used in scheduling simulations
 type NodeClaimTemplateWithResources struct {
 	ObjectMeta `json:"metadata,omitempty"`
 	// +required
