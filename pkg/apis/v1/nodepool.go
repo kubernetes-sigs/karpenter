@@ -218,14 +218,20 @@ type NodeClaimTemplateSpec struct {
 }
 
 // This is used to convert between the NodeClaim's NodeClaimSpec to the Nodepool NodeClaimTemplate's NodeClaimSpec.
-func (in *NodeClaimTemplateSpec) ToNodeClaimSpec() *NodeClaimSpec {
-	return &NodeClaimSpec{
-		Taints:                 in.Taints,
-		StartupTaints:          in.StartupTaints,
-		Requirements:           in.Requirements,
-		NodeClassRef:           in.NodeClassRef,
-		TerminationGracePeriod: in.TerminationGracePeriod,
-		ExpireAfter:            in.ExpireAfter,
+func (in *NodeClaimTemplate) ToNodeClaim() *NodeClaim {
+	return &NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels:      in.ObjectMeta.Labels,
+			Annotations: in.ObjectMeta.Annotations,
+		},
+		Spec: NodeClaimSpec{
+			Taints:                 in.Spec.Taints,
+			StartupTaints:          in.Spec.StartupTaints,
+			Requirements:           in.Spec.Requirements,
+			NodeClassRef:           in.Spec.NodeClassRef,
+			TerminationGracePeriod: in.Spec.TerminationGracePeriod,
+			ExpireAfter:            in.Spec.ExpireAfter,
+		},
 	}
 }
 
