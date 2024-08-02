@@ -46,7 +46,7 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 		v1nodepool = &NodePool{
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
+					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
 							Name:  "test",
 							Kind:  "test",
@@ -201,8 +201,8 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 			})
 		})
 		Context("Disruption", func() {
-			It("should convert v1 nodepool consolidateAfter to nil with WhenUnderutilized", func() {
-				v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
+			It("should convert v1 nodepool consolidateAfter to nil with WhenEmptyOrUnderutilized", func() {
+				v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmptyOrUnderutilized
 				v1nodepool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
 				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
 				Expect(v1beta1nodepool.Spec.Disruption.ConsolidateAfter).To(BeNil())
@@ -276,7 +276,7 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 		v1nodepool = &NodePool{
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
+					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
 							Name:  "test",
 							Kind:  "test",
