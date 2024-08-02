@@ -75,7 +75,7 @@ var _ = Describe("Static Drift Hash", func() {
 							"keyLabel": "valueLabel",
 						},
 					},
-					Spec: v1.NodeClaimSpecWithoutResources{
+					Spec: v1.NodeClaimTemplateSpec{
 						Taints: []corev1.Taint{
 							{
 								Key:    "key",

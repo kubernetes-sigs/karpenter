@@ -60,7 +60,7 @@ type taintKeyEffect struct {
 	Effect   v1.TaintEffect
 }
 
-func (in *NodeClaimSpecWithoutResources) validateTaints() (errs *apis.FieldError) {
+func (in *NodeClaimTemplateSpec) validateTaints() (errs *apis.FieldError) {
 	existing := map[taintKeyEffect]struct{}{}
 	errs = errs.Also(validateTaintsField(in.Taints, existing, "taints"))
 	errs = errs.Also(validateTaintsField(in.StartupTaints, existing, "startupTaints"))
@@ -104,7 +104,7 @@ func validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}
 // This function is used by the NodeClaim validation webhook to verify the nodepool requirements.
 // When this function is called, the nodepool's requirements do not include the requirements from labels.
 // NodeClaim requirements only support well known labels.
-func (in *NodeClaimSpecWithoutResources) validateRequirements() (errs *apis.FieldError) {
+func (in *NodeClaimTemplateSpec) validateRequirements() (errs *apis.FieldError) {
 	for i, requirement := range in.Requirements {
 		if err := ValidateRequirement(requirement); err != nil {
 			errs = errs.Also(apis.ErrInvalidArrayValue(err, "requirements", i))

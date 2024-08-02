@@ -2973,7 +2973,7 @@ var _ = Describe("Consolidation", func() {
 				},
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpecWithoutResources{
+						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{},
 							NodeClassRef: &v1.NodeClassReference{
 								Name: "non-existent",

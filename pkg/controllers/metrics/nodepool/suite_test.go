@@ -63,7 +63,7 @@ var _ = Describe("Metrics", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
-					Spec: v1.NodeClaimSpecWithoutResources{
+					Spec: v1.NodeClaimTemplateSpec{
 						NodeClassRef: &v1.NodeClassReference{
 							Name: "default",
 						},

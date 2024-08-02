@@ -42,7 +42,7 @@ var _ = Describe("Topology", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
-					Spec: v1.NodeClaimSpecWithoutResources{
+					Spec: v1.NodeClaimTemplateSpec{
 						Requirements: []v1.NodeSelectorRequirementWithMinValues{
 							{
 								NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -969,7 +969,7 @@ var _ = Describe("Topology", func() {
 			spotNodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpecWithoutResources{
+						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
 									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -993,7 +993,7 @@ var _ = Describe("Topology", func() {
 			onDemandNodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpecWithoutResources{
+						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
 									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -1060,7 +1060,7 @@ var _ = Describe("Topology", func() {
 			nodePoolB := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpecWithoutResources{
+						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
 									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -2382,7 +2382,7 @@ var _ = Describe("Taints", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
-					Spec: v1.NodeClaimSpecWithoutResources{
+					Spec: v1.NodeClaimTemplateSpec{
 						Requirements: []v1.NodeSelectorRequirementWithMinValues{
 							{
 								NodeSelectorRequirement: corev1.NodeSelectorRequirement{

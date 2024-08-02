@@ -48,7 +48,7 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 		v1nodepool = &NodePool{
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpecWithoutResources{
+					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
 							Name:  "test",
 							Kind:  "test",
@@ -293,7 +293,7 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 		v1nodepool = &NodePool{
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpecWithoutResources{
+					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
 							Name:  "test",
 							Kind:  "test",
