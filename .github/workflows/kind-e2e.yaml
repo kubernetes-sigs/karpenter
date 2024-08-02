@@ -9,6 +9,7 @@ jobs:
       issues: write
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         k8sVersion: ["1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
     steps:
