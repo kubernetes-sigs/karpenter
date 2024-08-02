@@ -64,12 +64,12 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx)))
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewQueue(env.Client, recorder)
-	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
+	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
 })
 
 var _ = AfterSuite(func() {
@@ -762,6 +762,80 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectSingletonReconciled(ctx, queue)
 			ExpectDeleted(ctx, env.Client, pod)
+		})
+		Context("VolumeAttachments", func() {
+			It("should wait for volume attachments", func() {
+				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
+					NodeName:   node.Name,
+					VolumeName: "foo",
+				})
+				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va)
+				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectExists(ctx, env.Client, node)
+
+				ExpectDeleted(ctx, env.Client, va)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNotFound(ctx, env.Client, node)
+			})
+			It("should only wait for volume attachments associated with drainable pods", func() {
+				vaDrainable := test.VolumeAttachment(test.VolumeAttachmentOptions{
+					NodeName:   node.Name,
+					VolumeName: "foo",
+				})
+				vaNonDrainable := test.VolumeAttachment(test.VolumeAttachmentOptions{
+					NodeName:   node.Name,
+					VolumeName: "bar",
+				})
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					VolumeName: "bar",
+				})
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: defaultOwnerRefs,
+					},
+					Tolerations: []corev1.Toleration{{
+						Key:      v1.DisruptedTaintKey,
+						Operator: corev1.TolerationOpExists,
+					}},
+					PersistentVolumeClaims: []string{pvc.Name},
+				})
+				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, vaDrainable, vaNonDrainable, pod, pvc)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectExists(ctx, env.Client, node)
+
+				ExpectDeleted(ctx, env.Client, vaDrainable)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNotFound(ctx, env.Client, node)
+			})
+			It("should wait for volume attachments until the nodeclaim's termination grace period expires", func() {
+				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
+					NodeName:   node.Name,
+					VolumeName: "foo",
+				})
+				nodeClaim.Annotations = map[string]string{
+					v1.NodeClaimTerminationTimestampAnnotationKey: fakeClock.Now().Add(time.Minute).Format(time.RFC3339),
+				}
+				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va)
+				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectExists(ctx, env.Client, node)
+
+				fakeClock.Step(5 * time.Minute)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNotFound(ctx, env.Client, node)
+			})
 		})
 	})
 	Context("Metrics", func() {

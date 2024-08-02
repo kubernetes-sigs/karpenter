@@ -21,15 +21,16 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/errors"
-
-	"sigs.k8s.io/karpenter/pkg/utils/termination"
-
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -38,19 +39,22 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
-
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/utils/termination"
+	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
 // Controller for the resource
 type Controller struct {
+	clock         clock.Clock
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	terminator    *terminator.Terminator
@@ -58,8 +62,9 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) *Controller {
 	return &Controller{
+		clock:         clk,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		terminator:    terminator,
@@ -119,6 +124,18 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
+	// In order for Pods associated with PersistentVolumes to smoothly migrate from the terminating Node, we wait
+	// for VolumeAttachments of drain-able Pods to be cleaned up before terminating Node and removing its finalizer.
+	// However, if TerminationGracePeriod is configured for Node, and we are past that period, we will skip waiting.
+	if nodeTerminationTime == nil || c.clock.Now().Before(*nodeTerminationTime) {
+		areVolumesDetached, err := c.ensureVolumesDetached(ctx, node)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("ensuring no volume attachments, %w", err)
+		}
+		if !areVolumesDetached {
+			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		}
+	}
 	nodeClaims, err = nodeutils.GetNodeClaims(ctx, node, c.kubeClient)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
@@ -156,6 +173,58 @@ func (c *Controller) deleteAllNodeClaims(ctx context.Context, nodeClaims ...*v1.
 		}
 	}
 	return nil
+}
+
+func (c *Controller) ensureVolumesDetached(ctx context.Context, node *corev1.Node) (volumesDetached bool, err error) {
+	volumeAttachments, err := nodeutils.GetVolumeAttachments(ctx, c.kubeClient, node)
+	if err != nil {
+		return false, err
+	}
+	// Filter out VolumeAttachments associated with not drain-able Pods
+	filteredVolumeAttachments, err := filterVolumeAttachments(ctx, c.kubeClient, node, volumeAttachments, c.clock)
+	if err != nil {
+		return false, err
+	}
+	return len(filteredVolumeAttachments) == 0, nil
+}
+
+// filterVolumeAttachments filters out storagev1.VolumeAttachments that should not block the termination
+// of the passed corev1.Node
+func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node *corev1.Node, volumeAttachments []*storagev1.VolumeAttachment, clk clock.Clock) ([]*storagev1.VolumeAttachment, error) {
+	// No need to filter empty VolumeAttachments list
+	if len(volumeAttachments) == 0 {
+		return volumeAttachments, nil
+	}
+	// Create list of non-drain-able Pods associated with Node
+	pods, err := nodeutils.GetPods(ctx, kubeClient, node)
+	if err != nil {
+		return nil, err
+	}
+	unDrainablePods := lo.Reject(pods, func(p *corev1.Pod, _ int) bool {
+		return pod.IsDrainable(p, clk)
+	})
+	// Filter out VolumeAttachments associated with non-drain-able Pods
+	// Match on Pod -> PersistentVolumeClaim -> PersistentVolume Name <- VolumeAttachment
+	shouldFilterOutVolume := sets.New[string]()
+	for _, p := range unDrainablePods {
+		for _, v := range p.Spec.Volumes {
+			pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, p, v)
+			if errors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if pvc != nil {
+				shouldFilterOutVolume.Insert(pvc.Spec.VolumeName)
+			}
+		}
+	}
+	filteredVolumeAttachments := lo.Reject(volumeAttachments, func(v *storagev1.VolumeAttachment, _ int) bool {
+		pvName := v.Spec.Source.PersistentVolumeName
+		return pvName == nil || shouldFilterOutVolume.Has(*pvName)
+	})
+	return filteredVolumeAttachments, nil
 }
 
 func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error {
