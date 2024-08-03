@@ -21,7 +21,6 @@ import (
 	"time"
 
 	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
-	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,10 +46,9 @@ func NewKruiseDaemonSetController(kubeClient client.Client, cluster *state.Clust
 }
 
 func (c *KruiseDaemonSetController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "state.daemonset")
+	ctx = injection.WithControllerName(ctx, "state.kruise-daemonset")
 
-	// TODO replace
-	daemonSet := appsv1.DaemonSet{}
+	daemonSet := kruise.DaemonSet{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the daemonset deletion
@@ -58,7 +56,7 @@ func (c *KruiseDaemonSetController) Reconcile(ctx context.Context, req reconcile
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	if err := c.cluster.UpdateDaemonSet(ctx, &daemonSet); err != nil {
+	if err := c.cluster.UpdateKruiseDaemonSet(ctx, &daemonSet); err != nil {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
