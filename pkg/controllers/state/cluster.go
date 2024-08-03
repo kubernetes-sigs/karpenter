@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 	"fmt"
+	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
 	"sort"
 	"sync"
 	"time"
@@ -373,6 +374,10 @@ func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonS
 		}
 	}
 
+	return nil
+}
+
+func (c *Cluster) UpdateKruiseDaemonSet(ctx context.Context, daemonset *kruise.DaemonSet) error {
 	return nil
 }
 
