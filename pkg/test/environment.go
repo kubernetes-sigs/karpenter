@@ -25,6 +25,7 @@ import (
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
@@ -71,6 +72,14 @@ func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
 			return []string{obj.(*v1.NodeClaim).Status.ProviderID}
+		})
+	}
+}
+
+func VolumeAttachmentFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		return c.IndexField(ctx, &storagev1.VolumeAttachment{}, "spec.nodeName", func(obj client.Object) []string {
+			return []string{obj.(*storagev1.VolumeAttachment).Spec.NodeName}
 		})
 	}
 }

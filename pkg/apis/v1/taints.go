@@ -20,22 +20,21 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 // Karpenter specific taints
 const (
-	DisruptionTaintKey             = apis.Group + "/disruption"
-	DisruptingNoScheduleTaintValue = "disrupting"
-	UnregisteredTaintKey           = apis.Group + "/unregistered"
+	DisruptedTaintKey    = apis.Group + "/disrupted"
+	UnregisteredTaintKey = apis.Group + "/unregistered"
 )
 
 var (
-	// DisruptionNoScheduleTaint is used by the deprovisioning controller to ensure no pods
-	// are scheduled to a node that Karpenter is actively disrupting.
-	DisruptionNoScheduleTaint = v1.Taint{
-		Key:    DisruptionTaintKey,
+	// DisruptedNoScheduleTaint is applied by the disruption and termination controllers to nodes disrupted by Karpenter.
+	// This ensures no additional pods schedule to those nodes while they are terminating.
+	DisruptedNoScheduleTaint = v1.Taint{
+		Key:    DisruptedTaintKey,
 		Effect: v1.TaintEffectNoSchedule,
-		Value:  DisruptingNoScheduleTaintValue,
 	}
 	UnregisteredNoExecuteTaint = v1.Taint{
 		Key:    UnregisteredTaintKey,
@@ -43,6 +42,7 @@ var (
 	}
 )
 
+// IsDisruptingTaint checks if the taint is either the v1 or v1beta1 disruption taint.
 func IsDisruptingTaint(taint v1.Taint) bool {
-	return taint.MatchTaint(&DisruptionNoScheduleTaint) && taint.Value == DisruptingNoScheduleTaintValue
+	return taint.MatchTaint(&DisruptedNoScheduleTaint) || v1beta1.IsDisruptingTaint(taint)
 }

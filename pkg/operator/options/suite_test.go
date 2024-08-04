@@ -57,6 +57,8 @@ var _ = Describe("Options", func() {
 		"DISABLE_LEADER_ELECTION",
 		"MEMORY_LIMIT",
 		"LOG_LEVEL",
+		"LOG_OUTPUT_PATHS",
+		"LOG_ERROR_OUTPUT_PATHS",
 		"BATCH_MAX_DURATION",
 		"BATCH_IDLE_DURATION",
 		"FEATURE_GATES",
@@ -109,6 +111,8 @@ var _ = Describe("Options", func() {
 				DisableLeaderElection: lo.ToPtr(false),
 				MemoryLimit:           lo.ToPtr[int64](-1),
 				LogLevel:              lo.ToPtr("info"),
+				LogOutputPaths:        lo.ToPtr("stdout"),
+				LogErrorOutputPaths:   lo.ToPtr("stderr"),
 				BatchMaxDuration:      lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:     lo.ToPtr(time.Second),
 				FeatureGates: test.FeatureGates{
@@ -119,6 +123,8 @@ var _ = Describe("Options", func() {
 		})
 
 		It("shouldn't overwrite CLI flags with environment variables", func() {
+			os.Setenv("LOG_OUTPUT_PATHS", "stdout")
+			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "stderr")
 			err := opts.Parse(
 				fs,
 				"--karpenter-service", "cli",
@@ -133,6 +139,8 @@ var _ = Describe("Options", func() {
 				"--disable-leader-election=true",
 				"--memory-limit", "0",
 				"--log-level", "debug",
+				"--log-output-paths", "/etc/k8s/test",
+				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
 				"--feature-gates", "SpotToSpotConsolidation=true",
@@ -152,6 +160,8 @@ var _ = Describe("Options", func() {
 				DisableLeaderElection: lo.ToPtr(true),
 				MemoryLimit:           lo.ToPtr[int64](0),
 				LogLevel:              lo.ToPtr("debug"),
+				LogOutputPaths:        lo.ToPtr("/etc/k8s/test"),
+				LogErrorOutputPaths:   lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:      lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:     lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
@@ -174,6 +184,8 @@ var _ = Describe("Options", func() {
 			os.Setenv("DISABLE_LEADER_ELECTION", "true")
 			os.Setenv("MEMORY_LIMIT", "0")
 			os.Setenv("LOG_LEVEL", "debug")
+			os.Setenv("LOG_OUTPUT_PATHS", "/etc/k8s/test")
+			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("FEATURE_GATES", "SpotToSpotConsolidation=true")
@@ -197,6 +209,8 @@ var _ = Describe("Options", func() {
 				DisableLeaderElection: lo.ToPtr(true),
 				MemoryLimit:           lo.ToPtr[int64](0),
 				LogLevel:              lo.ToPtr("debug"),
+				LogOutputPaths:        lo.ToPtr("/etc/k8s/test"),
+				LogErrorOutputPaths:   lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:      lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:     lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
@@ -228,12 +242,13 @@ var _ = Describe("Options", func() {
 			err := opts.Parse(
 				fs,
 				"--karpenter-service", "cli",
-				"--disable-webhook",
+				"--log-output-paths", "/etc/k8s/test",
+				"--log-error-output-paths", "/etc/k8s/testerror",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
 				ServiceName:           lo.ToPtr("cli"),
-				DisableWebhook:        lo.ToPtr(true),
+				DisableWebhook:        lo.ToPtr(false),
 				WebhookPort:           lo.ToPtr(0),
 				MetricsPort:           lo.ToPtr(0),
 				WebhookMetricsPort:    lo.ToPtr(0),
@@ -244,6 +259,8 @@ var _ = Describe("Options", func() {
 				DisableLeaderElection: lo.ToPtr(true),
 				MemoryLimit:           lo.ToPtr[int64](0),
 				LogLevel:              lo.ToPtr("debug"),
+				LogOutputPaths:        lo.ToPtr("/etc/k8s/test"),
+				LogErrorOutputPaths:   lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:      lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:     lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
@@ -305,6 +322,8 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.DisableLeaderElection).To(Equal(optsB.DisableLeaderElection))
 	Expect(optsA.MemoryLimit).To(Equal(optsB.MemoryLimit))
 	Expect(optsA.LogLevel).To(Equal(optsB.LogLevel))
+	Expect(optsA.LogOutputPaths).To(Equal(optsB.LogOutputPaths))
+	Expect(optsA.LogErrorOutputPaths).To(Equal(optsB.LogErrorOutputPaths))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
 	Expect(optsA.BatchIdleDuration).To(Equal(optsB.BatchIdleDuration))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))

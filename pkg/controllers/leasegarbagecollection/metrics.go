@@ -24,7 +24,7 @@ import (
 )
 
 var (
-	NodeLeasesDeletedCounter = prometheus.NewCounterVec(
+	NodeLeasesDeletedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
@@ -36,5 +36,5 @@ var (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(NodeLeasesDeletedCounter)
+	crmetrics.Registry.MustRegister(NodeLeasesDeletedTotal)
 }

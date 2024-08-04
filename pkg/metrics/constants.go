@@ -28,15 +28,11 @@ const (
 
 	NodePoolLabel     = "nodepool"
 	ReasonLabel       = "reason"
-	TypeLabel         = "type"
 	CapacityTypeLabel = "capacity_type"
 
 	// Reasons for CREATE/DELETE shared metrics
-	ConsolidationReason = "consolidation"
-	ProvisioningReason  = "provisioning"
-	ExpirationReason    = "expiration"
-	EmptinessReason     = "emptiness"
-	DriftReason         = "drift"
+	ProvisionedReason = "provisioned"
+	ExpiredReason     = "expired"
 )
 
 // DurationBuckets returns a []float64 of default threshold values for duration histograms.

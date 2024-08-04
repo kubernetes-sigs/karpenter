@@ -239,7 +239,7 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 			disruptionBudgetMapping[nodePool.Name][reason] = allowedDisruptions
 
 			allowedDisruptionsTotal += allowedDisruptions
-			NodePoolAllowedDisruptionsGauge.With(map[string]string{
+			NodePoolAllowedDisruptions.With(map[string]string{
 				metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
 			}).Set(float64(allowedDisruptions))
 			if allowedDisruptions == 0 {

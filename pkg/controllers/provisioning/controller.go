@@ -90,10 +90,12 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 	//nolint:ineffassign
 	ctx = injection.WithControllerName(ctx, "provisioner.trigger.node") //nolint:ineffassign,staticcheck
 
-	// If the disruption taint doesn't exist or the deletion timestamp isn't set, it's not being disrupted.
+	// If the disruption taint doesn't exist and the deletion timestamp isn't set, it's not being disrupted.
 	// We don't check the deletion timestamp here, as we expect the termination controller to eventually set
 	// the taint when it picks up the node from being deleted.
-	if !lo.Contains(n.Spec.Taints, v1.DisruptionNoScheduleTaint) {
+	if !lo.ContainsBy(n.Spec.Taints, func(taint corev1.Taint) bool {
+		return v1.IsDisruptingTaint(taint)
+	}) {
 		return reconcile.Result{}, nil
 	}
 	c.provisioner.Trigger()

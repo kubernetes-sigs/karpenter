@@ -38,7 +38,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
@@ -49,7 +48,6 @@ var ctx context.Context
 var nodeClaimDisruptionController *nodeclaimdisruption.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
-var cluster *state.Cluster
 var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
@@ -67,8 +65,7 @@ var _ = BeforeSuite(func() {
 	}))
 	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
-	cluster = state.NewCluster(fakeClock, env.Client)
-	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cluster, cp)
+	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -82,7 +79,6 @@ var _ = BeforeEach(func() {
 
 var _ = AfterEach(func() {
 	cp.Reset()
-	cluster.Reset()
 	ExpectCleanedUp(ctx, env.Client)
 })
 
@@ -98,11 +94,15 @@ var _ = Describe("Disruption", func() {
 				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
 			},
 		})
+		// set the lastPodEvent to 5 minutes in the past
+		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 	})
 	It("should set multiple disruption conditions simultaneously", func() {
 		cp.Drifted = "drifted"
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
@@ -112,14 +112,14 @@ var _ = Describe("Disruption", func() {
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
 	It("should remove multiple disruption conditions simultaneously", func() {
 		cp.Drifted = ""
-		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: nil}
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: nil}
 
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeEmpty)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
@@ -127,6 +127,6 @@ var _ = Describe("Disruption", func() {
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeEmpty)).To(BeNil())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
 })

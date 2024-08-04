@@ -115,7 +115,7 @@ var _ = Describe("Termination", func() {
 				},
 			},
 		})
-		nodeclaimtermination.InstanceTerminationDuration.Reset()
+		nodeclaimtermination.InstanceTerminationDurationSeconds.Reset()
 
 	})
 	It("should delete the node and the CloudProvider NodeClaim when NodeClaim deletion is triggered", func() {

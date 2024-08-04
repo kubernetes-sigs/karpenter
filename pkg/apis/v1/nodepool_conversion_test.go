@@ -48,7 +48,7 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 		v1nodepool = &NodePool{
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
+					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
 							Name:  "test",
 							Kind:  "test",
@@ -206,8 +206,15 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 			})
 		})
 		Context("Disruption", func() {
-			It("should convert v1 nodepool consolidateAfter", func() {
-				v1nodepool.Spec.Disruption.ConsolidateAfter = &NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
+			It("should convert v1 nodepool consolidateAfter to nil with WhenEmptyOrUnderutilized", func() {
+				v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmptyOrUnderutilized
+				v1nodepool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
+				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+				Expect(v1beta1nodepool.Spec.Disruption.ConsolidateAfter).To(BeNil())
+			})
+			It("should convert v1 nodepool consolidateAfter with WhenEmpty", func() {
+				v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
+				v1nodepool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
 				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
 				Expect(lo.FromPtr(v1beta1nodepool.Spec.Disruption.ConsolidateAfter.Duration)).To(Equal(lo.FromPtr(v1nodepool.Spec.Disruption.ConsolidateAfter.Duration)))
 			})
@@ -249,18 +256,6 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 						Expect(v1beta1nodepool.Spec.Disruption.Budgets[i].Duration.Duration).To(Equal(v1nodepool.Spec.Disruption.Budgets[i].Duration.Duration))
 					}
 				})
-				It("should convert v1 nodepool reason", func() {
-					v1nodepool.Spec.Disruption.Budgets = append(v1nodepool.Spec.Disruption.Budgets, Budget{
-						Reasons: []DisruptionReason{DisruptionReasonDrifted, DisruptionReasonUnderutilized, DisruptionReasonEmpty},
-					})
-					Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
-					for i := range v1nodepool.Spec.Disruption.Budgets {
-						expected := lo.Map(v1nodepool.Spec.Disruption.Budgets[i].Reasons, func(reason DisruptionReason, _ int) v1beta1.DisruptionReason {
-							return v1beta1.DisruptionReason(reason)
-						})
-						Expect(v1beta1nodepool.Spec.Disruption.Budgets[i].Reasons).To(BeEquivalentTo(expected))
-					}
-				})
 			})
 		})
 	})
@@ -286,7 +281,7 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 		v1nodepool = &NodePool{
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
+					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
 							Name:  "test",
 							Kind:  "test",
@@ -479,7 +474,14 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 			})
 		})
 		Context("Disruption", func() {
-			It("should convert v1beta1 nodepool consolidateAfter", func() {
+			It("should convert v1beta1 nodepool consolidateAfter to 0 for WhenUnderutilized", func() {
+				v1beta1nodepool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenUnderutilized
+				v1beta1nodepool.Spec.Disruption.ConsolidateAfter = nil
+				Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+				Expect(lo.FromPtr(v1nodepool.Spec.Disruption.ConsolidateAfter.Duration)).To(BeEquivalentTo(0))
+			})
+			It("should convert v1beta1 nodepool consolidateAfter for WhenEmpty", func() {
+				v1beta1nodepool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
 				v1beta1nodepool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
 				Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
 				Expect(v1nodepool.Spec.Disruption.ConsolidateAfter.Duration).To(Equal(v1beta1nodepool.Spec.Disruption.ConsolidateAfter.Duration))
@@ -520,18 +522,6 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
 					for i := range v1beta1nodepool.Spec.Disruption.Budgets {
 						Expect(v1nodepool.Spec.Disruption.Budgets[i].Duration.Duration).To(Equal(v1beta1nodepool.Spec.Disruption.Budgets[i].Duration.Duration))
-					}
-				})
-				It("should convert v1beta1 nodepool reason", func() {
-					v1beta1nodepool.Spec.Disruption.Budgets = append(v1beta1nodepool.Spec.Disruption.Budgets, v1beta1.Budget{
-						Reasons: []v1beta1.DisruptionReason{v1beta1.DisruptionReasonDrifted, v1beta1.DisruptionReasonUnderutilized, v1beta1.DisruptionReasonEmpty},
-					})
-					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
-					for i := range v1beta1nodepool.Spec.Disruption.Budgets {
-						expected := lo.Map(v1beta1nodepool.Spec.Disruption.Budgets[i].Reasons, func(reason v1beta1.DisruptionReason, _ int) DisruptionReason {
-							return DisruptionReason(reason)
-						})
-						Expect(v1nodepool.Spec.Disruption.Budgets[i].Reasons).To(BeEquivalentTo(expected))
 					}
 				})
 			})

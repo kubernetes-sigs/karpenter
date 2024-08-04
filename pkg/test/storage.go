@@ -153,3 +153,28 @@ func StorageClass(overrides ...StorageClassOptions) *storagev1.StorageClass {
 		VolumeBindingMode: options.VolumeBindingMode,
 	}
 }
+
+type VolumeAttachmentOptions struct {
+	metav1.ObjectMeta
+	NodeName   string
+	VolumeName string
+}
+
+func VolumeAttachment(overrides ...VolumeAttachmentOptions) *storagev1.VolumeAttachment {
+	options := VolumeAttachmentOptions{}
+	for _, opts := range overrides {
+		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
+			panic(fmt.Sprintf("Failed to merge options: %s", err))
+		}
+	}
+	return &storagev1.VolumeAttachment{
+		ObjectMeta: ObjectMeta(options.ObjectMeta),
+		Spec: storagev1.VolumeAttachmentSpec{
+			NodeName: options.NodeName,
+			Attacher: "fake-csi",
+			Source: storagev1.VolumeAttachmentSource{
+				PersistentVolumeName: lo.ToPtr(options.VolumeName),
+			},
+		},
+	}
+}

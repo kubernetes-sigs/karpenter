@@ -134,7 +134,7 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconcile.Result, e
 	if len(results.NewNodeClaims) == 0 {
 		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
-	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisioningReason), RecordPodNomination); err != nil {
+	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisionedReason), RecordPodNomination); err != nil {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
@@ -306,7 +306,9 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
-	defer metrics.Measure(schedulingDuration)()
+	defer metrics.Measure(scheduler.SchedulingDurationSeconds.With(
+		prometheus.Labels{scheduler.ControllerLabel: injection.GetControllerName(ctx)},
+	))()
 	start := time.Now()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
@@ -375,7 +377,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 
 	log.FromContext(ctx).WithValues("NodeClaim", klog.KRef("", nodeClaim.Name), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
 		Info("created nodeclaim")
-	metrics.NodeClaimsCreatedCounter.With(prometheus.Labels{
+	metrics.NodeClaimsCreatedTotal.With(prometheus.Labels{
 		metrics.ReasonLabel:       options.Reason,
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],

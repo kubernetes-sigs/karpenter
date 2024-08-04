@@ -46,7 +46,6 @@ const (
 const (
 	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
 	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
-	ManagedByAnnotationKey                     = apis.Group + "/managed-by"
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	KubeletCompatibilityAnnotationKey          = apis.CompatibilityGroup + "/v1beta1-kubelet-conversion"
