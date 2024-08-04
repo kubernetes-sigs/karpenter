@@ -19,14 +19,12 @@ package state
 import (
 	"context"
 	"fmt"
-	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -43,6 +41,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
+
+type ObjectKey struct {
+	Group     string
+	Kind      string
+	Namespace string
+	Name      string
+}
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
@@ -348,17 +353,17 @@ func (c *Cluster) Reset() {
 	c.daemonSetPods = sync.Map{}
 }
 
-func (c *Cluster) GetDaemonSetPod(daemonset *appsv1.DaemonSet) *corev1.Pod {
-	if pod, ok := c.daemonSetPods.Load(client.ObjectKeyFromObject(daemonset)); ok {
+func (c *Cluster) GetDaemonSetPod(daemonset client.Object) *corev1.Pod {
+	if pod, ok := c.daemonSetPods.Load(c.ObjectKeyFromObject(daemonset)); ok {
 		return pod.(*corev1.Pod).DeepCopy()
 	}
 
 	return nil
 }
 
-func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonSet) error {
+func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset client.Object) error {
 	pods := &corev1.PodList{}
-	err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.Namespace))
+	err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.GetNamespace()))
 	if err != nil {
 		return err
 	}
@@ -369,7 +374,7 @@ func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonS
 
 	for i := range pods.Items {
 		if metav1.IsControlledBy(&pods.Items[i], daemonset) {
-			c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), &pods.Items[i])
+			c.daemonSetPods.Store(c.ObjectKeyFromObject(daemonset), &pods.Items[i])
 			break
 		}
 	}
@@ -377,12 +382,17 @@ func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonS
 	return nil
 }
 
-func (c *Cluster) UpdateKruiseDaemonSet(ctx context.Context, daemonset *kruise.DaemonSet) error {
-	return nil
+func (c *Cluster) DeleteDaemonSet(key ObjectKey) {
+	c.daemonSetPods.Delete(key)
 }
 
-func (c *Cluster) DeleteDaemonSet(key types.NamespacedName) {
-	c.daemonSetPods.Delete(key)
+func (c *Cluster) ObjectKeyFromObject(obj client.Object) ObjectKey {
+	return ObjectKey{
+		Group:     obj.GetObjectKind().GroupVersionKind().Group,
+		Kind:      obj.GetObjectKind().GroupVersionKind().Kind,
+		Namespace: obj.GetNamespace(),
+		Name:      obj.GetName(),
+	}
 }
 
 // WARNING
