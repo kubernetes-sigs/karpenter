@@ -60,6 +60,7 @@ type Options struct {
 	BatchMaxDuration      time.Duration
 	BatchIdleDuration     time.Duration
 	FeatureGates          FeatureGates
+	SupportKruise         bool
 }
 
 type FlagSet struct {
@@ -94,6 +95,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: SpotToSpotConsolidation")
+	fs.BoolVarWithEnv(&o.SupportKruise, "support-kruise", "SUPPORT_KRUISE", false, "Enable the support kruise")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {

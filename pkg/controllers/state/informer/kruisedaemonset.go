@@ -18,6 +18,10 @@ package informer
 
 import (
 	"context"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"time"
 
 	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
@@ -32,6 +36,12 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
+
+func init() {
+	gv := schema.GroupVersion{Group: "apps.kruise.io", Version: "v1alpha"}
+	v1.AddToGroupVersion(scheme.Scheme, gv)
+	scheme.Scheme.AddKnownTypes(gv, &kruise.DaemonSet{})
+}
 
 type KruiseDaemonSetController struct {
 	kubeClient client.Client
@@ -52,17 +62,26 @@ func (c *KruiseDaemonSetController) Reconcile(ctx context.Context, req reconcile
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the daemonset deletion
-			c.cluster.DeleteDaemonSet(req.NamespacedName)
+			c.cluster.DeleteDaemonSet(state.ObjectKey{
+				Group:     "apps.kruise.io",
+				Kind:      "DaemonSet",
+				Namespace: req.Namespace,
+				Name:      req.Name,
+			})
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	if err := c.cluster.UpdateKruiseDaemonSet(ctx, &daemonSet); err != nil {
+	if err := c.cluster.UpdateDaemonSet(ctx, &daemonSet); err != nil {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }
 
-func (c *KruiseDaemonSetController) Register(_ context.Context, m manager.Manager) error {
+func (c *KruiseDaemonSetController) Register(ctx context.Context, m manager.Manager) error {
+	if !options.FromContext(ctx).SupportKruise {
+		return nil
+	}
+
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.kruise-daemonset").
 		For(&kruise.DaemonSet{}).

@@ -59,6 +59,7 @@ var _ = Describe("Options", func() {
 		"BATCH_MAX_DURATION",
 		"BATCH_IDLE_DURATION",
 		"FEATURE_GATES",
+		"SUPPORT_KRUISE",
 	}
 
 	BeforeEach(func() {
@@ -111,6 +112,7 @@ var _ = Describe("Options", func() {
 				FeatureGates: test.FeatureGates{
 					SpotToSpotConsolidation: lo.ToPtr(false),
 				},
+				SupportKruise: lo.ToPtr(false),
 			}))
 		})
 
@@ -133,6 +135,7 @@ var _ = Describe("Options", func() {
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
 				"--feature-gates", "SpotToSpotConsolidation=true",
+				"--support-kruise=true",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -152,6 +155,7 @@ var _ = Describe("Options", func() {
 				FeatureGates: test.FeatureGates{
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
+				SupportKruise: lo.ToPtr(true),
 			}))
 		})
 
@@ -170,6 +174,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("FEATURE_GATES", "SpotToSpotConsolidation=true")
+			os.Setenv("SUPPORT_KRUISE", "true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -193,6 +198,7 @@ var _ = Describe("Options", func() {
 				FeatureGates: test.FeatureGates{
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
+				SupportKruise: lo.ToPtr(true),
 			}))
 		})
 
@@ -208,6 +214,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("FEATURE_GATES", "SpotToSpotConsolidation=true")
+			os.Setenv("SUPPORT_KRUISE", "true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -236,6 +243,7 @@ var _ = Describe("Options", func() {
 				FeatureGates: test.FeatureGates{
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
+				SupportKruise: lo.ToPtr(true),
 			}))
 		})
 	})
@@ -289,4 +297,5 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
 	Expect(optsA.BatchIdleDuration).To(Equal(optsB.BatchIdleDuration))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
+	Expect(optsA.SupportKruise).To(Equal(optsB.SupportKruise))
 }
