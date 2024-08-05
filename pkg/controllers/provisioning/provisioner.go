@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"strings"
 	"time"
 
@@ -417,25 +419,43 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*corev1.Pod, erro
 		return nil, fmt.Errorf("listing daemonsets, %w", err)
 	}
 
-	return lo.Map(daemonSetList.Items, func(d appsv1.DaemonSet, _ int) *corev1.Pod {
-		pod := p.cluster.GetDaemonSetPod(&d)
+	handler := func(pod *corev1.Pod, template corev1.PodTemplateSpec) *corev1.Pod {
 		if pod == nil {
-			pod = &corev1.Pod{Spec: d.Spec.Template.Spec}
+			pod = &corev1.Pod{Spec: template.Spec}
 		}
 		// Replacing retrieved pod affinity with daemonset pod template required node affinity since this is overridden
 		// by the daemonset controller during pod creation
 		// https://github.com/kubernetes/kubernetes/blob/c5cf0ac1889f55ab51749798bec684aed876709d/pkg/controller/daemon/util/daemonset_util.go#L176
-		if d.Spec.Template.Spec.Affinity != nil && d.Spec.Template.Spec.Affinity.NodeAffinity != nil && d.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		if template.Spec.Affinity != nil && template.Spec.Affinity.NodeAffinity != nil && template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
 			if pod.Spec.Affinity == nil {
 				pod.Spec.Affinity = &corev1.Affinity{}
 			}
 			if pod.Spec.Affinity.NodeAffinity == nil {
 				pod.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
 			}
-			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = d.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 		}
 		return pod
-	}), nil
+	}
+
+	pods := lo.Map(daemonSetList.Items, func(d appsv1.DaemonSet, _ int) *corev1.Pod {
+		pod := p.cluster.GetDaemonSetPod(&d)
+		return handler(pod, d.Spec.Template)
+	})
+
+	if options.FromContext(ctx).SupportKruise {
+		kruiseDaemonSetList := &kruise.DaemonSetList{}
+		if err := p.kubeClient.List(ctx, kruiseDaemonSetList); err != nil {
+			return nil, fmt.Errorf("listing kruise daemonsets, %w", err)
+		}
+
+		pods = append(pods, lo.Map(kruiseDaemonSetList.Items, func(d kruise.DaemonSet, _ int) *corev1.Pod {
+			pod := p.cluster.GetDaemonSetPod(&d)
+			return handler(pod, d.Spec.Template)
+		})...)
+	}
+
+	return pods, nil
 }
 
 func (p *Provisioner) Validate(ctx context.Context, pod *corev1.Pod) error {

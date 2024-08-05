@@ -1430,6 +1430,34 @@ var _ = Describe("DaemonSet Controller", func() {
 
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(BeNil())
 	})
+	It("should update daemonsetCache when kruise daemonset pod is created", func() {
+		daemonset := test.DaemonSet(
+			test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+			}},
+		)
+		ExpectApplied(ctx, env.Client, daemonset)
+		daemonsetPod := test.UnschedulablePod(
+			test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "DaemonSet",
+							Name:               daemonset.Name,
+							UID:                daemonset.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					},
+				},
+			})
+		daemonsetPod.Spec = daemonset.Spec.Template.Spec
+		ExpectApplied(ctx, env.Client, daemonsetPod)
+		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+
+		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod))
+	})
 })
 
 var _ = Describe("Consolidated State", func() {
