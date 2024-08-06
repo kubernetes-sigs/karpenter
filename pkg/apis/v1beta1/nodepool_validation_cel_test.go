@@ -232,43 +232,6 @@ var _ = Describe("CEL/Validation", func() {
 			}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
-		DescribeTable("should succeed when creating a budget with valid reasons", func(reason DisruptionReason) {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Nodes:    "10",
-				Schedule: lo.ToPtr("* * * * *"),
-				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
-				Reasons:  []DisruptionReason{reason},
-			}}
-			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-		},
-			Entry("should allow disruption reason Drifted", DisruptionReasonDrifted),
-			Entry("should allow disruption reason Underutilized", DisruptionReasonUnderutilized),
-			Entry("should allow disruption reason Empty", DisruptionReasonEmpty),
-		)
-
-		DescribeTable("should fail when creating a budget with invalid reasons", func(reason string) {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Nodes:    "10",
-				Schedule: lo.ToPtr("* * * * *"),
-				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
-				Reasons:  []DisruptionReason{DisruptionReason(reason)},
-			}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		},
-			Entry("should not allow invalid reason", "invalid"),
-			Entry("should not allow expired disruption reason", "expired"),
-			Entry("should not allow empty reason", ""),
-		)
-
-		It("should allow setting multiple reasons", func() {
-			nodePool.Spec.Disruption.Budgets = []Budget{{
-				Nodes:    "10",
-				Schedule: lo.ToPtr("* * * * *"),
-				Duration: &metav1.Duration{Duration: lo.Must(time.ParseDuration("20m"))},
-				Reasons:  []DisruptionReason{DisruptionReasonDrifted, DisruptionReasonEmpty},
-			}}
-			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-		})
 	})
 
 	Context("KubeletConfiguration", func() {
@@ -875,16 +838,6 @@ var _ = Describe("CEL/Validation", func() {
 	Context("Resources", func() {
 		It("should not allow resources to be set", func() {
 			nodePool.Spec.Template.Spec.Resources = ResourceRequirements{Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1")}}
-			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
-		})
-	})
-	Context("TerminationGracePeriod", func() {
-		It("should succeed on a positive terminationGracePeriod duration", func() {
-			nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
-			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-		})
-		It("should fail on a negative terminationGracePeriod duration", func() {
-			nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * -30}
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 	})

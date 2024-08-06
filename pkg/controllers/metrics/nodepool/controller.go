@@ -44,7 +44,7 @@ const (
 )
 
 var (
-	limitGaugeVec = prometheus.NewGaugeVec(
+	limit = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodePoolSubsystem,
@@ -56,7 +56,7 @@ var (
 			nodePoolNameLabel,
 		},
 	)
-	usageGaugeVec = prometheus.NewGaugeVec(
+	usage = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodePoolSubsystem,
@@ -71,7 +71,7 @@ var (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(limitGaugeVec, usageGaugeVec)
+	crmetrics.Registry.MustRegister(limit, usage)
 }
 
 type Controller struct {
@@ -105,8 +105,8 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 func buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]corev1.ResourceList{
-		usageGaugeVec: nodePool.Status.Resources,
-		limitGaugeVec: getLimits(nodePool),
+		usage: nodePool.Status.Resources,
+		limit: getLimits(nodePool),
 	} {
 		for k, v := range resourceList {
 			res = append(res, &metrics.StoreMetric{

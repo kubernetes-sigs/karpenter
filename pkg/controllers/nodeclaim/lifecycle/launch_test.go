@@ -76,14 +76,12 @@ var _ = Describe("Launch", func() {
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
-	It("should requeue with no error if NodeClassNotReady is returned from the cloudprovider", func() {
+	It("should delete the nodeclaim if NodeClassNotReady is returned from the cloudprovider", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("nodeClass isn't ready"))
 		nodeClaim := test.NodeClaim()
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		res := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		Expect(res.Requeue).To(BeTrue())
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeLaunched).Status).To(Equal(metav1.ConditionFalse))
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 })

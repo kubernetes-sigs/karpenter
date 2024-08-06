@@ -50,12 +50,11 @@ const (
 	podHostCapacityType = "capacity_type"
 	podHostInstanceType = "instance_type"
 	podPhase            = "phase"
-
-	phasePending = "Pending"
+	phasePending        = "Pending"
 )
 
 var (
-	podGaugeVec = prometheus.NewGaugeVec(
+	podState = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
 			Subsystem: metrics.PodSubsystem,
@@ -64,7 +63,7 @@ var (
 		},
 		labelNames(),
 	)
-	podStartupTimeSummary = prometheus.NewSummary(
+	podStartupDurationSeconds = prometheus.NewSummary(
 		prometheus.SummaryOpts{
 			Namespace:  "karpenter",
 			Subsystem:  metrics.PodSubsystem,
@@ -84,8 +83,7 @@ type Controller struct {
 }
 
 func init() {
-	crmetrics.Registry.MustRegister(podGaugeVec)
-	crmetrics.Registry.MustRegister(podStartupTimeSummary)
+	crmetrics.Registry.MustRegister(podState, podStartupDurationSeconds)
 }
 
 func labelNames() []string {
@@ -130,7 +128,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 	c.metricStore.Update(client.ObjectKeyFromObject(pod).String(), []*metrics.StoreMetric{
 		{
-			GaugeVec: podGaugeVec,
+			GaugeVec: podState,
 			Value:    1,
 			Labels:   labels,
 		},
@@ -149,7 +147,7 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod) {
 		return c.Type == corev1.PodReady
 	})
 	if c.pendingPods.Has(key) && ok {
-		podStartupTimeSummary.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds())
+		podStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds())
 		c.pendingPods.Delete(key)
 	}
 }

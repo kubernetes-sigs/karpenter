@@ -35,7 +35,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
@@ -50,17 +49,18 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 
-	drift     *Drift
-	emptiness *Emptiness
+	drift         *Drift
+	consolidation *Consolidation
 }
 
-// NewController constructs a nodeclaim disruption controller
-func NewController(clk clock.Clock, kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider) *Controller {
+// NewController constructs a nodeclaim disruption controller. Note that every sub-controller has a dependency on its nodepool.
+// Disruption mechanisms that don't depend on the nodepool (like expiration), should live elsewhere.
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		drift:         &Drift{cloudProvider: cloudProvider},
-		emptiness:     &Emptiness{kubeClient: kubeClient, cluster: cluster, clock: clk},
+		consolidation: &Consolidation{kubeClient: kubeClient, clock: clk},
 	}
 }
 
@@ -85,7 +85,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	var errs error
 	reconcilers := []nodeClaimReconciler{
 		c.drift,
-		c.emptiness,
+		c.consolidation,
 	}
 	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, nodePool, nodeClaim)

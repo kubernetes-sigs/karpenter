@@ -24,12 +24,12 @@ import (
 const (
 	NodeSubsystem      = "nodes"
 	NodeClaimSubsystem = "nodeclaims"
-	NodePoolSubsystem  = "nodepool"
+	NodePoolSubsystem  = "nodepools"
 	PodSubsystem       = "pods"
 )
 
 var (
-	NodeClaimsCreatedCounter = prometheus.NewCounterVec(
+	NodeClaimsCreatedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
@@ -42,12 +42,24 @@ var (
 			CapacityTypeLabel,
 		},
 	)
-	NodeClaimsTerminatedCounter = prometheus.NewCounterVec(
+	NodeClaimsTerminatedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
 			Name:      "terminated_total",
-			Help:      "Number of nodeclaims terminated in total by Karpenter. Labeled by reason the nodeclaim was terminated and the owning nodepool.",
+			Help:      "Number of nodeclaims terminated in total by Karpenter. Labeled by the owning nodepool.",
+		},
+		[]string{
+			NodePoolLabel,
+			CapacityTypeLabel,
+		},
+	)
+	NodeClaimsDisruptedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: NodeClaimSubsystem,
+			Name:      "disrupted_total",
+			Help:      "Number of nodeclaims disrupted in total by Karpenter. Labeled by reason the nodeclaim was disrupted and the owning nodepool.",
 		},
 		[]string{
 			ReasonLabel,
@@ -55,64 +67,7 @@ var (
 			CapacityTypeLabel,
 		},
 	)
-	NodeClaimsLaunchedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: NodeClaimSubsystem,
-			Name:      "launched_total",
-			Help:      "Number of nodeclaims launched in total by Karpenter. Labeled by the owning nodepool.",
-		},
-		[]string{
-			NodePoolLabel,
-		},
-	)
-	NodeClaimsRegisteredCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: NodeClaimSubsystem,
-			Name:      "registered_total",
-			Help:      "Number of nodeclaims registered in total by Karpenter. Labeled by the owning nodepool.",
-		},
-		[]string{
-			NodePoolLabel,
-		},
-	)
-	NodeClaimsInitializedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: NodeClaimSubsystem,
-			Name:      "initialized_total",
-			Help:      "Number of nodeclaims initialized in total by Karpenter. Labeled by the owning nodepool.",
-		},
-		[]string{
-			NodePoolLabel,
-		},
-	)
-	NodeClaimsDisruptedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: NodeClaimSubsystem,
-			Name:      "disrupted_total",
-			Help:      "Number of nodeclaims disrupted in total by Karpenter. Labeled by disruption type of the nodeclaim and the owning nodepool.",
-		},
-		[]string{
-			TypeLabel,
-			NodePoolLabel,
-		},
-	)
-	NodeClaimsDriftedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: NodeClaimSubsystem,
-			Name:      "drifted_total",
-			Help:      "Number of nodeclaims drifted reasons in total by Karpenter. Labeled by drift type of the nodeclaim and the owning nodepool.",
-		},
-		[]string{
-			TypeLabel,
-			NodePoolLabel,
-		},
-	)
-	NodesCreatedCounter = prometheus.NewCounterVec(
+	NodesCreatedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
@@ -123,7 +78,7 @@ var (
 			NodePoolLabel,
 		},
 	)
-	NodesTerminatedCounter = prometheus.NewCounterVec(
+	NodesTerminatedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
@@ -136,16 +91,7 @@ var (
 	)
 )
 
-// GetLabelOrDefault returns a default aggregation value of "n/a" if the label we are looking for doesn't have a value in our labels
-func GetLabelOrDefault(labels map[string]string, key string) string {
-	if value, exists := labels[key]; exists {
-		return value
-	}
-	return "n/a"
-}
-
 func init() {
-	crmetrics.Registry.MustRegister(NodeClaimsCreatedCounter, NodeClaimsTerminatedCounter, NodeClaimsLaunchedCounter,
-		NodeClaimsRegisteredCounter, NodeClaimsInitializedCounter, NodeClaimsDisruptedCounter, NodeClaimsDriftedCounter,
-		NodesCreatedCounter, NodesTerminatedCounter, workqueueDepth, workqueueAdds, workqueueLatency, workDuration, workqueueUnfinished, workqueueLongestRunningProcessor, workqueueRetries)
+	crmetrics.Registry.MustRegister(NodeClaimsCreatedTotal, NodeClaimsTerminatedTotal, NodeClaimsDisruptedTotal,
+		NodesCreatedTotal, NodesTerminatedTotal, workqueueDepth, workqueueAdds, workqueueLatency, workDuration, workqueueUnfinished, workqueueLongestRunningProcessor, workqueueRetries)
 }

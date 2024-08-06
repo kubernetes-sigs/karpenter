@@ -509,7 +509,7 @@ func (env *Environment) ConsistentlyExpectDisruptionsWithNodeCount(disruptingNod
 
 		nodes = lo.Filter(nodeList.Items, func(n corev1.Node, _ int) bool {
 			_, ok := lo.Find(n.Spec.Taints, func(t corev1.Taint) bool {
-				return v1.IsDisruptingTaint(t)
+				return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
 			})
 			return ok
 		})
@@ -681,7 +681,7 @@ func (env *Environment) EventuallyExpectEmpty(nodeClaims ...*v1.NodeClaim) {
 	Eventually(func(g Gomega) {
 		for _, nc := range nodeClaims {
 			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
-			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
+			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 		}
 	}).Should(Succeed())
 }

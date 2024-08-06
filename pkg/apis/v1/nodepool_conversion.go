@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -54,13 +55,13 @@ func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePo
 }
 
 func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
-	v1beta1np.ConsolidateAfter = (*v1beta1.NillableDuration)(in.ConsolidateAfter)
-	v1beta1np.ConsolidationPolicy = v1beta1.ConsolidationPolicy(in.ConsolidationPolicy)
+	v1beta1np.ConsolidationPolicy = lo.Ternary(in.ConsolidationPolicy == ConsolidationPolicyWhenEmptyOrUnderutilized,
+		v1beta1.ConsolidationPolicyWhenUnderutilized, v1beta1.ConsolidationPolicy(in.ConsolidationPolicy))
+	// If the v1 nodepool is WhenUnderutilized, the v1beta1 nodepool should have an unset consolidateAfter
+	v1beta1np.ConsolidateAfter = lo.Ternary(in.ConsolidationPolicy == ConsolidationPolicyWhenEmptyOrUnderutilized,
+		nil, (*v1beta1.NillableDuration)(lo.ToPtr(in.ConsolidateAfter)))
 	v1beta1np.Budgets = lo.Map(in.Budgets, func(v1budget Budget, _ int) v1beta1.Budget {
 		return v1beta1.Budget{
-			Reasons: lo.Map(v1budget.Reasons, func(reason DisruptionReason, _ int) v1beta1.DisruptionReason {
-				return v1beta1.DisruptionReason(reason)
-			}),
 			Nodes:    v1budget.Nodes,
 			Schedule: v1budget.Schedule,
 			Duration: v1budget.Duration,
@@ -146,13 +147,13 @@ func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.Node
 }
 
 func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
-	in.ConsolidateAfter = (*NillableDuration)(v1beta1np.ConsolidateAfter)
-	in.ConsolidationPolicy = ConsolidationPolicy(v1beta1np.ConsolidationPolicy)
+	// if consolidationPolicy is WhenUnderutilized, set the v1 duration to 0, otherwise, set to the value of consolidateAfter.
+	in.ConsolidateAfter = lo.Ternary(v1beta1np.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized,
+		NillableDuration{Duration: lo.ToPtr(time.Duration(0))}, (NillableDuration)(lo.FromPtr(v1beta1np.ConsolidateAfter)))
+	in.ConsolidationPolicy = lo.Ternary(v1beta1np.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized,
+		ConsolidationPolicyWhenEmptyOrUnderutilized, ConsolidationPolicy(v1beta1np.ConsolidationPolicy))
 	in.Budgets = lo.Map(v1beta1np.Budgets, func(v1beta1budget v1beta1.Budget, _ int) Budget {
 		return Budget{
-			Reasons: lo.Map(v1beta1budget.Reasons, func(reason v1beta1.DisruptionReason, _ int) DisruptionReason {
-				return DisruptionReason(reason)
-			}),
 			Nodes:    v1beta1budget.Nodes,
 			Schedule: v1beta1budget.Schedule,
 			Duration: v1beta1budget.Duration,

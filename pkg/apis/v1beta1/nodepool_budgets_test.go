@@ -17,12 +17,9 @@ limitations under the License.
 package v1beta1_test
 
 import (
-	"context"
 	"math"
-	"strings"
 	"time"
 
-	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -33,10 +30,8 @@ import (
 )
 
 var _ = Describe("Budgets", func() {
-	var nodePool *NodePool
 	var budgets []Budget
 	var fakeClock *clock.FakeClock
-	var ctx = context.Background()
 
 	BeforeEach(func() {
 		// Set the time to the middle of the year of 2000, the best year ever
@@ -58,112 +53,21 @@ var _ = Describe("Budgets", func() {
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				Reasons: []DisruptionReason{
-					DisruptionReasonDrifted,
-					DisruptionReasonUnderutilized,
-				},
 				Nodes:    "15",
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				Reasons: []DisruptionReason{
-					DisruptionReasonDrifted,
-				},
 				Nodes:    "5",
 				Schedule: lo.ToPtr("* * * * *"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 			{
-				Reasons: []DisruptionReason{
-					DisruptionReasonUnderutilized,
-					DisruptionReasonDrifted,
-					DisruptionReasonEmpty,
-				},
 				Nodes:    "0",
 				Schedule: lo.ToPtr("@weekly"),
 				Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
 			},
 		}
-		nodePool = &NodePool{
-			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
-			Spec: NodePoolSpec{
-				Disruption: Disruption{
-					Budgets: budgets,
-				},
-			},
-		}
-	})
-
-	Context("GetAllowedDisruptionsByReason", func() {
-		It("should return 0 for all reasons if a budget is active for all reasons", func() {
-			budgets[5].Schedule = lo.ToPtr("* * * * *")
-			budgets[5].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
-
-			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
-			Expect(err).To(BeNil())
-			Expect(disruptionsByReason[DisruptionReasonUnderutilized]).To(Equal(0))
-			Expect(disruptionsByReason[DisruptionReasonDrifted]).To(Equal(0))
-			Expect(disruptionsByReason[DisruptionReasonEmpty]).To(Equal(0))
-		})
-
-		It("should return MaxInt32 for all reasons when there are no active budgets", func() {
-			for i := range budgets {
-				budgets[i].Schedule = lo.ToPtr("@yearly")
-				budgets[i].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))})
-			}
-			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
-			Expect(err).To(BeNil())
-
-			// All budgets should have unbounded disruptions when inactive
-			for _, disruptions := range disruptionsByReason {
-				Expect(disruptions).To(Equal(math.MaxInt32))
-			}
-		})
-
-		It("should ignore reason-defined budgets when inactive", func() {
-			budgets[3].Schedule = lo.ToPtr("@yearly")
-			budgets[4].Schedule = lo.ToPtr("@yearly")
-			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
-			Expect(err).To(BeNil())
-			for _, disruptions := range disruptionsByReason {
-				Expect(disruptions).To(Equal(10))
-			}
-		})
-
-		It("should return the budget for all disruption reasons when undefined", func() {
-			nodePool.Spec.Disruption.Budgets = budgets[:1]
-			Expect(len(nodePool.Spec.Disruption.Budgets)).To(Equal(1))
-			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
-			Expect(err).To(BeNil())
-			Expect(len(budgets[0].Reasons)).To(Equal(0))
-			for _, disruptions := range disruptionsByReason {
-				Expect(disruptions).To(Equal(10))
-			}
-		})
-
-		It("should get the minimum budget for each reason", func() {
-
-			nodePool.Spec.Disruption.Budgets = append(nodePool.Spec.Disruption.Budgets,
-				[]Budget{
-					{
-						Schedule: lo.ToPtr("* * * * *"),
-						Nodes:    "4",
-						Duration: lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("1h"))}),
-						Reasons: []DisruptionReason{
-							DisruptionReasonEmpty,
-						},
-					},
-				}...)
-			disruptionsByReason, err := nodePool.GetAllowedDisruptionsByReason(ctx, fakeClock, 100)
-			Expect(err).To(BeNil())
-
-			Expect(disruptionsByReason[DisruptionReasonEmpty]).To(Equal(4))
-			Expect(disruptionsByReason[DisruptionReasonDrifted]).To(Equal(5))
-			// The budget where reason == nil overrides the budget with a specified reason
-			Expect(disruptionsByReason[DisruptionReasonUnderutilized]).To(Equal(10))
-		})
-
 	})
 
 	Context("AllowedDisruptions", func() {

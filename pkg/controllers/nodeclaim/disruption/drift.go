@@ -24,12 +24,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -61,8 +59,8 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	}
 	// 2. Otherwise, if the NodeClaim isn't drifted, but has the status condition, remove it.
 	if driftedReason == "" {
-		_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeDrifted)
 		if hasDriftedCondition {
+			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeDrifted)
 			log.FromContext(ctx).V(1).Info("removing drifted status condition, not drifted")
 		}
 		return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
@@ -71,14 +69,6 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDrifted, string(driftedReason), string(driftedReason))
 	if !hasDriftedCondition {
 		log.FromContext(ctx).V(1).WithValues("reason", string(driftedReason)).Info("marking drifted")
-		metrics.NodeClaimsDisruptedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:     metrics.DriftReason,
-			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-		}).Inc()
-		metrics.NodeClaimsDriftedCounter.With(prometheus.Labels{
-			metrics.TypeLabel:     string(driftedReason),
-			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-		}).Inc()
 	}
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil

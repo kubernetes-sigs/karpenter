@@ -127,7 +127,7 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 	lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.taints[*].karpenter.sh/disruption", func(o client.Object) []string {
 		node := o.(*corev1.Node)
 		t, _ := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
-			return t.Key == v1.DisruptionTaintKey
+			return t.Key == v1.DisruptedTaintKey
 		})
 		return []string{t.Value}
 	}))
@@ -180,7 +180,7 @@ func (env *Environment) DefaultNodePool(nodeClass *v1alpha1.KWOKNodeClass) *v1.N
 			},
 		},
 	}
-	nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{}
+	nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{}
 	nodePool.Spec.Template.Spec.ExpireAfter.Duration = nil
 	nodePool.Spec.Limits = v1.Limits(corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse("1000"),
