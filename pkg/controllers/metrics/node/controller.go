@@ -160,8 +160,8 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]corev1.ResourceList{
 		systemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
-		totalPodRequests:    resources.Subtract(n.PodRequests(), n.DaemonSetRequests()),
-		totalPodLimits:      resources.Subtract(n.PodLimits(), n.DaemonSetLimits()),
+		totalPodRequests:    n.PodRequests(),
+		totalPodLimits:      n.PodLimits(),
 		totalDaemonRequests: n.DaemonSetRequests(),
 		totalDaemonLimits:   n.DaemonSetLimits(),
 		allocatable:         n.Node.Status.Allocatable,
