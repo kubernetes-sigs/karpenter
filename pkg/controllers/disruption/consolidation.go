@@ -111,10 +111,10 @@ func (c *consolidation) sortCandidates(candidates []*Candidate) []*Candidate {
 // computeConsolidation computes a consolidation action to take
 //
 // nolint:gocyclo
-func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, pscheduling.Results, error) {
+func (c *consolidation) computeConsolidation(ctx context.Context, schedulingAction string, candidates ...*Candidate) (Command, pscheduling.Results, error) {
 	var err error
 	// Run scheduling simulation to compute consolidation option
-	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
+	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, schedulingAction, candidates...)
 	if err != nil {
 		// if a candidate node is now deleting, just retry
 		if errors.Is(err, errCandidateDeleting) {

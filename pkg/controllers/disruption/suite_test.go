@@ -69,8 +69,8 @@ var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
-var SIHeap *orb.SchedulingInputHeap
-var SMHeap *orb.SchedulingMetadataHeap
+var schedulingInputHeap *orb.SchedulingInputHeap
+var schedulingMetadataHeap *orb.SchedulingMetadataHeap
 var queue *orchestration.Queue
 
 var onDemandInstances []*cloudprovider.InstanceType
@@ -95,9 +95,9 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
-	SIHeap = orb.NewSchedulingInputHeap()
-	SMHeap = orb.NewSchedulingMetadataHeap()
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, SIHeap, SMHeap)
+	schedulingInputHeap = orb.NewMinHeap[orb.SchedulingInput]()
+	schedulingMetadataHeap = orb.NewMinHeap[orb.SchedulingMetadata]()
+	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, schedulingInputHeap, schedulingMetadataHeap)
 	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
 	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
@@ -234,7 +234,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(Succeed())
 
-		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, candidate)
+		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, "", candidate)
 		Expect(err).To(Succeed())
 		Expect(results.PodErrors[pod]).To(BeNil())
 	})

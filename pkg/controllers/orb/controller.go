@@ -17,6 +17,7 @@ limitations under the License.
 package orb
 
 import (
+	"container/heap"
 	"context"
 	"fmt"
 	"math"
@@ -25,26 +26,32 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/singleton"
-
+	// Warning: This github version of protobuf may get autoimported from go.mod/go.sum definitions.
+	// It is outdated and will cause errors in the (de/)serialization processes
+	//     proto "github.com/gogo/protobuf/proto"
 	"google.golang.org/protobuf/proto"
-	// proto "github.com/gogo/protobuf/proto" // This one is outdated and causes errors in the (de/)serialization processes
+
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
-const ( // Constants for calculating the moving average of the rebaseline
+const (
+	pvMountPath = "/data" // TODO: Generalize this to pull directory mounted via the CSI driver in our PV/PVC config yaml
+
+	// Constants for rebaselining logic, calculating the moving average of differences' sizes compared to baseline size
 	initialDeltaThreshold = 0.50
 	decayFactor           = 0.9
-	updateFactor          = 0.1
+	updateFactor          = 1 - decayFactor
 	thresholdMultiplier   = 1.2
 	minThreshold          = 0.1
-) // mountPath = "/data" // Worth including? As defined in our PVC yaml
+)
 
 type Controller struct {
-	schedulingInputHeap    *SchedulingInputHeap    // Batches logs of inputs to heap
-	schedulingMetadataHeap *SchedulingMetadataHeap // batches logs of scheduling metadata to heap
-	mostRecentBaseline     *SchedulingInput        // The most recently saved baseline scheduling input
+	schedulingInputHeap    *SchedulingInputHeap    // This heap batches logs of inputs every reconcile loop.
+	schedulingMetadataHeap *SchedulingMetadataHeap // This heap batches logs of scheduling metadata every reconcile loop.
+	mostRecentBaseline     *SchedulingInput        // The most recently saved full scheduling input on which subsequent diffs are based.
 	baselineSize           int                     // The size of the currently basedlined SchedulingInput in bytes
 	rebaselineThreshold    float32                 // The percentage threshold (between 0 and 1)
 	deltaToBaselineAvg     float32                 // The average delta to the baseline, moving average
@@ -55,34 +62,26 @@ func NewController(schedulingInputHeap *SchedulingInputHeap, schedulingMetadataH
 	return &Controller{
 		schedulingInputHeap:    schedulingInputHeap,
 		schedulingMetadataHeap: schedulingMetadataHeap,
-		shouldRebaseline:       true,
+		mostRecentBaseline:     nil,
+		shouldRebaseline:       true, // Always rebaseline at start-up / on first reconcile
 		rebaselineThreshold:    initialDeltaThreshold,
 	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
-	// ctx = injection.WithControllerName(ctx, "orb.batcher") // What is this for?
+	ctx = injection.WithControllerName(ctx, "orb.batcher") //nolint:ineffassign,staticcheck
 
-	fmt.Println("----------  Starting an ORB Reconcile Cycle  ----------") // For debugging, delete later.
-
-	// Log the scheduling inputs from the heap into either baseline or differences
 	err := c.logSchedulingInputsToPV()
 	if err != nil {
 		fmt.Println("Error writing scheduling inputs to PV:", err)
 		return reconcile.Result{}, err
 	}
 
-	// Log the associated scheduling action metadata
-	err = c.logSchedulingMetadataToPV(c.schedulingMetadataHeap)
+	err = c.logSchedulingMetadataToPV()
 	if err != nil {
 		fmt.Println("Error writing scheduling metadata to PV:", err)
 		return reconcile.Result{}, err
 	}
-
-	// Markers for testing, delete later
-	fmt.Println("----------- Ending an ORB Reconcile Cycle -----------")
-	fmt.Println()
-
 	return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 }
 
@@ -95,8 +94,9 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 // Logs the scheduling inputs from the heap as either a baseline or differences
 func (c *Controller) logSchedulingInputsToPV() error {
+	batchedDifferences := []*SchedulingInputDifferences{}
 	for c.schedulingInputHeap.Len() > 0 {
-		currentInput := c.schedulingInputHeap.Pop().(SchedulingInput)
+		currentInput := heap.Pop(c.schedulingInputHeap).(SchedulingInput)
 
 		// Set the baseline on initial input or upon rebaselining
 		if c.mostRecentBaseline == nil || c.shouldRebaseline {
@@ -105,16 +105,19 @@ func (c *Controller) logSchedulingInputsToPV() error {
 				fmt.Println("Error saving baseline to PV:", err)
 				return err
 			}
-			c.shouldRebaseline = false
 			c.mostRecentBaseline = &currentInput
-		} else { // Check if the scheduling inputs have changed since the last time we saved it to PV
-			inputDifferences := currentInput.Diff(c.mostRecentBaseline)
-			err := c.logSchedulingDifferencesToPV(inputDifferences, currentInput.Timestamp)
-			if err != nil {
-				fmt.Println("Error saving differences to PV:", err)
-				return err
-			}
+			c.shouldRebaseline = false
+		} else { // Batch the scheduling inputs differences since the last time we saved it to PV
+			currentDifferences := c.mostRecentBaseline.Diff(&currentInput)
+			batchedDifferences = append(batchedDifferences, currentDifferences)
+			c.determineRebaseline(currentDifferences.getByteSize())
 		}
+	}
+
+	err := c.logBatchedSchedulingDifferencesToPV(batchedDifferences)
+	if err != nil {
+		fmt.Println("Error saving differences to PV:", err)
+		return err
 	}
 	return nil
 }
@@ -129,30 +132,31 @@ func (c *Controller) logSchedulingBaselineToPV(item *SchedulingInput) error {
 
 	timestampStr := item.Timestamp.Format("2006-01-02_15-04-05")
 	fileName := fmt.Sprintf("SchedulingInputBaseline_%s.log", timestampStr)
-	path := filepath.Join("/data", fileName)
+	path := filepath.Join(pvMountPath, fileName)
 
-	fmt.Println("Writing baseline data to S3 bucket.") // test print / remove later
 	return c.writeToPV(logdata, path)
 }
 
-// TODO: Eventually merge these individual difference prints to all the differences within a batch (similar to metadata)
-func (c *Controller) logSchedulingDifferencesToPV(differences *SchedulingInputDifferences, timestamp time.Time) error {
-	logdata, err := MarshalDifferences(differences)
+func (c *Controller) logBatchedSchedulingDifferencesToPV(batchedDifferences []*SchedulingInputDifferences) error {
+	if len(batchedDifferences) == 0 {
+		return nil // Nothing to log.
+	}
+
+	start, end := GetTimeWindow(batchedDifferences)
+	fileName := fmt.Sprintf("SchedulingInputDifferences_%s_%s.log", start.Format("2006-01-02_15-04-05"), end.Format("2006-01-02_15-04-05"))
+	path := filepath.Join(pvMountPath, fileName)
+
+	logdata, err := MarshalBatchedDifferences(batchedDifferences)
 	if err != nil {
 		fmt.Println("Error converting Scheduling Input to Protobuf:", err)
 		return err
 	}
-	c.shouldRebaseline = c.determineRebaseline(len(logdata))
-
-	timestampStr := timestamp.Format("2006-01-02_15-04-05")
-	fileName := fmt.Sprintf("SchedulingInputDifferences_%s.log", timestampStr)
-	path := filepath.Join("/data", fileName)
-
-	fmt.Println("Writing differences data to S3 bucket.") // test print / remove later
 	return c.writeToPV(logdata, path)
 }
 
-func (c *Controller) logSchedulingMetadataToPV(heap *SchedulingMetadataHeap) error {
+// Log the associated scheduling action metadata
+func (c *Controller) logSchedulingMetadataToPV() error {
+	heap := c.schedulingMetadataHeap
 	if heap == nil || heap.Len() == 0 {
 		return nil // Nothing to log.
 	}
@@ -161,7 +165,7 @@ func (c *Controller) logSchedulingMetadataToPV(heap *SchedulingMetadataHeap) err
 	oldestStr := (*heap)[0].Timestamp.Format("2006-01-02_15-04-05")
 	newestStr := (*heap)[len(*heap)-1].Timestamp.Format("2006-01-02_15-04-05")
 	fileName := fmt.Sprintf("SchedulingMetadata_%s_to_%s.log", oldestStr, newestStr)
-	path := filepath.Join("/data", fileName)
+	path := filepath.Join(pvMountPath, fileName)
 
 	// Marshals the mapping
 	mappingdata, err := proto.Marshal(protoSchedulingMetadataMap(heap))
@@ -169,8 +173,6 @@ func (c *Controller) logSchedulingMetadataToPV(heap *SchedulingMetadataHeap) err
 		fmt.Println("Error marshalling data:", err)
 		return err
 	}
-
-	fmt.Println("Writing metadata to S3 bucket!")
 	return c.writeToPV(mappingdata, path)
 }
 
@@ -193,23 +195,20 @@ func (c *Controller) writeToPV(logdata []byte, path string) error {
 
 // Determines if we should save a new baseline Scheduling Input, using a moving-average heuristic
 // The largest portion of the SchedulingInputs are InstanceTypes, so the expectation is that a
-// rebaseline will only be triggered when InstanceType offers change. This allows for changes if
-// other underlying data changes significantly, however.
-// TODO: due to its size, track/reconstruct diffs on InstanceTypes at a lower level.
-func (c *Controller) determineRebaseline(diffSize int) bool {
+// rebaseline will only be triggered when InstanceType offerings change.
+func (c *Controller) determineRebaseline(diffSize int) {
 	diffSizeFloat := float32(diffSize)
 	baselineSizeFloat := float32(c.baselineSize)
 
 	// If differences' size exceeds threshold percentage, rebaseline and update moving average
 	if diffSizeFloat > c.rebaselineThreshold*baselineSizeFloat {
 		c.baselineSize = diffSize
-		c.deltaToBaselineAvg = float32(diffSize) / baselineSizeFloat
-		return true
+		c.deltaToBaselineAvg = diffSizeFloat / baselineSizeFloat
+		c.shouldRebaseline = true
+	} else { // Otherwise, update the threshold
+		deltaToBaselineRatio := diffSizeFloat / baselineSizeFloat
+		c.deltaToBaselineAvg = (c.deltaToBaselineAvg * decayFactor) + (deltaToBaselineRatio * updateFactor)
+		c.rebaselineThreshold = float32(math.Max(float64(minThreshold), float64(c.deltaToBaselineAvg*thresholdMultiplier)))
+		c.shouldRebaseline = false
 	}
-
-	// Updates the Threshold Value
-	deltaToBaselineRatio := diffSizeFloat / baselineSizeFloat
-	c.deltaToBaselineAvg = (c.deltaToBaselineAvg * decayFactor) + (deltaToBaselineRatio * updateFactor)
-	c.rebaselineThreshold = float32(math.Max(float64(minThreshold), float64(c.deltaToBaselineAvg*thresholdMultiplier)))
-	return false
 }

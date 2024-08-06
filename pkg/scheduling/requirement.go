@@ -17,10 +17,12 @@ limitations under the License.
 package scheduling
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
 	"strconv"
+	"strings"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -239,6 +241,47 @@ func (r *Requirement) Len() int {
 		return math.MaxInt64 - r.values.Len()
 	}
 	return r.values.Len()
+}
+
+// For ORB Logger to ensure reconstruction of Scheduling Inputs shows sufficient details
+func (r *Requirement) MarshalJSON() ([]byte, error) {
+	var key, operator, valuesStr, greaterThan, lessThan, minValues string
+
+	switch r.Operator() {
+	case v1.NodeSelectorOpExists, v1.NodeSelectorOpDoesNotExist:
+		key = r.Key
+		operator = string(r.Operator())
+	default:
+		key = r.Key
+		operator = string(r.Operator())
+		valuesStr = fmt.Sprint("[", strings.Join(sets.List(r.values), ","), "]")
+
+	}
+	if r.greaterThan != nil {
+		greaterThan = fmt.Sprintf("%d", *r.greaterThan)
+	}
+	if r.lessThan != nil {
+		lessThan = fmt.Sprintf("%d", *r.lessThan)
+	}
+	if r.MinValues != nil {
+		minValues = fmt.Sprintf("%d", *r.MinValues)
+	}
+
+	return json.Marshal(struct {
+		Key         string `json:"key"`
+		Operator    string `json:"operator"`
+		Values      string `json:"values"`
+		GreaterThan string `json:"greaterThan,omitempty"`
+		LessThan    string `json:"lessThan,omitempty"`
+		MinValues   string `json:"minValues,omitempty"`
+	}{
+		Key:         key,
+		Operator:    operator,
+		Values:      valuesStr,
+		GreaterThan: greaterThan,
+		LessThan:    lessThan,
+		MinValues:   minValues,
+	})
 }
 
 func (r *Requirement) String() string {

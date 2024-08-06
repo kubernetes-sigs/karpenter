@@ -52,6 +52,14 @@ const (
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
 )
 
+// Karpenter specific scheduling actions
+const (
+	ProvisioningSchedulingAction            = "normal-provisioning"
+	SingleNodeConsolidationSchedulingAction = "single-node-consolidation"
+	MultiNodeConsolidationSchedulingAction  = "multi-node-consolidation"
+	DriftSchedulingAction                   = "drift"
+)
+
 // Karpenter specific finalizers
 const (
 	TerminationFinalizer = apis.Group + "/termination"

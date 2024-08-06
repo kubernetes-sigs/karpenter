@@ -24,32 +24,41 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	v1api "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
+	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
-// This defines a min-heap of SchedulingInputs by slice, with the Timestamp field defined as the comparator
-type SchedulingInputHeap []SchedulingInput // no mutexes needed, heaps are thread-safe in container/heap
+type TimestampedType interface {
+	GetTime() time.Time
+}
 
-func (h SchedulingInputHeap) Len() int {
+// MinTimeHeap is a generic min-heap implementation with the Timestamp field defined as the comparator
+type MinTimeHeap[T TimestampedType] []T
+
+type SchedulingInputHeap = MinTimeHeap[SchedulingInput]
+type SchedulingMetadataHeap = MinTimeHeap[SchedulingMetadata]
+
+func (h MinTimeHeap[T]) Len() int {
 	return len(h)
 }
 
-// This compares timestamps for a min heap, so that oldest inputs pop first.
-func (h SchedulingInputHeap) Less(i, j int) bool {
-	return h[i].Timestamp.Before(h[j].Timestamp)
+// Compares timestamps for a min heap. Oldest elements pop first.
+func (h MinTimeHeap[T]) Less(i, j int) bool {
+	return h[i].GetTime().Before(h[j].GetTime())
 }
 
-func (h SchedulingInputHeap) Swap(i, j int) {
+func (h MinTimeHeap[T]) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 }
 
-func (h *SchedulingInputHeap) Push(x interface{}) {
-	*h = append(*h, x.(SchedulingInput))
+func (h *MinTimeHeap[T]) Push(x interface{}) {
+	*h = append(*h, x.(T))
 }
 
-func (h *SchedulingInputHeap) Pop() interface{} {
+func (h *MinTimeHeap[T]) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
@@ -57,66 +66,31 @@ func (h *SchedulingInputHeap) Pop() interface{} {
 	return x
 }
 
-func NewSchedulingInputHeap() *SchedulingInputHeap {
-	h := &SchedulingInputHeap{}
+func NewMinHeap[T TimestampedType]() *MinTimeHeap[T] {
+	h := &MinTimeHeap[T]{}
 	heap.Init(h)
 	return h
 }
 
-// Function for logging scheduling inputs to the Provisioner Scheduler. Batches via a min-heap, ordered by least recent.
-func (h *SchedulingInputHeap) LogSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time,
-	pods []*v1.Pod, stateNodes []*state.StateNode, bindings map[types.NamespacedName]string, instanceTypes map[string][]*cloudprovider.InstanceType) {
-	si := NewSchedulingInput(ctx, kubeClient, scheduledTime, pods, stateNodes, bindings, instanceTypes["default"])
-	si.Reduce()
-	h.Push(si)
+// Pushes Provisioner Scheduler inputs to their heap for the ORB controller to reconcile.
+func (h *MinTimeHeap[SchedulingInput]) LogSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time, pods []*v1.Pod, stateNodes []*state.StateNode,
+	bindings map[types.NamespacedName]string, instanceTypes map[string][]*cloudprovider.InstanceType, topology *scheduler.Topology, daemonSetPods []*v1.Pod) {
+	si := NewSchedulingInput(ctx, kubeClient, scheduledTime, pods, stateNodes, bindings, instanceTypes, topology, daemonSetPods)
+	heap.Push(h, si)
 }
 
-type SchedulingMetadataHeap []SchedulingMetadata
-
-func (h SchedulingMetadataHeap) Len() int {
-	return len(h)
-}
-
-func (h SchedulingMetadataHeap) Less(i, j int) bool {
-	return h[i].Timestamp.Before(h[j].Timestamp)
-}
-
-func (h SchedulingMetadataHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *SchedulingMetadataHeap) Push(x interface{}) {
-	*h = append(*h, x.(SchedulingMetadata))
-}
-
-func (h *SchedulingMetadataHeap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[:n-1]
-	return x
-}
-
-func NewSchedulingMetadataHeap() *SchedulingMetadataHeap {
-	h := &SchedulingMetadataHeap{}
-	heap.Init(h)
-	return h
-}
-
-// This function will log scheduling action to PV
-func (h *SchedulingMetadataHeap) LogSchedulingAction(ctx context.Context, schedulingTime time.Time) {
-	metadata, ok := GetSchedulingMetadata(ctx)
-
-	// The resolves the time difference between the start of a consolidation call and the subsequent provisioning scheduling
-	metadata.Timestamp = schedulingTime
-
-	if !ok { // Provisioning metadata is not set, set it to the default - normal provisioning action
-		ctx = WithSchedulingMetadata(ctx, "normal-provisioning", schedulingTime)
-		metadata, _ = GetSchedulingMetadata(ctx) // Get it again to update metadata
+// Pushes scheduling action metadata being scheduled by the Provisioner to their heap for the ORB controller to reconcile.
+// Re-setting scheduling time here resolves the potential time difference between the start of an action call (consolidation/drift)
+// and its subsequent provisioning scheduling. This allows us to associate metadata with its respective scheduling action.
+func (h *MinTimeHeap[SchedulingMetadata]) LogSchedulingAction(ctx context.Context, schedulingAction string, schedulingTime time.Time) {
+	if schedulingAction == "" { // If scheduling reason is not set already (i.e. scheduling was not prompted by a Consolidation or Drift) it is a normal provisioning action
+		schedulingAction = v1api.ProvisioningSchedulingAction
 	}
-	h.Push(metadata)
+
+	heap.Push(h, NewSchedulingMetadata(schedulingAction, schedulingTime))
 }
 
+// Converts from scheduling metadata's Karpenter representation to protobuf. It is nearly-symmetric to its Reconstruct function.
 func protoSchedulingMetadataMap(heap *SchedulingMetadataHeap) *pb.SchedulingMetadataMap {
 	mapping := &pb.SchedulingMetadataMap{}
 	for heap.Len() > 0 {
@@ -125,4 +99,15 @@ func protoSchedulingMetadataMap(heap *SchedulingMetadataHeap) *pb.SchedulingMeta
 		mapping.Entries = append(mapping.Entries, entry)
 	}
 	return mapping
+}
+
+// Reconstructs scheduling metadata as a slice instead of back as a heap since each file will be heapified in aggregate.
+// It is nearly-symmetric to its proto function above; the slice of metadata is more meaningful than the original map as a reconstruction.
+func ReconstructAllSchedulingMetadata(mapping *pb.SchedulingMetadataMap) []*SchedulingMetadata {
+	metadata := []*SchedulingMetadata{}
+	for _, entry := range mapping.Entries {
+		metadatum := reconstructSchedulingMetadata(entry)
+		metadata = append(metadata, &metadatum)
+	}
+	return metadata
 }

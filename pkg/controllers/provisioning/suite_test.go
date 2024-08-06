@@ -54,17 +54,17 @@ import (
 )
 
 var (
-	ctx                 context.Context
-	fakeClock           *clock.FakeClock
-	cluster             *state.Cluster
-	nodeController      *informer.NodeController
-	daemonsetController *informer.DaemonSetController
-	cloudProvider       *fake.CloudProvider
-	prov                *provisioning.Provisioner
-	env                 *test.Environment
-	SIHeap              *orb.SchedulingInputHeap
-	SMHeap              *orb.SchedulingMetadataHeap
-	instanceTypeMap     map[string]*cloudprovider.InstanceType
+	ctx                    context.Context
+	fakeClock              *clock.FakeClock
+	cluster                *state.Cluster
+	nodeController         *informer.NodeController
+	daemonsetController    *informer.DaemonSetController
+	cloudProvider          *fake.CloudProvider
+	prov                   *provisioning.Provisioner
+	env                    *test.Environment
+	schedulingInputHeap    *orb.SchedulingInputHeap
+	schedulingMetadataHeap *orb.SchedulingMetadataHeap
+	instanceTypeMap        map[string]*cloudprovider.InstanceType
 )
 
 func TestAPIs(t *testing.T) {
@@ -80,8 +80,8 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	SIHeap = orb.NewSchedulingInputHeap()
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, SIHeap, SMHeap)
+	schedulingInputHeap = orb.NewMinHeap[orb.SchedulingInput]()
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, schedulingInputHeap, schedulingMetadataHeap)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}

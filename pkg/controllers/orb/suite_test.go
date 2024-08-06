@@ -30,6 +30,9 @@ import (
 
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -44,18 +47,37 @@ import (
 )
 
 var (
-	ctx                 context.Context
-	fakeClock           *clock.FakeClock
-	cluster             *state.Cluster
-	nodeController      *informer.NodeController
-	daemonsetController *informer.DaemonSetController
-	cloudProvider       *fake.CloudProvider
-	prov                *provisioning.Provisioner
-	env                 *test.Environment
-	SIHeap              *orb.SchedulingInputHeap
-	SMHeap              *orb.SchedulingMetadataHeap
-	instanceTypeMap     map[string]*cloudprovider.InstanceType
+	ctx                    context.Context
+	fakeClock              *clock.FakeClock
+	cluster                *state.Cluster
+	nodeController         *informer.NodeController
+	daemonsetController    *informer.DaemonSetController
+	cloudProvider          *fake.CloudProvider
+	prov                   *provisioning.Provisioner
+	env                    *test.Environment
+	schedulingInputHeap    *orb.SchedulingInputHeap
+	schedulingMetadataHeap *orb.SchedulingMetadataHeap
+	instanceTypeMap        map[string]*cloudprovider.InstanceType
 )
+
+var (
+	reducedPodConditions = []v1.PodCondition{
+		{
+			Type:    v1.PodReady,
+			Status:  v1.ConditionTrue,
+			Reason:  "PodTestReason",
+			Message: "Testing Pod Condition",
+		},
+	}
+)
+
+func ReducedPodOptions(name, uid string) test.PodOptions {
+	return test.PodOptions{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uid)},
+		Phase:      v1.PodRunning,
+		Conditions: reducedPodConditions,
+	}
+}
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -70,8 +92,8 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	SIHeap = orb.NewSchedulingInputHeap()
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, SIHeap, SMHeap)
+	schedulingInputHeap = orb.NewMinHeap[orb.SchedulingInput]()
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, schedulingInputHeap, schedulingMetadataHeap)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	instanceTypeMap = map[string]*cloudprovider.InstanceType{}
@@ -95,5 +117,33 @@ var _ = AfterEach(func() {
 	cluster.Reset()
 })
 
-var _ = Describe("Orb", func() {
-})
+// var _ = Describe("Orb", func() {
+// 	It("should reduce pods and pod conditions", func() {
+// 		ExpectApplied(ctx, env.Client, test.NodePool())
+
+// 		pods := []*v1.Pod{}
+// 		for i := 1; i <= 2; i++ {
+// 			pods = append(pods, test.Pod(ReducedPodOptions("pod"+string(rune(i)), string(rune(i)))))
+// 		}
+
+// 		reducedPods := orb.reducePods(pods)
+
+// 		Expect(len(reducedPods)).To(Equal(2))
+// 		for i := 1; i <= 2; i++ {
+// 			// Positive case: Check that essential fields are preserved
+// 			Expect(reducedPods[i].Name).To(Equal(pods[i].Name))
+// 			Expect(reducedPods[i].Namespace).To(Equal(pods[i].Namespace))
+// 			Expect(reducedPods[i].UID).To(Equal(pods[i].UID))
+// 			Expect(reducedPods[i].Status.Phase).To(Equal(v1.PodRunning))
+// 			Expect(len(reducedPods[i].Status.Conditions)).To(Equal(4))
+// 			Expect(reducedPods[i].Status.Conditions[0].Type).To(Equal(pods[i].Status.Conditions[0].Type))
+// 			Expect(reducedPods[i].Status.Conditions[0].Status).To(Equal(pods[i].Status.Conditions[0].Status))
+// 			Expect(reducedPods[i].Status.Conditions[0].Reason).To(Equal(pods[i].Status.Conditions[0].Reason))
+// 			Expect(reducedPods[i].Status.Conditions[0].Message).To(Equal(pods[i].Status.Conditions[0].Message))
+
+// 			// Negative case: Spot-check that some non-essential fields are removed
+// 			Expect(reducedPods[i].Spec).To(BeEmpty())
+// 		}
+// 	})
+
+// })

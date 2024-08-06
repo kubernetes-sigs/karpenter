@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
@@ -218,8 +219,8 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
-func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stateNodes []*state.StateNode) (*scheduler.Scheduler, error) {
-	nodePoolList := &v1.NodePoolList{}
+func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, schedulingAction string) (*scheduler.Scheduler, error) {
+	nodePoolList := &v1beta1.NodePoolList{}
 	err := p.kubeClient.List(ctx, nodePoolList)
 	if err != nil {
 		return nil, fmt.Errorf("listing node pools, %w", err)
@@ -312,10 +313,10 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
 
-	// Log scheduling action and scheduling inputs for ORB batcher
-	schedulingTime := time.Now()
-	p.schedulingMetadataHeap.LogSchedulingAction(ctx, schedulingTime)
-	p.schedulingInputHeap.LogSchedulingInput(ctx, p.kubeClient, schedulingTime, pods, stateNodes, p.cluster.GetBindings(), instanceTypes)
+	// Push scheduling action and scheduling inputs to heaps for ORB controller reconciliation
+	schedulingTime := time.Now() // Used to sync a reference time for action and metadata.
+	p.schedulingMetadataHeap.LogSchedulingAction(ctx, schedulingAction, schedulingTime)
+	p.schedulingInputHeap.LogSchedulingInput(ctx, p.kubeClient, schedulingTime, pods, stateNodes, p.cluster.GetBindings(), instanceTypes, topology, daemonSetPods)
 
 	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }
@@ -355,7 +356,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(pods) == 0 {
 		return scheduler.Results{}, nil
 	}
-	s, err := p.NewScheduler(ctx, pods, nodes.Active())
+	s, err := p.NewScheduler(ctx, pods, nodes.Active(), "")
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			log.FromContext(ctx).Info("no nodepools found")

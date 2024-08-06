@@ -597,3 +597,23 @@ func (c *Cluster) GetBindings() map[types.NamespacedName]string {
 	maps.Copy(bindings, c.bindings)
 	return bindings
 }
+
+// Hydrates the cluster with the data from the ORB logs
+func (c *Cluster) ReconstructCluster(ctx context.Context, bindings map[types.NamespacedName]string, stateNodes []*StateNode, daemonSetPods []*v1.Pod, allPods *v1.PodList) {
+	// Set Bindings
+	c.bindings = bindings
+
+	// Hydrate StateNodes
+	for _, statenode := range stateNodes {
+		c.UpdateNode(ctx, statenode.Node)
+		c.UpdateNodeClaim(statenode.NodeClaim)
+	}
+	// Hydrate all pods
+	for _, pod := range allPods.Items {
+		c.UpdatePod(ctx, &pod)
+	}
+	// Set DaemonSetPods
+	for _, pod := range daemonSetPods {
+		c.daemonSetPods.Store(client.ObjectKeyFromObject(pod), pod)
+	}
+}

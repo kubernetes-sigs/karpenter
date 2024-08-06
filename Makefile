@@ -56,6 +56,7 @@ e2etests: ## Run the e2e suite against your local cluster
 apply: verify build ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	kubectl apply -f kwok/charts/crds
 	kubectl apply -f ./pv_and_pvc.yaml
+	protoc --go_out=. --go_opt=paths=source_relative ./pkg/controllers/orb/proto/SchedulingInput.proto
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
 		--set controller.image.repository=$(IMG_REPOSITORY) \
