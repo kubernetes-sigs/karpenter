@@ -69,7 +69,7 @@ var _ = Describe("NodeUtils", func() {
 			Spec: v1.NodeClaimSpec{
 				NodeClassRef: &v1.NodeClassReference{
 					Kind:  "NodeClassRef",
-					Group: "test.cloudprovider/v1",
+					Group: "test.cloudprovider",
 					Name:  "default",
 				},
 			},
