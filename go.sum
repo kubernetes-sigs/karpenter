@@ -47,8 +47,8 @@ github.com/alecthomas/units v0.0.0-20190924025748-f65c72e2690d/go.mod h1:rBZYJk5
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/avast/retry-go v3.0.0+incompatible h1:4SOWQ7Qs+oroOTQOYnAHqelpCO0biHSxpiH9JdtuBj0=
 github.com/avast/retry-go v3.0.0+incompatible/go.mod h1:XtSnn+n/sHqQIpZ10K1qAevBhOOCWBLXXy3hyiqqBrY=
-github.com/awslabs/operatorpkg v0.0.0-20240801183540-0a6e9812953c h1:/10pTC8+qjgaya6a2XelKgkD252yGr2FdDrVVsDYaMQ=
-github.com/awslabs/operatorpkg v0.0.0-20240801183540-0a6e9812953c/go.mod h1:NmFIDk+owvhQnz7hsFgdShl1CXywHQaVCQwhLS+CIhY=
+github.com/awslabs/operatorpkg v0.0.0-20240805231134-67d0acfb6306 h1:0dzaVod1XLEc38H4IB+KOgStoCt8RkCVI4t+XsSPrWE=
+github.com/awslabs/operatorpkg v0.0.0-20240805231134-67d0acfb6306/go.mod h1:7u2ugtOiWSvqqwNlnQ8W+2TjwnSTbHoMHnR1AKpKVMA=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
 github.com/beorn7/perks v1.0.0/go.mod h1:KWe93zE9D1o94FZ5RNwFwVgaQK1VOXiVxmqh+CedLV8=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
