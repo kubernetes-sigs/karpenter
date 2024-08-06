@@ -68,7 +68,7 @@ var _ = Describe("OrderByWeight", func() {
 				Spec: v1.NodePoolSpec{
 					Weight: lo.ToPtr[int32](int32(rand.Intn(100) + 1)), //nolint:gosec
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							NodeClassRef: &v1.NodeClassReference{
 								Name: "default",
 							},
@@ -99,7 +99,7 @@ var _ = Describe("OrderByWeight", func() {
 				Spec: v1.NodePoolSpec{
 					Weight: lo.ToPtr[int32](10), //nolint:gosec
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							NodeClassRef: &v1.NodeClassReference{
 								Name: "default",
 							},

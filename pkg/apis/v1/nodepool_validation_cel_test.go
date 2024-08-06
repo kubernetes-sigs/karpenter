@@ -42,7 +42,7 @@ var _ = Describe("CEL/Validation", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
 			Spec: NodePoolSpec{
 				Template: NodeClaimTemplate{
-					Spec: NodeClaimSpec{
+					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
 							Kind: "NodeClaim",
 							Name: "default",
@@ -91,14 +91,14 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
-		It("should succeed  when setting consolidateAfter with consolidationPolicy=WhenUnderutilized", func() {
+		It("should succeed  when setting consolidateAfter with consolidationPolicy=WhenEmptyOrUnderutilized", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(lo.Must(time.ParseDuration("30s")))}
-			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
+			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmptyOrUnderutilized
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
-		It("should succeed when setting consolidateAfter to 'Never' with consolidationPolicy=WhenUnderutilized", func() {
+		It("should succeed when setting consolidateAfter to 'Never' with consolidationPolicy=WhenEmptyOrUnderutilized", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: nil}
-			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
+			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmptyOrUnderutilized
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should succeed when setting consolidateAfter to 'Never' with consolidationPolicy=WhenEmpty", func() {
