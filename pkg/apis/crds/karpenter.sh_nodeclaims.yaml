@@ -628,7 +628,7 @@ spec:
                       - key
                       - operator
                     type: object
-                  maxItems: 30
+                  maxItems: 100
                   type: array
                   x-kubernetes-validations:
                     - message: requirements with operator 'In' must have a value defined
