@@ -61,7 +61,7 @@ var (
 			Namespace: "karpenter",
 			Subsystem: "nodes",
 			Name:      "total_pod_requests",
-			Help:      "Node total pod requests are the resources requested by non-DaemonSet pods bound to nodes.",
+			Help:      "Node total pod requests are the resources requested by pods bound to nodes, including the DaemonSet pods.",
 		},
 		nodeLabelNames(),
 	)
@@ -70,7 +70,7 @@ var (
 			Namespace: "karpenter",
 			Subsystem: "nodes",
 			Name:      "total_pod_limits",
-			Help:      "Node total pod limits are the resources specified by non-DaemonSet pod limits.",
+			Help:      "Node total pod limits are the resources specified by pod limits, including the DaemonSet pods.",
 		},
 		nodeLabelNames(),
 	)
