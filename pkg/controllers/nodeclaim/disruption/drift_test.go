@@ -368,7 +368,7 @@ var _ = Describe("Drift", func() {
 							NodeClassRef: &v1.NodeClassReference{
 								Kind:  "fakeKind",
 								Name:  "fakeName",
-								Group: "fakeGroup/fakeVerion",
+								Group: "fakeGroup",
 							},
 							Taints: []corev1.Taint{
 								{

@@ -1260,7 +1260,7 @@ var _ = Describe("Provisioning", func() {
 					Template: v1.NodeClaimTemplate{
 						Spec: v1.NodeClaimTemplateSpec{
 							NodeClassRef: &v1.NodeClassReference{
-								Group: "cloudprovider.karpenter.sh/v1",
+								Group: "cloudprovider.karpenter.sh",
 								Kind:  "CloudProvider",
 								Name:  "default",
 							},
@@ -1275,7 +1275,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 			Expect(cloudProvider.CreateCalls[0].Spec.NodeClassRef).To(Equal(
 				&v1.NodeClassReference{
-					Group: "cloudprovider.karpenter.sh/v1",
+					Group: "cloudprovider.karpenter.sh",
 					Kind:  "CloudProvider",
 					Name:  "default",
 				},

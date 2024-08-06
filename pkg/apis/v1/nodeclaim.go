@@ -103,6 +103,7 @@ type NodeClassReference struct {
 	// +required
 	Name string `json:"name"`
 	// API version of the referent
+	// +kubebuilder:validation:Pattern=`^[^/]*$`
 	// +required
 	Group string `json:"group"`
 }
