@@ -142,7 +142,6 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 				Operator: v1beta1Requirements.Operator,
 				Values:   v1beta1Requirements.Values,
 			},
-			MinValues: lo.ToPtr(0),
 		}
 	})
 
