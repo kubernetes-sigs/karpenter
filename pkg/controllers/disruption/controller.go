@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,7 +185,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
 	commandID := uuid.NewUUID()
-	log.FromContext(ctx).WithValues("command-id", commandID).Info(fmt.Sprintf("disrupting via %s %s", m.Reason(), cmd))
+	log.FromContext(ctx).WithValues("command-id", commandID).Info(fmt.Sprintf("disrupting %s nodeclaim(s), %s", strings.ToLower(string(m.Reason())), cmd))
 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
 		return c.StateNode
