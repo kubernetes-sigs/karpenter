@@ -72,7 +72,7 @@ var _ = Describe("TerminationUtils", func() {
 		cloudProvider.CreatedNodeClaims[nodeClaim.Status.ProviderID] = nodeClaim
 	})
 	It("should not call cloudProvider Delete if the status condition is already Terminating", func() {
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeTerminating)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		instanceTerminated, err := EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
 		Expect(len(cloudProvider.DeleteCalls)).To(BeEquivalentTo(0))
@@ -87,7 +87,7 @@ var _ = Describe("TerminationUtils", func() {
 		Expect(len(cloudProvider.DeleteCalls)).To(BeEquivalentTo(1))
 		Expect(instanceTerminated).To(BeFalse())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
 		//This will call cloudProvider.Get(). Instance is terminated at this point
 		instanceTerminated, err = EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
@@ -103,7 +103,7 @@ var _ = Describe("TerminationUtils", func() {
 		Expect(len(cloudProvider.DeleteCalls)).To(BeEquivalentTo(1))
 		Expect(instanceTerminated).To(BeFalse())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
 		// The delete call that happened first will remove the cloudProvider instance from cloudProvider.CreatedNodeClaims[].
 		// To model the behavior of having cloudProvider instance not terminated, we add it back here.

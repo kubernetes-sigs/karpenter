@@ -28,7 +28,7 @@ const (
 	ConditionTypeInitialized          = "Initialized"
 	ConditionTypeConsolidatable       = "Consolidatable"
 	ConditionTypeDrifted              = "Drifted"
-	ConditionTypeTerminating          = "Terminating"
+	ConditionTypeInstanceTerminating  = "InstanceTerminating"
 	ConditionTypeConsistentStateFound = "ConsistentStateFound"
 )
 
