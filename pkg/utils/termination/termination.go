@@ -32,11 +32,11 @@ import (
 // conflict or a NotFound error if we encounter it while updating the status on nodeClaim.
 func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1.NodeClaim, cloudProvider cloudprovider.CloudProvider) (terminated bool, err error) {
 	// Check if the status condition on nodeClaim is Terminating
-	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue() {
+	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
 		// If not then call Delete on cloudProvider to trigger termination and always requeue reconciliation
 		if err := cloudProvider.Delete(ctx, nodeClaim); err != nil {
 			if cloudprovider.IsNodeClaimNotFoundError(err) {
-				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeTerminating)
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
 				// We call Update() here rather than Patch() because patching a list with a JSON merge patch
 				// can cause races due to the fact that it fully replaces the list on a change
 				// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
@@ -49,7 +49,7 @@ func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1.NodeCl
 			return false, fmt.Errorf("terminating cloudprovider instance, %w", err)
 		}
 
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeTerminating)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
 		// We call Update() here rather than Patch() because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
 		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732

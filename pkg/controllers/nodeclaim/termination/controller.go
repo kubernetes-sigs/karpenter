@@ -128,7 +128,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		}
 		InstanceTerminationDurationSeconds.With(map[string]string{
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).LastTransitionTime.Time).Seconds())
+		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).LastTransitionTime.Time).Seconds())
 	}
 	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
