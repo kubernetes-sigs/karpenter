@@ -42,5 +42,5 @@ var (
 			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, consolidationTypeLabel},
-	)
+	) //stability=BETA
 )

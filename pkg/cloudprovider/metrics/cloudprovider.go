@@ -57,7 +57,7 @@ var methodDuration = prometheus.NewHistogramVec(
 		metricLabelMethod,
 		metricLabelProvider,
 	},
-)
+) //stability=BETA
 
 var (
 	errorsTotal = prometheus.NewCounterVec(
@@ -73,7 +73,7 @@ var (
 			metricLabelProvider,
 			metricLabelError,
 		},
-	)
+	) //stability=BETA
 )
 
 func init() {

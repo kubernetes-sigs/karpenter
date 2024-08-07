@@ -45,7 +45,7 @@ var (
 		[]string{
 			ControllerLabel,
 		},
-	)
+	) //stability=STABLE
 	QueueDepth = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
@@ -57,5 +57,5 @@ var (
 			ControllerLabel,
 			schedulingIDLabel,
 		},
-	)
+	) //stability=BETA
 )

@@ -85,7 +85,7 @@ var (
 			Help:      "A metric with a constant '1' value labeled by version from which karpenter was built.",
 		},
 		[]string{"version", "goversion", "goarch", "commit"},
-	)
+	) //stability=STABLE
 )
 
 // Version is the karpenter app version injected during compilation

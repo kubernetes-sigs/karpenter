@@ -55,7 +55,7 @@ var (
 			Help:      "Node allocatable are the resources allocatable by nodes.",
 		},
 		nodeLabelNames(),
-	)
+	) //stability=BETA
 	totalPodRequests = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -64,7 +64,7 @@ var (
 			Help:      "Node total pod requests are the resources requested by pods bound to nodes, including the DaemonSet pods.",
 		},
 		nodeLabelNames(),
-	)
+	) //stability=BETA
 	totalPodLimits = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -73,7 +73,7 @@ var (
 			Help:      "Node total pod limits are the resources specified by pod limits, including the DaemonSet pods.",
 		},
 		nodeLabelNames(),
-	)
+	) //stability=BETA
 	totalDaemonRequests = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -82,7 +82,7 @@ var (
 			Help:      "Node total daemon requests are the resource requested by DaemonSet pods bound to nodes.",
 		},
 		nodeLabelNames(),
-	)
+	) //stability=BETA
 	totalDaemonLimits = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -91,7 +91,7 @@ var (
 			Help:      "Node total daemon limits are the resources specified by DaemonSet pod limits.",
 		},
 		nodeLabelNames(),
-	)
+	) //stability=BETA
 	systemOverhead = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "karpenter",
@@ -100,7 +100,7 @@ var (
 			Help:      "Node system daemon overhead are the resources reserved for system overhead, the difference between the node's capacity and allocatable values are reported by the status.",
 		},
 		nodeLabelNames(),
-	)
+	) //stability=BETA
 	wellKnownLabels = getWellKnownLabels()
 )
 
