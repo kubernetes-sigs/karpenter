@@ -27,10 +27,9 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 
-	. "sigs.k8s.io/karpenter/pkg/utils/testing"
-
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 var ctx context.Context

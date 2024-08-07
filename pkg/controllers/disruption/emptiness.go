@@ -22,13 +22,11 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
-
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 // Emptiness is a subreconciler that deletes empty candidates.

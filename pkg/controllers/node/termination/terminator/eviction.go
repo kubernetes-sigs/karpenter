@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"sigs.k8s.io/karpenter/pkg/metrics"
-
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -41,10 +39,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
-
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
 const (

@@ -20,8 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -32,12 +30,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
-	. "sigs.k8s.io/karpenter/pkg/utils/testing"
-
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 var (
