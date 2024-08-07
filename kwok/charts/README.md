@@ -41,7 +41,7 @@ For full Karpenter documentation please checkout [https://karpenter.sh](https://
 | podDisruptionBudget.maxUnavailable | int | `1` |  |
 | podDisruptionBudget.name | string | `"karpenter"` |  |
 | podLabels | object | `{}` | Additional labels for the pod. |
-| podSecurityContext | object | `{"fsGroup":65536}` | SecurityContext for the pod. |
+<!-- | podSecurityContext | object | `{"fsGroup":65536}` | SecurityContext for the pod. | -->
 | priorityClassName | string | `"system-cluster-critical"` | PriorityClass name for the pod. |
 | replicas | int | `1` | Number of replicas. |
 | revisionHistoryLimit | int | `10` | The number of old ReplicaSets to retain to allow rollback. |
