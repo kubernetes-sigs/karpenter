@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -131,7 +130,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		c.recordRun(fmt.Sprintf("%T", m))
 		success, err := c.disrupt(ctx, m)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("disrupting via %q, %w", m.Reason(), err)
+			return reconcile.Result{}, fmt.Errorf("disrupting via reason=%q, %w", m.Reason(), err)
 		}
 		if success {
 			return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
@@ -185,7 +184,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
 	commandID := uuid.NewUUID()
-	log.FromContext(ctx).WithValues("command-id", commandID).Info(fmt.Sprintf("disrupting %s nodeclaim(s), %s", strings.ToLower(string(m.Reason())), cmd))
+	log.FromContext(ctx).WithValues("command-id", commandID, "reason", m.Reason()).Info(fmt.Sprintf("disrupting nodeclaim(s) via %s", cmd))
 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
 		return c.StateNode

@@ -226,7 +226,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
-	log.FromContext(ctx).Info("command succeeded")
+	log.FromContext(ctx).V(1).Info("command succeeded")
 	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
