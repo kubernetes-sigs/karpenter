@@ -24,7 +24,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	v1api "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 )
 
@@ -73,7 +72,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			return Command{}, scheduling.Results{}, nil
 		}
 		// compute a possible consolidation option
-		cmd, results, err := s.computeConsolidation(ctx, v1api.SingleNodeConsolidationSchedulingAction, candidate)
+		cmd, results, err := s.computeConsolidation(ctx, v1.SingleNodeConsolidationSchedulingAction, candidate)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed computing consolidation")
 			continue

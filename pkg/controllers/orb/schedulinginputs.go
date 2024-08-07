@@ -30,7 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/karpenter/pkg/apis/v1"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -273,12 +274,12 @@ func MarshalSchedulingInput(si *SchedulingInput) ([]byte, error) {
 func UnmarshalSchedulingInput(schedulingInputData []byte) (*SchedulingInput, error) {
 	entry := &pb.SchedulingInput{}
 	if err := proto.Unmarshal(schedulingInputData, entry); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal SchedulingInput: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal SchedulingInput: %w", err)
 	}
 
 	si, err := reconstructSchedulingInput(entry)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reconstruct SchedulingInput: %v", err)
+		return nil, fmt.Errorf("failed to reconstruct SchedulingInput: %w", err)
 	}
 	return si, nil
 }
@@ -302,21 +303,56 @@ func protoSchedulingInput(si *SchedulingInput) *pb.SchedulingInput {
 func reconstructSchedulingInput(pbsi *pb.SchedulingInput) (*SchedulingInput, error) {
 	timestamp, err := time.Parse("2006-01-02_15-04-05", pbsi.GetTimestamp())
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse timestamp: %v", err)
+		return nil, fmt.Errorf("failed to parse timestamp: %w", err)
+	}
+
+	reconstructedStateNodesWithPods, err := reconstructStateNodesWithPods(pbsi.GetStatenodesData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct StateNodesWithPods: %w", err)
+	}
+
+	reconstructedInstanceTypes, err := reconstructInstanceTypes(pbsi.GetInstancetypesData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct InstanceTypes: %w", err)
+	}
+
+	reconstructedTopology, err := reconstructTopology(pbsi.GetTopologyData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct Topology: %w", err)
+	}
+
+	reconstructedDaemonSetPods, err := reconstructDaemonSetPods(pbsi.GetDaemonsetpodsData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct DaemonSetPods: %w", err)
+	}
+
+	reconstructedPVList, err := reconstructPVList(pbsi.GetPvlistData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct PVList: %w", err)
+	}
+
+	reconstructedPVCList, err := reconstructPVCList(pbsi.GetPvclistData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct PVCList: %w", err)
+	}
+
+	reconstructedScheduledPodList, err := reconstructScheduledPodList(pbsi.GetScheduledpodlistData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct ScheduledPodList: %w", err)
 	}
 
 	return &SchedulingInput{
 		timestamp,
 		reconstructPods(pbsi.GetPendingpodData()),
-		reconstructStateNodesWithPods(pbsi.GetStatenodesData()),
+		reconstructedStateNodesWithPods,
 		reconstructBindings(pbsi.GetBindingsData()),
-		reconstructInstanceTypes(pbsi.GetInstancetypesData()),
+		reconstructedInstanceTypes,
 		reconstructNodePoolInstanceTypes(pbsi.GetNodepoolstoinstancetypesData()),
-		reconstructTopology(pbsi.GetTopologyData()),
-		reconstructDaemonSetPods(pbsi.GetDaemonsetpodsData()),
-		reconstructPVList(pbsi.GetPvlistData()),
-		reconstructPVCList(pbsi.GetPvclistData()),
-		reconstructScheduledPodList(pbsi.GetScheduledpodlistData()),
+		reconstructedTopology,
+		reconstructedDaemonSetPods,
+		reconstructedPVList,
+		reconstructedPVCList,
+		reconstructedScheduledPodList,
 	}, nil
 }
 
@@ -421,13 +457,17 @@ func protoStateNodesWithPods(stateNodesWithPods []*StateNodeWithPods) []*pb.Stat
 	return snpData
 }
 
-func reconstructStateNodesWithPods(snpData []*pb.StateNodeWithPods) []*StateNodeWithPods {
+func reconstructStateNodesWithPods(snpData []*pb.StateNodeWithPods) ([]*StateNodeWithPods, error) {
 	stateNodesWithPods := []*StateNodeWithPods{}
 	for _, snpData := range snpData {
 		node := &corev1.Node{}
-		node.Unmarshal(snpData.Node)
+		if err := node.Unmarshal(snpData.Node); err != nil {
+			return nil, err
+		}
 		nodeClaim := &v1.NodeClaim{}
-		json.Unmarshal(snpData.NodeClaim, nodeClaim)
+		if err := json.Unmarshal(snpData.NodeClaim, nodeClaim); err != nil {
+			return nil, err
+		}
 
 		stateNodesWithPods = append(stateNodesWithPods, &StateNodeWithPods{
 			Node:      node,
@@ -435,7 +475,7 @@ func reconstructStateNodesWithPods(snpData []*pb.StateNodeWithPods) []*StateNode
 			Pods:      reconstructPods(snpData.Pods),
 		})
 	}
-	return stateNodesWithPods
+	return stateNodesWithPods, nil
 }
 
 func protoInstanceTypes(instanceTypes []*cloudprovider.InstanceType) []*pb.InstanceType {
@@ -452,18 +492,26 @@ func protoInstanceTypes(instanceTypes []*cloudprovider.InstanceType) []*pb.Insta
 	return itData
 }
 
-func reconstructInstanceTypes(itData []*pb.InstanceType) []*cloudprovider.InstanceType {
+func reconstructInstanceTypes(itData []*pb.InstanceType) ([]*cloudprovider.InstanceType, error) {
 	instanceTypes := []*cloudprovider.InstanceType{}
 	for _, it := range itData {
+		reconstructedCapacity, err := reconstructResourceList(it.Capacity)
+		if err != nil {
+			return nil, err
+		}
+		reconstructedOverhead, err := reconstructOverhead(it.Overhead)
+		if err != nil {
+			return nil, err
+		}
 		instanceTypes = append(instanceTypes, &cloudprovider.InstanceType{
 			Name:         it.Name,
 			Requirements: reconstructRequirements(it.Requirements),
 			Offerings:    reconstructOfferings(it.Offerings),
-			Capacity:     reconstructResourceList(it.Capacity),
-			Overhead:     reconstructOverhead(it.Overhead),
+			Capacity:     reconstructedCapacity,
+			Overhead:     reconstructedOverhead,
 		})
 	}
-	return instanceTypes
+	return instanceTypes, nil
 }
 
 func protoRequirements(requirements scheduling.Requirements) []*pb.InstanceType_Requirement {
@@ -550,14 +598,16 @@ func protoCapacity(capacity corev1.ResourceList) *pb.InstanceType_ResourceList {
 	return protoResourceList(capacity)
 }
 
-func reconstructResourceList(protoCapacity *pb.InstanceType_ResourceList) corev1.ResourceList {
+func reconstructResourceList(protoCapacity *pb.InstanceType_ResourceList) (corev1.ResourceList, error) {
 	capacity := corev1.ResourceList{}
 	for _, resourceQuantity := range protoCapacity.Resources {
 		quantity := &resource.Quantity{}
-		quantity.Unmarshal(resourceQuantity.Quantity)
+		if err := quantity.Unmarshal(resourceQuantity.Quantity); err != nil {
+			return nil, err
+		}
 		capacity[corev1.ResourceName(resourceQuantity.ResourceName)] = *quantity
 	}
-	return capacity
+	return capacity, nil
 }
 
 func protoOverhead(overhead *cloudprovider.InstanceTypeOverhead) *pb.InstanceType_Overhead {
@@ -568,12 +618,24 @@ func protoOverhead(overhead *cloudprovider.InstanceTypeOverhead) *pb.InstanceTyp
 	}
 }
 
-func reconstructOverhead(protoOverhead *pb.InstanceType_Overhead) *cloudprovider.InstanceTypeOverhead {
-	return &cloudprovider.InstanceTypeOverhead{
-		KubeReserved:      reconstructResourceList(protoOverhead.Kubereserved),
-		SystemReserved:    reconstructResourceList(protoOverhead.Systemreserved),
-		EvictionThreshold: reconstructResourceList(protoOverhead.Evictionthreshold),
+func reconstructOverhead(protoOverhead *pb.InstanceType_Overhead) (*cloudprovider.InstanceTypeOverhead, error) {
+	kubeReserved, err := reconstructResourceList(protoOverhead.Kubereserved)
+	if err != nil {
+		return nil, err
 	}
+	systemReserved, err := reconstructResourceList(protoOverhead.Systemreserved)
+	if err != nil {
+		return nil, err
+	}
+	evictionThreshold, err := reconstructResourceList(protoOverhead.Evictionthreshold)
+	if err != nil {
+		return nil, err
+	}
+	return &cloudprovider.InstanceTypeOverhead{
+		KubeReserved:      kubeReserved,
+		SystemReserved:    systemReserved,
+		EvictionThreshold: evictionThreshold,
+	}, nil
 }
 
 func protoBindings(bindings map[types.NamespacedName]string) *pb.Bindings {
@@ -634,10 +696,13 @@ func protoTopology(topology *scheduler.Topology) []byte {
 	return topologyData
 }
 
-func reconstructTopology(topologyData []byte) *scheduler.Topology {
+func reconstructTopology(topologyData []byte) (*scheduler.Topology, error) {
 	topology := &scheduler.Topology{}
-	json.Unmarshal(topologyData, topology)
-	return topology
+	if err := json.Unmarshal(topologyData, topology); err != nil {
+		return nil, err
+	}
+
+	return topology, nil
 }
 
 func protoDaemonSetPods(daemonSetPods []*corev1.Pod) []byte {
@@ -656,15 +721,18 @@ func protoDaemonSetPods(daemonSetPods []*corev1.Pod) []byte {
 	return dspData
 }
 
-func reconstructDaemonSetPods(dspData []byte) []*corev1.Pod {
+func reconstructDaemonSetPods(dspData []byte) ([]*corev1.Pod, error) {
 	podList := &corev1.PodList{}
-	podList.Unmarshal(dspData)
+	if err := podList.Unmarshal(dspData); err != nil {
+		return nil, err
+	}
 
 	daemonSetPods := []*corev1.Pod{}
 	for _, pod := range podList.Items {
-		daemonSetPods = append(daemonSetPods, &pod)
+		podCopy := pod
+		daemonSetPods = append(daemonSetPods, &podCopy)
 	}
-	return daemonSetPods
+	return daemonSetPods, nil
 }
 
 func protoPVList(pvList *corev1.PersistentVolumeList) []byte {
@@ -679,10 +747,12 @@ func protoPVList(pvList *corev1.PersistentVolumeList) []byte {
 	return pvListData
 }
 
-func reconstructPVList(pvListData []byte) *corev1.PersistentVolumeList {
+func reconstructPVList(pvListData []byte) (*corev1.PersistentVolumeList, error) {
 	pvList := &corev1.PersistentVolumeList{}
-	pvList.Unmarshal(pvListData)
-	return pvList
+	if err := pvList.Unmarshal(pvListData); err != nil {
+		return nil, err
+	}
+	return pvList, nil
 }
 
 func protoPVCList(pvcList *corev1.PersistentVolumeClaimList) []byte {
@@ -697,10 +767,12 @@ func protoPVCList(pvcList *corev1.PersistentVolumeClaimList) []byte {
 	return pvcListData
 }
 
-func reconstructPVCList(pvcListData []byte) *corev1.PersistentVolumeClaimList {
+func reconstructPVCList(pvcListData []byte) (*corev1.PersistentVolumeClaimList, error) {
 	pvcList := &corev1.PersistentVolumeClaimList{}
-	pvcList.Unmarshal(pvcListData)
-	return pvcList
+	if err := pvcList.Unmarshal(pvcListData); err != nil {
+		return nil, err
+	}
+	return pvcList, nil
 }
 
 func protoScheduledPodList(scheduledPodList *corev1.PodList) []byte {
@@ -715,8 +787,10 @@ func protoScheduledPodList(scheduledPodList *corev1.PodList) []byte {
 	return scheduledPodListData
 }
 
-func reconstructScheduledPodList(scheduledPodListData []byte) *corev1.PodList {
+func reconstructScheduledPodList(scheduledPodListData []byte) (*corev1.PodList, error) {
 	scheduledPodList := &corev1.PodList{}
-	scheduledPodList.Unmarshal(scheduledPodListData)
-	return scheduledPodList
+	if err := scheduledPodList.Unmarshal(scheduledPodListData); err != nil {
+		return nil, err
+	}
+	return scheduledPodList, nil
 }

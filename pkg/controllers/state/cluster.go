@@ -599,21 +599,26 @@ func (c *Cluster) GetBindings() map[types.NamespacedName]string {
 }
 
 // Hydrates the cluster with the data from the ORB logs
-func (c *Cluster) ReconstructCluster(ctx context.Context, bindings map[types.NamespacedName]string, stateNodes []*StateNode, daemonSetPods []*corev1.Pod, allPods *corev1.PodList) {
+func (c *Cluster) ReconstructCluster(ctx context.Context, bindings map[types.NamespacedName]string, stateNodes []*StateNode, daemonSetPods []*corev1.Pod, allPods *corev1.PodList) error {
 	// Set Bindings
 	c.bindings = bindings
 
 	// Hydrate StateNodes
 	for _, statenode := range stateNodes {
-		c.UpdateNode(ctx, statenode.Node)
+		if err := c.UpdateNode(ctx, statenode.Node); err != nil {
+			return err
+		}
 		c.UpdateNodeClaim(statenode.NodeClaim)
 	}
 	// Hydrate all pods
 	for _, pod := range allPods.Items {
-		c.UpdatePod(ctx, &pod)
+		if err := c.UpdatePod(ctx, &pod); err != nil {
+			return err
+		}
 	}
 	// Set DaemonSetPods
 	for _, pod := range daemonSetPods {
 		c.daemonSetPods.Store(client.ObjectKeyFromObject(pod), pod)
 	}
+	return nil
 }

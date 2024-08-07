@@ -29,6 +29,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/sets"
+
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
 
@@ -136,7 +137,7 @@ func MarshalBatchedDifferences(batchedDifferences []*SchedulingInputDifferences)
 	}
 	protoData, err := proto.Marshal(protoDifferences)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal Differences: %v", err)
+		return nil, fmt.Errorf("failed to marshal Differences: %w", err)
 	}
 	return protoData, nil
 }
@@ -144,20 +145,20 @@ func MarshalBatchedDifferences(batchedDifferences []*SchedulingInputDifferences)
 func UnmarshalBatchedDifferences(differencesData []byte) ([]*SchedulingInputDifferences, error) {
 	batchedDifferences := &pb.BatchedDifferences{}
 	if err := proto.Unmarshal(differencesData, batchedDifferences); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal Differences: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal Differences: %w", err)
 	}
 
 	batchedAdded, err := reconstructSchedulingInputs(batchedDifferences.GetAdded())
 	if err != nil {
-		return nil, fmt.Errorf("failed to reconstruct Added: %v", err)
+		return nil, fmt.Errorf("failed to reconstruct Added: %w", err)
 	}
 	batchedRemoved, err := reconstructSchedulingInputs(batchedDifferences.GetRemoved())
 	if err != nil {
-		return nil, fmt.Errorf("failed to reconstruct Removed: %v", err)
+		return nil, fmt.Errorf("failed to reconstruct Removed: %w", err)
 	}
 	batchedChanged, err := reconstructSchedulingInputs(batchedDifferences.GetChanged())
 	if err != nil {
-		return nil, fmt.Errorf("failed to reconstruct Changed: %v", err)
+		return nil, fmt.Errorf("failed to reconstruct Changed: %w", err)
 	}
 
 	batchedSchedulingInputDifferences := []*SchedulingInputDifferences{}
@@ -193,22 +194,22 @@ func reconstructSchedulingInputs(pbsi []*pb.SchedulingInput) ([]*SchedulingInput
 }
 
 // Functions to check the differences in all the fields of a SchedulingInput (except the timestamp)
-func (oldSi *SchedulingInput) Diff(si *SchedulingInput) *SchedulingInputDifferences {
-	podDiff := diffSlice(oldSi.PendingPods, si.PendingPods, getPodKey, hasPodChanged)
-	snpDiff := diffSlice(oldSi.StateNodesWithPods, si.StateNodesWithPods, getStateNodeWithPodsKey, hasStateNodeWithPodsChanged)
-	bindingsDiff := diffMap(oldSi.Bindings, si.Bindings, hasBindingChanged)
-	itDiff := diffSlice(oldSi.AllInstanceTypes, si.AllInstanceTypes, GetInstanceTypeKey, hasInstanceTypeChanged)
-	npitDiff := diffMap(oldSi.NodePoolInstanceTypes, si.NodePoolInstanceTypes, hasNodePoolInstanceTypeChanged)
-	topologyDiff := diffOnlyChanges(oldSi.Topology, si.Topology)
-	dspDiff := diffSlice(oldSi.DaemonSetPods, si.DaemonSetPods, getPodKey, hasPodChanged)
-	pvListDiff := diffOnlyChanges(oldSi.PVList, si.PVList)
-	pvcListDiff := diffOnlyChanges(oldSi.PVCList, si.PVCList)
-	scheduledPodListDiff := diffOnlyChanges(oldSi.ScheduledPodList, si.ScheduledPodList)
+func (si *SchedulingInput) Diff(newSi *SchedulingInput) *SchedulingInputDifferences {
+	podDiff := diffSlice(si.PendingPods, newSi.PendingPods, getPodKey, hasPodChanged)
+	snpDiff := diffSlice(si.StateNodesWithPods, newSi.StateNodesWithPods, getStateNodeWithPodsKey, hasStateNodeWithPodsChanged)
+	bindingsDiff := diffMap(si.Bindings, newSi.Bindings, hasBindingChanged)
+	itDiff := diffSlice(si.AllInstanceTypes, newSi.AllInstanceTypes, GetInstanceTypeKey, hasInstanceTypeChanged)
+	npitDiff := diffMap(si.NodePoolInstanceTypes, newSi.NodePoolInstanceTypes, hasNodePoolInstanceTypeChanged)
+	topologyDiff := diffOnlyChanges(si.Topology, newSi.Topology)
+	dspDiff := diffSlice(si.DaemonSetPods, newSi.DaemonSetPods, getPodKey, hasPodChanged)
+	pvListDiff := diffOnlyChanges(si.PVList, newSi.PVList)
+	pvcListDiff := diffOnlyChanges(si.PVCList, newSi.PVCList)
+	scheduledPodListDiff := diffOnlyChanges(si.ScheduledPodList, newSi.ScheduledPodList)
 
 	// Added and Removed is not defined for unitary resources (topology, pvList, pvcList and scheduledPodList).
-	diffAdded := &SchedulingInput{si.Timestamp, podDiff.Added, snpDiff.Added, bindingsDiff.Added, itDiff.Added, npitDiff.Added, nil, dspDiff.Added, nil, nil, nil}
-	diffRemoved := &SchedulingInput{si.Timestamp, podDiff.Removed, snpDiff.Removed, bindingsDiff.Removed, itDiff.Removed, npitDiff.Removed, nil, dspDiff.Removed, nil, nil, nil}
-	diffChanged := &SchedulingInput{si.Timestamp, podDiff.Changed, snpDiff.Changed, bindingsDiff.Changed, itDiff.Changed, npitDiff.Changed, topologyDiff.Changed, dspDiff.Changed, pvListDiff.Changed, pvcListDiff.Changed, scheduledPodListDiff.Changed}
+	diffAdded := &SchedulingInput{newSi.Timestamp, podDiff.Added, snpDiff.Added, bindingsDiff.Added, itDiff.Added, npitDiff.Added, nil, dspDiff.Added, nil, nil, nil}
+	diffRemoved := &SchedulingInput{newSi.Timestamp, podDiff.Removed, snpDiff.Removed, bindingsDiff.Removed, itDiff.Removed, npitDiff.Removed, nil, dspDiff.Removed, nil, nil, nil}
+	diffChanged := &SchedulingInput{newSi.Timestamp, podDiff.Changed, snpDiff.Changed, bindingsDiff.Changed, itDiff.Changed, npitDiff.Changed, topologyDiff.Changed, dspDiff.Changed, pvListDiff.Changed, pvcListDiff.Changed, scheduledPodListDiff.Changed}
 
 	if diffAdded.isEmpty() {
 		diffAdded = &SchedulingInput{}
