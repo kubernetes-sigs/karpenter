@@ -1,7 +1,6 @@
 name: kind-e2e
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 jobs:
   kind-e2e:
@@ -11,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        k8sVersion: ["1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
+        k8sVersion: ["1.25.0", "1.26.0", "1.27.0", "1.28.0", "1.29.0", "1.30.0"]
     steps:
     - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
     - name: Set up Python 3.10
@@ -23,6 +22,8 @@ jobs:
           k8sVersion: ${{ matrix.k8sVersion }}
     - name: Kind Cluster
       uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
+      with:
+        node_image: docker.io/kindest/node:v${{matrix.k8sVersion}}
     - name: check kind cluster and taint nodes
       shell: bash
       run: |
@@ -37,7 +38,7 @@ jobs:
       shell: bash
       run: |
         make toolchain
-        make install-kwok
+        #make install-kwok
         export KWOK_REPO=kind.local
         export KIND_CLUSTER_NAME=chart-testing
         make apply-with-kind
@@ -70,6 +71,11 @@ jobs:
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         make e2etests
+    - uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+      if: always()
+      with:
+        name: artifacts_${{ matrix.k8sVersion}}
+        path: ${{ env.OUTPUT_DIR }}
     - name: run test analysis
       shell: bash
       run: |
