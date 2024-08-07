@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
@@ -151,15 +152,11 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 		}
 	})
 
-	defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
-	nodeclassGroupVersion, err := schema.ParseGroupVersion(v1beta1nc.NodeClassRef.APIVersion)
-	if err != nil {
-		return "", err
-	}
+	nodeclasses := injection.GetNodeClasses(ctx)
 	in.NodeClassRef = &NodeClassReference{
 		Name:  v1beta1nc.NodeClassRef.Name,
-		Kind:  lo.Ternary(v1beta1nc.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1nc.NodeClassRef.Kind),
-		Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, nodeclassGroupVersion.Group),
+		Kind:  lo.Ternary(v1beta1nc.NodeClassRef.Kind == "", nodeclasses[0].Kind, v1beta1nc.NodeClassRef.Kind),
+		Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", nodeclasses[0].Group, strings.Split(v1beta1nc.NodeClassRef.APIVersion, "/")[0]),
 	}
 
 	if v1beta1nc.Kubelet != nil {
