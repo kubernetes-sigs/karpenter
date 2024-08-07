@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	pvMountPath = "/data" // TODO: Generalize this to pull directory mounted via the CSI driver in our PV/PVC config yaml
+	pvMountPath = "/data"
 
 	// Constants for rebaselining logic, calculating the moving average of differences' sizes compared to baseline size
 	initialDeltaThreshold = 0.50

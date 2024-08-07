@@ -32,14 +32,14 @@ import (
 	"strings"
 	"time"
 
-	v1prov "github.com/aws/karpenter-provider-aws/pkg/apis/v1"
+	v1api "github.com/aws/karpenter-provider-aws/pkg/apis/v1"
 	"google.golang.org/protobuf/proto"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	_ "knative.dev/pkg/system/testing"
 	"sigs.k8s.io/karpenter/tools/orbdebuggingtool/pkg"
 
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/orb"
 	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -49,13 +49,12 @@ import (
 var (
 	logPath               string // Points to where the logs are stored (whether from the user's PV or some local save of the files)
 	nodepoolsYamlFilepath string
-	nodePools             []*v1beta1.NodePool
+	nodePools             []*v1.NodePool
 	reconstruct           bool
 	resimulate            bool
 	all                   bool
 	reconstructionOutput  string
 	outputDir             string
-	// TODO: Mount PV for access locally, if desired. (Or could leave that to a given customer?)
 )
 
 // Options of all the scheduling actions for the user to choose off the command-line.
@@ -71,7 +70,7 @@ func (o *SchedulingMetadataOption) String() string {
 }
 
 // Alias to define JSON marshaling for YAML output
-type PodErrors map[*v1.Pod]error
+type PodErrors map[*corev1.Pod]error
 
 func (pe *PodErrors) String() string {
 	var sb strings.Builder
@@ -104,31 +103,30 @@ func init() {
 		fmt.Println("Invalid value for -rec-output flag. Valid options: 'yaml', 'json', 'both'. Using default value 'yaml'.")
 	}
 
-	// TODO: This is cloud provider specific and needs to be generalized.
-	// Warning: Without it, however, the Difference logic in Requirements/Offerings will fail.
-	v1beta1.RestrictedLabelDomains = v1beta1.RestrictedLabelDomains.Insert(v1prov.RestrictedLabelDomains...)
-	v1beta1.WellKnownLabels = v1beta1.WellKnownLabels.Insert(
-		v1prov.LabelInstanceHypervisor,
-		v1prov.LabelInstanceEncryptionInTransitSupported,
-		v1prov.LabelInstanceCategory,
-		v1prov.LabelInstanceFamily,
-		v1prov.LabelInstanceGeneration,
-		v1prov.LabelInstanceSize,
-		v1prov.LabelInstanceLocalNVME,
-		v1prov.LabelInstanceCPU,
-		v1prov.LabelInstanceCPUManufacturer,
-		v1prov.LabelInstanceMemory,
-		v1prov.LabelInstanceEBSBandwidth,
-		v1prov.LabelInstanceNetworkBandwidth,
-		v1prov.LabelInstanceGPUName,
-		v1prov.LabelInstanceGPUManufacturer,
-		v1prov.LabelInstanceGPUCount,
-		v1prov.LabelInstanceGPUMemory,
-		v1prov.LabelInstanceAcceleratorName,
-		v1prov.LabelInstanceAcceleratorManufacturer,
-		v1prov.LabelInstanceAcceleratorCount,
-		v1prov.LabelTopologyZoneID,
-		v1.LabelWindowsBuild,
+	// Warning: Without cloudprovider-specific labels, the Difference logic in Requirements/Offerings will fail.
+	v1.RestrictedLabelDomains = v1.RestrictedLabelDomains.Insert(v1api.RestrictedLabelDomains...)
+	v1.WellKnownLabels = v1.WellKnownLabels.Insert(
+		v1api.LabelInstanceHypervisor,
+		v1api.LabelInstanceEncryptionInTransitSupported,
+		v1api.LabelInstanceCategory,
+		v1api.LabelInstanceFamily,
+		v1api.LabelInstanceGeneration,
+		v1api.LabelInstanceSize,
+		v1api.LabelInstanceLocalNVME,
+		v1api.LabelInstanceCPU,
+		v1api.LabelInstanceCPUManufacturer,
+		v1api.LabelInstanceMemory,
+		v1api.LabelInstanceEBSBandwidth,
+		v1api.LabelInstanceNetworkBandwidth,
+		v1api.LabelInstanceGPUName,
+		v1api.LabelInstanceGPUManufacturer,
+		v1api.LabelInstanceGPUCount,
+		v1api.LabelInstanceGPUMemory,
+		v1api.LabelInstanceAcceleratorName,
+		v1api.LabelInstanceAcceleratorManufacturer,
+		v1api.LabelInstanceAcceleratorCount,
+		v1api.LabelTopologyZoneID,
+		corev1.LabelWindowsBuild,
 	)
 }
 
@@ -546,7 +544,7 @@ func ReconstructDifferences(fileNames []string) ([]*orb.SchedulingInputDifferenc
 }
 
 // Reads in a NodePools.yaml file and unmarshals into a NodePool slice
-func unmarshalNodePoolsFromUser(nodepoolYamlFilepath string) ([]*v1beta1.NodePool, error) {
+func unmarshalNodePoolsFromUser(nodepoolYamlFilepath string) ([]*v1.NodePool, error) {
 	yamlFile, err := os.Open(nodepoolYamlFilepath)
 	if err != nil {
 		fmt.Println("Error opening file:", err)
@@ -560,13 +558,13 @@ func unmarshalNodePoolsFromUser(nodepoolYamlFilepath string) ([]*v1beta1.NodePoo
 		return nil, err
 	}
 
-	nodePools := []*v1beta1.NodePool{}
+	nodePools := []*v1.NodePool{}
 	nodepoolsbytes := bytes.Split(yamlData, []byte("\n---\n"))
 	for _, nodepoolbytes := range nodepoolsbytes {
 		if len(bytes.TrimSpace(nodepoolbytes)) == 0 {
 			continue
 		}
-		nodePool := &v1beta1.NodePool{}
+		nodePool := &v1.NodePool{}
 		err = yaml.Unmarshal(nodepoolbytes, nodePool)
 		if err != nil {
 			return nil, err
@@ -608,26 +606,26 @@ func (pe PodErrors) MarshalJSON() ([]byte, error) {
 }
 
 // Export the results object as a yaml
-func printResults(results scheduling.Results, timestamp time.Time, nodePools []*v1beta1.NodePool) {
+func printResults(results scheduling.Results, timestamp time.Time, nodePools []*v1.NodePool) {
 	podErrors := PodErrors{}
 	for pod, err := range results.PodErrors {
 		podErrors[pod] = err
 	}
 
 	// Map nodePoolNames to their NodePool for faster lookup below
-	nodePoolMap := map[string]*v1beta1.NodePool{}
+	nodePoolMap := map[string]*v1.NodePool{}
 	for _, nodePool := range nodePools {
 		nodePoolMap[nodePool.Name] = nodePool
 	}
 
 	// Get the truncated and sorted provisionable NodeClaims from the full set of scheduling.NodeClaims
-	nodeClaims := []*v1beta1.NodeClaim{}
+	nodeClaims := []*v1.NodeClaim{}
 	for i := range results.NewNodeClaims {
 		nodeClaims = append(nodeClaims, results.NewNodeClaims[i].ToNodeClaim(nodePoolMap[results.NewNodeClaims[i].NodePoolName]))
 	}
 
 	provisionableResults := struct {
-		NewNodeClaims []*v1beta1.NodeClaim
+		NewNodeClaims []*v1.NodeClaim
 		ExistingNodes []*scheduling.ExistingNode
 		PodErrors     PodErrors
 	}{

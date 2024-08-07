@@ -245,7 +245,6 @@ func diffSlice[T any](oldresource, newresource []*T, getKey func(*T) string, has
 		removed = append(removed, oldResourceMap[removedKey])
 	}
 
-	// TODO: Opportunity to optimize -- Diff/Merge by at lower granularity to log less data.
 	for commonKey := range oldResourceSet.Intersection(newResourceSet) {
 		if hasChanged(oldResourceMap[commonKey], newResourceMap[commonKey]) {
 			changed = append(changed, newResourceMap[commonKey])
@@ -313,8 +312,6 @@ func hasNodePoolInstanceTypeChanged(instancetypes, newInstanceTypes []string) bo
 }
 
 // Used when fields contain unexported types, which would cause DeepEqual to panic.
-// TODO: Likely inefficient equality checking for nested types like Offerings and Requirements,
-// but both have unexported types not compatible with DeepEqual
 func structEqualJSON(a, b interface{}) bool {
 	aBytes, _ := json.Marshal(a)
 	bBytes, _ := json.Marshal(b)

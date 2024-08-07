@@ -21,7 +21,7 @@ import (
 
 	"k8s.io/utils/clock"
 	_ "knative.dev/pkg/system/testing"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/orb"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -29,7 +29,7 @@ import (
 )
 
 // Resimulate a scheduling run using the scheduling input reconstructed from the logs.
-func Resimulate(reconstructedSchedulingInput *orb.SchedulingInput, nodePools []*v1beta1.NodePool) (scheduler.Results, error) {
+func Resimulate(reconstructedSchedulingInput *orb.SchedulingInput, nodePools []*v1.NodePool) (scheduler.Results, error) {
 	// Reconstruct the dynamic fields from the logged inputs
 	stateNodes := getStateNodesFromSchedulingInput(reconstructedSchedulingInput)
 	instanceTypes := getInstanceTypesFromSchedulingInput(reconstructedSchedulingInput)
