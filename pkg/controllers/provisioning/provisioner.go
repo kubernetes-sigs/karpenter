@@ -48,7 +48,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
@@ -219,8 +218,8 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
-func (p *Provisioner) NewScheduler(ctx context.Context, pods []*v1.Pod, stateNodes []*state.StateNode, schedulingAction string) (*scheduler.Scheduler, error) {
-	nodePoolList := &v1beta1.NodePoolList{}
+func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stateNodes []*state.StateNode, schedulingAction string) (*scheduler.Scheduler, error) {
+	nodePoolList := &v1.NodePoolList{}
 	err := p.kubeClient.List(ctx, nodePoolList)
 	if err != nil {
 		return nil, fmt.Errorf("listing node pools, %w", err)

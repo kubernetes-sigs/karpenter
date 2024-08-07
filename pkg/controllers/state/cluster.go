@@ -599,7 +599,7 @@ func (c *Cluster) GetBindings() map[types.NamespacedName]string {
 }
 
 // Hydrates the cluster with the data from the ORB logs
-func (c *Cluster) ReconstructCluster(ctx context.Context, bindings map[types.NamespacedName]string, stateNodes []*StateNode, daemonSetPods []*v1.Pod, allPods *v1.PodList) {
+func (c *Cluster) ReconstructCluster(ctx context.Context, bindings map[types.NamespacedName]string, stateNodes []*StateNode, daemonSetPods []*corev1.Pod, allPods *corev1.PodList) {
 	// Set Bindings
 	c.bindings = bindings
 

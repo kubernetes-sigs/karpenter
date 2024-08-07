@@ -24,13 +24,13 @@ import (
 
 	proto "google.golang.org/protobuf/proto"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -44,37 +44,37 @@ type BindingsMap map[types.NamespacedName]string // Alias to allow JSON Marshali
 // later deserialization, reconstruction and resimulation in the ORB Debugging Tool
 type SchedulingInput struct {
 	Timestamp             time.Time
-	PendingPods           []*v1.Pod
+	PendingPods           []*corev1.Pod
 	StateNodesWithPods    []*StateNodeWithPods
 	Bindings              BindingsMap
 	AllInstanceTypes      []*cloudprovider.InstanceType
 	NodePoolInstanceTypes map[string][]string
 	Topology              *scheduler.Topology
-	DaemonSetPods         []*v1.Pod
-	PVList                *v1.PersistentVolumeList
-	PVCList               *v1.PersistentVolumeClaimList
-	ScheduledPodList      *v1.PodList
+	DaemonSetPods         []*corev1.Pod
+	PVList                *corev1.PersistentVolumeList
+	PVCList               *corev1.PersistentVolumeClaimList
+	ScheduledPodList      *corev1.PodList
 }
 
 // Construct a Scheduling Input and reduce it down to what's minimally required for resimulation
-func NewSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time, pendingPods []*v1.Pod, stateNodes []*state.StateNode,
-	bindings map[types.NamespacedName]string, instanceTypes map[string][]*cloudprovider.InstanceType, topology *scheduler.Topology, daemonSetPods []*v1.Pod) SchedulingInput {
+func NewSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time, pendingPods []*corev1.Pod, stateNodes []*state.StateNode,
+	bindings map[types.NamespacedName]string, instanceTypes map[string][]*cloudprovider.InstanceType, topology *scheduler.Topology, daemonSetPods []*corev1.Pod) SchedulingInput {
 	allInstanceTypes, nodePoolInstanceTypes := getAllInstanceTypesAndNodePoolMapping(instanceTypes)
 
 	// Get all PVs, PVCs and scheduledPods from kubeClient
-	pvcList := &v1.PersistentVolumeClaimList{}
+	pvcList := &corev1.PersistentVolumeClaimList{}
 	err := kubeClient.List(ctx, pvcList)
 	if err != nil {
 		fmt.Println("PVC List error in Scheduling Input logging: ", err)
 		return SchedulingInput{}
 	}
-	pvList := &v1.PersistentVolumeList{}
+	pvList := &corev1.PersistentVolumeList{}
 	err = kubeClient.List(ctx, pvList)
 	if err != nil {
 		fmt.Println("PV List error in Scheduling Input logging: ", err)
 		return SchedulingInput{}
 	}
-	scheduledPodList := &v1.PodList{}
+	scheduledPodList := &corev1.PodList{}
 	err = kubeClient.List(ctx, scheduledPodList)
 	if err != nil {
 		fmt.Println("Pod List error in Scheduling Input logging: ", err)
@@ -128,7 +128,7 @@ func (si *SchedulingInput) isEmpty() bool {
 
 /* Resource getter methods to generalize a lambda function argument for merge */
 
-func GetPendingPods(s *SchedulingInput) []*v1.Pod {
+func GetPendingPods(s *SchedulingInput) []*corev1.Pod {
 	return s.PendingPods
 }
 func GetStateNodesWithPods(s *SchedulingInput) []*StateNodeWithPods {
@@ -146,24 +146,24 @@ func GetNodePoolInstanceTypes(s *SchedulingInput) map[string][]string {
 func GetTopology(s *SchedulingInput) *scheduler.Topology {
 	return s.Topology
 }
-func GetDaemonSetPods(s *SchedulingInput) []*v1.Pod {
+func GetDaemonSetPods(s *SchedulingInput) []*corev1.Pod {
 	return s.DaemonSetPods
 }
-func GetPVList(s *SchedulingInput) *v1.PersistentVolumeList {
+func GetPVList(s *SchedulingInput) *corev1.PersistentVolumeList {
 	return s.PVList
 }
-func GetPVCList(s *SchedulingInput) *v1.PersistentVolumeClaimList {
+func GetPVCList(s *SchedulingInput) *corev1.PersistentVolumeClaimList {
 	return s.PVCList
 }
-func GetScheduledPodList(s *SchedulingInput) *v1.PodList {
+func GetScheduledPodList(s *SchedulingInput) *corev1.PodList {
 	return s.ScheduledPodList
 }
 
 // A stateNode combined with its associated Pods.
 type StateNodeWithPods struct {
-	Node      *v1.Node
-	NodeClaim *v1beta1.NodeClaim
-	Pods      []*v1.Pod
+	Node      *corev1.Node
+	NodeClaim *v1.NodeClaim
+	Pods      []*corev1.Pod
 }
 
 func (snp StateNodeWithPods) GetName() string {
@@ -211,17 +211,17 @@ func getAllInstanceTypesAndNodePoolMapping(instanceTypes map[string][]*cloudprov
 }
 
 // Reduces pods to just their Name, Namespace, UID, PodSpec and the Status' Phase and reduced-Conditions
-func reducePods(pods []*v1.Pod) []*v1.Pod {
-	reducedPods := []*v1.Pod{}
+func reducePods(pods []*corev1.Pod) []*corev1.Pod {
+	reducedPods := []*corev1.Pod{}
 	for _, pod := range pods {
-		reducedPod := &v1.Pod{
+		reducedPod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      pod.Name,
 				Namespace: pod.Namespace,
 				UID:       pod.GetUID(),
 			},
 			Spec: pod.Spec,
-			Status: v1.PodStatus{
+			Status: corev1.PodStatus{
 				Phase:      pod.Status.Phase,
 				Conditions: reducePodConditions(pod.Status.Conditions),
 			},
@@ -232,10 +232,10 @@ func reducePods(pods []*v1.Pod) []*v1.Pod {
 }
 
 // Reduces a pod's conditions to only Type, Status, Reason and Message
-func reducePodConditions(conditions []v1.PodCondition) []v1.PodCondition {
-	reducedConditions := []v1.PodCondition{}
+func reducePodConditions(conditions []corev1.PodCondition) []corev1.PodCondition {
+	reducedConditions := []corev1.PodCondition{}
 	for _, condition := range conditions {
-		reducedCondition := v1.PodCondition{
+		reducedCondition := corev1.PodCondition{
 			Type:    condition.Type,
 			Status:  condition.Status,
 			Reason:  condition.Reason,
@@ -320,7 +320,7 @@ func reconstructSchedulingInput(pbsi *pb.SchedulingInput) (*SchedulingInput, err
 	}, nil
 }
 
-func protoPods(pods []*v1.Pod) []*pb.ReducedPod {
+func protoPods(pods []*corev1.Pod) []*pb.ReducedPod {
 	reducedPods := []*pb.ReducedPod{}
 	for _, pod := range pods {
 		podSpecData, err := pod.Spec.Marshal()
@@ -341,18 +341,18 @@ func protoPods(pods []*v1.Pod) []*pb.ReducedPod {
 	return reducedPods
 }
 
-func reconstructPods(reducedPods []*pb.ReducedPod) []*v1.Pod {
-	pods := []*v1.Pod{}
+func reconstructPods(reducedPods []*pb.ReducedPod) []*corev1.Pod {
+	pods := []*corev1.Pod{}
 	for _, reducedPod := range reducedPods {
-		pod := &v1.Pod{
+		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      reducedPod.Name,
 				Namespace: reducedPod.Namespace,
 				UID:       types.UID(reducedPod.Uid),
 			},
-			Spec: v1.PodSpec{},
-			Status: v1.PodStatus{
-				Phase:      v1.PodPhase(reducedPod.Phase),
+			Spec: corev1.PodSpec{},
+			Status: corev1.PodStatus{
+				Phase:      corev1.PodPhase(reducedPod.Phase),
 				Conditions: reconstructPodConditions(reducedPod.Conditions),
 			},
 		}
@@ -366,7 +366,7 @@ func reconstructPods(reducedPods []*pb.ReducedPod) []*v1.Pod {
 	return pods
 }
 
-func protoPodConditions(conditions []v1.PodCondition) []*pb.ReducedPod_PodCondition {
+func protoPodConditions(conditions []corev1.PodCondition) []*pb.ReducedPod_PodCondition {
 	reducedPodConditions := []*pb.ReducedPod_PodCondition{}
 	for _, condition := range conditions {
 		reducedPodCondition := &pb.ReducedPod_PodCondition{
@@ -380,12 +380,12 @@ func protoPodConditions(conditions []v1.PodCondition) []*pb.ReducedPod_PodCondit
 	return reducedPodConditions
 }
 
-func reconstructPodConditions(reducedPodConditions []*pb.ReducedPod_PodCondition) []v1.PodCondition {
-	podConditions := []v1.PodCondition{}
+func reconstructPodConditions(reducedPodConditions []*pb.ReducedPod_PodCondition) []corev1.PodCondition {
+	podConditions := []corev1.PodCondition{}
 	for _, reducedPodCondition := range reducedPodConditions {
-		podCondition := v1.PodCondition{
-			Type:    v1.PodConditionType(reducedPodCondition.Type),
-			Status:  v1.ConditionStatus(reducedPodCondition.Status),
+		podCondition := corev1.PodCondition{
+			Type:    corev1.PodConditionType(reducedPodCondition.Type),
+			Status:  corev1.ConditionStatus(reducedPodCondition.Status),
 			Reason:  reducedPodCondition.Reason,
 			Message: reducedPodCondition.Message,
 		}
@@ -424,9 +424,9 @@ func protoStateNodesWithPods(stateNodesWithPods []*StateNodeWithPods) []*pb.Stat
 func reconstructStateNodesWithPods(snpData []*pb.StateNodeWithPods) []*StateNodeWithPods {
 	stateNodesWithPods := []*StateNodeWithPods{}
 	for _, snpData := range snpData {
-		node := &v1.Node{}
+		node := &corev1.Node{}
 		node.Unmarshal(snpData.Node)
-		nodeClaim := &v1beta1.NodeClaim{}
+		nodeClaim := &v1.NodeClaim{}
 		json.Unmarshal(snpData.NodeClaim, nodeClaim)
 
 		stateNodesWithPods = append(stateNodesWithPods, &StateNodeWithPods{
@@ -498,7 +498,7 @@ func reconstructRequirements(requirementsData []*pb.InstanceType_Requirement) sc
 
 		requirements.Add(scheduling.NewRequirementWithFlexibility(
 			requirementData.Key,
-			v1.NodeSelectorOperator(requirementData.Nodeselectoroperator),
+			corev1.NodeSelectorOperator(requirementData.Nodeselectoroperator),
 			minValues,
 			requirementData.Values...,
 		))
@@ -530,7 +530,7 @@ func reconstructOfferings(offeringsData []*pb.InstanceType_Offering) cloudprovid
 	return offerings
 }
 
-func protoResourceList(resourceList v1.ResourceList) *pb.InstanceType_ResourceList {
+func protoResourceList(resourceList corev1.ResourceList) *pb.InstanceType_ResourceList {
 	protoResourceList := &pb.InstanceType_ResourceList{}
 	for resourceName, quantity := range resourceList {
 		protoQuantity, err := quantity.Marshal()
@@ -546,16 +546,16 @@ func protoResourceList(resourceList v1.ResourceList) *pb.InstanceType_ResourceLi
 	return protoResourceList
 }
 
-func protoCapacity(capacity v1.ResourceList) *pb.InstanceType_ResourceList {
+func protoCapacity(capacity corev1.ResourceList) *pb.InstanceType_ResourceList {
 	return protoResourceList(capacity)
 }
 
-func reconstructResourceList(protoCapacity *pb.InstanceType_ResourceList) v1.ResourceList {
-	capacity := v1.ResourceList{}
+func reconstructResourceList(protoCapacity *pb.InstanceType_ResourceList) corev1.ResourceList {
+	capacity := corev1.ResourceList{}
 	for _, resourceQuantity := range protoCapacity.Resources {
 		quantity := &resource.Quantity{}
 		quantity.Unmarshal(resourceQuantity.Quantity)
-		capacity[v1.ResourceName(resourceQuantity.ResourceName)] = *quantity
+		capacity[corev1.ResourceName(resourceQuantity.ResourceName)] = *quantity
 	}
 	return capacity
 }
@@ -640,9 +640,9 @@ func reconstructTopology(topologyData []byte) *scheduler.Topology {
 	return topology
 }
 
-func protoDaemonSetPods(daemonSetPods []*v1.Pod) []byte {
-	podList := &v1.PodList{
-		Items: []v1.Pod{},
+func protoDaemonSetPods(daemonSetPods []*corev1.Pod) []byte {
+	podList := &corev1.PodList{
+		Items: []corev1.Pod{},
 	}
 	for _, pod := range daemonSetPods {
 		podList.Items = append(podList.Items, *pod)
@@ -656,18 +656,18 @@ func protoDaemonSetPods(daemonSetPods []*v1.Pod) []byte {
 	return dspData
 }
 
-func reconstructDaemonSetPods(dspData []byte) []*v1.Pod {
-	podList := &v1.PodList{}
+func reconstructDaemonSetPods(dspData []byte) []*corev1.Pod {
+	podList := &corev1.PodList{}
 	podList.Unmarshal(dspData)
 
-	daemonSetPods := []*v1.Pod{}
+	daemonSetPods := []*corev1.Pod{}
 	for _, pod := range podList.Items {
 		daemonSetPods = append(daemonSetPods, &pod)
 	}
 	return daemonSetPods
 }
 
-func protoPVList(pvList *v1.PersistentVolumeList) []byte {
+func protoPVList(pvList *corev1.PersistentVolumeList) []byte {
 	if pvList == nil {
 		return []byte{}
 	}
@@ -679,13 +679,13 @@ func protoPVList(pvList *v1.PersistentVolumeList) []byte {
 	return pvListData
 }
 
-func reconstructPVList(pvListData []byte) *v1.PersistentVolumeList {
-	pvList := &v1.PersistentVolumeList{}
+func reconstructPVList(pvListData []byte) *corev1.PersistentVolumeList {
+	pvList := &corev1.PersistentVolumeList{}
 	pvList.Unmarshal(pvListData)
 	return pvList
 }
 
-func protoPVCList(pvcList *v1.PersistentVolumeClaimList) []byte {
+func protoPVCList(pvcList *corev1.PersistentVolumeClaimList) []byte {
 	if pvcList == nil {
 		return []byte{}
 	}
@@ -697,13 +697,13 @@ func protoPVCList(pvcList *v1.PersistentVolumeClaimList) []byte {
 	return pvcListData
 }
 
-func reconstructPVCList(pvcListData []byte) *v1.PersistentVolumeClaimList {
-	pvcList := &v1.PersistentVolumeClaimList{}
+func reconstructPVCList(pvcListData []byte) *corev1.PersistentVolumeClaimList {
+	pvcList := &corev1.PersistentVolumeClaimList{}
 	pvcList.Unmarshal(pvcListData)
 	return pvcList
 }
 
-func protoScheduledPodList(scheduledPodList *v1.PodList) []byte {
+func protoScheduledPodList(scheduledPodList *corev1.PodList) []byte {
 	if scheduledPodList == nil {
 		return []byte{}
 	}
@@ -715,8 +715,8 @@ func protoScheduledPodList(scheduledPodList *v1.PodList) []byte {
 	return scheduledPodListData
 }
 
-func reconstructScheduledPodList(scheduledPodListData []byte) *v1.PodList {
-	scheduledPodList := &v1.PodList{}
+func reconstructScheduledPodList(scheduledPodListData []byte) *corev1.PodList {
+	scheduledPodList := &corev1.PodList{}
 	scheduledPodList.Unmarshal(scheduledPodListData)
 	return scheduledPodList
 }

@@ -92,7 +92,7 @@ func NewControllers(
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewController(kubeClient, cloudProvider, recorder),
-		nodeclaimdisruption.NewController(clock, kubeClient, cluster, cloudProvider),
+		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		orb.NewController(schedulingInputHeap, schedulingMetadataHeap),
 		leasegarbagecollection.NewController(kubeClient),
 		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),

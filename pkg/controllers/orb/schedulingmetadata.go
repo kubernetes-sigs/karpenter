@@ -27,12 +27,6 @@ type SchedulingMetadata struct {
 	Timestamp time.Time
 }
 
-type key int
-
-const (
-	schedulingMetadataKey key = iota
-)
-
 func (sm SchedulingMetadata) GetTime() time.Time {
 	return sm.Timestamp
 }

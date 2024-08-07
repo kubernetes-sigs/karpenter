@@ -248,7 +248,7 @@ func (r *Requirement) MarshalJSON() ([]byte, error) {
 	var key, operator, valuesStr, greaterThan, lessThan, minValues string
 
 	switch r.Operator() {
-	case v1.NodeSelectorOpExists, v1.NodeSelectorOpDoesNotExist:
+	case corev1.NodeSelectorOpExists, corev1.NodeSelectorOpDoesNotExist:
 		key = r.Key
 		operator = string(r.Operator())
 	default:
