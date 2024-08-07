@@ -198,3 +198,38 @@ func HasPodAntiAffinity(pod *corev1.Pod) bool {
 		(len(pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 0 ||
 			len(pod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0)
 }
+
+// PodAffinityCmp compares two pods based on their affinity
+func PodAffinityCmp(lhsPod *corev1.Pod, rhsPod *corev1.Pod) int {
+	if lhsPod.Spec.Affinity != nil && rhsPod.Spec.Affinity != nil {
+		if HasRequiredPodAntiAffinity(lhsPod) && !HasRequiredPodAntiAffinity(rhsPod) {
+			return 1
+		} else if !HasRequiredPodAntiAffinity(lhsPod) && HasRequiredPodAntiAffinity(rhsPod) {
+			return -1
+		} else if HasRequiredPodAntiAffinity(lhsPod) && HasRequiredPodAntiAffinity(rhsPod) {
+			return PodAntiAffinityCmp(lhsPod, rhsPod)
+		}
+	}
+
+	return 0
+}
+
+// PodAntiAffinityCmp compares two pods based on their the size of their anti-affinity constraints
+func PodAntiAffinityCmp(lhsPod *corev1.Pod, rhsPod *corev1.Pod) int {
+	lPodAntiAffinity := lhsPod.Spec.Affinity.PodAntiAffinity
+	rPodAntiAffinity := rhsPod.Spec.Affinity.PodAntiAffinity
+	if len(lPodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) > len(rPodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) {
+		return 1
+	} else if len(lPodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) <
+		len(rPodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) {
+		return -1
+	}
+
+	if len(lPodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) > len(rPodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) {
+		return 1
+	} else if len(lPodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) < len(rPodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) {
+		return -1
+	}
+
+	return 0
+}
