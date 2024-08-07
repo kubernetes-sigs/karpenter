@@ -261,6 +261,19 @@ var _ = Describe("Options", func() {
 				},
 			}))
 		})
+
+		It("service should not empty", func() {
+			fs = &options.FlagSet{
+				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+			}
+			opts.AddFlags(fs)
+			err := opts.Parse(
+				fs,
+				"--karpenter-service", "",
+			)
+			Expect(err).ToNot(BeNil())
+		})
+
 	})
 
 	DescribeTable(
