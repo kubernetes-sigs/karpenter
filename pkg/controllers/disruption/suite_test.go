@@ -1793,7 +1793,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "delete",
-			metrics.ReasonLabel: string(v1.DisruptionReasonDrifted),
+			metrics.ReasonLabel: "drifted",
 		})
 	})
 	It("should fire metrics for single node delete disruption", func() {
@@ -1820,7 +1820,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "delete",
-			metrics.ReasonLabel: string(v1.DisruptionReasonDrifted),
+			metrics.ReasonLabel: "drifted",
 		})
 	})
 	It("should fire metrics for single node replace disruption", func() {
@@ -1845,7 +1845,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "replace",
-			metrics.ReasonLabel: string(v1.DisruptionReasonDrifted),
+			metrics.ReasonLabel: "drifted",
 		})
 	})
 	It("should fire metrics for multi-node empty disruption", func() {
@@ -1863,7 +1863,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "delete",
-			metrics.ReasonLabel:  string(v1.DisruptionReasonEmpty),
+			metrics.ReasonLabel:  "empty",
 			"consolidation_type": "empty",
 		})
 	})
@@ -1905,7 +1905,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "delete",
-			metrics.ReasonLabel:  string(v1.DisruptionReasonUnderutilized),
+			metrics.ReasonLabel:  "underutilized",
 			"consolidation_type": "multi",
 		})
 	})
@@ -1967,7 +1967,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "replace",
-			metrics.ReasonLabel:  string(v1.DisruptionReasonUnderutilized),
+			metrics.ReasonLabel:  "underutilized",
 			"consolidation_type": "multi",
 		})
 	})

@@ -97,7 +97,7 @@ var _ = Describe("Emptiness", func() {
 			fakeClock.Step(10 * time.Minute)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
-				metrics.ReasonLabel: string(v1.DisruptionReasonEmpty),
+				metrics.ReasonLabel: "empty",
 			})
 
 			ExpectDeleted(ctx, env.Client, pod)
@@ -110,7 +110,7 @@ var _ = Describe("Emptiness", func() {
 			wg.Wait()
 
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
-				metrics.ReasonLabel: string(v1.DisruptionReasonEmpty),
+				metrics.ReasonLabel: "empty",
 			})
 		})
 	})
