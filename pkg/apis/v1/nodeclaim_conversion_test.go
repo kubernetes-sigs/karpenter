@@ -176,20 +176,30 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 					Group: object.GVK(&v1alpha1.TestNodeClass{}).Group,
 				}
 				Expect(v1nodeclaim.ConvertTo(ctx, v1beta1nodeclaim)).To(Succeed())
-				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(v1nodeclaim.Spec.NodeClassRef.Kind))
 				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Name).To(Equal(v1nodeclaim.Spec.NodeClassRef.Name))
-				Expect(v1beta1nodeclaim.Spec.NodeClassRef.APIVersion).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].GroupVersion().String()))
+				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(v1nodeclaim.Spec.NodeClassRef.Kind))
+				Expect(v1beta1nodeclaim.Spec.NodeClassRef.APIVersion).To(BeEmpty())
 			})
-			It("should not include APIVersion for v1beta1 if Group and Kind is not in the supported nodeclass", func() {
+			It("should retain NodeClassReference details when the karpenter.sh/v1beta1-nodeclass-reference annotation exists", func() {
+				nodeClassReference := &v1beta1.NodeClassReference{
+					APIVersion: object.GVK(&v1alpha1.TestNodeClass{}).GroupVersion().String(),
+					Name:       "nodeclass-test",
+					Kind:       object.GVK(&v1alpha1.TestNodeClass{}).Kind,
+				}
+				nodeClassAnnotation, err := json.Marshal(nodeClassReference)
+				Expect(err).ToNot(HaveOccurred())
+				v1nodeclaim.Annotations = lo.Assign(map[string]string{
+					NodeClassReferenceAnnotationKey: string(nodeClassAnnotation),
+				})
 				v1nodeclaim.Spec.NodeClassRef = &NodeClassReference{
-					Kind:  "test-kind",
+					Kind:  object.GVK(&v1alpha1.TestNodeClass{}).Kind,
 					Name:  "nodeclass-test",
-					Group: "testgroup.sh",
+					Group: object.GVK(&v1alpha1.TestNodeClass{}).Group,
 				}
 				Expect(v1nodeclaim.ConvertTo(ctx, v1beta1nodeclaim)).To(Succeed())
-				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(v1nodeclaim.Spec.NodeClassRef.Kind))
-				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Name).To(Equal(v1nodeclaim.Spec.NodeClassRef.Name))
-				Expect(v1beta1nodeclaim.Spec.NodeClassRef.APIVersion).To(Equal(""))
+				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Name).To(Equal(nodeClassReference.Name))
+				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(nodeClassReference.Kind))
+				Expect(v1beta1nodeclaim.Spec.NodeClassRef.APIVersion).To(Equal(nodeClassReference.APIVersion))
 			})
 		})
 	})
@@ -311,7 +321,12 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 	It("should convert v1beta1 nodeclaim metadata", func() {
 		v1beta1nodeclaim.ObjectMeta = test.ObjectMeta()
 		Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
-		v1beta1nodeclaim.Annotations = map[string]string{}
+
+		nodeClassReferenceAnnotation, err := json.Marshal(v1beta1nodeclaim.Spec.NodeClassRef)
+		Expect(err).ToNot(HaveOccurred())
+		v1beta1nodeclaim.Annotations = map[string]string{
+			NodeClassReferenceAnnotationKey: string(nodeClassReferenceAnnotation),
+		}
 		Expect(v1nodeclaim.ObjectMeta).To(BeEquivalentTo(v1beta1nodeclaim.ObjectMeta))
 	})
 	Context("NodeClaim Spec", func() {
@@ -436,19 +451,27 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 					Name:       "nodeclass-test",
 					APIVersion: "testgroup.sh/testversion",
 				}
+				nodeClassReferenceAnnotation, err := json.Marshal(v1beta1nodeclaim.Spec.NodeClassRef)
+				Expect(err).ToNot(HaveOccurred())
+
 				Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
 				Expect(v1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(v1beta1nodeclaim.Spec.NodeClassRef.Kind))
 				Expect(v1nodeclaim.Spec.NodeClassRef.Name).To(Equal(v1beta1nodeclaim.Spec.NodeClassRef.Name))
 				Expect(v1nodeclaim.Spec.NodeClassRef.Group).To(Equal("testgroup.sh"))
+				Expect(v1nodeclaim.Annotations).To(HaveKeyWithValue(NodeClassReferenceAnnotationKey, string(nodeClassReferenceAnnotation)))
 			})
 			It("should set default nodeclass group and kind on v1beta1 nodeclassRef", func() {
 				v1beta1nodeclaim.Spec.NodeClassRef = &v1beta1.NodeClassReference{
 					Name: "nodeclass-test",
 				}
+				nodeClassReferenceAnnotation, err := json.Marshal(v1beta1nodeclaim.Spec.NodeClassRef)
+				Expect(err).ToNot(HaveOccurred())
+
 				Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
 				Expect(v1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].Kind))
 				Expect(v1nodeclaim.Spec.NodeClassRef.Name).To(Equal(v1beta1nodeclaim.Spec.NodeClassRef.Name))
 				Expect(v1nodeclaim.Spec.NodeClassRef.Group).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].Group))
+				Expect(v1nodeclaim.Annotations).To(HaveKeyWithValue(NodeClassReferenceAnnotationKey, string(nodeClassReferenceAnnotation)))
 			})
 		})
 	})

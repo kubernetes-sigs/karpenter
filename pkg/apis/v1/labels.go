@@ -49,6 +49,7 @@ const (
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	KubeletCompatibilityAnnotationKey          = apis.CompatibilityGroup + "/v1beta1-kubelet-conversion"
+	NodeClassReferenceAnnotationKey            = apis.CompatibilityGroup + "/v1beta1-nodeclass-reference"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
 )
 
