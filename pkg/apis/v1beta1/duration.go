@@ -28,19 +28,19 @@ const Never = "Never"
 // that the duration is disabled and sets the inner duration as nil
 type NillableDuration struct {
 	*time.Duration
+	Raw string
 }
 
 // UnmarshalJSON implements the json.Unmarshaller interface.
 func (d *NillableDuration) UnmarshalJSON(b []byte) error {
-	var str string
-	err := json.Unmarshal(b, &str)
+	err := json.Unmarshal(b, &d.Raw)
 	if err != nil {
 		return err
 	}
-	if str == Never {
+	if d.Raw == Never {
 		return nil
 	}
-	pd, err := time.ParseDuration(str)
+	pd, err := time.ParseDuration(d.Raw)
 	if err != nil {
 		return err
 	}
@@ -50,16 +50,32 @@ func (d *NillableDuration) UnmarshalJSON(b []byte) error {
 
 // MarshalJSON implements the json.Marshaler interface.
 func (d NillableDuration) MarshalJSON() ([]byte, error) {
-	if d.Duration == nil {
-		return json.Marshal(Never)
+	if d.Raw == "" {
+		if d.Duration != nil {
+			out, err := json.Marshal(d.Duration)
+			if err != nil {
+				return nil, err
+			}
+			d.Raw = string(out)
+		} else {
+			d.Raw = Never
+		}
 	}
-	return json.Marshal(d.Duration.String())
+	return json.Marshal(d.Raw)
 }
 
 // ToUnstructured implements the value.UnstructuredConverter interface.
 func (d NillableDuration) ToUnstructured() interface{} {
-	if d.Duration == nil {
-		return Never
+	if d.Raw == "" {
+		if d.Duration != nil {
+			out, err := json.Marshal(d.Duration)
+			if err != nil {
+				return nil
+			}
+			d.Raw = string(out)
+		} else {
+			d.Raw = Never
+		}
 	}
-	return d.Duration.String()
+	return d.Raw
 }
