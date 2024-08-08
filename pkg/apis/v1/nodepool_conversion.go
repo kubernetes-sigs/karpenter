@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -46,19 +45,28 @@ func (in *NodePool) ConvertTo(ctx context.Context, to apis.Convertible) error {
 func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec, kubeletAnnotation string) error {
 	v1beta1np.Weight = in.Weight
 	v1beta1np.Limits = v1beta1.Limits(in.Limits)
-	in.Disruption.convertTo(&v1beta1np.Disruption)
+	if err := in.Disruption.convertTo(&v1beta1np.Disruption); err != nil {
+		return err
+	}
 	// Set the expireAfter to the nodeclaim template's expireAfter.
 	// Don't convert terminationGracePeriod, as this is only included in v1.
-	v1beta1np.Disruption.ExpireAfter = v1beta1.NillableDuration(in.Template.Spec.ExpireAfter)
+	if err := in.Template.Spec.ExpireAfter.convertTo(&v1beta1np.Disruption.ExpireAfter); err != nil {
+		return err
+	}
 	return in.Template.convertTo(ctx, &v1beta1np.Template, kubeletAnnotation)
 }
 
-func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
+func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) error {
 	v1beta1np.ConsolidationPolicy = lo.Ternary(in.ConsolidationPolicy == ConsolidationPolicyWhenEmptyOrUnderutilized,
 		v1beta1.ConsolidationPolicyWhenUnderutilized, v1beta1.ConsolidationPolicy(in.ConsolidationPolicy))
 	// If the v1 nodepool is WhenUnderutilized, the v1beta1 nodepool should have an unset consolidateAfter
-	v1beta1np.ConsolidateAfter = lo.Ternary(in.ConsolidationPolicy == ConsolidationPolicyWhenEmptyOrUnderutilized,
-		nil, (*v1beta1.NillableDuration)(lo.ToPtr(in.ConsolidateAfter)))
+	if in.ConsolidationPolicy == ConsolidationPolicyWhenEmptyOrUnderutilized {
+		v1beta1np.ConsolidateAfter = nil
+	} else {
+		if err := in.ConsolidateAfter.convertTo(v1beta1np.ConsolidateAfter); err != nil {
+			return err
+		}
+	}
 	v1beta1np.Budgets = lo.Map(in.Budgets, func(v1budget Budget, _ int) v1beta1.Budget {
 		return v1beta1.Budget{
 			Nodes:    v1budget.Nodes,
@@ -66,6 +74,7 @@ func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
 			Duration: v1budget.Duration,
 		}
 	})
+	return nil
 }
 
 func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate, kubeletAnnotation string) error {
@@ -140,15 +149,25 @@ func (in *NodePool) ConvertFrom(ctx context.Context, v1beta1np apis.Convertible)
 func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec) (string, error) {
 	in.Weight = v1beta1np.Weight
 	in.Limits = Limits(v1beta1np.Limits)
-	in.Template.Spec.ExpireAfter = NillableDuration(v1beta1np.Disruption.ExpireAfter)
-	in.Disruption.convertFrom(&v1beta1np.Disruption)
+	if err := in.Template.Spec.ExpireAfter.convertFrom(&v1beta1np.Disruption.ExpireAfter); err != nil {
+		return "", err
+	}
+	if err := in.Disruption.convertFrom(&v1beta1np.Disruption); err != nil {
+		return "", err
+	}
 	return in.Template.convertFrom(ctx, &v1beta1np.Template)
 }
 
-func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
+func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) error {
 	// if consolidationPolicy is WhenUnderutilized, set the v1 duration to 0, otherwise, set to the value of consolidateAfter.
-	in.ConsolidateAfter = lo.Ternary(v1beta1np.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized,
-		NillableDuration{Duration: lo.ToPtr(time.Duration(0))}, (NillableDuration)(lo.FromPtr(v1beta1np.ConsolidateAfter)))
+	if v1beta1np.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized {
+		in.ConsolidateAfter = lo.Must(NewNillableDuration("0s"))
+	} else {
+		if err := in.ConsolidateAfter.convertFrom(v1beta1np.ConsolidateAfter); err != nil {
+			return err
+		}
+	}
+
 	in.ConsolidationPolicy = lo.Ternary(v1beta1np.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized,
 		ConsolidationPolicyWhenEmptyOrUnderutilized, ConsolidationPolicy(v1beta1np.ConsolidationPolicy))
 	in.Budgets = lo.Map(v1beta1np.Budgets, func(v1beta1budget v1beta1.Budget, _ int) Budget {
@@ -158,6 +177,7 @@ func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) {
 			Duration: v1beta1budget.Duration,
 		}
 	})
+	return nil
 }
 
 func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate) (string, error) {
@@ -195,4 +215,26 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 	}
 
 	return "", nil
+}
+
+func (src *NillableDuration) convertTo(dst *v1beta1.NillableDuration) error {
+	raw, err := src.MarshalJSON()
+	if err != nil {
+		return err
+	}
+	if err := dst.UnmarshalJSON(raw); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (dst *NillableDuration) convertFrom(src *v1beta1.NillableDuration) error {
+	raw, err := src.MarshalJSON()
+	if err != nil {
+		return err
+	}
+	if err := dst.UnmarshalJSON(raw); err != nil {
+		return err
+	}
+	return nil
 }
