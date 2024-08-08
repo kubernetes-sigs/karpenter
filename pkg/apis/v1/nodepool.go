@@ -139,7 +139,7 @@ const (
 )
 
 var (
-	// DisruptionReasons is a list of all valid reasons for disruption budgets.
+	// WellKnownDisruptionReasons is a list of all valid reasons for disruption budgets.
 	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonEmpty, DisruptionReasonDrifted}
 )
 

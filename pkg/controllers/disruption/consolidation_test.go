@@ -157,7 +157,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
-				metrics.ReasonLabel: string(v1.DisruptionReasonUnderutilized),
+				metrics.ReasonLabel: "underutilized",
 			})
 
 			// remove the do-not-disrupt annotation to make the node eligible for consolidation and update cluster state
@@ -172,7 +172,7 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
-				metrics.ReasonLabel: string(v1.DisruptionReasonUnderutilized),
+				metrics.ReasonLabel: "underutilized",
 			})
 		})
 	})

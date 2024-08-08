@@ -79,7 +79,7 @@ var _ = Describe("Drift", func() {
 	})
 	Context("Metrics", func() {
 		var eligibleNodesLabels = map[string]string{
-			metrics.ReasonLabel: string(v1.DisruptionReasonDrifted),
+			metrics.ReasonLabel: "drifted",
 		}
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
