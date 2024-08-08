@@ -1,7 +1,6 @@
 name: presubmit
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -14,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        k8sVersion: ["1.25.x", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
+        k8sVersion: ["1.25.0", "1.26.x", "1.27.x", "1.28.x", "1.29.x", "1.30.x"]
     steps:
     - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
     - uses: ./.github/actions/install-deps
