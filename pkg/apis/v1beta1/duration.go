@@ -50,10 +50,32 @@ func (d *NillableDuration) UnmarshalJSON(b []byte) error {
 
 // MarshalJSON implements the json.Marshaler interface.
 func (d NillableDuration) MarshalJSON() ([]byte, error) {
+	if d.Raw == "" {
+		if d.Duration != nil {
+			out, err := json.Marshal(d.Duration)
+			if err != nil {
+				return nil, err
+			}
+			d.Raw = string(out)
+		} else {
+			d.Raw = Never
+		}
+	}
 	return json.Marshal(d.Raw)
 }
 
 // ToUnstructured implements the value.UnstructuredConverter interface.
 func (d NillableDuration) ToUnstructured() interface{} {
+	if d.Raw == "" {
+		if d.Duration != nil {
+			out, err := json.Marshal(d.Duration)
+			if err != nil {
+				return nil
+			}
+			d.Raw = string(out)
+		} else {
+			d.Raw = Never
+		}
+	}
 	return d.Raw
 }

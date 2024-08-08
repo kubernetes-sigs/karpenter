@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -161,7 +162,10 @@ func (in *NodePoolSpec) convertFrom(ctx context.Context, v1beta1np *v1beta1.Node
 func (in *Disruption) convertFrom(v1beta1np *v1beta1.Disruption) error {
 	// if consolidationPolicy is WhenUnderutilized, set the v1 duration to 0, otherwise, set to the value of consolidateAfter.
 	if v1beta1np.ConsolidationPolicy == v1beta1.ConsolidationPolicyWhenUnderutilized {
-		in.ConsolidateAfter = lo.Must(NewNillableDuration("0s"))
+		in.ConsolidateAfter = NillableDuration{
+			Raw: "0s",
+			Duration: lo.ToPtr(time.Duration(0)),
+		}
 	} else {
 		if err := in.ConsolidateAfter.convertFrom(v1beta1np.ConsolidateAfter); err != nil {
 			return err
