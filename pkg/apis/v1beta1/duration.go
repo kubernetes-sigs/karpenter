@@ -28,19 +28,19 @@ const Never = "Never"
 // that the duration is disabled and sets the inner duration as nil
 type NillableDuration struct {
 	*time.Duration
-	raw string
+	Raw string
 }
 
 // UnmarshalJSON implements the json.Unmarshaller interface.
 func (d *NillableDuration) UnmarshalJSON(b []byte) error {
-	err := json.Unmarshal(b, &d.raw)
+	err := json.Unmarshal(b, &d.Raw)
 	if err != nil {
 		return err
 	}
-	if d.raw == Never {
+	if d.Raw == Never {
 		return nil
 	}
-	pd, err := time.ParseDuration(d.raw)
+	pd, err := time.ParseDuration(d.Raw)
 	if err != nil {
 		return err
 	}
@@ -50,10 +50,10 @@ func (d *NillableDuration) UnmarshalJSON(b []byte) error {
 
 // MarshalJSON implements the json.Marshaler interface.
 func (d NillableDuration) MarshalJSON() ([]byte, error) {
-	return json.Marshal(d.raw)
+	return json.Marshal(d.Raw)
 }
 
 // ToUnstructured implements the value.UnstructuredConverter interface.
 func (d NillableDuration) ToUnstructured() interface{} {
-	return d.raw
+	return d.Raw
 }
