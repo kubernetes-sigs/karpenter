@@ -148,7 +148,7 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 	in.NodeClassRef = &NodeClassReference{
 		Name:  v1beta1nc.NodeClassRef.Name,
 		Kind:  lo.Ternary(v1beta1nc.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1nc.NodeClassRef.Kind),
-		Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, nodeclassGroupVersion.Group),
+		Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, lo.Ternary(nodeclassGroupVersion.Group == "", nodeclassGroupVersion.Version, nodeclassGroupVersion.Group)),
 	}
 
 	if v1beta1nc.Kubelet != nil {

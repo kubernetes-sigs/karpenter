@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -176,13 +175,6 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 		}
 	})
 
-	nodeclasses := injection.GetNodeClasses(ctx)
-	in.Spec.NodeClassRef = &NodeClassReference{
-		Name:  v1beta1np.Spec.NodeClassRef.Name,
-		Kind:  lo.Ternary(v1beta1np.Spec.NodeClassRef.Kind == "", nodeclasses[0].Kind, v1beta1np.Spec.NodeClassRef.Kind),
-		Group: lo.Ternary(v1beta1np.Spec.NodeClassRef.APIVersion == "", nodeclasses[0].Group, strings.Split(v1beta1np.Spec.NodeClassRef.APIVersion, "/")[0]),
-	}
-
 	defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
 	nodeclassGroupVersion, err := schema.ParseGroupVersion(v1beta1np.Spec.NodeClassRef.APIVersion)
 	if err != nil {
@@ -191,7 +183,7 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 	in.Spec.NodeClassRef = &NodeClassReference{
 		Name:  v1beta1np.Spec.NodeClassRef.Name,
 		Kind:  lo.Ternary(v1beta1np.Spec.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1np.Spec.NodeClassRef.Kind),
-		Group: lo.Ternary(v1beta1np.Spec.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, nodeclassGroupVersion.Group),
+		Group: lo.Ternary(v1beta1np.Spec.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, lo.Ternary(nodeclassGroupVersion.Group == "", nodeclassGroupVersion.Version, nodeclassGroupVersion.Group)),
 	}
 
 	if v1beta1np.Spec.Kubelet != nil {
