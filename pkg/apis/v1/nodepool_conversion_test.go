@@ -188,20 +188,30 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 						Group: object.GVK(&v1alpha1.TestNodeClass{}).Group,
 					}
 					Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind))
 					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Name))
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].GroupVersion().String()))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(BeEmpty())
 				})
-				It("should not include APIVersion for v1beta1 if Group and Kind is not in the supported nodeclass", func() {
+				It("should retain NodeClassReference details when the karpenter.sh/v1beta1-nodeclass-reference annotation exists", func() {
+					nodeClassReference := &v1beta1.NodeClassReference{
+						APIVersion: object.GVK(&v1alpha1.TestNodeClass{}).GroupVersion().String(),
+						Name:       "nodeclass-test",
+						Kind:       object.GVK(&v1alpha1.TestNodeClass{}).Kind,
+					}
+					nodeClassAnnotation, err := json.Marshal(nodeClassReference)
+					Expect(err).ToNot(HaveOccurred())
+					v1nodepool.Annotations = lo.Assign(map[string]string{
+						NodeClassReferenceAnnotationKey: string(nodeClassAnnotation),
+					})
 					v1nodepool.Spec.Template.Spec.NodeClassRef = &NodeClassReference{
-						Kind:  "test-kind",
+						Kind:  object.GVK(&v1alpha1.TestNodeClass{}).Kind,
 						Name:  "nodeclass-test",
-						Group: "testgroup.sh",
+						Group: object.GVK(&v1alpha1.TestNodeClass{}).Group,
 					}
 					Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind))
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Name))
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(""))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(nodeClassReference.Name))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(nodeClassReference.Kind))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(nodeClassReference.APIVersion))
 				})
 			})
 		})
@@ -457,19 +467,27 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 						Name:       "nodeclass-test",
 						APIVersion: "testgroup.sh/testversion",
 					}
+					nodeClassReferenceAnnotation, err := json.Marshal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef)
+					Expect(err).ToNot(HaveOccurred())
+
 					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind))
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name))
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Group).To(Equal("testgroup.sh"))
+					Expect(v1nodepool.Annotations).To(HaveKeyWithValue(NodeClassReferenceAnnotationKey, string(nodeClassReferenceAnnotation)))
 				})
 				It("should set default nodeclass group and kind on v1beta1 nodeclassRef", func() {
 					v1beta1nodepool.Spec.Template.Spec.NodeClassRef = &v1beta1.NodeClassReference{
 						Name: "nodeclass-test",
 					}
+					nodeClassReferenceAnnotation, err := json.Marshal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef)
+					Expect(err).ToNot(HaveOccurred())
+
 					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].Kind))
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name))
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Group).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].Group))
+					Expect(v1nodepool.Annotations).To(HaveKeyWithValue(NodeClassReferenceAnnotationKey, string(nodeClassReferenceAnnotation)))
 				})
 			})
 		})
