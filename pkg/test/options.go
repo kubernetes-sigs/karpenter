@@ -45,6 +45,7 @@ type OptionsFields struct {
 	BatchMaxDuration      *time.Duration
 	BatchIdleDuration     *time.Duration
 	FeatureGates          FeatureGates
+	RegistrationDuration  *time.Duration
 }
 
 type FeatureGates struct {
@@ -79,5 +80,6 @@ func Options(overrides ...OptionsFields) *options.Options {
 		FeatureGates: options.FeatureGates{
 			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
 		},
+		RegistrationDuration: lo.FromPtrOr(opts.RegistrationDuration, 15*time.Minute),
 	}
 }
