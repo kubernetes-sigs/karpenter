@@ -37,5 +37,5 @@ var (
 			Objectives: metrics.SummaryObjectives(),
 		},
 		[]string{metrics.NodePoolLabel},
-	)
+	) //stability=BETA
 )

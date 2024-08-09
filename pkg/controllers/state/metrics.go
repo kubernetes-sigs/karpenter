@@ -35,7 +35,7 @@ var (
 			Name:      "node_count",
 			Help:      "Current count of nodes in cluster state",
 		},
-	)
+	) //stability=STABLE
 
 	ClusterStateSynced = prometheus.NewGauge(
 		prometheus.GaugeOpts{
@@ -44,7 +44,7 @@ var (
 			Name:      "synced",
 			Help:      "Returns 1 if cluster state is synced and 0 otherwise. Synced checks that nodeclaims and nodes that are stored in the APIServer have the same representation as Karpenter's cluster state",
 		},
-	)
+	) //stability=STABLE
 )
 
 func init() {

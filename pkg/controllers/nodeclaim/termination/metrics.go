@@ -36,7 +36,7 @@ var InstanceTerminationDurationSeconds = prometheus.NewHistogramVec(
 		Buckets:   prometheus.ExponentialBuckets(1, 2, 11), //The threshold values generated here are 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024
 	},
 	[]string{metrics.NodePoolLabel},
-)
+) //stability=BETA
 
 var NodeClaimTerminationDurationSeconds = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
@@ -46,4 +46,4 @@ var NodeClaimTerminationDurationSeconds = prometheus.NewHistogramVec(
 		Help:      "Duration of NodeClaim termination in seconds.",
 		Buckets:   prometheus.ExponentialBuckets(1, 2, 12)}, //The threshold values generated here are 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024. 2048
 	[]string{metrics.NodePoolLabel},
-)
+) //stability=BETA

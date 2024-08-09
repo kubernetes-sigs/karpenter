@@ -49,7 +49,7 @@ var (
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]string{metrics.ReasonLabel, consolidationTypeLabel},
-	)
+	) //stability=BETA
 	DecisionsPerformedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
@@ -58,7 +58,7 @@ var (
 			Help:      "Number of disruption decisions performed. Labeled by disruption decision, reason, and consolidation type.",
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, consolidationTypeLabel},
-	)
+	) //stability=STABLE
 	EligibleNodes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
@@ -67,7 +67,7 @@ var (
 			Help:      "Number of nodes eligible for disruption by Karpenter. Labeled by disruption reason.",
 		},
 		[]string{metrics.ReasonLabel},
-	)
+	) //stability=BETA
 	ConsolidationTimeoutsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
@@ -76,7 +76,7 @@ var (
 			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
 		},
 		[]string{consolidationTypeLabel},
-	)
+	) //stability=BETA
 	NodePoolAllowedDisruptions = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
@@ -85,5 +85,5 @@ var (
 			Help:      "The number of nodes for a given NodePool that can be concurrently disrupting at a point in time. Labeled by NodePool. Note that allowed disruptions can change very rapidly, as new nodes may be created and others may be deleted at any point.",
 		},
 		[]string{metrics.NodePoolLabel, metrics.ReasonLabel},
-	)
+	) //stability=STABLE
 )

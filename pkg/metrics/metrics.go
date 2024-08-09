@@ -41,7 +41,7 @@ var (
 			NodePoolLabel,
 			CapacityTypeLabel,
 		},
-	)
+	) //stability=STABLE
 	NodeClaimsTerminatedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -53,7 +53,7 @@ var (
 			NodePoolLabel,
 			CapacityTypeLabel,
 		},
-	)
+	) //stability=STABLE
 	NodeClaimsDisruptedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -77,7 +77,7 @@ var (
 		[]string{
 			NodePoolLabel,
 		},
-	)
+	) //stability=STABLE
 	NodesTerminatedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -88,7 +88,7 @@ var (
 		[]string{
 			NodePoolLabel,
 		},
-	)
+	) //stability=STABLE
 )
 
 func init() {

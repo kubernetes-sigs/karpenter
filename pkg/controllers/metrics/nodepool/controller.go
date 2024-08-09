@@ -55,7 +55,7 @@ var (
 			resourceTypeLabel,
 			nodePoolNameLabel,
 		},
-	)
+	) //stability=STABLE
 	usage = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
@@ -67,7 +67,7 @@ var (
 			resourceTypeLabel,
 			nodePoolNameLabel,
 		},
-	)
+	) //stability=STABLE
 )
 
 func init() {

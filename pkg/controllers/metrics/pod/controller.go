@@ -62,7 +62,7 @@ var (
 			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, nodepool name, zone, architecture, capacity type, instance type and pod phase.",
 		},
 		labelNames(),
-	)
+	) //stability=BETA
 	podStartupDurationSeconds = prometheus.NewSummary(
 		prometheus.SummaryOpts{
 			Namespace:  "karpenter",
@@ -71,7 +71,7 @@ var (
 			Help:       "The time from pod creation until the pod is running.",
 			Objectives: metrics.SummaryObjectives(),
 		},
-	)
+	) //stability=STABLE
 )
 
 // Controller for the resource
