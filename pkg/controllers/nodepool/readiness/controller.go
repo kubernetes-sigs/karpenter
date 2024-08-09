@@ -20,6 +20,9 @@ import (
 	"context"
 	logger "log"
 
+	"github.com/awslabs/operatorpkg/object"
+	"github.com/samber/lo"
+
 	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -79,7 +82,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	return reconcile.Result{}, nil
 }
 func (c *Controller) getNodeClass(ctx context.Context, nodePool *v1.NodePool, supportedNC []status.Object) (status.Object, error) {
-	nodeClass := supportedNC[0]
+	nodeClass, ok := lo.Find(supportedNC, func(nc status.Object) bool {
+		return object.GVK(nc).Group == nodePool.Spec.Template.Spec.NodeClassRef.Group && object.GVK(nc).Kind == nodePool.Spec.Template.Spec.NodeClassRef.Kind
+	})
+	if !ok {
+		return nodeClass, nil
+	}
 	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name}, nodeClass); err != nil {
 		if errors.IsNotFound(err) {
 			return nil, nil
