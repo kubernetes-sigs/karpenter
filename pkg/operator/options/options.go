@@ -113,6 +113,9 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	if !lo.Contains(validLogLevels, o.LogLevel) {
 		return fmt.Errorf("validating cli flags / env vars, invalid log level %q", o.LogLevel)
 	}
+	if o.ServiceName == "" {
+		return errors.New("Karpenter-service must be not empty")
+	}
 	gates, err := ParseFeatureGates(o.FeatureGates.inputStr)
 	if err != nil {
 		return fmt.Errorf("parsing feature gates, %w", err)
