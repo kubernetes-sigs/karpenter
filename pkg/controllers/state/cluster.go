@@ -53,6 +53,7 @@ type Cluster struct {
 	nodeNameToProviderID      map[string]string               // node name -> provider id
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
+	antiAffinityPods          sync.Map                        // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
@@ -60,8 +61,7 @@ type Cluster struct {
 	// changed about the cluster that might make consolidation possible. By recording
 	// the state, interested disruption methods can check to see if this has changed to
 	// optimize and not try to disrupt if nothing about the cluster has changed.
-	clusterState     time.Time
-	antiAffinityPods sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
+	clusterState time.Time
 }
 
 func NewCluster(clk clock.Clock, client client.Client) *Cluster {
