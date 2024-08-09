@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -43,7 +44,7 @@ type NodeClaim struct {
 
 var nodeID int64
 
-func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *NodeClaim {
+func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType, sharedCache *cache.Cache) *NodeClaim {
 	// Copy the template, and add hostname
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(v1.LabelHostname, hostname)
@@ -53,6 +54,7 @@ func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daem
 	template.Requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
 	template.InstanceTypeOptions = instanceTypes
 	template.Spec.Resources.Requests = daemonResources
+	template.cache = sharedCache
 
 	return &NodeClaim{
 		NodeClaimTemplate: template,
@@ -101,7 +103,7 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, resources.RequestsForPods(pod))
 
-	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
+	filtered := n.filterInstanceTypesByRequirements(nodeClaimRequirements, requests)
 
 	if len(filtered.remaining) == 0 {
 		// log the total resources being requested (daemonset + the pod)
@@ -239,7 +241,7 @@ func (r filterResults) FailureReason() string {
 }
 
 //nolint:gocyclo
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, requests v1.ResourceList) filterResults {
+func (n *NodeClaim) filterInstanceTypesByRequirements(requirements scheduling.Requirements, requests v1.ResourceList) filterResults {
 	results := filterResults{
 		requests:        requests,
 		requirementsMet: false,
@@ -251,10 +253,22 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		fitsAndOffering:         false,
 	}
 
-	for _, it := range instanceTypes {
+	for _, it := range n.InstanceTypeOptions {
 		// the tradeoff to not short circuiting on the filtering is that we can report much better error messages
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)
+
+		// update instance type allocatables from cache if available
+		cacheMapKey := fmt.Sprintf(
+			"allocatableCache;%s;%s",
+			n.NodePoolName,
+			it.Name,
+		)
+		cachedAllocatable, ok := n.cache.Get(cacheMapKey)
+		if ok && cachedAllocatable != nil {
+			it.SetAllocatable(cachedAllocatable.(v1.ResourceList))
+		}
+
 		itFits := fits(it, requests)
 		itHasOffering := it.Offerings.Available().HasCompatible(requirements)
 

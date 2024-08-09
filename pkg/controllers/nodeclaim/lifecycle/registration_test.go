@@ -18,6 +18,7 @@ package lifecycle_test
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -34,6 +35,35 @@ var _ = Describe("Registration", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
+	It("should update nodeclaim allocatables from the registered node", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.Node(test.NodeOptions{
+			ProviderID:  nodeClaim.Status.ProviderID,
+			Taints:      []corev1.Taint{v1.UnregisteredNoExecuteTaint},
+			Allocatable: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("3123Mi")},
+		})
+
+		ExpectApplied(ctx, env.Client, node)
+		ExpectNodeExists(ctx, env.Client, node.Name)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+		// This refreshes the nodeClaim, and it's allocatable
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		// Expect nodeClaim allocatable to be same as node allocatable
+		ExpectResources(node.Status.Allocatable, nodeClaim.Status.Allocatable)
+	})
+
 	It("should match the nodeClaim to the Node when the Node comes online", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{

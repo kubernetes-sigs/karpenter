@@ -35,6 +35,8 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
+	"github.com/patrickmn/go-cache"
+
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -47,7 +49,7 @@ import (
 func NewScheduler(kubeClient client.Client, nodePools []*v1.NodePool,
 	cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
 	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*corev1.Pod,
-	recorder events.Recorder) *Scheduler {
+	recorder events.Recorder, sharedCache *cache.Cache) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
@@ -70,6 +72,7 @@ func NewScheduler(kubeClient client.Client, nodePools []*v1.NodePool,
 		instanceTypes:      instanceTypes,
 		daemonOverhead:     getDaemonOverhead(templates, daemonSetPods),
 		recorder:           recorder,
+		cache:              sharedCache,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
@@ -91,6 +94,7 @@ type Scheduler struct {
 	topology           *Topology
 	cluster            *state.Cluster
 	recorder           events.Recorder
+	cache              *cache.Cache
 	kubeClient         client.Client
 }
 
@@ -281,7 +285,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName])))
 			}
 		}
-		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
+		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes, s.cache)
 		if err := nodeClaim.Add(pod); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, daemonset overhead=%s, %w",
 				nodeClaimTemplate.NodePoolName,

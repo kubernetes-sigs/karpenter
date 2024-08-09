@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -39,6 +40,7 @@ import (
 
 type Registration struct {
 	kubeClient client.Client
+	cache      cache.Cache
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
@@ -87,6 +89,20 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node) error {
 	stored := node.DeepCopy()
 	controllerutil.AddFinalizer(node, v1.TerminationFinalizer)
+
+	// Update cached allocatables
+	cacheMapKey := fmt.Sprintf(
+		"allocatableCache;%s;%s",
+		nodeClaim.Labels[v1.NodePoolLabelKey],
+		nodeClaim.Labels[corev1.LabelInstanceTypeStable],
+	)
+	cacheValue, found := r.cache.Get(cacheMapKey)
+	if !found || !equality.Semantic.DeepEqual(cacheValue.(corev1.ResourceList), nodeClaim.Status.Allocatable) {
+		log.FromContext(ctx).WithValues("NodePool", nodeClaim.Labels[v1.NodePoolLabelKey]).Info(fmt.Sprintf("Updating allocatable cache for %s", nodeClaim.Labels[corev1.LabelInstanceTypeStable]))
+		r.cache.Set(cacheMapKey, stored.Status.Allocatable, cache.DefaultExpiration)
+	}
+
+	nodeClaim.Status.Allocatable = stored.Status.Allocatable
 
 	node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
 	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels)

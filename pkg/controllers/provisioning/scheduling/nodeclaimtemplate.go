@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/awslabs/operatorpkg/object"
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,6 +43,7 @@ type NodeClaimTemplate struct {
 	NodePoolName        string
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Requirements        scheduling.Requirements
+	cache               *cache.Cache
 }
 
 func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {

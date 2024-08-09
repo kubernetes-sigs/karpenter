@@ -101,6 +101,10 @@ func (i *InstanceType) Allocatable() corev1.ResourceList {
 	return i.allocatable.DeepCopy()
 }
 
+func (i *InstanceType) SetAllocatable(newAllocatable corev1.ResourceList) {
+	i.allocatable = newAllocatable
+}
+
 func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(its, func(i, j int) bool {
