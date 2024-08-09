@@ -18,11 +18,13 @@ package informer
 
 import (
 	"context"
+	"time"
+
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
+
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"time"
 
 	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/errors"

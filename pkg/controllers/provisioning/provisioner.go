@@ -20,10 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"strings"
 	"time"
+
+	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
+
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
