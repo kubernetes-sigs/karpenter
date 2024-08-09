@@ -52,6 +52,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/orb"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -76,26 +77,31 @@ func WithReason(reason string) func(*LaunchOptions) {
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
-	cloudProvider  cloudprovider.CloudProvider
-	kubeClient     client.Client
-	batcher        *Batcher
-	volumeTopology *scheduler.VolumeTopology
-	cluster        *state.Cluster
-	recorder       events.Recorder
-	cm             *pretty.ChangeMonitor
+	cloudProvider          cloudprovider.CloudProvider
+	kubeClient             client.Client
+	batcher                *Batcher
+	volumeTopology         *scheduler.VolumeTopology
+	cluster                *state.Cluster
+	recorder               events.Recorder
+	schedulingInputHeap    *orb.SchedulingInputHeap
+	schedulingMetadataHeap *orb.SchedulingMetadataHeap
+	cm                     *pretty.ChangeMonitor
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+	schedulingInputHeap *orb.SchedulingInputHeap, schedulingMetadataHeap *orb.SchedulingMetadataHeap,
 ) *Provisioner {
 	p := &Provisioner{
-		batcher:        NewBatcher(),
-		cloudProvider:  cloudProvider,
-		kubeClient:     kubeClient,
-		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
-		cluster:        cluster,
-		recorder:       recorder,
-		cm:             pretty.NewChangeMonitor(),
+		batcher:                NewBatcher(),
+		cloudProvider:          cloudProvider,
+		kubeClient:             kubeClient,
+		volumeTopology:         scheduler.NewVolumeTopology(kubeClient),
+		cluster:                cluster,
+		recorder:               recorder,
+		schedulingInputHeap:    schedulingInputHeap,
+		schedulingMetadataHeap: schedulingMetadataHeap,
+		cm:                     pretty.NewChangeMonitor(),
 	}
 	return p
 }
@@ -212,7 +218,7 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
-func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stateNodes []*state.StateNode) (*scheduler.Scheduler, error) {
+func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stateNodes []*state.StateNode, schedulingAction string) (*scheduler.Scheduler, error) {
 	nodePoolList := &v1.NodePoolList{}
 	err := p.kubeClient.List(ctx, nodePoolList)
 	if err != nil {
@@ -252,6 +258,9 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 			continue
 		}
 		instanceTypes[nodePool.Name] = append(instanceTypes[nodePool.Name], instanceTypeOptions...)
+
+		// Here's where I can update ITs in the detailed logging
+		// Log instancetypes here, or diff-ed?
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
@@ -302,6 +311,12 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
+
+	// Push scheduling action and scheduling inputs to heaps for ORB controller reconciliation
+	schedulingTime := time.Now() // Used to sync a reference time for action and metadata.
+	p.schedulingMetadataHeap.LogSchedulingAction(ctx, schedulingAction, schedulingTime)
+	p.schedulingInputHeap.LogSchedulingInput(ctx, p.kubeClient, schedulingTime, pods, stateNodes, p.cluster.GetBindings(), instanceTypes, topology, daemonSetPods)
+
 	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
 }
 
@@ -340,7 +355,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(pods) == 0 {
 		return scheduler.Results{}, nil
 	}
-	s, err := p.NewScheduler(ctx, pods, nodes.Active())
+	s, err := p.NewScheduler(ctx, pods, nodes.Active(), "")
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			log.FromContext(ctx).Info("no nodepools found")

@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+option go_package = "sigs.k8s.io/karpenter/pkg/controllers/orb/proto";
+
+message BatchedDifferences {
+  repeated SchedulingInput added = 1;
+  repeated SchedulingInput removed = 2;
+  repeated SchedulingInput changed = 3;
+}
+// Anything in bytes are the self-describing wire format provided by K8s
+message SchedulingInput {
+  string timestamp = 1;
+  repeated ReducedPod pendingpod_data = 2;
+  repeated StateNodeWithPods statenodes_data = 3;
+  Bindings bindings_data = 4;
+  repeated InstanceType instancetypes_data = 5;
+  NodePoolsToInstanceTypes nodepoolstoinstancetypes_data = 6;
+  optional bytes topology_data = 7;
+  optional bytes daemonsetpods_data = 8;
+  optional bytes pvlist_data = 9;
+  optional bytes pvclist_data = 10;
+  optional bytes scheduledpodlist_data = 11;
+}
+
+message ReducedPod {
+  string name = 1;
+  string namespace = 2;
+  string uid = 3;
+  string phase = 4;
+  bytes spec = 5;
+  repeated PodCondition conditions = 6;
+
+  message PodCondition {
+    string type = 1;
+    string status = 2;
+    string reason = 3;
+    string message = 4;
+  }
+}
+
+// A stateNode with the its associated Pods on it.
+message StateNodeWithPods {
+  optional bytes node = 1;
+  optional bytes nodeClaim = 2;
+  repeated ReducedPod pods = 3;
+}
+
+// Bindings represents the mapping between a Pod and the node it's bound to.
+message Bindings {
+  repeated Binding binding = 1;
+
+  message Binding {
+    NamespacedName pod_namespaced_name = 1;
+    string node_name = 2;
+  
+    message NamespacedName {
+      string namespace = 1;
+      string name = 2;
+    }
+  }  
+}
+
+message InstanceType {
+  string name = 1;
+  repeated Requirement requirements = 2;
+  repeated Offering offerings = 3;
+  ResourceList capacity = 4;
+  Overhead overhead = 5;
+
+  message Requirement {
+    string key = 1;
+    string nodeselectoroperator = 2;
+    repeated string values = 3;
+    optional int64 minvalues = 4;
+  }
+  
+  message Offering {
+    repeated Requirement requirements = 1;
+    double price = 2;
+    bool available = 3;
+  }
+
+  message ResourceList {
+    repeated ResourceQuantity resources = 1;
+  }
+
+  message Overhead {
+    ResourceList kubereserved = 1;
+    ResourceList systemreserved = 2;
+    ResourceList evictionthreshold = 3;
+  }
+
+  message ResourceQuantity {
+    string resource_name = 1;
+    bytes quantity = 2;
+  }
+
+  message Quantity {
+    oneof value {
+      int64 i = 1; // for int64 scaled form
+      string d = 2; // for inf.Dec form
+    }
+  }
+}
+
+// NodepoolsToInstanceTypes represents the mapping from each Nodepool to its set of InstanceTypes by name
+message NodePoolsToInstanceTypes {
+  repeated NodePoolToInstanceTypes nodepoolstoinstancetypes = 1;
+
+  message NodePoolToInstanceTypes {
+    string nodepool = 1;
+    repeated string instancetype_name = 2;
+  }
+}
+
+message SchedulingMetadataMap {
+  repeated MappingEntry entries = 1;
+
+  message MappingEntry {
+    string action = 1;
+    string timestamp = 2;
+  }
+}

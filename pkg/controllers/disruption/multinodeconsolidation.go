@@ -135,7 +135,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
-		cmd, results, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
+		cmd, results, err := m.computeConsolidation(ctx, v1.MultiNodeConsolidationSchedulingAction, candidatesToConsolidate...)
 		if err != nil {
 			return Command{}, scheduling.Results{}, err
 		}

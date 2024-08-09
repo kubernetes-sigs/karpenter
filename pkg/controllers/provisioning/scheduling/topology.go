@@ -18,6 +18,7 @@ package scheduling
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 
@@ -436,4 +437,37 @@ func mapOperator(operator metav1.LabelSelectorOperator) selection.Operator {
 
 func IgnoredForTopology(p *corev1.Pod) bool {
 	return !pod.IsScheduled(p) || pod.IsTerminal(p) || pod.IsTerminating(p)
+}
+
+// Function to marshal Topology as a JSON for the four internal fields
+func (t *Topology) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Topologies        map[uint64]*TopologyGroup
+		InverseTopologies map[uint64]*TopologyGroup
+		Domains           map[string]sets.Set[string]
+		ExcludedPods      sets.Set[string]
+	}{
+		Topologies:        t.topologies,
+		InverseTopologies: t.inverseTopologies,
+		Domains:           t.domains,
+		ExcludedPods:      t.excludedPods})
+}
+
+// This function unmarshals back
+func (t *Topology) UnmarshalJSON(b []byte) error {
+	temp := struct {
+		Topologies        map[uint64]*TopologyGroup
+		InverseTopologies map[uint64]*TopologyGroup
+		Domains           map[string]sets.Set[string]
+		ExcludedPods      sets.Set[string]
+	}{}
+	err := json.Unmarshal(b, &temp)
+	if err != nil {
+		return err
+	}
+	t.topologies = temp.Topologies
+	t.inverseTopologies = temp.InverseTopologies
+	t.domains = temp.Domains
+	t.excludedPods = temp.ExcludedPods
+	return nil
 }

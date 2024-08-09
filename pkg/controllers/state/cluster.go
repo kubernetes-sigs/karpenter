@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -588,4 +589,36 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
+}
+
+// Returns a read-only copy of the bindings map, and can be used by other components to avoid locking when iterating over the map
+func (c *Cluster) GetBindings() map[types.NamespacedName]string {
+	bindings := map[types.NamespacedName]string{}
+	maps.Copy(bindings, c.bindings)
+	return bindings
+}
+
+// Hydrates the cluster with the data from the ORB logs
+func (c *Cluster) ReconstructCluster(ctx context.Context, bindings map[types.NamespacedName]string, stateNodes []*StateNode, daemonSetPods []*corev1.Pod, allPods *corev1.PodList) error {
+	// Set Bindings
+	c.bindings = bindings
+
+	// Hydrate StateNodes
+	for _, statenode := range stateNodes {
+		if err := c.UpdateNode(ctx, statenode.Node); err != nil {
+			return err
+		}
+		c.UpdateNodeClaim(statenode.NodeClaim)
+	}
+	// Hydrate all pods
+	for _, pod := range allPods.Items {
+		if err := c.UpdatePod(ctx, &pod); err != nil {
+			return err
+		}
+	}
+	// Set DaemonSetPods
+	for _, pod := range daemonSetPods {
+		c.daemonSetPods.Store(client.ObjectKeyFromObject(pod), pod)
+	}
+	return nil
 }

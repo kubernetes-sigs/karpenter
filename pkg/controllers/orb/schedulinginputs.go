@@ -1,0 +1,796 @@
+/*
+Copyright The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package orb
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	proto "google.golang.org/protobuf/proto"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	pb "sigs.k8s.io/karpenter/pkg/controllers/orb/proto"
+	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+)
+
+type BindingsMap map[types.NamespacedName]string // Alias to allow JSON Marshaling
+
+// These are the inputs to the Provisioner Scheduling which we'll serialize and log for
+// later deserialization, reconstruction and resimulation in the ORB Debugging Tool
+type SchedulingInput struct {
+	Timestamp             time.Time
+	PendingPods           []*corev1.Pod
+	StateNodesWithPods    []*StateNodeWithPods
+	Bindings              BindingsMap
+	AllInstanceTypes      []*cloudprovider.InstanceType
+	NodePoolInstanceTypes map[string][]string
+	Topology              *scheduler.Topology
+	DaemonSetPods         []*corev1.Pod
+	PVList                *corev1.PersistentVolumeList
+	PVCList               *corev1.PersistentVolumeClaimList
+	ScheduledPodList      *corev1.PodList
+}
+
+// Construct a Scheduling Input and reduce it down to what's minimally required for resimulation
+func NewSchedulingInput(ctx context.Context, kubeClient client.Client, scheduledTime time.Time, pendingPods []*corev1.Pod, stateNodes []*state.StateNode,
+	bindings map[types.NamespacedName]string, instanceTypes map[string][]*cloudprovider.InstanceType, topology *scheduler.Topology, daemonSetPods []*corev1.Pod) SchedulingInput {
+	allInstanceTypes, nodePoolInstanceTypes := getAllInstanceTypesAndNodePoolMapping(instanceTypes)
+
+	// Get all PVs, PVCs and scheduledPods from kubeClient
+	pvcList := &corev1.PersistentVolumeClaimList{}
+	err := kubeClient.List(ctx, pvcList)
+	if err != nil {
+		fmt.Println("PVC List error in Scheduling Input logging: ", err)
+		return SchedulingInput{}
+	}
+	pvList := &corev1.PersistentVolumeList{}
+	err = kubeClient.List(ctx, pvList)
+	if err != nil {
+		fmt.Println("PV List error in Scheduling Input logging: ", err)
+		return SchedulingInput{}
+	}
+	scheduledPodList := &corev1.PodList{}
+	err = kubeClient.List(ctx, scheduledPodList)
+	if err != nil {
+		fmt.Println("Pod List error in Scheduling Input logging: ", err)
+		return SchedulingInput{}
+	}
+
+	return SchedulingInput{
+		Timestamp:             scheduledTime,
+		PendingPods:           reducePods(pendingPods),
+		StateNodesWithPods:    newStateNodesWithPods(ctx, kubeClient, stateNodes),
+		Bindings:              bindings,
+		AllInstanceTypes:      allInstanceTypes,
+		NodePoolInstanceTypes: nodePoolInstanceTypes,
+		Topology:              topology,
+		DaemonSetPods:         daemonSetPods,
+		PVList:                pvList,
+		PVCList:               pvcList,
+		ScheduledPodList:      scheduledPodList,
+	}
+}
+
+// Comparator for MinTimeHeap interface
+func (si SchedulingInput) GetTime() time.Time {
+	return si.Timestamp
+}
+
+func (si SchedulingInput) String() string {
+	return protoSchedulingInput(&si).String()
+}
+
+func (m BindingsMap) MarshalJSON() ([]byte, error) {
+	temp := map[string]interface{}{}
+	for k, v := range m {
+		temp[k.String()] = v
+	}
+	return json.Marshal(temp)
+}
+
+func (si *SchedulingInput) isEmpty() bool {
+	return len(si.PendingPods) == 0 &&
+		len(si.StateNodesWithPods) == 0 &&
+		len(si.Bindings) == 0 &&
+		len(si.AllInstanceTypes) == 0 &&
+		len(si.NodePoolInstanceTypes) == 0 &&
+		si.Topology == nil &&
+		len(si.DaemonSetPods) == 0 &&
+		si.PVList == nil &&
+		si.PVCList == nil &&
+		si.ScheduledPodList == nil
+}
+
+/* Resource getter methods to generalize a lambda function argument for merge */
+
+func GetPendingPods(s *SchedulingInput) []*corev1.Pod {
+	return s.PendingPods
+}
+func GetStateNodesWithPods(s *SchedulingInput) []*StateNodeWithPods {
+	return s.StateNodesWithPods
+}
+func GetBindings(s *SchedulingInput) map[types.NamespacedName]string {
+	return s.Bindings
+}
+func GetAllInstanceTypes(s *SchedulingInput) []*cloudprovider.InstanceType {
+	return s.AllInstanceTypes
+}
+func GetNodePoolInstanceTypes(s *SchedulingInput) map[string][]string {
+	return s.NodePoolInstanceTypes
+}
+func GetTopology(s *SchedulingInput) *scheduler.Topology {
+	return s.Topology
+}
+func GetDaemonSetPods(s *SchedulingInput) []*corev1.Pod {
+	return s.DaemonSetPods
+}
+func GetPVList(s *SchedulingInput) *corev1.PersistentVolumeList {
+	return s.PVList
+}
+func GetPVCList(s *SchedulingInput) *corev1.PersistentVolumeClaimList {
+	return s.PVCList
+}
+func GetScheduledPodList(s *SchedulingInput) *corev1.PodList {
+	return s.ScheduledPodList
+}
+
+// A stateNode combined with its associated Pods.
+type StateNodeWithPods struct {
+	Node      *corev1.Node
+	NodeClaim *v1.NodeClaim
+	Pods      []*corev1.Pod
+}
+
+func (snp StateNodeWithPods) GetName() string {
+	if snp.Node == nil {
+		return snp.NodeClaim.GetName()
+	}
+	return snp.Node.GetName()
+}
+
+// Constructs StateNodesWithPods by reducing the stateNodes to their Node and NodeClaim and getting the Pods associated with them.
+func newStateNodesWithPods(ctx context.Context, kubeClient client.Client, stateNodes []*state.StateNode) []*StateNodeWithPods {
+	stateNodesWithPods := []*StateNodeWithPods{}
+	for _, stateNode := range reduceStateNodes(stateNodes) {
+		pods, err := stateNode.Pods(ctx, kubeClient)
+		if err != nil {
+			pods = nil
+		}
+		stateNodesWithPods = append(stateNodesWithPods, &StateNodeWithPods{
+			Node:      stateNode.Node,
+			NodeClaim: stateNode.NodeClaim,
+			Pods:      reducePods(pods),
+		})
+	}
+	return stateNodesWithPods
+}
+
+// Gets the superset of all InstanceTypes from the mapping. This is to simplify saving the NodePool -> InstanceType map.
+// It saves all of them by their unique name, then associats the NodePool name with its corresponding instancetype names
+func getAllInstanceTypesAndNodePoolMapping(instanceTypes map[string][]*cloudprovider.InstanceType) ([]*cloudprovider.InstanceType, map[string][]string) {
+	allInstanceTypesNameMap := map[string]*cloudprovider.InstanceType{}
+	nodePoolToInstanceTypes := map[string][]string{}
+	for nodePool, instanceTypeSlice := range instanceTypes {
+		instanceTypeSliceNameMap := CreateMapFromSlice(instanceTypeSlice, GetInstanceTypeKey)
+		for instanceTypeName, instanceType := range instanceTypeSliceNameMap {
+			allInstanceTypesNameMap[instanceTypeName] = instanceType
+		}
+		nodePoolToInstanceTypes[nodePool] = sets.KeySet(instanceTypeSliceNameMap).UnsortedList()
+	}
+	uniqueInstanceTypeNames := sets.KeySet(allInstanceTypesNameMap).UnsortedList()
+	uniqueInstanceTypes := []*cloudprovider.InstanceType{}
+	for _, instanceTypeName := range uniqueInstanceTypeNames {
+		uniqueInstanceTypes = append(uniqueInstanceTypes, allInstanceTypesNameMap[instanceTypeName])
+	}
+	return uniqueInstanceTypes, nodePoolToInstanceTypes
+}
+
+// Reduces pods to just their Name, Namespace, UID, PodSpec and the Status' Phase and reduced-Conditions
+func reducePods(pods []*corev1.Pod) []*corev1.Pod {
+	reducedPods := []*corev1.Pod{}
+	for _, pod := range pods {
+		reducedPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+				UID:       pod.GetUID(),
+			},
+			Spec: pod.Spec,
+			Status: corev1.PodStatus{
+				Phase:      pod.Status.Phase,
+				Conditions: reducePodConditions(pod.Status.Conditions),
+			},
+		}
+		reducedPods = append(reducedPods, reducedPod)
+	}
+	return reducedPods
+}
+
+// Reduces a pod's conditions to only Type, Status, Reason and Message
+func reducePodConditions(conditions []corev1.PodCondition) []corev1.PodCondition {
+	reducedConditions := []corev1.PodCondition{}
+	for _, condition := range conditions {
+		reducedCondition := corev1.PodCondition{
+			Type:    condition.Type,
+			Status:  condition.Status,
+			Reason:  condition.Reason,
+			Message: condition.Message,
+		}
+		reducedConditions = append(reducedConditions, reducedCondition)
+	}
+	return reducedConditions
+}
+
+// Reducing to just the exportable fields: Node and NodeClaim in StateNode
+func reduceStateNodes(nodes []*state.StateNode) []*state.StateNode {
+	reducedStateNodes := []*state.StateNode{}
+	for _, node := range nodes {
+		if node != nil {
+			reducedStateNode := &state.StateNode{}
+			reducedStateNode.Node = node.Node
+			reducedStateNode.NodeClaim = node.NodeClaim
+			if reducedStateNode.Node != nil || reducedStateNode.NodeClaim != nil {
+				reducedStateNodes = append(reducedStateNodes, reducedStateNode) // Guarantees both won't be nil
+			}
+		}
+	}
+	return reducedStateNodes
+}
+
+/* Symmetric functions to convert between SchedulingInputs and their fields to protobuf serialization */
+// Marshal <--> Unmarshal, outer layer functions from Karpenter structs to []byte and back
+// proto <--> reconstruct, inner layer functions from Karpenter structs to protobuf struct and back
+
+func MarshalSchedulingInput(si *SchedulingInput) ([]byte, error) {
+	return proto.Marshal(protoSchedulingInput(si))
+}
+
+func UnmarshalSchedulingInput(schedulingInputData []byte) (*SchedulingInput, error) {
+	entry := &pb.SchedulingInput{}
+	if err := proto.Unmarshal(schedulingInputData, entry); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal SchedulingInput: %w", err)
+	}
+
+	si, err := reconstructSchedulingInput(entry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct SchedulingInput: %w", err)
+	}
+	return si, nil
+}
+
+func protoSchedulingInput(si *SchedulingInput) *pb.SchedulingInput {
+	return &pb.SchedulingInput{
+		Timestamp:                    si.Timestamp.Format("2006-01-02_15-04-05"),
+		PendingpodData:               protoPods(si.PendingPods),
+		BindingsData:                 protoBindings(si.Bindings),
+		StatenodesData:               protoStateNodesWithPods(si.StateNodesWithPods),
+		InstancetypesData:            protoInstanceTypes(si.AllInstanceTypes),
+		NodepoolstoinstancetypesData: protoNodePoolInstanceTypes(si.NodePoolInstanceTypes),
+		TopologyData:                 protoTopology(si.Topology),
+		DaemonsetpodsData:            protoDaemonSetPods(si.DaemonSetPods),
+		PvlistData:                   protoPVList(si.PVList),
+		PvclistData:                  protoPVCList(si.PVCList),
+		ScheduledpodlistData:         protoScheduledPodList(si.ScheduledPodList),
+	}
+}
+
+func reconstructSchedulingInput(pbsi *pb.SchedulingInput) (*SchedulingInput, error) {
+	timestamp, err := time.Parse("2006-01-02_15-04-05", pbsi.GetTimestamp())
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse timestamp: %w", err)
+	}
+
+	reconstructedStateNodesWithPods, err := reconstructStateNodesWithPods(pbsi.GetStatenodesData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct StateNodesWithPods: %w", err)
+	}
+
+	reconstructedInstanceTypes, err := reconstructInstanceTypes(pbsi.GetInstancetypesData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct InstanceTypes: %w", err)
+	}
+
+	reconstructedTopology, err := reconstructTopology(pbsi.GetTopologyData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct Topology: %w", err)
+	}
+
+	reconstructedDaemonSetPods, err := reconstructDaemonSetPods(pbsi.GetDaemonsetpodsData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct DaemonSetPods: %w", err)
+	}
+
+	reconstructedPVList, err := reconstructPVList(pbsi.GetPvlistData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct PVList: %w", err)
+	}
+
+	reconstructedPVCList, err := reconstructPVCList(pbsi.GetPvclistData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct PVCList: %w", err)
+	}
+
+	reconstructedScheduledPodList, err := reconstructScheduledPodList(pbsi.GetScheduledpodlistData())
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct ScheduledPodList: %w", err)
+	}
+
+	return &SchedulingInput{
+		timestamp,
+		reconstructPods(pbsi.GetPendingpodData()),
+		reconstructedStateNodesWithPods,
+		reconstructBindings(pbsi.GetBindingsData()),
+		reconstructedInstanceTypes,
+		reconstructNodePoolInstanceTypes(pbsi.GetNodepoolstoinstancetypesData()),
+		reconstructedTopology,
+		reconstructedDaemonSetPods,
+		reconstructedPVList,
+		reconstructedPVCList,
+		reconstructedScheduledPodList,
+	}, nil
+}
+
+func protoPods(pods []*corev1.Pod) []*pb.ReducedPod {
+	reducedPods := []*pb.ReducedPod{}
+	for _, pod := range pods {
+		podSpecData, err := pod.Spec.Marshal()
+		if err != nil {
+			fmt.Println("Failed to marshal pod spec: ", err)
+			return nil
+		}
+		reducedPod := &pb.ReducedPod{
+			Name:       pod.Name,
+			Namespace:  pod.Namespace,
+			Uid:        string(pod.GetUID()),
+			Phase:      string(pod.Status.Phase),
+			Spec:       podSpecData,
+			Conditions: protoPodConditions(pod.Status.Conditions),
+		}
+		reducedPods = append(reducedPods, reducedPod)
+	}
+	return reducedPods
+}
+
+func reconstructPods(reducedPods []*pb.ReducedPod) []*corev1.Pod {
+	pods := []*corev1.Pod{}
+	for _, reducedPod := range reducedPods {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      reducedPod.Name,
+				Namespace: reducedPod.Namespace,
+				UID:       types.UID(reducedPod.Uid),
+			},
+			Spec: corev1.PodSpec{},
+			Status: corev1.PodStatus{
+				Phase:      corev1.PodPhase(reducedPod.Phase),
+				Conditions: reconstructPodConditions(reducedPod.Conditions),
+			},
+		}
+		err := pod.Spec.Unmarshal(reducedPod.Spec)
+		if err != nil {
+			fmt.Println("Failed to unmarshal pod spec: ", err)
+			return nil
+		}
+		pods = append(pods, pod)
+	}
+	return pods
+}
+
+func protoPodConditions(conditions []corev1.PodCondition) []*pb.ReducedPod_PodCondition {
+	reducedPodConditions := []*pb.ReducedPod_PodCondition{}
+	for _, condition := range conditions {
+		reducedPodCondition := &pb.ReducedPod_PodCondition{
+			Type:    string(condition.Type),
+			Status:  string(condition.Status),
+			Reason:  condition.Reason,
+			Message: condition.Message,
+		}
+		reducedPodConditions = append(reducedPodConditions, reducedPodCondition)
+	}
+	return reducedPodConditions
+}
+
+func reconstructPodConditions(reducedPodConditions []*pb.ReducedPod_PodCondition) []corev1.PodCondition {
+	podConditions := []corev1.PodCondition{}
+	for _, reducedPodCondition := range reducedPodConditions {
+		podCondition := corev1.PodCondition{
+			Type:    corev1.PodConditionType(reducedPodCondition.Type),
+			Status:  corev1.ConditionStatus(reducedPodCondition.Status),
+			Reason:  reducedPodCondition.Reason,
+			Message: reducedPodCondition.Message,
+		}
+		podConditions = append(podConditions, podCondition)
+	}
+	return podConditions
+}
+
+func protoStateNodesWithPods(stateNodesWithPods []*StateNodeWithPods) []*pb.StateNodeWithPods {
+	snpData := []*pb.StateNodeWithPods{}
+	for _, snp := range stateNodesWithPods {
+		nodeData := []byte{}
+		err := error(nil)
+		if snp.Node != nil {
+			nodeData, err = snp.Node.Marshal()
+			if err != nil {
+				continue // There is no Node, maybe there's a nodeclaim
+			}
+		}
+		nodeClaimData := []byte{}
+		if snp.NodeClaim != nil {
+			nodeClaimData, err = json.Marshal(snp.NodeClaim)
+			if err != nil {
+				continue // There is no NodeClaim
+			}
+		}
+		snpData = append(snpData, &pb.StateNodeWithPods{
+			Node:      nodeData,
+			NodeClaim: nodeClaimData,
+			Pods:      protoPods(snp.Pods),
+		})
+	}
+	return snpData
+}
+
+func reconstructStateNodesWithPods(snpData []*pb.StateNodeWithPods) ([]*StateNodeWithPods, error) {
+	stateNodesWithPods := []*StateNodeWithPods{}
+	for _, snpData := range snpData {
+		node := &corev1.Node{}
+		if err := node.Unmarshal(snpData.Node); err != nil {
+			return nil, err
+		}
+		nodeClaim := &v1.NodeClaim{}
+		if err := json.Unmarshal(snpData.NodeClaim, nodeClaim); err != nil {
+			return nil, err
+		}
+
+		stateNodesWithPods = append(stateNodesWithPods, &StateNodeWithPods{
+			Node:      node,
+			NodeClaim: nodeClaim,
+			Pods:      reconstructPods(snpData.Pods),
+		})
+	}
+	return stateNodesWithPods, nil
+}
+
+func protoInstanceTypes(instanceTypes []*cloudprovider.InstanceType) []*pb.InstanceType {
+	itData := []*pb.InstanceType{}
+	for _, it := range instanceTypes {
+		itData = append(itData, &pb.InstanceType{
+			Name:         it.Name,
+			Requirements: protoRequirements(it.Requirements),
+			Offerings:    protoOfferings(it.Offerings),
+			Capacity:     protoCapacity(it.Capacity),
+			Overhead:     protoOverhead(it.Overhead),
+		})
+	}
+	return itData
+}
+
+func reconstructInstanceTypes(itData []*pb.InstanceType) ([]*cloudprovider.InstanceType, error) {
+	instanceTypes := []*cloudprovider.InstanceType{}
+	for _, it := range itData {
+		reconstructedCapacity, err := reconstructResourceList(it.Capacity)
+		if err != nil {
+			return nil, err
+		}
+		reconstructedOverhead, err := reconstructOverhead(it.Overhead)
+		if err != nil {
+			return nil, err
+		}
+		instanceTypes = append(instanceTypes, &cloudprovider.InstanceType{
+			Name:         it.Name,
+			Requirements: reconstructRequirements(it.Requirements),
+			Offerings:    reconstructOfferings(it.Offerings),
+			Capacity:     reconstructedCapacity,
+			Overhead:     reconstructedOverhead,
+		})
+	}
+	return instanceTypes, nil
+}
+
+func protoRequirements(requirements scheduling.Requirements) []*pb.InstanceType_Requirement {
+	requirementsData := []*pb.InstanceType_Requirement{}
+	for _, requirement := range requirements {
+		requirementsData = append(requirementsData, &pb.InstanceType_Requirement{
+			Key:                  requirement.Key,
+			Nodeselectoroperator: string(requirement.Operator()),
+			Values:               requirement.Values(),
+			Minvalues: func() *int64 {
+				if requirement.MinValues == nil {
+					return nil
+				}
+				v := int64(*requirement.MinValues)
+				return &v
+			}(),
+		})
+	}
+	return requirementsData
+}
+
+func reconstructRequirements(requirementsData []*pb.InstanceType_Requirement) scheduling.Requirements {
+	requirements := scheduling.Requirements{}
+	for _, requirementData := range requirementsData {
+		minValues := func() *int {
+			if requirementData.Minvalues == nil {
+				return nil
+			}
+			v := int(*requirementData.Minvalues)
+			return &v
+		}()
+
+		requirements.Add(scheduling.NewRequirementWithFlexibility(
+			requirementData.Key,
+			corev1.NodeSelectorOperator(requirementData.Nodeselectoroperator),
+			minValues,
+			requirementData.Values...,
+		))
+	}
+	return requirements
+}
+
+func protoOfferings(offerings cloudprovider.Offerings) []*pb.InstanceType_Offering {
+	offeringsData := []*pb.InstanceType_Offering{}
+	for _, offering := range offerings {
+		offeringsData = append(offeringsData, &pb.InstanceType_Offering{
+			Requirements: protoRequirements(offering.Requirements),
+			Price:        offering.Price,
+			Available:    offering.Available,
+		})
+	}
+	return offeringsData
+}
+
+func reconstructOfferings(offeringsData []*pb.InstanceType_Offering) cloudprovider.Offerings {
+	offerings := cloudprovider.Offerings{}
+	for _, offeringData := range offeringsData {
+		offerings = append(offerings, cloudprovider.Offering{
+			Requirements: reconstructRequirements(offeringData.Requirements),
+			Price:        offeringData.Price,
+			Available:    offeringData.Available,
+		})
+	}
+	return offerings
+}
+
+func protoResourceList(resourceList corev1.ResourceList) *pb.InstanceType_ResourceList {
+	protoResourceList := &pb.InstanceType_ResourceList{}
+	for resourceName, quantity := range resourceList {
+		protoQuantity, err := quantity.Marshal()
+		if err != nil {
+			fmt.Println("cannot marshal quantity in protoResourceList")
+		}
+
+		protoResourceList.Resources = append(protoResourceList.Resources, &pb.InstanceType_ResourceQuantity{
+			ResourceName: string(resourceName),
+			Quantity:     protoQuantity,
+		})
+	}
+	return protoResourceList
+}
+
+func protoCapacity(capacity corev1.ResourceList) *pb.InstanceType_ResourceList {
+	return protoResourceList(capacity)
+}
+
+func reconstructResourceList(protoCapacity *pb.InstanceType_ResourceList) (corev1.ResourceList, error) {
+	capacity := corev1.ResourceList{}
+	for _, resourceQuantity := range protoCapacity.Resources {
+		quantity := &resource.Quantity{}
+		if err := quantity.Unmarshal(resourceQuantity.Quantity); err != nil {
+			return nil, err
+		}
+		capacity[corev1.ResourceName(resourceQuantity.ResourceName)] = *quantity
+	}
+	return capacity, nil
+}
+
+func protoOverhead(overhead *cloudprovider.InstanceTypeOverhead) *pb.InstanceType_Overhead {
+	return &pb.InstanceType_Overhead{
+		Kubereserved:      protoResourceList(overhead.KubeReserved),
+		Systemreserved:    protoResourceList(overhead.SystemReserved),
+		Evictionthreshold: protoResourceList(overhead.EvictionThreshold),
+	}
+}
+
+func reconstructOverhead(protoOverhead *pb.InstanceType_Overhead) (*cloudprovider.InstanceTypeOverhead, error) {
+	kubeReserved, err := reconstructResourceList(protoOverhead.Kubereserved)
+	if err != nil {
+		return nil, err
+	}
+	systemReserved, err := reconstructResourceList(protoOverhead.Systemreserved)
+	if err != nil {
+		return nil, err
+	}
+	evictionThreshold, err := reconstructResourceList(protoOverhead.Evictionthreshold)
+	if err != nil {
+		return nil, err
+	}
+	return &cloudprovider.InstanceTypeOverhead{
+		KubeReserved:      kubeReserved,
+		SystemReserved:    systemReserved,
+		EvictionThreshold: evictionThreshold,
+	}, nil
+}
+
+func protoBindings(bindings map[types.NamespacedName]string) *pb.Bindings {
+	bindingsProto := &pb.Bindings{}
+	for podNamespacedName, nodeName := range bindings {
+		binding := &pb.Bindings_Binding{
+			PodNamespacedName: &pb.Bindings_Binding_NamespacedName{
+				Namespace: podNamespacedName.Namespace,
+				Name:      podNamespacedName.Name,
+			},
+			NodeName: nodeName,
+		}
+		bindingsProto.Binding = append(bindingsProto.Binding, binding)
+	}
+	return bindingsProto
+}
+
+func reconstructBindings(bindingsProto *pb.Bindings) map[types.NamespacedName]string {
+	bindings := map[types.NamespacedName]string{}
+	for _, binding := range bindingsProto.Binding {
+		podNamespacedName := types.NamespacedName{
+			Namespace: binding.PodNamespacedName.Namespace,
+			Name:      binding.PodNamespacedName.Name,
+		}
+		bindings[podNamespacedName] = binding.NodeName
+	}
+	return bindings
+}
+
+func protoNodePoolInstanceTypes(nodePoolInstanceTypes map[string][]string) *pb.NodePoolsToInstanceTypes {
+	npitProto := &pb.NodePoolsToInstanceTypes{}
+	for nodePool, instanceTypeNames := range nodePoolInstanceTypes {
+		npitProto.Nodepoolstoinstancetypes = append(npitProto.Nodepoolstoinstancetypes, &pb.NodePoolsToInstanceTypes_NodePoolToInstanceTypes{
+			Nodepool:         nodePool,
+			InstancetypeName: instanceTypeNames,
+		})
+	}
+	return npitProto
+}
+
+func reconstructNodePoolInstanceTypes(npitProto *pb.NodePoolsToInstanceTypes) map[string][]string {
+	nodePoolInstanceTypes := map[string][]string{}
+	for _, npit := range npitProto.Nodepoolstoinstancetypes {
+		nodePoolInstanceTypes[npit.Nodepool] = npit.InstancetypeName
+	}
+	return nodePoolInstanceTypes
+}
+
+func protoTopology(topology *scheduler.Topology) []byte {
+	if topology == nil {
+		return []byte{}
+	}
+	topologyData, err := json.Marshal(topology)
+	if err != nil {
+		fmt.Println("Error marshaling topology to JSON", err)
+		return []byte{}
+	}
+	return topologyData
+}
+
+func reconstructTopology(topologyData []byte) (*scheduler.Topology, error) {
+	topology := &scheduler.Topology{}
+	if err := json.Unmarshal(topologyData, topology); err != nil {
+		return nil, err
+	}
+
+	return topology, nil
+}
+
+func protoDaemonSetPods(daemonSetPods []*corev1.Pod) []byte {
+	podList := &corev1.PodList{
+		Items: []corev1.Pod{},
+	}
+	for _, pod := range daemonSetPods {
+		podList.Items = append(podList.Items, *pod)
+	}
+
+	dspData, err := podList.Marshal()
+	if err != nil {
+		fmt.Println("Error marshaling DaemonSetPods to JSON", err)
+		return []byte{}
+	}
+	return dspData
+}
+
+func reconstructDaemonSetPods(dspData []byte) ([]*corev1.Pod, error) {
+	podList := &corev1.PodList{}
+	if err := podList.Unmarshal(dspData); err != nil {
+		return nil, err
+	}
+
+	daemonSetPods := []*corev1.Pod{}
+	for _, pod := range podList.Items {
+		podCopy := pod
+		daemonSetPods = append(daemonSetPods, &podCopy)
+	}
+	return daemonSetPods, nil
+}
+
+func protoPVList(pvList *corev1.PersistentVolumeList) []byte {
+	if pvList == nil {
+		return []byte{}
+	}
+	pvListData, err := pvList.Marshal()
+	if err != nil {
+		fmt.Println("Error marshaling PVList to JSON", err)
+		return []byte{}
+	}
+	return pvListData
+}
+
+func reconstructPVList(pvListData []byte) (*corev1.PersistentVolumeList, error) {
+	pvList := &corev1.PersistentVolumeList{}
+	if err := pvList.Unmarshal(pvListData); err != nil {
+		return nil, err
+	}
+	return pvList, nil
+}
+
+func protoPVCList(pvcList *corev1.PersistentVolumeClaimList) []byte {
+	if pvcList == nil {
+		return []byte{}
+	}
+	pvcListData, err := pvcList.Marshal()
+	if err != nil {
+		fmt.Println("Error marshaling PVCList to JSON", err)
+		return []byte{}
+	}
+	return pvcListData
+}
+
+func reconstructPVCList(pvcListData []byte) (*corev1.PersistentVolumeClaimList, error) {
+	pvcList := &corev1.PersistentVolumeClaimList{}
+	if err := pvcList.Unmarshal(pvcListData); err != nil {
+		return nil, err
+	}
+	return pvcList, nil
+}
+
+func protoScheduledPodList(scheduledPodList *corev1.PodList) []byte {
+	if scheduledPodList == nil {
+		return []byte{}
+	}
+	scheduledPodListData, err := scheduledPodList.Marshal()
+	if err != nil {
+		fmt.Println("Error marshaling ScheduledPodList to JSON", err)
+		return []byte{}
+	}
+	return scheduledPodListData
+}
+
+func reconstructScheduledPodList(scheduledPodListData []byte) (*corev1.PodList, error) {
+	scheduledPodList := &corev1.PodList{}
+	if err := scheduledPodList.Unmarshal(scheduledPodListData); err != nil {
+		return nil, err
+	}
+	return scheduledPodList, nil
+}

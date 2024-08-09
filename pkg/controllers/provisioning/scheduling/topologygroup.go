@@ -17,6 +17,7 @@ limitations under the License.
 package scheduling
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 
@@ -271,4 +272,59 @@ func (t *TopologyGroup) selects(pod *v1.Pod) bool {
 		selector = labels.Nothing()
 	}
 	return t.namespaces.Has(pod.Namespace) && selector.Matches(labels.Set(pod.Labels))
+}
+
+func (t *TopologyGroup) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Key          string
+		Type         TopologyType
+		MaxSkew      int32
+		MinDomains   *int32
+		Namespaces   sets.Set[string]
+		Selector     *metav1.LabelSelector
+		NodeFilter   TopologyNodeFilter
+		Owners       map[types.UID]struct{}
+		Domains      map[string]int32
+		EmptyDomains sets.Set[string]
+	}{
+		Key:          t.Key,
+		Type:         t.Type,
+		MaxSkew:      t.maxSkew,
+		MinDomains:   t.minDomains,
+		Namespaces:   t.namespaces,
+		Selector:     t.selector,
+		NodeFilter:   t.nodeFilter,
+		Owners:       t.owners,
+		Domains:      t.domains,
+		EmptyDomains: t.emptyDomains,
+	})
+}
+
+func (t *TopologyGroup) UnmarshalJSON(data []byte) error {
+	var tmp struct {
+		Key          string
+		Type         TopologyType
+		MaxSkew      int32
+		MinDomains   *int32
+		Namespaces   sets.Set[string]
+		Selector     *metav1.LabelSelector
+		NodeFilter   TopologyNodeFilter
+		Owners       map[types.UID]struct{}
+		Domains      map[string]int32
+		EmptyDomains sets.Set[string]
+	}
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	t.Key = tmp.Key
+	t.Type = tmp.Type
+	t.maxSkew = tmp.MaxSkew
+	t.minDomains = tmp.MinDomains
+	t.namespaces = tmp.Namespaces
+	t.selector = tmp.Selector
+	t.nodeFilter = tmp.NodeFilter
+	t.owners = tmp.Owners
+	t.domains = tmp.Domains
+	t.emptyDomains = tmp.EmptyDomains
+	return nil
 }
