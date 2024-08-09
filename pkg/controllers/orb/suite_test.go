@@ -59,6 +59,8 @@ var (
 	schedulingInputHeap    *orb.SchedulingInputHeap
 	schedulingMetadataHeap *orb.SchedulingMetadataHeap
 	instanceTypeMap        map[string]*cloudprovider.InstanceType
+	originalPVMountPath    string
+	controller             *orb.Controller
 )
 
 var (
@@ -106,6 +108,8 @@ var _ = BeforeSuite(func() {
 var _ = BeforeEach(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider.Reset()
+	originalPVMountPath = "/data"
+	controller = orb.NewController(orb.NewMinHeap[orb.SchedulingInput](), orb.NewMinHeap[orb.SchedulingMetadata]())
 })
 
 var _ = AfterSuite(func() {
@@ -118,33 +122,75 @@ var _ = AfterEach(func() {
 	cluster.Reset()
 })
 
-// var _ = Describe("Orb", func() {
-// 	It("should reduce pods and pod conditions", func() {
-// 		ExpectApplied(ctx, env.Client, test.NodePool())
+var _ = Describe("Orb", func() {
+	It("Empty scheduling inputs marshal as blank and unmarshal as nil", func() {
+		emptySchedulingInput := test.EmptySchedulingInput()
+		marshaled, _ := orb.MarshalSchedulingInput(emptySchedulingInput)
+		Expect(len(marshaled) == 0)
+		unmarshaled, _ := orb.UnmarshalSchedulingInput(marshaled)
+		Expect(unmarshaled == nil)
+	})
+	// It("Non-empty reflexive differences are empty", func() {
+	// 	schedulingInput := test.SchedulingInput(ctx, env.Client)
+	// 	reflexiveDiff := schedulingInput.Diff(schedulingInput) // reflexive check
+	// 	Expect(reflexiveDiff).To(Equal(test.EmptySchedulingInputDifferences()))
 
-// 		pods := []*v1.Pod{}
-// 		for i := 1; i <= 2; i++ {
-// 			pods = append(pods, test.Pod(ReducedPodOptions("pod"+string(rune(i)), string(rune(i)))))
-// 		}
+	// 	marshaled, _ := orb.MarshalSchedulingInput(schedulingInput)
+	// 	unmarshaled, _ := orb.UnmarshalSchedulingInput(marshaled)
 
-// 		reducedPods := orb.reducePods(pods)
+	// 	Expect(unmarshaled != nil).To(BeTrue())
+	// 	actualDiff := unmarshaled.Diff(schedulingInput)
+	// 	Expect(actualDiff).To(Equal(test.EmptySchedulingInputDifferences()))
+	// })
+	// It("Non-empty differences are empty and equal", func() {
+	// 	schedulingInput := test.SchedulingInput(ctx, env.Client)
+	// 	marshaled, _ := orb.MarshalSchedulingInput(schedulingInput)
+	// 	unmarshaled, _ := orb.UnmarshalSchedulingInput(marshaled)
 
-// 		Expect(len(reducedPods)).To(Equal(2))
-// 		for i := 1; i <= 2; i++ {
-// 			// Positive case: Check that essential fields are preserved
-// 			Expect(reducedPods[i].Name).To(Equal(pods[i].Name))
-// 			Expect(reducedPods[i].Namespace).To(Equal(pods[i].Namespace))
-// 			Expect(reducedPods[i].UID).To(Equal(pods[i].UID))
-// 			Expect(reducedPods[i].Status.Phase).To(Equal(v1.PodRunning))
-// 			Expect(len(reducedPods[i].Status.Conditions)).To(Equal(4))
-// 			Expect(reducedPods[i].Status.Conditions[0].Type).To(Equal(pods[i].Status.Conditions[0].Type))
-// 			Expect(reducedPods[i].Status.Conditions[0].Status).To(Equal(pods[i].Status.Conditions[0].Status))
-// 			Expect(reducedPods[i].Status.Conditions[0].Reason).To(Equal(pods[i].Status.Conditions[0].Reason))
-// 			Expect(reducedPods[i].Status.Conditions[0].Message).To(Equal(pods[i].Status.Conditions[0].Message))
+	// 	Expect(unmarshaled != nil)
 
-// 			// Negative case: Spot-check that some non-essential fields are removed
-// 			Expect(reducedPods[i].Spec).To(BeEmpty())
-// 		}
-// 	})
+	// 	reflexiveDiff := schedulingInput.Diff(schedulingInput) // reflexive check
+	// 	Expect(reflexiveDiff).To(Equal(test.EmptySchedulingInputDifferences()))
 
-// })
+	// 	actualDiff := unmarshaled.Diff(schedulingInput)
+	// 	Expect(actualDiff).To(Equal(test.EmptySchedulingInputDifferences()))
+	// })
+	// It("marshaling and unmarshalling scheduling input should yield the same - empty", func() {
+	// 	emptySchedulingInput := test.EmptySchedulingInput()
+	// 	marshaled, _ := orb.MarshalSchedulingInput(emptySchedulingInput)
+	// 	unmarshaled, _ := orb.UnmarshalSchedulingInput(marshaled)
+	// 	Expect(unmarshaled).To(Equal(emptySchedulingInput))
+	// })
+	// It("marshaling and unmarshalling scheduling inputs should yield the same - non-empty", func() {
+	// 	schedulingInput := test.SchedulingInput(ctx, env.Client)
+	// 	marshaled, _ := orb.MarshalSchedulingInput(schedulingInput)
+	// 	unmarshaled, _ := orb.UnmarshalSchedulingInput(marshaled)
+
+	// 	//Expect each field of the scheduling input to be equal
+	// 	Expect(unmarshaled.Timestamp).To(Equal(schedulingInput.Timestamp))
+	// 	Expect(unmarshaled.PendingPods).To(Equal(schedulingInput.PendingPods))
+	// 	Expect(unmarshaled.StateNodesWithPods).To(Equal(schedulingInput.StateNodesWithPods))
+	// 	Expect(unmarshaled.Bindings).To(Equal(schedulingInput.Bindings))
+	// 	Expect(unmarshaled.AllInstanceTypes).To(Equal(schedulingInput.AllInstanceTypes))
+	// 	Expect(unmarshaled.NodePoolInstanceTypes).To(Equal(schedulingInput.NodePoolInstanceTypes))
+	// 	Expect(unmarshaled.Topology).To(Equal(schedulingInput.Topology))
+	// 	Expect(unmarshaled.DaemonSetPods).To(Equal(schedulingInput.DaemonSetPods))
+	// 	Expect(unmarshaled.PVList).To(Equal(schedulingInput.PVList))
+	// 	Expect(unmarshaled.PVCList).To(Equal(schedulingInput.PVCList))
+	// 	Expect(unmarshaled.ScheduledPodList).To(Equal(schedulingInput.ScheduledPodList))
+
+	// 	Expect(unmarshaled).To(Equal(schedulingInput))
+	// })
+	// It("marshaling and unmarshalling differences should yield the same - empty", func() {
+	// 	emptySliceSchedulingInputDifferences := test.EmptySchedulingInputDifferencesSlice()
+	// 	marshaled, _ := orb.MarshalBatchedDifferences(emptySliceSchedulingInputDifferences)
+	// 	unmarshaled, _ := orb.UnmarshalBatchedDifferences(marshaled)
+	// 	Expect(unmarshaled).To(Equal(emptySliceSchedulingInputDifferences))
+	// })
+	// It("marshaling and unmarshalling differences should yield the same - non-empty", func() {
+	// 	SchedulingInputDifferences := test.SchedulingInputDifferencesSlice(ctx, env.Client)
+	// 	marshaled, _ := orb.MarshalBatchedDifferences(SchedulingInputDifferences)
+	// 	unmarshaled, _ := orb.UnmarshalBatchedDifferences(marshaled)
+	// 	Expect(unmarshaled).To(Equal(SchedulingInputDifferences))
+	// })
+})

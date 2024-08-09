@@ -195,6 +195,14 @@ func reconstructSchedulingInputs(pbsi []*pb.SchedulingInput) ([]*SchedulingInput
 
 // Functions to check the differences in all the fields of a SchedulingInput (except the timestamp)
 func (si *SchedulingInput) Diff(newSi *SchedulingInput) *SchedulingInputDifferences {
+	if newSi == nil {
+		return &SchedulingInputDifferences{
+			Added:   &SchedulingInput{},
+			Removed: &SchedulingInput{},
+			Changed: &SchedulingInput{},
+		}
+	}
+
 	podDiff := diffSlice(si.PendingPods, newSi.PendingPods, getPodKey, hasPodChanged)
 	snpDiff := diffSlice(si.StateNodesWithPods, newSi.StateNodesWithPods, getStateNodeWithPodsKey, hasStateNodeWithPodsChanged)
 	bindingsDiff := diffMap(si.Bindings, newSi.Bindings, hasBindingChanged)
@@ -281,7 +289,7 @@ func diffOnlyChanges[T any](oldresource, newresource *T) Differences[*T] {
 	if !structEqualJSON(oldresource, newresource) {
 		return Differences[*T]{nil, nil, newresource}
 	}
-	return Differences[*T]{nil, nil, oldresource}
+	return Differences[*T]{nil, nil, nil} //oldresource?
 }
 
 /* Equality functions for 'hasChanged' lambda functions */

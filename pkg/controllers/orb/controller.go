@@ -34,7 +34,6 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
@@ -171,7 +170,7 @@ func (c *Controller) logSchedulingMetadataToPV() error {
 	// Marshals the mapping
 	mappingdata, err := proto.Marshal(protoSchedulingMetadataMap(heap))
 	if err != nil {
-		fmt.Println("Error marshaling data:", err)
+		fmt.Println("Error marshalling data:", err)
 		return err
 	}
 	return c.writeToPV(mappingdata, path)
