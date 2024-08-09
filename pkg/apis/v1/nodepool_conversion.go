@@ -18,13 +18,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/pkg/apis"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -38,17 +36,23 @@ func (in *NodePool) ConvertTo(ctx context.Context, to apis.Convertible) error {
 
 	// Convert v1 status
 	v1beta1NP.Status.Resources = in.Status.Resources
-	return in.Spec.convertTo(ctx, &v1beta1NP.Spec, in.Annotations[KubeletCompatibilityAnnotationKey])
+	if err := in.Spec.convertTo(&v1beta1NP.Spec, in.Annotations[KubeletCompatibilityAnnotationKey], in.Annotations[NodeClassReferenceAnnotationKey]); err != nil {
+		return err
+	}
+	// Remove the annotations from the v1beta1 NodeClaim on the convert back
+	delete(v1beta1NP.Annotations, KubeletCompatibilityAnnotationKey)
+	delete(v1beta1NP.Annotations, NodeClassReferenceAnnotationKey)
+	return nil
 }
 
-func (in *NodePoolSpec) convertTo(ctx context.Context, v1beta1np *v1beta1.NodePoolSpec, kubeletAnnotation string) error {
+func (in *NodePoolSpec) convertTo(v1beta1np *v1beta1.NodePoolSpec, kubeletAnnotation, nodeClassReferenceAnnotation string) error {
 	v1beta1np.Weight = in.Weight
 	v1beta1np.Limits = v1beta1.Limits(in.Limits)
 	in.Disruption.convertTo(&v1beta1np.Disruption)
 	// Set the expireAfter to the nodeclaim template's expireAfter.
 	// Don't convert terminationGracePeriod, as this is only included in v1.
 	v1beta1np.Disruption.ExpireAfter = v1beta1.NillableDuration(in.Template.Spec.ExpireAfter)
-	return in.Template.convertTo(ctx, &v1beta1np.Template, kubeletAnnotation)
+	return in.Template.convertTo(&v1beta1np.Template, kubeletAnnotation, nodeClassReferenceAnnotation)
 }
 
 func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
@@ -59,7 +63,7 @@ func (in *Disruption) convertTo(v1beta1np *v1beta1.Disruption) {
 		nil, (*v1beta1.NillableDuration)(lo.ToPtr(in.ConsolidateAfter)))
 }
 
-func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.NodeClaimTemplate, kubeletAnnotation string) error {
+func (in *NodeClaimTemplate) convertTo(v1beta1np *v1beta1.NodeClaimTemplate, kubeletAnnotation, nodeClassReferenceAnnotation string) error {
 	v1beta1np.ObjectMeta = v1beta1.ObjectMeta(in.ObjectMeta)
 	v1beta1np.Spec.Taints = in.Spec.Taints
 	v1beta1np.Spec.StartupTaints = in.Spec.StartupTaints
@@ -70,28 +74,16 @@ func (in *NodeClaimTemplate) convertTo(ctx context.Context, v1beta1np *v1beta1.N
 			Operator: v1Requirements.Operator,
 		}
 	})
-
-	nodeClasses := injection.GetNodeClasses(ctx)
-	// We are sorting the supported nodeclass, so that we are able to consistently find the same GVK,
-	// if multiple version of a nodeclass are supported
-	sort.Slice(nodeClasses, func(i int, j int) bool {
-		if nodeClasses[i].Group != nodeClasses[j].Group {
-			return nodeClasses[i].Group < nodeClasses[j].Group
+	// Convert the NodeClassReference depending on whether the annotation exists
+	v1beta1np.Spec.NodeClassRef = &v1beta1.NodeClassReference{}
+	if nodeClassReferenceAnnotation != "" {
+		if err := json.Unmarshal([]byte(nodeClassReferenceAnnotation), v1beta1np.Spec.NodeClassRef); err != nil {
+			return fmt.Errorf("unmarshaling nodeClassRef annotation, %w", err)
 		}
-		if nodeClasses[i].Version != nodeClasses[j].Version {
-			return nodeClasses[i].Version < nodeClasses[j].Version
-		}
-		return nodeClasses[i].Kind < nodeClasses[j].Kind
-	})
-	matchingNodeClass, found := lo.Find(nodeClasses, func(nc schema.GroupVersionKind) bool {
-		return nc.Kind == in.Spec.NodeClassRef.Kind && nc.Group == in.Spec.NodeClassRef.Group
-	})
-	v1beta1np.Spec.NodeClassRef = &v1beta1.NodeClassReference{
-		Kind:       in.Spec.NodeClassRef.Kind,
-		Name:       in.Spec.NodeClassRef.Name,
-		APIVersion: lo.Ternary(found, matchingNodeClass.GroupVersion().String(), ""),
+	} else {
+		v1beta1np.Spec.NodeClassRef.Name = in.Spec.NodeClassRef.Name
+		v1beta1np.Spec.NodeClassRef.Kind = in.Spec.NodeClassRef.Kind
 	}
-
 	if kubeletAnnotation != "" {
 		v1beta1kubelet := &v1beta1.KubeletConfiguration{}
 		err := json.Unmarshal([]byte(kubeletAnnotation), v1beta1kubelet)
@@ -121,6 +113,13 @@ func (in *NodePool) ConvertFrom(ctx context.Context, v1beta1np apis.Convertible)
 	} else {
 		in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatibilityAnnotationKey: kubeletAnnotation})
 	}
+	nodeClassRefAnnotation, err := json.Marshal(v1beta1NP.Spec.Template.Spec.NodeClassRef)
+	if err != nil {
+		return fmt.Errorf("marshaling nodeClassRef annotation, %w", err)
+	}
+	in.Annotations = lo.Assign(in.Annotations, map[string]string{
+		NodeClassReferenceAnnotationKey: string(nodeClassRefAnnotation),
+	})
 	return nil
 }
 
@@ -154,13 +153,12 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 		}
 	})
 
-	nodeclasses := injection.GetNodeClasses(ctx)
+	defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
 	in.Spec.NodeClassRef = &NodeClassReference{
 		Name:  v1beta1np.Spec.NodeClassRef.Name,
-		Kind:  lo.Ternary(v1beta1np.Spec.NodeClassRef.Kind == "", nodeclasses[0].Kind, v1beta1np.Spec.NodeClassRef.Kind),
-		Group: lo.Ternary(v1beta1np.Spec.NodeClassRef.APIVersion == "", nodeclasses[0].Group, strings.Split(v1beta1np.Spec.NodeClassRef.APIVersion, "/")[0]),
+		Kind:  lo.Ternary(v1beta1np.Spec.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1np.Spec.NodeClassRef.Kind),
+		Group: lo.Ternary(v1beta1np.Spec.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, strings.Split(v1beta1np.Spec.NodeClassRef.APIVersion, "/")[0]),
 	}
-
 	if v1beta1np.Spec.Kubelet != nil {
 		kubelet, err := json.Marshal(v1beta1np.Spec.Kubelet)
 		if err != nil {
@@ -168,6 +166,5 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 		}
 		return string(kubelet), nil
 	}
-
 	return "", nil
 }
