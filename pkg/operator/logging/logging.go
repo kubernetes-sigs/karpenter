@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"knative.dev/pkg/changeset"
-
 	"knative.dev/pkg/logging/logkey"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"

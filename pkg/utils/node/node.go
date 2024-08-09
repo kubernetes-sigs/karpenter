@@ -21,14 +21,12 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-
-	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 

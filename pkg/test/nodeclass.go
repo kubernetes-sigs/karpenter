@@ -19,11 +19,10 @@ package test
 import (
 	"fmt"
 
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-
 	"github.com/awslabs/operatorpkg/status"
-
 	"github.com/imdario/mergo"
+
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 // NodeClass creates a test NodeClass with defaults that can be overridden by overrides.
