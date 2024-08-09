@@ -36,9 +36,8 @@ spec:
   template:
     spec:
       tolerations:
-      - operator: "Equal"
+      - operator: Exists
         key: CriticalAddonsOnly 
-        effect: NoSchedule
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
