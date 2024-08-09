@@ -18,6 +18,7 @@ package v1_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -268,6 +269,24 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 		for _, resource := range lo.Keys(v1nodepool.Status.Resources) {
 			Expect(v1beta1nodepool.Status.Resources[resource]).To(Equal(v1nodepool.Status.Resources[resource]))
 		}
+	})
+	Context("Round Trip", func() {
+		DescribeTable(
+			"NillableDuration",
+			func(value string, field func() *NillableDuration) {
+				str := fmt.Sprintf("%q", value)
+				duration := NillableDuration{}
+				Expect(json.Unmarshal([]byte(str), &duration)).Should(Succeed())
+				*field() = duration
+				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+				Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+				result, err := json.Marshal(*field())
+				Expect(err).To(BeNil())
+				Expect(string(result)).To(Equal(str))
+			},
+			Entry("spec.template.spec.expireAfter", "720h", func() *NillableDuration { return &v1nodepool.Spec.Template.Spec.ExpireAfter }),
+			Entry("spec.disruption.consolidateAfter", "15m", func() *NillableDuration { return &v1nodepool.Spec.Disruption.ConsolidateAfter }),
+		)
 	})
 })
 
@@ -536,5 +555,28 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 		for _, resource := range lo.Keys(v1beta1nodepool.Status.Resources) {
 			Expect(v1beta1nodepool.Status.Resources[resource]).To(Equal(v1nodepool.Status.Resources[resource]))
 		}
+	})
+	Context("Round Trip", func() {
+		DescribeTable(
+			"NillableDuration",
+			func(value string, field func() *v1beta1.NillableDuration) {
+				str := fmt.Sprintf("%q", value)
+				duration := v1beta1.NillableDuration{}
+				Expect(json.Unmarshal([]byte(str), &duration)).Should(Succeed())
+				*field() = duration
+				Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+				result, err := json.Marshal(*field())
+				Expect(err).To(BeNil())
+				Expect(string(result)).To(Equal(str))
+			},
+			Entry("spec.template.spec.expireAfter", "720h", func() *v1beta1.NillableDuration { return &v1beta1nodepool.Spec.Disruption.ExpireAfter }),
+			Entry("spec.disruption.consolidateAfter", "15m", func() *v1beta1.NillableDuration {
+				if v1beta1nodepool.Spec.Disruption.ConsolidateAfter == nil {
+					v1beta1nodepool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{}
+				}
+				return v1beta1nodepool.Spec.Disruption.ConsolidateAfter
+			}),
+		)
 	})
 })
