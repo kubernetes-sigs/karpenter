@@ -64,6 +64,7 @@ var nodeController *informer.NodeController
 var podController *informer.PodController
 var nodePoolController *informer.NodePoolController
 var daemonsetController *informer.DaemonSetController
+var kruiseDaemonSetController *informer.KruiseDaemonSetController
 var cloudProvider *fake.CloudProvider
 var nodePool *v1.NodePool
 
@@ -86,6 +87,7 @@ var _ = BeforeSuite(func() {
 	podController = informer.NewPodController(env.Client, cluster)
 	nodePoolController = informer.NewNodePoolController(env.Client, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
+	kruiseDaemonSetController = informer.NewKruiseDaemonSetController(env.Client, cluster)
 })
 
 var _ = AfterSuite(func() {
@@ -1431,7 +1433,7 @@ var _ = Describe("DaemonSet Controller", func() {
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(BeNil())
 	})
 	It("should update daemonsetCache when kruise daemonset pod is created", func() {
-		daemonset := test.DaemonSet(
+		daemonset := test.KruiseDaemonSet(
 			test.DaemonSetOptions{PodOptions: test.PodOptions{
 				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
@@ -1442,7 +1444,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					OwnerReferences: []metav1.OwnerReference{
 						{
-							APIVersion:         "apps/v1",
+							APIVersion:         "apps.kruise.io/v1beta1",
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
@@ -1454,9 +1456,58 @@ var _ = Describe("DaemonSet Controller", func() {
 			})
 		daemonsetPod.Spec = daemonset.Spec.Template.Spec
 		ExpectApplied(ctx, env.Client, daemonsetPod)
-		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+		ExpectReconcileSucceeded(ctx, kruiseDaemonSetController, client.ObjectKeyFromObject(daemonset))
 
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod))
+	})
+	It("should update daemonsetCache with the newest created kruise daemonset pod", func() {
+		daemonset := test.KruiseDaemonSet(
+			test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+			}},
+		)
+		ExpectApplied(ctx, env.Client, daemonset)
+		daemonsetPod1 := test.UnschedulablePod(
+			test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps.kruise.io/v1beta1",
+							Kind:               "DaemonSet",
+							Name:               daemonset.Name,
+							UID:                daemonset.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					},
+				},
+			})
+		daemonsetPod1.Spec = daemonset.Spec.Template.Spec
+		ExpectApplied(ctx, env.Client, daemonsetPod1)
+		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+
+		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod1))
+
+		daemonsetPod2 := test.UnschedulablePod(
+			test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps.kruise.io/v1beta1",
+							Kind:               "DaemonSet",
+							Name:               daemonset.Name,
+							UID:                daemonset.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					},
+				},
+			})
+		time.Sleep(time.Second) // Making sure the two pods have different creationTime
+		daemonsetPod2.Spec = daemonset.Spec.Template.Spec
+		ExpectApplied(ctx, env.Client, daemonsetPod2)
+		ExpectReconcileSucceeded(ctx, kruiseDaemonSetController, client.ObjectKeyFromObject(daemonset))
+		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod2))
 	})
 })
 
