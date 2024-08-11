@@ -18,8 +18,11 @@ package v1
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"time"
+
+	"github.com/samber/lo"
 )
 
 const Never = "Never"
@@ -32,7 +35,14 @@ type NillableDuration struct {
 
 	// Raw is used to ensure we remarshal the NillableDuration in the same format it was specified.
 	// This ensures tools like Flux and ArgoCD don't mistakenly detect drift due to our conversion webhooks.
-	Raw []byte
+	Raw []byte `hash:"ignore"`
+}
+
+func MustParseNillableDuration(val string) NillableDuration {
+	nd := NillableDuration{}
+	// Use %q instead of %s to ensure that we unmarshal the value as a string and not an int
+	lo.Must0(json.Unmarshal([]byte(fmt.Sprintf("%q", val)), &nd))
+	return nd
 }
 
 // UnmarshalJSON implements the json.Unmarshaller interface.
