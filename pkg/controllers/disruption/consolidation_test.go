@@ -66,7 +66,7 @@ var _ = Describe("Consolidation", func() {
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
 					}},
-					ConsolidateAfter: v1.NillableDuration{Duration: lo.ToPtr(0 * time.Second)},
+					ConsolidateAfter: v1.MustParseNillableDuration("0s"),
 				},
 			},
 		})
@@ -103,7 +103,7 @@ var _ = Describe("Consolidation", func() {
 	Context("Events", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmptyOrUnderutilized", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
-			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))}
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
@@ -118,7 +118,7 @@ var _ = Describe("Consolidation", func() {
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmpty", func() {
 			pod := test.Pod()
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
-			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: lo.ToPtr(time.Minute)}
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("1m")
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -128,7 +128,7 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
 			pod := test.Pod()
-			nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{}
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -379,7 +379,7 @@ var _ = Describe("Consolidation", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
@@ -446,7 +446,7 @@ var _ = Describe("Consolidation", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
 						}},
@@ -512,7 +512,7 @@ var _ = Describe("Consolidation", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
@@ -597,7 +597,7 @@ var _ = Describe("Consolidation", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
@@ -684,7 +684,7 @@ var _ = Describe("Consolidation", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
@@ -771,7 +771,7 @@ var _ = Describe("Consolidation", func() {
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
+						ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
 						Budgets: []v1.Budget{{
 							Nodes: "0%",
 						}},
@@ -3947,7 +3947,7 @@ var _ = Describe("Consolidation", func() {
 		var nodes []*corev1.Node
 
 		BeforeEach(func() {
-			nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(3 * time.Second)}
+			nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("3s")
 			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -3958,7 +3958,7 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 				Spec: v1.NodeClaimSpec{
-					ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(3 * time.Second)},
+					ExpireAfter: v1.MustParseNillableDuration("3s"),
 				},
 				Status: v1.NodeClaimStatus{
 					Allocatable: map[corev1.ResourceName]resource.Quantity{
