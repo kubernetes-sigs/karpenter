@@ -294,7 +294,7 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 			Expect(err).To(BeNil())
 			Expect(string(result)).To(Equal(`"10h"`))
 		})
-		It("spec.disruption.consolidateAfter", func() {
+		It("spec.disruption.consolidateAfter (Never)", func() {
 			v1nodepool.Spec.Disruption.ConsolidateAfter = MustParseNillableDuration("Never")
 			Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
 			Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
