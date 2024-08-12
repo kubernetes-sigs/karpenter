@@ -77,36 +77,30 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should fail on negative consolidateAfter", func() {
-			duration := MustParseNillableDuration("-1s")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("-1s"))
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should succeed on a disabled consolidateAfter", func() {
-			duration := MustParseNillableDuration("Never")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("Never"))
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should succeed on a valid consolidateAfter", func() {
-			duration := MustParseNillableDuration("30s")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("30s"))
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should succeed when setting consolidateAfter with consolidationPolicy=WhenEmpty", func() {
-			duration := MustParseNillableDuration("30s")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("30s"))
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
 		It("should fail when setting consolidateAfter with consolidationPolicy=WhenUnderutilized", func() {
-			duration := MustParseNillableDuration("30s")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("30s"))
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should succeed when not setting consolidateAfter to 'Never' with consolidationPolicy=WhenUnderutilized", func() {
-			duration := MustParseNillableDuration("Never")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("Never"))
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})

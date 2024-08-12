@@ -53,32 +53,28 @@ var _ = Describe("Webhook/Validation", func() {
 	})
 	Context("Disruption", func() {
 		It("should succeed on a disabled expireAfter", func() {
-			nodePool.Spec.Disruption.ExpireAfter.Duration = nil
+			nodePool.Spec.Disruption.ExpireAfter = MustParseNillableDuration("Never")
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should succeed on a valid expireAfter", func() {
-			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(lo.Must(time.ParseDuration("30s")))
+			nodePool.Spec.Disruption.ExpireAfter = MustParseNillableDuration("30s")
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should succeed on a disabled consolidateAfter", func() {
-			duration := MustParseNillableDuration("Never")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("Never"))
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should succeed on a valid consolidateAfter", func() {
-			duration := MustParseNillableDuration("30s")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("30s"))
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should succeed when setting consolidateAfter with consolidationPolicy=WhenEmpty", func() {
-			duration := MustParseNillableDuration("30s")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("30s"))
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
 			Expect(nodePool.Validate(ctx)).To(Succeed())
 		})
 		It("should fail when setting consolidateAfter with consolidationPolicy=WhenUnderutilized", func() {
-			duration := MustParseNillableDuration("30s")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("30s"))
 			nodePool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenUnderutilized
 			Expect(nodePool.Validate(ctx)).ToNot(Succeed())
 		})
