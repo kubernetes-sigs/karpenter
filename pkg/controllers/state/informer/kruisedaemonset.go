@@ -40,7 +40,7 @@ import (
 )
 
 func init() {
-	gv := schema.GroupVersion{Group: "apps.kruise.io", Version: "v1alpha"}
+	gv := schema.GroupVersion{Group: "apps.kruise.io", Version: "v1alpha1"}
 	v1.AddToGroupVersion(scheme.Scheme, gv)
 	scheme.Scheme.AddKnownTypes(gv, &kruise.DaemonSet{})
 }

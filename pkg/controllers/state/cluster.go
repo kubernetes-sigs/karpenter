@@ -32,8 +32,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -387,9 +389,16 @@ func (c *Cluster) DeleteDaemonSet(key ObjectKey) {
 }
 
 func (c *Cluster) ObjectKeyFromObject(obj client.Object) ObjectKey {
+	gvk, err := apiutil.GVKForObject(obj, scheme.Scheme)
+	if err != nil {
+		gvk = schema.GroupVersionKind{
+			Group: "",
+			Kind:  "",
+		}
+	}
 	return ObjectKey{
-		Group:     obj.GetObjectKind().GroupVersionKind().Group,
-		Kind:      obj.GetObjectKind().GroupVersionKind().Kind,
+		Group:     gvk.Group,
+		Kind:      gvk.Kind,
 		Namespace: obj.GetNamespace(),
 		Name:      obj.GetName(),
 	}

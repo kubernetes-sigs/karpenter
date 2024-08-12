@@ -1444,7 +1444,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					OwnerReferences: []metav1.OwnerReference{
 						{
-							APIVersion:         "apps.kruise.io/v1beta1",
+							APIVersion:         "apps.kruise.io/v1alpha1",
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
@@ -1472,7 +1472,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					OwnerReferences: []metav1.OwnerReference{
 						{
-							APIVersion:         "apps.kruise.io/v1beta1",
+							APIVersion:         "apps.kruise.io/v1alpha1",
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
@@ -1493,7 +1493,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					OwnerReferences: []metav1.OwnerReference{
 						{
-							APIVersion:         "apps.kruise.io/v1beta1",
+							APIVersion:         "apps.kruise.io/v1alpha1",
 							Kind:               "DaemonSet",
 							Name:               daemonset.Name,
 							UID:                daemonset.UID,
