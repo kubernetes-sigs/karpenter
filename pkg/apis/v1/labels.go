@@ -47,6 +47,7 @@ const (
 	NodePoolHashAnnotationKey                  = Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = Group + "/nodepool-hash-version"
 	KubeletCompatibilityAnnotationKey          = CompatibilityGroup + "/v1beta1-kubelet-conversion"
+	NodeClassReferenceAnnotationKey            = CompatibilityGroup + "/v1beta1-nodeclass-reference"
 	NodeClaimTerminationTimestampAnnotationKey = Group + "/nodeclaim-termination-timestamp"
 )
 
