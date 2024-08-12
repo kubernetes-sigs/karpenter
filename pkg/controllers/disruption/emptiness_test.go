@@ -45,9 +45,9 @@ var _ = Describe("Emptiness", func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Disruption: v1beta1.Disruption{
-					ConsolidateAfter:    &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 0)},
+					ConsolidateAfter:    lo.ToPtr(v1beta1.MustParseNillableDuration("0s")),
 					ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenEmpty,
-					ExpireAfter:         v1beta1.NillableDuration{Duration: nil},
+					ExpireAfter:         v1beta1.MustParseNillableDuration("Never"),
 					// Disrupt away!
 					Budgets: []v1beta1.Budget{{
 						Nodes: "100%",
@@ -90,7 +90,7 @@ var _ = Describe("Emptiness", func() {
 			Expect(recorder.Calls("Unconsolidatable")).To(Equal(0))
 		})
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
-			nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{}
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("Never"))
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*v1.Node{node}, []*v1beta1.NodeClaim{nodeClaim})
@@ -252,9 +252,9 @@ var _ = Describe("Emptiness", func() {
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
-						ConsolidateAfter:    &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+						ConsolidateAfter:    lo.ToPtr(v1beta1.MustParseNillableDuration("30s")),
 						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenEmpty,
-						ExpireAfter:         v1beta1.NillableDuration{Duration: nil},
+						ExpireAfter:         v1beta1.MustParseNillableDuration("Never"),
 						Budgets: []v1beta1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
@@ -323,9 +323,9 @@ var _ = Describe("Emptiness", func() {
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
-						ConsolidateAfter:    &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+						ConsolidateAfter:    lo.ToPtr(v1beta1.MustParseNillableDuration("30s")),
 						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenEmpty,
-						ExpireAfter:         v1beta1.NillableDuration{Duration: nil},
+						ExpireAfter:         v1beta1.MustParseNillableDuration("Never"),
 						Budgets: []v1beta1.Budget{{
 							Nodes: "100%",
 						}},
