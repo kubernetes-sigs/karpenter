@@ -16,7 +16,11 @@ package v1
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
 	"time"
+
+	"github.com/samber/lo"
 )
 
 const Never = "Never"
@@ -26,6 +30,17 @@ const Never = "Never"
 // that the duration is disabled and sets the inner duration as nil
 type NillableDuration struct {
 	*time.Duration
+
+	// Raw is used to ensure we remarshal the NillableDuration in the same format it was specified.
+	// This ensures tools like Flux and ArgoCD don't mistakenly detect drift due to our conversion webhooks.
+	Raw []byte `hash:"ignore"`
+}
+
+func MustParseNillableDuration(val string) NillableDuration {
+	nd := NillableDuration{}
+	// Use %q instead of %s to ensure that we unmarshal the value as a string and not an int
+	lo.Must0(json.Unmarshal([]byte(fmt.Sprintf("%q", val)), &nd))
+	return nd
 }
 
 // UnmarshalJSON implements the json.Unmarshaller interface.
@@ -42,22 +57,29 @@ func (d *NillableDuration) UnmarshalJSON(b []byte) error {
 	if err != nil {
 		return err
 	}
+	d.Raw = slices.Clone(b)
 	d.Duration = &pd
 	return nil
 }
 
 // MarshalJSON implements the json.Marshaler interface.
 func (d NillableDuration) MarshalJSON() ([]byte, error) {
-	if d.Duration == nil {
-		return json.Marshal(Never)
+	if d.Raw != nil {
+		return d.Raw, nil
 	}
-	return json.Marshal(d.Duration.String())
+	if d.Duration != nil {
+		return json.Marshal(d.Duration.String())
+	}
+	return json.Marshal(Never)
 }
 
 // ToUnstructured implements the value.UnstructuredConverter interface.
 func (d NillableDuration) ToUnstructured() interface{} {
-	if d.Duration == nil {
-		return Never
+	if d.Raw != nil {
+		return d.Raw
 	}
-	return d.Duration.String()
+	if d.Duration != nil {
+		return d.Duration.String()
+	}
+	return Never
 }

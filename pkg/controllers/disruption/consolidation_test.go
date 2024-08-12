@@ -3162,7 +3162,7 @@ var _ = Describe("Consolidation", func() {
 		var node1, node2 *v1.Node
 
 		BeforeEach(func() {
-			nodePool.Spec.Disruption.ExpireAfter = v1beta1.NillableDuration{Duration: lo.ToPtr(3 * time.Second)}
+			nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("3s")
 			nodeClaim1, node1 = test.NodeClaimAndNode(v1beta1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{

@@ -42,9 +42,9 @@ var _ = Describe("Emptiness", func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Disruption: v1beta1.Disruption{
-					ConsolidateAfter:    &v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+					ConsolidateAfter:    lo.ToPtr(v1beta1.MustParseNillableDuration("30s")),
 					ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenEmpty,
-					ExpireAfter:         v1beta1.NillableDuration{Duration: nil},
+					ExpireAfter:         v1beta1.MustParseNillableDuration("Never"),
 				},
 			},
 		})

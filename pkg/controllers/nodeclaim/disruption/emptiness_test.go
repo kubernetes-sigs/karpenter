@@ -77,7 +77,7 @@ var _ = Describe("Emptiness", func() {
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Empty).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from the nodeClaim when emptiness is disabled", func() {
-		nodePool.Spec.Disruption.ConsolidateAfter.Duration = nil
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("Never"))
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Empty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
