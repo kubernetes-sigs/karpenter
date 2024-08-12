@@ -192,11 +192,14 @@ var _ = Describe("Queue Limits", func() {
 		nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.LabelInstanceTypeStable:   currentInstance.Name,
-					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
-					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
-					v1beta1.NodePoolLabelKey:     nodePool.Name,
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
 				},
+			},
+			Spec: v1.NodeClaimSpec{
+				ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)},
 			},
 			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
@@ -443,7 +446,7 @@ var _ = Describe("Disruption Taints", func() {
 				},
 			},
 		})
-		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: nil}
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("Never"))
 		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)

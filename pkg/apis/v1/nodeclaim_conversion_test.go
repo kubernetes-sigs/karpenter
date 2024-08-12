@@ -274,22 +274,8 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 	)
 
 	BeforeEach(func() {
-		v1nodePool = &NodePool{
-			ObjectMeta: test.ObjectMeta(),
-			Spec: NodePoolSpec{
-				Template: NodeClaimTemplate{
-					Spec: NodeClaimTemplateSpec{
-						NodeClassRef: &NodeClassReference{
-							Kind:  "test-kind",
-							Name:  "default",
-							Group: "test-group",
-						},
-						Requirements: []NodeSelectorRequirementWithMinValues{},
-					},
-				},
-			},
-		}
-		v1nodePool.Spec.Template.Spec.ExpireAfter = NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
+		v1nodePool = test.NodePool()
+		v1nodePool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("30m")
 		v1nodeclaim = &NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -327,13 +313,13 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 	Context("ExpireAfter", func() {
 		It("should default the v1beta1 expireAfter to v1 when the nodepool doesn't exist", func() {
 			Expect(env.Client.Delete(ctx, v1nodePool)).To(Succeed())
-			v1nodePool.Spec.Template.Spec.ExpireAfter = NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
+			v1nodePool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("30m")
 			Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
 			Expect(v1nodeclaim.Spec.ExpireAfter.Duration).To(BeNil())
 		})
 		It("should default the v1beta1 expireAfter to v1 when the nodepool label doesn't exist", func() {
 			delete(v1beta1nodeclaim.Labels, v1beta1.NodePoolLabelKey)
-			v1nodePool.Spec.Template.Spec.ExpireAfter = NillableDuration{Duration: lo.ToPtr(30 * time.Minute)}
+			v1nodePool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("30m")
 			Expect(env.Client.Update(ctx, v1nodePool)).To(Succeed())
 			Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
 			Expect(v1nodeclaim.Spec.ExpireAfter.Duration).To(BeNil())
