@@ -99,7 +99,7 @@ var _ = Describe("Disruption", func() {
 	It("should set multiple disruption conditions simultaneously", func() {
 		cp.Drifted = "drifted"
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Disruption.ConsolidateAfter = v1beta1.MustParseNillableDuration("30s")
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("30s"))
 		nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
@@ -115,7 +115,7 @@ var _ = Describe("Disruption", func() {
 	})
 	It("should remove multiple disruption conditions simultaneously", func() {
 		nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("Never")
-		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(MustParseNillableDuration("Never"))
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("Never"))
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Drifted)
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Empty)
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)

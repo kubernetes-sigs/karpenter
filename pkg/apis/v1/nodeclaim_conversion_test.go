@@ -274,8 +274,22 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 	)
 
 	BeforeEach(func() {
-		v1nodePool = test.NodePool()
-		v1nodePool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("30m")
+		v1nodePool = &NodePool{
+			ObjectMeta: test.ObjectMeta(),
+			Spec: NodePoolSpec{
+				Template: NodeClaimTemplate{
+					Spec: NodeClaimTemplateSpec{
+						NodeClassRef: &NodeClassReference{
+							Kind:  "test-kind",
+							Name:  "default",
+							Group: "test-group",
+						},
+						Requirements: []NodeSelectorRequirementWithMinValues{},
+						ExpireAfter:  MustParseNillableDuration("30m"),
+					},
+				},
+			},
+		}
 		v1nodeclaim = &NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
