@@ -63,9 +63,6 @@ var _ = Describe("Static Drift Hash", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
-				Disruption: v1beta1.Disruption{
-					ExpireAfter: v1beta1.MustParseNillableDuration("5m"),
-				},
 				Template: v1beta1.NodeClaimTemplate{
 					ObjectMeta: v1beta1.ObjectMeta{
 						Annotations: map[string]string{

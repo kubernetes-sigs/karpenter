@@ -428,9 +428,6 @@ var _ = Describe("Drift", func() {
 			nodePool = &v1beta1.NodePool{
 				ObjectMeta: nodePool.ObjectMeta,
 				Spec: v1beta1.NodePoolSpec{
-					Disruption: v1beta1.Disruption{
-						ExpireAfter: v1beta1.MustParseNillableDuration("5m"),
-					},
 					Template: v1beta1.NodeClaimTemplate{
 						ObjectMeta: v1beta1.ObjectMeta{
 							Annotations: map[string]string{

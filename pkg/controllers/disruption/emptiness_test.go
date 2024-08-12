@@ -357,7 +357,7 @@ var _ = Describe("Emptiness", func() {
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
-						ConsolidateAfter:    lo.ToPtr(v1beta1.MustParseNillableDuration("3os")),
+						ConsolidateAfter:    lo.ToPtr(v1beta1.MustParseNillableDuration("30s")),
 						ConsolidationPolicy: v1beta1.ConsolidationPolicyWhenEmpty,
 						ExpireAfter:         v1beta1.MustParseNillableDuration("Never"),
 						Budgets: []v1beta1.Budget{{
