@@ -19,7 +19,6 @@ package disruption_test
 import (
 	"time"
 
-	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,7 +46,7 @@ var _ = Describe("Expiration", func() {
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted metric when expired", func() {
-			nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+			nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("30s")
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 			// step forward to make the node expired
@@ -66,7 +65,7 @@ var _ = Describe("Expiration", func() {
 		})
 	})
 	It("should remove the status condition from the NodeClaims when expiration is disabled", func() {
-		nodePool.Spec.Disruption.ExpireAfter.Duration = nil
+		nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("Never")
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
@@ -76,7 +75,7 @@ var _ = Describe("Expiration", func() {
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired)).To(BeNil())
 	})
 	It("should mark NodeClaims as expired", func() {
-		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+		nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		// step forward to make the node expired
@@ -87,7 +86,7 @@ var _ = Describe("Expiration", func() {
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from non-expired NodeClaims", func() {
-		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
+		nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("200s")
 		nodeClaim.StatusConditions().MarkTrue(v1beta1.Expired)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
@@ -97,7 +96,7 @@ var _ = Describe("Expiration", func() {
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired)).To(BeNil())
 	})
 	It("should mark NodeClaims as expired if the nodeClaim is expired but the node isn't", func() {
-		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+		nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		// step forward to make the node expired
@@ -109,7 +108,7 @@ var _ = Describe("Expiration", func() {
 		Expect(nodeClaim.StatusConditions().GetCondition(v1beta1.Expired).IsTrue()).To(BeTrue())
 	})
 	It("should return the requeue interval for the time between now and when the nodeClaim expires", func() {
-		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
+		nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("200s")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))

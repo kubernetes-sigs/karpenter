@@ -49,8 +49,8 @@ var _ = Describe("Expiration", func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Disruption: v1beta1.Disruption{
-					ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
-					ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+					ConsolidateAfter: lo.ToPtr(v1beta1.MustParseNillableDuration("Never")),
+					ExpireAfter:      v1beta1.MustParseNillableDuration("30s"),
 					// Disrupt away!
 					Budgets: []v1beta1.Budget{{
 						Nodes: "100%",
@@ -314,8 +314,8 @@ var _ = Describe("Expiration", func() {
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
 						}},
-						ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+						ExpireAfter:      v1beta1.MustParseNillableDuration("30s"),
+						ConsolidateAfter: lo.ToPtr(v1beta1.MustParseNillableDuration("Never")),
 					},
 				},
 			})
@@ -379,8 +379,8 @@ var _ = Describe("Expiration", func() {
 						Budgets: []v1beta1.Budget{{
 							Nodes: "100%",
 						}},
-						ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+						ExpireAfter:      v1beta1.MustParseNillableDuration("30s"),
+						ConsolidateAfter: lo.ToPtr(v1beta1.MustParseNillableDuration("Never")),
 					},
 				},
 			})
