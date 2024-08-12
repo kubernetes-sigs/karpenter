@@ -192,14 +192,11 @@ var _ = Describe("Queue Limits", func() {
 		nodeClaim2, node2 = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					v1.NodePoolLabelKey:            nodePool.Name,
-					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					v1.LabelInstanceTypeStable:   currentInstance.Name,
+					v1beta1.CapacityTypeLabelKey: currentInstance.Offerings[0].CapacityType,
+					v1.LabelTopologyZone:         currentInstance.Offerings[0].Zone,
+					v1beta1.NodePoolLabelKey:     nodePool.Name,
 				},
-			},
-			Spec: v1.NodeClaimSpec{
-				ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)},
 			},
 			Status: v1beta1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
