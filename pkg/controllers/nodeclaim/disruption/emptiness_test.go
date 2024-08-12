@@ -40,8 +40,7 @@ var _ = Describe("Emptiness", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		duration := v1beta1.MustParseNillableDuration("30s")
-		nodePool.Spec.Disruption.ConsolidateAfter = &duration
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("30s"))
 		nodeClaim, node = test.NodeClaimAndNode(v1beta1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -147,8 +146,7 @@ var _ = Describe("Emptiness", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1beta1.ConditionTypeEmpty).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from the nodeClaim when emptiness is disabled", func() {
-		duration := v1beta1.MustParseNillableDuration("Never")
-		nodePool.Spec.Disruption.ConsolidateAfter = &duration
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("Never"))
 		nodeClaim.StatusConditions().SetTrue(v1beta1.ConditionTypeEmpty)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)

@@ -121,11 +121,10 @@ var _ = Describe("Static Drift Hash", func() {
 		expectedHash := nodePool.Hash()
 		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, expectedHash))
 
-		duration := v1beta1.MustParseNillableDuration("30s")
 		nodePool.Spec.Limits = v1beta1.Limits(v1.ResourceList{"cpu": resource.MustParse("16")})
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Disruption.ConsolidateAfter = &duration
-		nodePool.Spec.Disruption.ExpireAfter.Duration = duration.Duration
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("30s"))
+		nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("30s")
 		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 			{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}},

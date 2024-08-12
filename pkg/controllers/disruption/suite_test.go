@@ -196,8 +196,7 @@ var _ = Describe("Simulate Scheduling", func() {
 				},
 			},
 		})
-		duration := v1beta1.MustParseNillableDuration("Never")
-		nodePool.Spec.Disruption.ConsolidateAfter = &duration
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("Never"))
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, nodes[0])
 
@@ -274,9 +273,8 @@ var _ = Describe("Simulate Scheduling", func() {
 				Operator: v1.NodeSelectorOpExists,
 			},
 		})
-		duration := v1beta1.MustParseNillableDuration("Never")
 		nodePool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("5m")
-		nodePool.Spec.Disruption.ConsolidateAfter = &duration
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("Never"))
 		nodePool.Spec.Disruption.Budgets = []v1beta1.Budget{{Nodes: "3"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 
@@ -525,8 +523,7 @@ var _ = Describe("Disruption Taints", func() {
 				},
 			},
 		})
-		duration := v1beta1.MustParseNillableDuration("Never")
-		nodePool.Spec.Disruption.ConsolidateAfter = &duration
+		nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("Never"))
 		node.Spec.Taints = append(node.Spec.Taints, v1beta1.DisruptionNoScheduleTaint)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)

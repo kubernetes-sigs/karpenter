@@ -47,11 +47,10 @@ var _ = Describe("Expiration", func() {
 	var node *v1.Node
 
 	BeforeEach(func() {
-		duration := v1beta1.MustParseNillableDuration("Never")
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Disruption: v1beta1.Disruption{
-					ConsolidateAfter: &duration,
+					ConsolidateAfter: lo.ToPtr(v1beta1.MustParseNillableDuration("Never")),
 					ExpireAfter:      v1beta1.MustParseNillableDuration("30s"),
 					// Disrupt away!
 					Budgets: []v1beta1.Budget{{
@@ -349,7 +348,6 @@ var _ = Describe("Expiration", func() {
 		})
 		It("should allow 2 empty nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
-			duration := v1beta1.MustParseNillableDuration("Never")
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
@@ -358,7 +356,7 @@ var _ = Describe("Expiration", func() {
 							Nodes: "50%",
 						}},
 						ExpireAfter:      v1beta1.MustParseNillableDuration("30s"),
-						ConsolidateAfter: &duration,
+						ConsolidateAfter: lo.ToPtr(v1beta1.MustParseNillableDuration("Never")),
 					},
 				},
 			})
@@ -416,7 +414,6 @@ var _ = Describe("Expiration", func() {
 		})
 		It("should allow all empty nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
-			duration := v1beta1.MustParseNillableDuration("Never")
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
@@ -424,7 +421,7 @@ var _ = Describe("Expiration", func() {
 							Nodes: "100%",
 						}},
 						ExpireAfter:      v1beta1.MustParseNillableDuration("30s"),
-						ConsolidateAfter: &duration,
+						ConsolidateAfter: lo.ToPtr(v1beta1.MustParseNillableDuration("Never")),
 					},
 				},
 			})

@@ -102,8 +102,7 @@ var _ = Describe("Consolidation", func() {
 		It("should not fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmpty", func() {
 			pod := test.Pod()
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-			duration := v1beta1.MustParseNillableDuration("1m")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("1m"))
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -118,8 +117,7 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
 			pod := test.Pod()
-			duration := v1beta1.MustParseNillableDuration("0s")
-			nodePool.Spec.Disruption.ConsolidateAfter = &duration
+			nodePool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("0s"))
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
