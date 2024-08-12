@@ -19,7 +19,6 @@ package hash_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -64,6 +63,9 @@ var _ = Describe("Static Drift Hash", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
+				Disruption: v1beta1.Disruption{
+					ExpireAfter: v1beta1.MustParseNillableDuration("5m"),
+				},
 				Template: v1beta1.NodeClaimTemplate{
 					ObjectMeta: v1beta1.ObjectMeta{
 						Annotations: map[string]string{
@@ -119,10 +121,11 @@ var _ = Describe("Static Drift Hash", func() {
 		expectedHash := nodePool.Hash()
 		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1beta1.NodePoolHashAnnotationKey, expectedHash))
 
+		duration := v1beta1.MustParseNillableDuration("30s")
 		nodePool.Spec.Limits = v1beta1.Limits(v1.ResourceList{"cpu": resource.MustParse("16")})
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1beta1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Disruption.ConsolidateAfter = &v1beta1.NillableDuration{Duration: lo.ToPtr(30 * time.Second)}
-		nodePool.Spec.Disruption.ExpireAfter.Duration = lo.ToPtr(30 * time.Second)
+		nodePool.Spec.Disruption.ConsolidateAfter = &duration
+		nodePool.Spec.Disruption.ExpireAfter.Duration = duration.Duration
 		nodePool.Spec.Template.Spec.Requirements = []v1beta1.NodeSelectorRequirementWithMinValues{
 			{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 			{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpGt, Values: []string{"1"}}},

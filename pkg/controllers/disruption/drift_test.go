@@ -48,11 +48,12 @@ var _ = Describe("Drift", func() {
 	var node *v1.Node
 
 	BeforeEach(func() {
+		duration := v1beta1.MustParseNillableDuration("Never")
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Disruption: v1beta1.Disruption{
-					ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
-					ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
+					ConsolidateAfter: &duration,
+					ExpireAfter:      duration,
 					// Disrupt away!
 					Budgets: []v1beta1.Budget{{
 						Nodes: "100%",
@@ -339,11 +340,12 @@ var _ = Describe("Drift", func() {
 		})
 		It("should allow 2 nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
+			duration := v1beta1.MustParseNillableDuration("Never")
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
-						ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
+						ConsolidateAfter: &duration,
+						ExpireAfter:      duration,
 						Budgets: []v1beta1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
@@ -406,11 +408,12 @@ var _ = Describe("Drift", func() {
 		})
 		It("should allow all nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
+			duration := v1beta1.MustParseNillableDuration("Never")
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
-						ExpireAfter:      v1beta1.NillableDuration{Duration: nil},
+						ConsolidateAfter: &duration,
+						ExpireAfter:      duration,
 						Budgets: []v1beta1.Budget{{
 							Nodes: "100%",
 						}},

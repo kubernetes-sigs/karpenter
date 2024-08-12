@@ -47,11 +47,12 @@ var _ = Describe("Expiration", func() {
 	var node *v1.Node
 
 	BeforeEach(func() {
+		duration := v1beta1.MustParseNillableDuration("Never")
 		nodePool = test.NodePool(v1beta1.NodePool{
 			Spec: v1beta1.NodePoolSpec{
 				Disruption: v1beta1.Disruption{
-					ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
-					ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+					ConsolidateAfter: &duration,
+					ExpireAfter:      v1beta1.MustParseNillableDuration("30s"),
 					// Disrupt away!
 					Budgets: []v1beta1.Budget{{
 						Nodes: "100%",
@@ -348,6 +349,7 @@ var _ = Describe("Expiration", func() {
 		})
 		It("should allow 2 empty nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
+			duration := v1beta1.MustParseNillableDuration("Never")
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
@@ -355,8 +357,8 @@ var _ = Describe("Expiration", func() {
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
 						}},
-						ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+						ExpireAfter:      v1beta1.MustParseNillableDuration("30s"),
+						ConsolidateAfter: &duration,
 					},
 				},
 			})
@@ -414,14 +416,15 @@ var _ = Describe("Expiration", func() {
 		})
 		It("should allow all empty nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
+			duration := v1beta1.MustParseNillableDuration("Never")
 			nps := test.NodePools(10, v1beta1.NodePool{
 				Spec: v1beta1.NodePoolSpec{
 					Disruption: v1beta1.Disruption{
 						Budgets: []v1beta1.Budget{{
 							Nodes: "100%",
 						}},
-						ExpireAfter:      v1beta1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
-						ConsolidateAfter: &v1beta1.NillableDuration{Duration: nil},
+						ExpireAfter:      v1beta1.MustParseNillableDuration("30s"),
+						ConsolidateAfter: &duration,
 					},
 				},
 			})
