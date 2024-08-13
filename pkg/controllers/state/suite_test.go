@@ -1483,7 +1483,7 @@ var _ = Describe("DaemonSet Controller", func() {
 			})
 		daemonsetPod1.Spec = daemonset.Spec.Template.Spec
 		ExpectApplied(ctx, env.Client, daemonsetPod1)
-		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+		ExpectReconcileSucceeded(ctx, kruiseDaemonSetController, client.ObjectKeyFromObject(daemonset))
 
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod1))
 
