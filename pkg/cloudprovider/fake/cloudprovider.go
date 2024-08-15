@@ -61,6 +61,8 @@ type CloudProvider struct {
 	CreatedNodeClaims         map[string]*v1.NodeClaim
 	Drifted                   cloudprovider.DriftReason
 	NodeClassGroupVersionKind []schema.GroupVersionKind
+
+	disruptionReasons []v1.DisruptionReason
 }
 
 func NewCloudProvider() *CloudProvider {
@@ -95,6 +97,8 @@ func (c *CloudProvider) Reset() {
 			Kind:    "",
 		},
 	}
+
+	c.disruptionReasons = []v1.DisruptionReason{"ExampleReason"}
 }
 
 func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
@@ -236,7 +240,7 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool) ([]
 }
 
 func (c *CloudProvider) DisruptionReasons() []v1.DisruptionReason {
-	return nil
+	return c.disruptionReasons
 }
 
 func (c *CloudProvider) Delete(_ context.Context, nc *v1.NodeClaim) error {

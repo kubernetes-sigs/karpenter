@@ -79,6 +79,8 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
 		methods: []Method{
+			// Terminate any NodeClaims with StatusConditions specific to the CloudProvider implementation. For
+			NewCloudProvider(kubeClient, cluster, c.cloudProvider, recorder, provisioner),
 			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 			NewDrift(kubeClient, cluster, provisioner, recorder),
 			// Delete any empty NodeClaims as there is zero cost in terms of disruption.
