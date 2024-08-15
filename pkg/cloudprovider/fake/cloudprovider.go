@@ -235,6 +235,10 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool) ([]
 	}, nil
 }
 
+func (c *CloudProvider) DisruptionReasons() []v1.DisruptionReason {
+	return nil
+}
+
 func (c *CloudProvider) Delete(_ context.Context, nc *v1.NodeClaim) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
