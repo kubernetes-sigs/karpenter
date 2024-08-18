@@ -400,7 +400,7 @@ var _ = Describe("Termination", func() {
 			}}}})
 
 			podKruiseDaemonEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "apps.kruise.io/v1alpha",
+				APIVersion:         "apps.kruise.io/v1alpha1",
 				Kind:               "DaemonSet",
 				Name:               kruiseDaemonEvict.Name,
 				UID:                kruiseDaemonEvict.UID,
@@ -408,7 +408,7 @@ var _ = Describe("Termination", func() {
 				BlockOwnerDeletion: lo.ToPtr(true),
 			}}}})
 			podKruiseDaemonNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "apps.kruise.io/v1alpha",
+				APIVersion:         "apps.kruise.io/v1alpha1",
 				Kind:               "DaemonSet",
 				Name:               kruiseDaemonNodeCritical.Name,
 				UID:                kruiseDaemonClusterCritical.UID,
@@ -416,7 +416,7 @@ var _ = Describe("Termination", func() {
 				BlockOwnerDeletion: lo.ToPtr(true),
 			}}}})
 			podKruiseDaemonClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "apps.kruise.io/v1alpha",
+				APIVersion:         "apps.kruise.io/v1alpha1",
 				Kind:               "DaemonSet",
 				Name:               kruiseDaemonClusterCritical.Name,
 				UID:                kruiseDaemonClusterCritical.UID,
