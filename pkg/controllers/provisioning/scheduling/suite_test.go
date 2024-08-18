@@ -3644,6 +3644,53 @@ var _ = Context("Scheduling", func() {
 				Expect(n.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 			}
 		})
+		It("should reschedule pods from a deleting node when pods are not active and they are owned by a Kruise StatefulSet", func() {
+			ss := test.KruiseStatefulSet()
+			ExpectApplied(ctx, env.Client, nodePool, ss)
+
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps.kruise.io/v1beta1",
+								Kind:               "StatefulSet",
+								Name:               ss.Name,
+								UID:                ss.UID,
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
+							},
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceMemory: resource.MustParse("100M"),
+						},
+					},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+
+			// Mark for deletion so that we consider all pods on this node for reschedulability
+			cluster.MarkForDeletion(node.Spec.ProviderID)
+
+			// Trigger an eviction to set the deletion timestamp but not delete the pod
+			ExpectEvicted(ctx, env.Client, pod)
+			ExpectExists(ctx, env.Client, pod)
+
+			// Trigger a provisioning loop and expect another node to get created
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
+
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodes).To(HaveLen(2))
+
+			// Expect both nodes to be of the same size to schedule the pod once it gets re-created
+			for _, n := range nodes {
+				Expect(n.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+			}
+		})
 	})
 
 	Describe("Metrics", func() {

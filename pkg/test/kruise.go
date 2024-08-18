@@ -18,10 +18,10 @@ package test
 
 import (
 	"fmt"
-
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/imdario/mergo"
 	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -35,7 +35,7 @@ type KruiseDaemonSetOptions struct {
 	PodOptions PodOptions
 }
 
-// DaemonSet creates a test pod with defaults that can be overridden by DaemonSetOptions.
+// KruiseDaemonSet creates a test pod with defaults that can be overridden by DaemonSetOptions.
 // Overrides are applied in order, with a last write wins semantic.
 func KruiseDaemonSet(overrides ...DaemonSetOptions) *kruise.DaemonSet {
 	options := DaemonSetOptions{}
@@ -60,6 +60,38 @@ func KruiseDaemonSet(overrides ...DaemonSetOptions) *kruise.DaemonSet {
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: options.Selector},
 				Spec:       Pod(options.PodOptions).Spec,
+			},
+		},
+	}
+}
+
+func KruiseStatefulSet(overrides ...StatefulSetOptions) *kruise.StatefulSet {
+	options := StatefulSetOptions{}
+	for _, opts := range overrides {
+		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
+			panic(fmt.Sprintf("Failed to merge deployment options: %s", err))
+		}
+	}
+
+	objectMeta := NamespacedObjectMeta(options.ObjectMeta)
+
+	if options.PodOptions.Image == "" {
+		options.PodOptions.Image = "public.ecr.aws/eks-distro/kubernetes/pause:3.2"
+	}
+	if options.PodOptions.Labels == nil {
+		options.PodOptions.Labels = map[string]string{
+			"app": objectMeta.Name,
+		}
+	}
+	pod := Pod(options.PodOptions)
+	return &kruise.StatefulSet{
+		ObjectMeta: objectMeta,
+		Spec: kruise.StatefulSetSpec{
+			Replicas: lo.ToPtr(options.Replicas),
+			Selector: &metav1.LabelSelector{MatchLabels: options.PodOptions.Labels},
+			Template: v1.PodTemplateSpec{
+				ObjectMeta: ObjectMeta(options.PodOptions.ObjectMeta),
+				Spec:       pod.Spec,
 			},
 		},
 	}
