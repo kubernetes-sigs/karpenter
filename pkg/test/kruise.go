@@ -18,12 +18,13 @@ package test
 
 import (
 	"fmt"
+
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/imdario/mergo"
 	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
 
+	v1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
