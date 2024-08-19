@@ -225,7 +225,7 @@ var _ = Describe("Provisioning", func() {
 		ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
-					Spec: v1.NodeClaimSpec{
+					Spec: v1.NodeClaimTemplateSpec{
 						Requirements: []v1.NodeSelectorRequirementWithMinValues{
 							{
 								NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -610,7 +610,7 @@ var _ = Describe("Provisioning", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							StartupTaints: []corev1.Taint{{Key: "foo.com/taint", Effect: corev1.TaintEffectNoSchedule}},
 						},
 					},
@@ -770,7 +770,7 @@ var _ = Describe("Provisioning", func() {
 				test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
 						Template: v1.NodeClaimTemplate{
-							Spec: v1.NodeClaimSpec{
+							Spec: v1.NodeClaimTemplateSpec{
 								Taints: []corev1.Taint{{Key: "foo", Value: "bar", Effect: corev1.TaintEffectNoSchedule}},
 							},
 						},
@@ -936,7 +936,7 @@ var _ = Describe("Provisioning", func() {
 						ObjectMeta: v1.ObjectMeta{
 							Labels: map[string]string{"test-key-1": "test-value-1"},
 						},
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key-2", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value-2"}}},
 								{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-key-3", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-value-3"}}},
@@ -1012,7 +1012,7 @@ var _ = Describe("Provisioning", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							Taints: []corev1.Taint{{Key: "nvidia.com/gpu", Value: "true", Effect: corev1.TaintEffectNoSchedule}},
 						},
 					},
@@ -1083,7 +1083,7 @@ var _ = Describe("Provisioning", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
 									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -1137,7 +1137,7 @@ var _ = Describe("Provisioning", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
 									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -1176,7 +1176,7 @@ var _ = Describe("Provisioning", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: []v1.NodeSelectorRequirementWithMinValues{
 								{
 									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -1260,9 +1260,9 @@ var _ = Describe("Provisioning", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							NodeClassRef: &v1.NodeClassReference{
-								Group: "cloudprovider.karpenter.sh/v1",
+								Group: "cloudprovider.karpenter.sh",
 								Kind:  "CloudProvider",
 								Name:  "default",
 							},
@@ -1277,7 +1277,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 			Expect(cloudProvider.CreateCalls[0].Spec.NodeClassRef).To(Equal(
 				&v1.NodeClassReference{
-					Group: "cloudprovider.karpenter.sh/v1",
+					Group: "cloudprovider.karpenter.sh",
 					Kind:  "CloudProvider",
 					Name:  "default",
 				},
@@ -1737,7 +1737,7 @@ var _ = Describe("Provisioning", func() {
 				nodePool := test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
 						Template: v1.NodeClaimTemplate{
-							Spec: v1.NodeClaimSpec{
+							Spec: v1.NodeClaimTemplateSpec{
 								Requirements: []v1.NodeSelectorRequirementWithMinValues{{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}}}},
 							},
 						},
@@ -1813,7 +1813,7 @@ var _ = Describe("Provisioning", func() {
 				nodePool := test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
 						Template: v1.NodeClaimTemplate{
-							Spec: v1.NodeClaimSpec{
+							Spec: v1.NodeClaimTemplateSpec{
 								Requirements: []v1.NodeSelectorRequirementWithMinValues{{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}},
 							},
 						},
@@ -1842,7 +1842,7 @@ var _ = Describe("Provisioning", func() {
 				nodePool := test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
 						Template: v1.NodeClaimTemplate{
-							Spec: v1.NodeClaimSpec{
+							Spec: v1.NodeClaimTemplateSpec{
 								Taints: []corev1.Taint{{Key: "foo", Value: "bar", Effect: corev1.TaintEffectPreferNoSchedule}},
 							},
 						},
@@ -1884,7 +1884,7 @@ var _ = Describe("Provisioning", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
+						Spec: v1.NodeClaimTemplateSpec{
 							Taints: []corev1.Taint{{Key: "foo", Value: "bar", Effect: corev1.TaintEffectPreferNoSchedule}},
 						},
 					},

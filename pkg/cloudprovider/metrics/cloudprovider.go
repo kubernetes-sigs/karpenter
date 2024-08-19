@@ -45,7 +45,7 @@ const (
 // decorator implements CloudProvider
 var _ cloudprovider.CloudProvider = (*decorator)(nil)
 
-var methodDurationHistogramVec = prometheus.NewHistogramVec(
+var methodDuration = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: "cloudprovider",
@@ -60,7 +60,7 @@ var methodDurationHistogramVec = prometheus.NewHistogramVec(
 )
 
 var (
-	errorsTotalCounter = prometheus.NewCounterVec(
+	errorsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "cloudprovider",
@@ -77,7 +77,7 @@ var (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(methodDurationHistogramVec, errorsTotalCounter)
+	crmetrics.Registry.MustRegister(methodDuration, errorsTotal)
 }
 
 type decorator struct {
@@ -97,60 +97,60 @@ func Decorate(cloudProvider cloudprovider.CloudProvider) cloudprovider.CloudProv
 
 func (d *decorator) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
 	method := "Create"
-	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	defer metrics.Measure(methodDuration.With(getLabelsMapForDuration(ctx, d, method)))()
 	nodeClaim, err := d.CloudProvider.Create(ctx, nodeClaim)
 	if err != nil {
-		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+		errorsTotal.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
 	return nodeClaim, err
 }
 
 func (d *decorator) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	method := "Delete"
-	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	defer metrics.Measure(methodDuration.With(getLabelsMapForDuration(ctx, d, method)))()
 	err := d.CloudProvider.Delete(ctx, nodeClaim)
 	if err != nil {
-		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+		errorsTotal.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
 	return err
 }
 
 func (d *decorator) Get(ctx context.Context, id string) (*v1.NodeClaim, error) {
 	method := "Get"
-	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	defer metrics.Measure(methodDuration.With(getLabelsMapForDuration(ctx, d, method)))()
 	nodeClaim, err := d.CloudProvider.Get(ctx, id)
 	if err != nil {
-		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+		errorsTotal.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
 	return nodeClaim, err
 }
 
 func (d *decorator) List(ctx context.Context) ([]*v1.NodeClaim, error) {
 	method := "List"
-	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	defer metrics.Measure(methodDuration.With(getLabelsMapForDuration(ctx, d, method)))()
 	nodeClaims, err := d.CloudProvider.List(ctx)
 	if err != nil {
-		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+		errorsTotal.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
 	return nodeClaims, err
 }
 
 func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	method := "GetInstanceTypes"
-	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	defer metrics.Measure(methodDuration.With(getLabelsMapForDuration(ctx, d, method)))()
 	instanceType, err := d.CloudProvider.GetInstanceTypes(ctx, nodePool)
 	if err != nil {
-		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+		errorsTotal.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
 	return instanceType, err
 }
 
 func (d *decorator) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (cloudprovider.DriftReason, error) {
 	method := "IsDrifted"
-	defer metrics.Measure(methodDurationHistogramVec.With(getLabelsMapForDuration(ctx, d, method)))()
+	defer metrics.Measure(methodDuration.With(getLabelsMapForDuration(ctx, d, method)))()
 	isDrifted, err := d.CloudProvider.IsDrifted(ctx, nodeClaim)
 	if err != nil {
-		errorsTotalCounter.With(getLabelsMapForError(ctx, d, method, err)).Inc()
+		errorsTotal.With(getLabelsMapForError(ctx, d, method, err)).Inc()
 	}
 	return isDrifted, err
 }

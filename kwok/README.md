@@ -20,7 +20,7 @@ Once kwok is installed and Karpenter successfully applies to the cluster, you sh
 
 ```bash
 cat <<EOF | envsubst | kubectl apply -f -
-apiVersion: karpenter.sh/v1beta1
+apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
   name: default
@@ -40,12 +40,12 @@ spec:
       nodeClassRef:
         name: default
         kind: KWOKNodeClass
-        apiVersion: v1alpha1
+        group: karpenter.kwok.sh
+      expireAfter: 720h # 30 * 24h = 720h
   limits:
     cpu: 1000
   disruption:
     consolidationPolicy: WhenUnderutilized
-    expireAfter: 720h # 30 * 24h = 720h
 ---
 apiVersion: karpenter.kwok.sh/v1alpha1
 kind: KWOKNodeClass

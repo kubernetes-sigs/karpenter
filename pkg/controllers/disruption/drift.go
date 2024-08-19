@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 // Drift is a subreconciler that deletes drifted candidates.
@@ -71,9 +70,9 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonDrifted] > 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][d.Reason()] > 0 {
 			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonDrifted]--
+			disruptionBudgetMapping[candidate.nodePool.Name][d.Reason()]--
 		}
 	}
 	// Disrupt all empty drifted candidates, as they require no scheduling simulations.
@@ -87,7 +86,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since drift commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonDrifted] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][d.Reason()] == 0 {
 			continue
 		}
 		// Check if we need to create any NodeClaims.
@@ -113,8 +112,8 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 	return Command{}, scheduling.Results{}, nil
 }
 
-func (d *Drift) Type() string {
-	return metrics.DriftReason
+func (d *Drift) Reason() v1.DisruptionReason {
+	return v1.DisruptionReasonDrifted
 }
 
 func (d *Drift) Class() string {

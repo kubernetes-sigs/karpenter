@@ -63,7 +63,7 @@ var _ = Describe("Metrics", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
-					Spec: v1.NodeClaimSpec{
+					Spec: v1.NodeClaimTemplateSpec{
 						NodeClassRef: &v1.NodeClassReference{
 							Name: "default",
 						},
@@ -83,7 +83,7 @@ var _ = Describe("Metrics", func() {
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for k, v := range limits {
-			m, found := FindMetricWithLabelValues("karpenter_nodepool_limit", map[string]string{
+			m, found := FindMetricWithLabelValues("karpenter_nodepools_limit", map[string]string{
 				"nodepool":      nodePool.GetName(),
 				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
 			})
@@ -103,7 +103,7 @@ var _ = Describe("Metrics", func() {
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for k, v := range resources {
-			m, found := FindMetricWithLabelValues("karpenter_nodepool_usage", map[string]string{
+			m, found := FindMetricWithLabelValues("karpenter_nodepools_usage", map[string]string{
 				"nodepool":      nodePool.GetName(),
 				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
 			})
@@ -112,7 +112,7 @@ var _ = Describe("Metrics", func() {
 		}
 	})
 	It("should delete the nodepool state metrics on nodepool delete", func() {
-		expectedMetrics := []string{"karpenter_nodepool_limit", "karpenter_nodepool_usage"}
+		expectedMetrics := []string{"karpenter_nodepools_limit", "karpenter_nodepools_usage"}
 		nodePool.Spec.Limits = v1.Limits{
 			corev1.ResourceCPU:              resource.MustParse("100"),
 			corev1.ResourceMemory:           resource.MustParse("100Mi"),

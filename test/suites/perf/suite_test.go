@@ -19,7 +19,6 @@ package perf_test
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -34,7 +33,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 )
 
 var nodePool *v1.NodePool
@@ -76,7 +74,7 @@ var _ = BeforeEach(func() {
 	nodePool.Spec.Limits = v1.Limits{}
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 	// Set expiration to some high value so that there's age-based ordering for consolidation tests
-	nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{Duration: lo.ToPtr(30 * time.Hour)}
+	nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("30h")
 })
 
 var _ = AfterEach(func() {

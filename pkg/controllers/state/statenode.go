@@ -493,15 +493,15 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		// If the taint is present and we want to remove the taint, remove it.
 		if !addTaint {
 			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint corev1.Taint, _ int) bool {
-				return taint.Key == v1.DisruptionTaintKey
+				return v1.IsDisruptingTaint(taint)
 			})
 			// otherwise, add it.
 		} else if addTaint && !hasTaint {
 			// If the taint key is present (but with a different value or effect), remove it.
-			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
-				return t.Key == v1.DisruptionTaintKey
+			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint corev1.Taint, _ int) bool {
+				return v1.IsDisruptingTaint(taint)
 			})
-			node.Spec.Taints = append(node.Spec.Taints, v1.DisruptionNoScheduleTaint)
+			node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 		}
 		if !equality.Semantic.DeepEqual(stored, node) {
 			if err := kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {

@@ -30,7 +30,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -62,7 +61,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	for _, candidate := range candidates {
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonUnderutilized] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][m.Reason()] == 0 {
 			constrainedByBudgets = true
 			continue
 		}
@@ -74,7 +73,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		}
 		// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 		disruptableCandidates = append(disruptableCandidates, candidate)
-		disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonUnderutilized]--
+		disruptionBudgetMapping[candidate.nodePool.Name][m.Reason()]--
 	}
 
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.
@@ -86,7 +85,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return Command{}, scheduling.Results{}, err
 	}
 
-	if cmd.Action() == NoOpAction {
+	if cmd.Decision() == NoOpDecision {
 		// if there are no candidates because of a budget, don't mark
 		// as consolidated, as it's possible it should be consolidatable
 		// the next time we try to disrupt.
@@ -96,7 +95,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, scheduling.Results{}, nil
 	}
 
-	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue, v1.DisruptionReasonUnderutilized).IsValid(ctx, cmd, consolidationTTL); err != nil {
+	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue, m.Reason()).IsValid(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
 			return Command{}, scheduling.Results{}, nil
@@ -125,7 +124,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for min <= max {
 		if m.clock.Now().After(timeout) {
-			ConsolidationTimeoutTotalCounter.WithLabelValues(m.ConsolidationType()).Inc()
+			ConsolidationTimeoutsTotal.WithLabelValues(m.ConsolidationType()).Inc()
 			if lastSavedCommand.candidates == nil {
 				log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
 			} else {
@@ -144,13 +143,13 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		replacementHasValidInstanceTypes := false
-		if cmd.Action() == ReplaceAction {
+		if cmd.Decision() == ReplaceDecision {
 			cmd.replacements[0].InstanceTypeOptions, err = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
 			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0 && err == nil
 		}
 
 		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
-		if replacementHasValidInstanceTypes || cmd.Action() == DeleteAction {
+		if replacementHasValidInstanceTypes || cmd.Decision() == DeleteDecision {
 			// We can consolidate NodeClaims [0,mid]
 			lastSavedCommand = cmd
 			lastSavedResults = results
@@ -214,8 +213,8 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 	return newNodeClaim.InstanceTypeOptions, err
 }
 
-func (m *MultiNodeConsolidation) Type() string {
-	return metrics.ConsolidationReason
+func (m *MultiNodeConsolidation) Reason() v1.DisruptionReason {
+	return v1.DisruptionReasonUnderutilized
 }
 
 func (m *MultiNodeConsolidation) Class() string {

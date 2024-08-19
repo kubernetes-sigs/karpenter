@@ -45,6 +45,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/expiration"
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+	podevents "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/podevents"
 	nodeclaimtermination "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/termination"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
@@ -82,18 +83,19 @@ func NewControllers(
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewNodePoolController(kubeClient, cluster),
 		informer.NewNodeClaimController(kubeClient, cluster),
-		termination.NewController(kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
+		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		metricspod.NewController(kubeClient),
 		metricsnodepool.NewController(kubeClient),
 		metricsnode.NewController(cluster),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
 		nodepoolcounter.NewController(kubeClient, cluster),
 		nodepoolvalidation.NewController(kubeClient),
+		podevents.NewController(clock, kubeClient),
 		nodeclaimconsistency.NewController(clock, kubeClient, recorder),
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, sharedCache),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimtermination.NewController(kubeClient, cloudProvider, recorder),
-		nodeclaimdisruption.NewController(clock, kubeClient, cluster, cloudProvider),
+		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		leasegarbagecollection.NewController(kubeClient),
 		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),

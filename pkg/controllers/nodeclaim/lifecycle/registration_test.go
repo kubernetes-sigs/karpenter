@@ -137,6 +137,8 @@ var _ = Describe("Registration", func() {
 		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
 	})
 	It("should sync the labels to the Node when the Node comes online", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{

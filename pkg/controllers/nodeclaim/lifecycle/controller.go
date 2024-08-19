@@ -141,7 +141,8 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		).
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewMaxOfRateLimiter(
-				workqueue.NewItemExponentialFailureRateLimiter(time.Second, time.Minute),
+				// back off until last attempt occurs ~90 seconds before nodeclaim expiration
+				workqueue.NewItemExponentialFailureRateLimiter(time.Second, 300*time.Second),
 				// 10 qps, 100 bucket size
 				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),

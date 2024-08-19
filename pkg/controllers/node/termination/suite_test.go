@@ -64,12 +64,12 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx)))
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewQueue(env.Client, recorder)
-	terminationController = termination.NewController(env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
+	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
 })
 
 var _ = AfterSuite(func() {
@@ -95,8 +95,8 @@ var _ = Describe("Termination", func() {
 		queue.Reset()
 
 		// Reset the metrics collectors
-		metrics.NodesTerminatedCounter.Reset()
-		termination.TerminationSummary.Reset()
+		metrics.NodesTerminatedTotal.Reset()
+		termination.TerminationDurationSeconds.Reset()
 	})
 
 	Context("Reconciliation", func() {
@@ -117,7 +117,7 @@ var _ = Describe("Termination", func() {
 			// The first reconciliation should trigger the Delete, and set the terminating status condition
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			nc := ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nc.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
+			Expect(nc.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 			ExpectNodeExists(ctx, env.Client, node.Name)
 
 			// The second reconciliation should call get, see the "instance" is terminated, and remove the node.
@@ -182,7 +182,7 @@ var _ = Describe("Termination", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podSkip := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []corev1.Toleration{{Key: v1.DisruptionTaintKey, Operator: corev1.TolerationOpEqual, Effect: v1.DisruptionNoScheduleTaint.Effect, Value: v1.DisruptionNoScheduleTaint.Value}},
+				Tolerations: []corev1.Toleration{{Key: v1.DisruptedTaintKey, Operator: corev1.TolerationOpEqual, Effect: v1.DisruptedNoScheduleTaint.Effect, Value: v1.DisruptedNoScheduleTaint.Value}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podSkip)
@@ -212,7 +212,7 @@ var _ = Describe("Termination", func() {
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podSkip := test.Pod(test.PodOptions{
 				NodeName:    node.Name,
-				Tolerations: []corev1.Toleration{{Key: v1.DisruptionTaintKey, Operator: corev1.TolerationOpExists, Effect: v1.DisruptionNoScheduleTaint.Effect}},
+				Tolerations: []corev1.Toleration{{Key: v1.DisruptedTaintKey, Operator: corev1.TolerationOpExists, Effect: v1.DisruptedNoScheduleTaint.Effect}},
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podSkip)
@@ -763,6 +763,80 @@ var _ = Describe("Termination", func() {
 			ExpectSingletonReconciled(ctx, queue)
 			ExpectDeleted(ctx, env.Client, pod)
 		})
+		Context("VolumeAttachments", func() {
+			It("should wait for volume attachments", func() {
+				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
+					NodeName:   node.Name,
+					VolumeName: "foo",
+				})
+				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va)
+				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectExists(ctx, env.Client, node)
+
+				ExpectDeleted(ctx, env.Client, va)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNotFound(ctx, env.Client, node)
+			})
+			It("should only wait for volume attachments associated with drainable pods", func() {
+				vaDrainable := test.VolumeAttachment(test.VolumeAttachmentOptions{
+					NodeName:   node.Name,
+					VolumeName: "foo",
+				})
+				vaNonDrainable := test.VolumeAttachment(test.VolumeAttachmentOptions{
+					NodeName:   node.Name,
+					VolumeName: "bar",
+				})
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					VolumeName: "bar",
+				})
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: defaultOwnerRefs,
+					},
+					Tolerations: []corev1.Toleration{{
+						Key:      v1.DisruptedTaintKey,
+						Operator: corev1.TolerationOpExists,
+					}},
+					PersistentVolumeClaims: []string{pvc.Name},
+				})
+				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, vaDrainable, vaNonDrainable, pod, pvc)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectExists(ctx, env.Client, node)
+
+				ExpectDeleted(ctx, env.Client, vaDrainable)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNotFound(ctx, env.Client, node)
+			})
+			It("should wait for volume attachments until the nodeclaim's termination grace period expires", func() {
+				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
+					NodeName:   node.Name,
+					VolumeName: "foo",
+				})
+				nodeClaim.Annotations = map[string]string{
+					v1.NodeClaimTerminationTimestampAnnotationKey: fakeClock.Now().Add(time.Minute).Format(time.RFC3339),
+				}
+				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va)
+				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectExists(ctx, env.Client, node)
+
+				fakeClock.Step(5 * time.Minute)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNotFound(ctx, env.Client, node)
+			})
+		})
 	})
 	Context("Metrics", func() {
 		It("should fire the terminationSummary metric when deleting nodes", func() {
@@ -773,7 +847,7 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 
-			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_time_seconds", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_termination_duration_seconds", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(m.GetSummary().GetSampleCount()).To(BeNumerically("==", 1))
 		})
@@ -818,7 +892,7 @@ var _ = Describe("Termination", func() {
 func ExpectNodeWithNodeClaimDraining(c client.Client, nodeName string) *corev1.Node {
 	GinkgoHelper()
 	node := ExpectNodeExists(ctx, c, nodeName)
-	Expect(node.Spec.Taints).To(ContainElement(v1.DisruptionNoScheduleTaint))
+	Expect(node.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 	Expect(lo.Contains(node.Finalizers, v1.TerminationFinalizer)).To(BeTrue())
 	Expect(node.DeletionTimestamp).ToNot(BeNil())
 	return node

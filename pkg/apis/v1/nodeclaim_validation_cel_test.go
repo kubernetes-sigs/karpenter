@@ -21,6 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
+
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	"github.com/Pallinder/go-randomdata"
@@ -93,6 +97,24 @@ var _ = Describe("Validation", func() {
 				{Key: "a", Effect: v1.TaintEffectNoExecute},
 			}
 			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
+		})
+	})
+	Context("NodeClassRef", func() {
+		It("should succeed for valid group", func() {
+			nodeClaim.Spec.NodeClassRef = &NodeClassReference{
+				Kind:  object.GVK(&v1alpha1.TestNodeClass{}).Kind,
+				Name:  "nodeclass-test",
+				Group: object.GVK(&v1alpha1.TestNodeClass{}).Group,
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
+		})
+		It("should fail for invalid group", func() {
+			nodeClaim.Spec.NodeClassRef = &NodeClassReference{
+				Kind:  object.GVK(&v1alpha1.TestNodeClass{}).Kind,
+				Name:  "nodeclass-test",
+				Group: "karpenter.test.sh/v1",
+			}
+			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
 		})
 	})
 	Context("Requirements", func() {

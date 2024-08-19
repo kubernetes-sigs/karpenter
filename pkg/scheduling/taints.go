@@ -21,24 +21,27 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	cloudproviderapi "k8s.io/cloud-provider/api"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 // KnownEphemeralTaints are taints that are expected to be added to a node while it's initializing
 // If the node is a Karpenter-managed node, we don't consider these taints while the node is uninitialized
 // since we expect these taints to eventually be removed
-var KnownEphemeralTaints = []v1.Taint{
-	{Key: v1.TaintNodeNotReady, Effect: v1.TaintEffectNoSchedule},
-	{Key: v1.TaintNodeUnreachable, Effect: v1.TaintEffectNoSchedule},
-	{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: v1.TaintEffectNoSchedule, Value: "true"},
+var KnownEphemeralTaints = []corev1.Taint{
+	{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+	{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
+	{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
+	v1.UnregisteredNoExecuteTaint,
 }
 
-// Taints is a decorated alias type for []v1.Taint
-type Taints []v1.Taint
+// Taints is a decorated alias type for []corev1.Taint
+type Taints []corev1.Taint
 
 // Tolerates returns true if the pod tolerates all taints.
-func (ts Taints) Tolerates(pod *v1.Pod) (errs error) {
+func (ts Taints) Tolerates(pod *corev1.Pod) (errs error) {
 	for i := range ts {
 		taint := ts[i]
 		tolerates := false
@@ -54,11 +57,11 @@ func (ts Taints) Tolerates(pod *v1.Pod) (errs error) {
 
 // Merge merges in taints with the passed in taints.
 func (ts Taints) Merge(with Taints) Taints {
-	res := lo.Map(ts, func(t v1.Taint, _ int) v1.Taint {
+	res := lo.Map(ts, func(t corev1.Taint, _ int) corev1.Taint {
 		return t
 	})
 	for _, taint := range with {
-		if _, ok := lo.Find(res, func(t v1.Taint) bool {
+		if _, ok := lo.Find(res, func(t corev1.Taint) bool {
 			return taint.MatchTaint(&t)
 		}); !ok {
 			res = append(res, taint)

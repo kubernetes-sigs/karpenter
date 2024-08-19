@@ -44,18 +44,14 @@ type Registration struct {
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	if nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() {
-		return reconcile.Result{}, nil
-	}
-	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue() {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRegistered, "NotLaunched", "Node not launched")
+	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsUnknown() {
 		return reconcile.Result{}, nil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
 	node, err := nodeclaimutil.NodeForNodeClaim(ctx, r.kubeClient, nodeClaim)
 	if err != nil {
 		if nodeclaimutil.IsNodeNotFoundError(err) {
-			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRegistered, "NodeNotFound", "Node not registered with cluster")
+			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeRegistered, "NodeNotFound", "Node not registered with cluster")
 			return reconcile.Result{}, nil
 		}
 		if nodeclaimutil.IsDuplicateNodeError(err) {
@@ -70,6 +66,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	// check if sync succeeded but setting the registered status condition failed
 	// if sync succeeded, then the label will be present and the taint will be gone
 	if _, ok := node.Labels[v1.NodeRegisteredLabelKey]; !ok && !hasStartupTaint {
+		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRegistered, "UnregisteredTaintNotFound", fmt.Sprintf("Invariant violated, %s taint must be present on Karpenter-managed nodes", v1.UnregisteredTaintKey))
 		return reconcile.Result{}, fmt.Errorf("missing required startup taint, %s", v1.UnregisteredTaintKey)
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
@@ -83,10 +80,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
 	nodeClaim.Status.NodeName = node.Name
 
-	metrics.NodeClaimsRegisteredCounter.With(prometheus.Labels{
-		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-	}).Inc()
-	metrics.NodesCreatedCounter.With(prometheus.Labels{
+	metrics.NodesCreatedTotal.With(prometheus.Labels{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 	}).Inc()
 	return reconcile.Result{}, nil

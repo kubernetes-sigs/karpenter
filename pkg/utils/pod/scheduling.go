@@ -55,21 +55,27 @@ func IsReschedulable(pod *corev1.Pod) bool {
 // - Does not have the "karpenter.sh/do-not-disrupt=true" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls)
 func IsEvictable(pod *corev1.Pod) bool {
 	return IsActive(pod) &&
-		!ToleratesDisruptionNoScheduleTaint(pod) &&
+		!ToleratesDisruptedNoScheduleTaint(pod) &&
 		!IsOwnedByNode(pod) &&
 		!HasDoNotDisrupt(pod)
 }
 
 // IsWaitingEviction checks if this is a pod that we are waiting to be removed from the node by ensuring that the pod:
 // - Isn't a terminal pod (Failed or Succeeded)
-// - Isn't a pod that has been terminating past its terminationGracePeriodSeconds
-// - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
-// - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
-// Note: pods with the `karpenter.sh/do-not-disrupt` annotation are included since node drain should stall until these pods are evicted or become terminal, even though Karpenter won't orchestrate the eviction.
+// - Can be drained by Karpenter (See IsDrainable)
 func IsWaitingEviction(pod *corev1.Pod, clk clock.Clock) bool {
 	return !IsTerminal(pod) &&
+		IsDrainable(pod, clk)
+}
+
+// IsDrainable checks if a pod can be drained by Karpenter by ensuring that the pod:
+// - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
+// - Isn't a pod that has been terminating past its terminationGracePeriodSeconds
+// - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
+// Note: pods with the `karpenter.sh/do-not-disrupt` annotation are included since node drain should stall until these pods are evicted or become terminal, even though Karpenter won't orchestrate the eviction.
+func IsDrainable(pod *corev1.Pod, clk clock.Clock) bool {
+	return !ToleratesDisruptedNoScheduleTaint(pod) &&
 		!IsStuckTerminating(pod, clk) &&
-		!ToleratesDisruptionNoScheduleTaint(pod) &&
 		// Mirror pods cannot be deleted through the API server since they are created and managed by kubelet
 		// This means they are effectively read-only and can't be controlled by API server calls
 		// https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#drain
@@ -174,9 +180,9 @@ func HasDoNotDisrupt(pod *corev1.Pod) bool {
 	return pod.Annotations[v1.DoNotDisruptAnnotationKey] == "true"
 }
 
-// ToleratesDisruptionNoScheduleTaint returns true if the pod tolerates karpenter.sh/disruption:NoSchedule=Disrupting taint
-func ToleratesDisruptionNoScheduleTaint(pod *corev1.Pod) bool {
-	return scheduling.Taints([]corev1.Taint{v1.DisruptionNoScheduleTaint}).Tolerates(pod) == nil
+// ToleratesDisruptedNoScheduleTaint returns true if the pod tolerates karpenter.sh/disrupted:NoSchedule taint
+func ToleratesDisruptedNoScheduleTaint(pod *corev1.Pod) bool {
+	return scheduling.Taints([]corev1.Taint{v1.DisruptedNoScheduleTaint}).Tolerates(pod) == nil
 }
 
 // HasRequiredPodAntiAffinity returns true if a non-empty PodAntiAffinity/RequiredDuringSchedulingIgnoredDuringExecution

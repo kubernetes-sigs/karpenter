@@ -139,8 +139,8 @@ var _ = Describe("Queue", func() {
 				},
 			},
 		)
-		node1.Spec.Taints = append(node1.Spec.Taints, v1.DisruptionNoScheduleTaint)
-		node2.Spec.Taints = append(node2.Spec.Taints, v1.DisruptionNoScheduleTaint)
+		node1.Spec.Taints = append(node1.Spec.Taints, v1.DisruptedNoScheduleTaint)
+		node2.Spec.Taints = append(node2.Spec.Taints, v1.DisruptedNoScheduleTaint)
 
 		ncName = test.RandomName()
 		replacements = []string{ncName}
@@ -171,7 +171,7 @@ var _ = Describe("Queue", func() {
 			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type"))).To(BeNil())
 
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
-			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptionNoScheduleTaint))
+			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 
 			ExpectSingletonReconciled(ctx, queue)
 
@@ -179,7 +179,7 @@ var _ = Describe("Queue", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
-			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptionNoScheduleTaint))
+			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
 		It("should not return an error when handling commands before the timeout", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, replacementNodeClaim)
@@ -201,7 +201,7 @@ var _ = Describe("Queue", func() {
 
 			ExpectSingletonReconciled(ctx, queue)
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
-			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptionNoScheduleTaint))
+			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
 		It("should fully handle a command when replacements are initialized", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, replacementNodeClaim, replacementNode)

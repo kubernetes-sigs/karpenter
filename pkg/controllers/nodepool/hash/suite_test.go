@@ -77,7 +77,7 @@ var _ = Describe("Static Drift Hash", func() {
 							"keyLabel": "valueLabel",
 						},
 					},
-					Spec: v1.NodeClaimSpec{
+					Spec: v1.NodeClaimTemplateSpec{
 						Taints: []corev1.Taint{
 							{
 								Key:    "key",
@@ -90,7 +90,7 @@ var _ = Describe("Static Drift Hash", func() {
 								Effect: corev1.TaintEffectNoExecute,
 							},
 						},
-						ExpireAfter:            v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)},
+						ExpireAfter:            v1.MustParseNillableDuration("5m"),
 						TerminationGracePeriod: &metav1.Duration{Duration: 5 * time.Minute},
 					},
 				},
@@ -125,7 +125,7 @@ var _ = Describe("Static Drift Hash", func() {
 
 		nodePool.Spec.Limits = v1.Limits(corev1.ResourceList{"cpu": resource.MustParse("16")})
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
-		nodePool.Spec.Disruption.ConsolidateAfter = &v1.NillableDuration{Duration: lo.ToPtr(30 * time.Second)}
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}}},
 			{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}},

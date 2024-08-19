@@ -149,7 +149,7 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (v *Validation) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	return c.nodePool.Spec.Disruption.ConsolidationPolicy == v1.ConsolidationPolicyWhenUnderutilized
+	return c.nodePool.Spec.Disruption.ConsolidateAfter.Duration != nil && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
 // ValidateCommand validates a command for a Method

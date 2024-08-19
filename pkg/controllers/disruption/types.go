@@ -47,7 +47,7 @@ const (
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
 	ComputeCommand(context.Context, map[string]map[v1.DisruptionReason]int, ...*Candidate) (Command, scheduling.Results, error)
-	Type() string
+	Reason() v1.DisruptionReason
 	Class() string
 	ConsolidationType() string
 }
@@ -119,29 +119,29 @@ type Command struct {
 	replacements []*scheduling.NodeClaim
 }
 
-type Action string
+type Decision string
 
 var (
-	NoOpAction    Action = "no-op"
-	ReplaceAction Action = "replace"
-	DeleteAction  Action = "delete"
+	NoOpDecision    Decision = "no-op"
+	ReplaceDecision Decision = "replace"
+	DeleteDecision  Decision = "delete"
 )
 
-func (c Command) Action() Action {
+func (c Command) Decision() Decision {
 	switch {
 	case len(c.candidates) > 0 && len(c.replacements) > 0:
-		return ReplaceAction
+		return ReplaceDecision
 	case len(c.candidates) > 0 && len(c.replacements) == 0:
-		return DeleteAction
+		return DeleteDecision
 	default:
-		return NoOpAction
+		return NoOpDecision
 	}
 }
 
 func (c Command) String() string {
 	var buf bytes.Buffer
 	podCount := lo.Reduce(c.candidates, func(_ int, cd *Candidate, _ int) int { return len(cd.reschedulablePods) }, 0)
-	fmt.Fprintf(&buf, "%s, terminating %d nodes (%d pods) ", c.Action(), len(c.candidates), podCount)
+	fmt.Fprintf(&buf, "%s, terminating %d nodes (%d pods) ", c.Decision(), len(c.candidates), podCount)
 	for i, old := range c.candidates {
 		if i != 0 {
 			fmt.Fprint(&buf, ", ")

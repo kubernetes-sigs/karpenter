@@ -119,7 +119,7 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cluster.Reset()
 	scheduling.QueueDepth.Reset()
-	scheduling.SimulationDurationSeconds.Reset()
+	scheduling.SchedulingDurationSeconds.Reset()
 })
 
 var _ = Context("Scheduling", func() {
@@ -128,7 +128,7 @@ var _ = Context("Scheduling", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
-					Spec: v1.NodeClaimSpec{
+					Spec: v1.NodeClaimTemplateSpec{
 						Requirements: []v1.NodeSelectorRequirementWithMinValues{
 							{
 								NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -3796,7 +3796,7 @@ var _ = Context("Scheduling", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				Eventually(func(g Gomega) {
-					m, ok := FindMetricWithLabelValues("karpenter_provisioner_scheduling_queue_depth", map[string]string{"controller": "provisioner"})
+					m, ok := FindMetricWithLabelValues("karpenter_scheduler_queue_depth", map[string]string{"controller": "provisioner"})
 					g.Expect(ok).To(BeTrue())
 					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
 				}, time.Second).Should(Succeed())
@@ -3826,7 +3826,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).To(BeNil())
 			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
 
-			m, ok := FindMetricWithLabelValues("karpenter_provisioner_scheduling_simulation_duration_seconds", map[string]string{"controller": "provisioner"})
+			m, ok := FindMetricWithLabelValues("karpenter_scheduler_scheduling_duration_seconds", map[string]string{"controller": "provisioner"})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", 1))
 			_, ok = lo.Find(m.Histogram.Bucket, func(b *io_prometheus_client.Bucket) bool { return lo.FromPtr(b.CumulativeCount) > 0 })

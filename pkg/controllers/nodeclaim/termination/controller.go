@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/samber/lo"
 
 	"sigs.k8s.io/karpenter/pkg/utils/termination"
@@ -124,9 +126,9 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		if !isInstanceTerminated {
 			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		InstanceTerminationDuration.With(map[string]string{
+		InstanceTerminationDurationSeconds.With(map[string]string{
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).LastTransitionTime.Time).Seconds())
+		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).LastTransitionTime.Time).Seconds())
 	}
 	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
@@ -140,9 +142,13 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
 		log.FromContext(ctx).Info("deleted nodeclaim")
-		NodeClaimTerminationDuration.With(map[string]string{
+		NodeClaimTerminationDurationSeconds.With(map[string]string{
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
+		metrics.NodeClaimsTerminatedTotal.With(prometheus.Labels{
+			metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+		}).Inc()
 	}
 	return reconcile.Result{}, nil
 }

@@ -25,7 +25,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 const SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
@@ -47,7 +46,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	}
 	candidates = s.sortCandidates(candidates)
 
-	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, v1.DisruptionReasonUnderutilized)
+	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, s.Reason())
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
@@ -57,7 +56,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonUnderutilized] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][s.Reason()] == 0 {
 			constrainedByBudgets = true
 			continue
 		}
@@ -68,7 +67,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			continue
 		}
 		if s.clock.Now().After(timeout) {
-			ConsolidationTimeoutTotalCounter.WithLabelValues(s.ConsolidationType()).Inc()
+			ConsolidationTimeoutsTotal.WithLabelValues(s.ConsolidationType()).Inc()
 			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
 			return Command{}, scheduling.Results{}, nil
 		}
@@ -78,7 +77,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			log.FromContext(ctx).Error(err, "failed computing consolidation")
 			continue
 		}
-		if cmd.Action() == NoOpAction {
+		if cmd.Decision() == NoOpDecision {
 			continue
 		}
 		if err := v.IsValid(ctx, cmd, consolidationTTL); err != nil {
@@ -99,8 +98,8 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	return Command{}, scheduling.Results{}, nil
 }
 
-func (s *SingleNodeConsolidation) Type() string {
-	return metrics.ConsolidationReason
+func (s *SingleNodeConsolidation) Reason() v1.DisruptionReason {
+	return v1.DisruptionReasonUnderutilized
 }
 
 func (s *SingleNodeConsolidation) Class() string {

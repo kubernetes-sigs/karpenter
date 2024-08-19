@@ -21,11 +21,12 @@ import (
 	"testing"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/metrics"
+
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
@@ -89,9 +90,10 @@ var _ = Describe("Expiration", func() {
 				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
 			},
 			Spec: v1.NodeClaimSpec{
-				ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+				ExpireAfter: v1.MustParseNillableDuration("30s"),
 			},
 		})
+		metrics.NodeClaimsDisruptedTotal.Reset()
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
@@ -103,14 +105,12 @@ var _ = Describe("Expiration", func() {
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted_total", map[string]string{
-				"type":     "expiration",
-				"nodepool": nodePool.Name,
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel: metrics.ExpiredReason,
+				"nodepool":          nodePool.Name,
 			})
-			Expect(found).To(BeTrue())
-			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
 		})
-		It("should fire a karpenter_nodeclaims_terminated metric when expired", func() {
+		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
 			nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeSpot
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
@@ -119,23 +119,20 @@ var _ = Describe("Expiration", func() {
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
-			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated_total", map[string]string{
-				"reason":        "expiration",
-				"nodepool":      nodePool.Name,
-				"capacity_type": nodeClaim.Labels[v1.CapacityTypeLabelKey],
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel: metrics.ExpiredReason,
+				"nodepool":          nodePool.Name,
 			})
-			Expect(found).To(BeTrue())
-			Expect(metric.GetCounter().GetValue()).To(BeNumerically("==", 1))
 		})
 	})
 	It("should not remove the NodeClaims when expiration is disabled", func() {
-		nodeClaim.Spec.ExpireAfter.Duration = nil
+		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should remove nodeclaims that are expired", func() {
-		nodeClaim.Spec.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// step forward to make the node expired
@@ -146,13 +143,13 @@ var _ = Describe("Expiration", func() {
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should not remove non-expired NodeClaims", func() {
-		nodeClaim.Spec.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
+		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should delete NodeClaims if the nodeClaim is expired but the node isn't", func() {
-		nodeClaim.Spec.ExpireAfter.Duration = lo.ToPtr(time.Second * 30)
+		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// step forward to make the node expired
@@ -163,7 +160,7 @@ var _ = Describe("Expiration", func() {
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should return the requeue interval for the time between now and when the nodeClaim expires", func() {
-		nodeClaim.Spec.ExpireAfter.Duration = lo.ToPtr(time.Second * 200)
+		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
 
 		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))

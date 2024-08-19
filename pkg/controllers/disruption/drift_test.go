@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/metrics"
+
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -48,7 +50,7 @@ var _ = Describe("Drift", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidateAfter: &v1.NillableDuration{Duration: nil},
+					ConsolidateAfter: v1.MustParseNillableDuration("Never"),
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
@@ -77,8 +79,7 @@ var _ = Describe("Drift", func() {
 	})
 	Context("Metrics", func() {
 		var eligibleNodesLabels = map[string]string{
-			"method":             "drift",
-			"consolidation_type": "",
+			metrics.ReasonLabel: "drifted",
 		}
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
@@ -96,7 +97,7 @@ var _ = Describe("Drift", func() {
 
 			fakeClock.Step(10 * time.Minute)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 0, eligibleNodesLabels)
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, eligibleNodesLabels)
 
 			// remove the do-not-disrupt annotation to make the node eligible for drift and update cluster state
 			pod.SetAnnotations(map[string]string{})
@@ -105,7 +106,7 @@ var _ = Describe("Drift", func() {
 
 			fakeClock.Step(10 * time.Minute)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			ExpectMetricGaugeValue(disruption.EligibleNodesGauge, 1, eligibleNodesLabels)
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, eligibleNodesLabels)
 		})
 	})
 	Context("Budgets", func() {
@@ -151,7 +152,7 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -190,7 +191,7 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -228,7 +229,7 @@ var _ = Describe("Drift", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -302,7 +303,7 @@ var _ = Describe("Drift", func() {
 
 			nodes = ExpectNodes(ctx, env.Client)
 			Expect(len(lo.Filter(nodes, func(nc *corev1.Node, _ int) bool {
-				return lo.Contains(nc.Spec.Taints, v1.DisruptionNoScheduleTaint)
+				return lo.Contains(nc.Spec.Taints, v1.DisruptedNoScheduleTaint)
 			}))).To(Equal(3))
 			// Execute all commands in the queue, only deleting 3 nodes
 			for i := 0; i < 5; i++ {
@@ -315,15 +316,15 @@ var _ = Describe("Drift", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidateAfter: &v1.NillableDuration{Duration: nil},
+						ConsolidateAfter: v1.MustParseNillableDuration("Never"),
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
 						}},
 					},
 					Template: v1.NodeClaimTemplate{
-						Spec: v1.NodeClaimSpec{
-							ExpireAfter: v1.NillableDuration{Duration: nil},
+						Spec: v1.NodeClaimTemplateSpec{
+							ExpireAfter: v1.MustParseNillableDuration("Never"),
 						},
 					},
 				},
@@ -366,7 +367,7 @@ var _ = Describe("Drift", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
@@ -382,7 +383,7 @@ var _ = Describe("Drift", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidateAfter: &v1.NillableDuration{Duration: nil},
+						ConsolidateAfter: v1.MustParseNillableDuration("Never"),
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
 						}},
@@ -427,7 +428,7 @@ var _ = Describe("Drift", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_nodepool_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
@@ -765,7 +766,7 @@ var _ = Describe("Drift", func() {
 			ExpectSingletonReconciled(ctx, queue)
 			// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
 			node = ExpectExists(ctx, env.Client, node)
-			Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptionNoScheduleTaint))
+			Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
 		It("can replace drifted nodes with multiple nodes", func() {
 			currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
