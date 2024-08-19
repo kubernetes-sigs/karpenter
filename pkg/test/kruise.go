@@ -21,7 +21,8 @@ import (
 
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/imdario/mergo"
-	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	kruisev1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	kruisev1beta1 "github.com/openkruise/kruise/apis/apps/v1beta1"
 	"github.com/samber/lo"
 
 	v1 "k8s.io/api/core/v1"
@@ -38,7 +39,7 @@ type KruiseDaemonSetOptions struct {
 
 // KruiseDaemonSet creates a test pod with defaults that can be overridden by DaemonSetOptions.
 // Overrides are applied in order, with a last write wins semantic.
-func KruiseDaemonSet(overrides ...DaemonSetOptions) *kruise.DaemonSet {
+func KruiseDaemonSet(overrides ...DaemonSetOptions) *kruisev1alpha1.DaemonSet {
 	options := DaemonSetOptions{}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
@@ -54,9 +55,9 @@ func KruiseDaemonSet(overrides ...DaemonSetOptions) *kruise.DaemonSet {
 	if options.Selector == nil {
 		options.Selector = map[string]string{"app": options.Name}
 	}
-	return &kruise.DaemonSet{
+	return &kruisev1alpha1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{Name: options.Name, Namespace: options.Namespace},
-		Spec: kruise.DaemonSetSpec{
+		Spec: kruisev1alpha1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{MatchLabels: options.Selector},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: options.Selector},
@@ -66,7 +67,7 @@ func KruiseDaemonSet(overrides ...DaemonSetOptions) *kruise.DaemonSet {
 	}
 }
 
-func KruiseStatefulSet(overrides ...StatefulSetOptions) *kruise.StatefulSet {
+func KruiseStatefulSet(overrides ...StatefulSetOptions) *kruisev1beta1.StatefulSet {
 	options := StatefulSetOptions{}
 	for _, opts := range overrides {
 		if err := mergo.Merge(&options, opts, mergo.WithOverride); err != nil {
@@ -85,9 +86,9 @@ func KruiseStatefulSet(overrides ...StatefulSetOptions) *kruise.StatefulSet {
 		}
 	}
 	pod := Pod(options.PodOptions)
-	return &kruise.StatefulSet{
+	return &kruisev1beta1.StatefulSet{
 		ObjectMeta: objectMeta,
-		Spec: kruise.StatefulSetSpec{
+		Spec: kruisev1beta1.StatefulSetSpec{
 			Replicas: lo.ToPtr(options.Replicas),
 			Selector: &metav1.LabelSelector{MatchLabels: options.PodOptions.Labels},
 			Template: v1.PodTemplateSpec{
@@ -809,8 +810,8 @@ spec:
                                   For example:
                                   '''
                                   orderPriority:
-			                      - orderedKey: key1
-                                  - orderedKey: key2
+                                    - orderedKey: key1
+                                    - orderedKey: key2
                                   '''
                                   First, all pods which have key1 in labels will be sorted by the value of key1.
                                   Then, the left pods which have no key1 but have key2 in labels will be sorted by
@@ -1610,4 +1611,5 @@ spec:
 
 var KruiseCRDs = []*apiextensionsv1.CustomResourceDefinition{
 	object.Unmarshal[apiextensionsv1.CustomResourceDefinition](KruiseDaemonSetCRD),
+	object.Unmarshal[apiextensionsv1.CustomResourceDefinition](KruiseStatefulSetCRD),
 }

@@ -26,7 +26,8 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 
-	kruise "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	kruisev1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	kruisev1beta1 "github.com/openkruise/kruise/apis/apps/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,7 +43,11 @@ import (
 func init() {
 	gv := schema.GroupVersion{Group: "apps.kruise.io", Version: "v1alpha1"}
 	v1.AddToGroupVersion(scheme.Scheme, gv)
-	scheme.Scheme.AddKnownTypes(gv, &kruise.DaemonSet{})
+	scheme.Scheme.AddKnownTypes(gv, &kruisev1alpha1.DaemonSet{})
+
+	gv = schema.GroupVersion{Group: "apps.kruise.io", Version: "v1beta1"}
+	v1.AddToGroupVersion(scheme.Scheme, gv)
+	scheme.Scheme.AddKnownTypes(gv, &kruisev1beta1.StatefulSet{})
 }
 
 type KruiseDaemonSetController struct {
@@ -60,7 +65,7 @@ func NewKruiseDaemonSetController(kubeClient client.Client, cluster *state.Clust
 func (c *KruiseDaemonSetController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "state.kruise-daemonset")
 
-	daemonSet := kruise.DaemonSet{}
+	daemonSet := kruisev1alpha1.DaemonSet{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, &daemonSet); err != nil {
 		if errors.IsNotFound(err) {
 			// notify cluster state of the daemonset deletion
@@ -86,7 +91,7 @@ func (c *KruiseDaemonSetController) Register(ctx context.Context, m manager.Mana
 
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.kruise-daemonset").
-		For(&kruise.DaemonSet{}).
+		For(&kruisev1alpha1.DaemonSet{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(c)
 }
