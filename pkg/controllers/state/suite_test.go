@@ -100,7 +100,7 @@ var _ = BeforeEach(func() {
 	ExpectApplied(ctx, env.Client, nodePool)
 })
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectCleanedUp(ctx, env.Client, test.KruiseObjects...)
 	cluster.Reset()
 	cloudProvider.Reset()
 })

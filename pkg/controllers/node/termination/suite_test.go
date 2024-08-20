@@ -89,7 +89,7 @@ var _ = Describe("Termination", func() {
 	})
 
 	AfterEach(func() {
-		ExpectCleanedUp(ctx, env.Client)
+		ExpectCleanedUp(ctx, env.Client, test.KruiseObjects...)
 		fakeClock.SetTime(time.Now())
 		cloudProvider.Reset()
 		queue.Reset()

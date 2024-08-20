@@ -96,7 +96,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectCleanedUp(ctx, env.Client, test.KruiseObjects...)
 	cloudProvider.Reset()
 	cluster.Reset()
 })

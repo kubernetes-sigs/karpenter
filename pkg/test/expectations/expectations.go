@@ -32,8 +32,6 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
 	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
-	kruisev1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
-	kruisev1beta1 "github.com/openkruise/kruise/apis/apps/v1beta1"
 	"github.com/prometheus/client_golang/prometheus"
 	prometheusmodel "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
@@ -218,13 +216,13 @@ func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ..
 	}
 }
 
-func ExpectCleanedUp(ctx context.Context, c client.Client) {
+func ExpectCleanedUp(ctx context.Context, c client.Client, extendedResources ...client.Object) {
 	GinkgoHelper()
 	wg := sync.WaitGroup{}
 	namespaces := &corev1.NamespaceList{}
 	Expect(c.List(ctx, namespaces)).To(Succeed())
 	ExpectFinalizersRemovedFromList(ctx, c, &corev1.NodeList{}, &v1.NodeClaimList{}, &corev1.PersistentVolumeClaimList{})
-	for _, object := range []client.Object{
+	for _, object := range append([]client.Object{
 		&corev1.Pod{},
 		&corev1.Node{},
 		&appsv1.DaemonSet{},
@@ -236,9 +234,7 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.NodePool{},
 		&v1alpha1.TestNodeClass{},
 		&v1.NodeClaim{},
-		&kruisev1beta1.StatefulSet{},
-		&kruisev1alpha1.DaemonSet{},
-	} {
+	}, extendedResources...) {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
 			go func(object client.Object, namespace string) {

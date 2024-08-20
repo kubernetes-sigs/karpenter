@@ -28,6 +28,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // DaemonSetOptions customizes a DaemonSet.
@@ -1612,4 +1613,9 @@ spec:
 var KruiseCRDs = []*apiextensionsv1.CustomResourceDefinition{
 	object.Unmarshal[apiextensionsv1.CustomResourceDefinition](KruiseDaemonSetCRD),
 	object.Unmarshal[apiextensionsv1.CustomResourceDefinition](KruiseStatefulSetCRD),
+}
+
+var KruiseObjects = []client.Object{
+	&kruisev1alpha1.DaemonSet{},
+	&kruisev1beta1.StatefulSet{},
 }

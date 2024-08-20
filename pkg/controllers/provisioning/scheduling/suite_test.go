@@ -114,7 +114,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectCleanedUp(ctx, env.Client, test.KruiseObjects...)
 	cluster.Reset()
 	scheduling.QueueDepth.Reset()
 	scheduling.SchedulingDurationSeconds.Reset()
