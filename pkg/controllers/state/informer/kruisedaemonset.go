@@ -43,11 +43,11 @@ import (
 func init() {
 	gv := schema.GroupVersion{Group: "apps.kruise.io", Version: "v1alpha1"}
 	v1.AddToGroupVersion(scheme.Scheme, gv)
-	scheme.Scheme.AddKnownTypes(gv, &kruisev1alpha1.DaemonSet{})
+	scheme.Scheme.AddKnownTypes(gv, &kruisev1alpha1.DaemonSet{}, &kruisev1alpha1.DaemonSetList{})
 
 	gv = schema.GroupVersion{Group: "apps.kruise.io", Version: "v1beta1"}
 	v1.AddToGroupVersion(scheme.Scheme, gv)
-	scheme.Scheme.AddKnownTypes(gv, &kruisev1beta1.StatefulSet{})
+	scheme.Scheme.AddKnownTypes(gv, &kruisev1beta1.StatefulSet{}, &kruisev1beta1.StatefulSetList{})
 }
 
 type KruiseDaemonSetController struct {

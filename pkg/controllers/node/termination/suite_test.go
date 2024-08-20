@@ -424,7 +424,7 @@ var _ = Describe("Termination", func() {
 				BlockOwnerDeletion: lo.ToPtr(true),
 			}}}})
 
-			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podNodeCritical, podClusterCritical, podDaemonEvict, podDaemonNodeCritical, podDaemonClusterCritical)
+			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podNodeCritical, podClusterCritical, podDaemonEvict, podDaemonNodeCritical, podDaemonClusterCritical, podKruiseDaemonEvict, podKruiseDaemonNodeCritical, podKruiseDaemonClusterCritical)
 
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
