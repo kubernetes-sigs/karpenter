@@ -88,7 +88,7 @@ func TestScheduling(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithCRDs(test.KruiseCRDs...))
-	ctx = options.ToContext(ctx, test.Options())
+	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{SupportKruise: lo.ToPtr(false)}))
 	cloudProvider = fake.NewCloudProvider()
 	instanceTypes, _ := cloudProvider.GetInstanceTypes(ctx, nil)
 	// set these on the cloud provider, so we can manipulate them if needed
@@ -3506,6 +3506,63 @@ var _ = Context("Scheduling", func() {
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion:         "apps/v1",
+								Kind:               "DaemonSet",
+								Name:               ds.Name,
+								UID:                ds.UID,
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
+							},
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceMemory: resource.MustParse("100M"),
+						},
+					},
+				},
+			)
+			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: "small-instance-type",
+						v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone:       "test-zone-1a",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
+
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// Mark for deletion so that we consider all pods on this node for reschedulability
+			cluster.MarkForDeletion(node.Spec.ProviderID)
+
+			// Trigger an eviction to set the deletion timestamp but not delete the pod
+			ExpectEvicted(ctx, env.Client, pod)
+			ExpectExists(ctx, env.Client, pod)
+
+			// Trigger a provisioning loop and expect that we don't create more nodes since we don't consider
+			// generic terminating pods
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
+
+			// We shouldn't create an additional node here because this is a standard pod
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodes).To(HaveLen(1))
+		})
+		It("should not re-schedule pods from a deleting node when pods are owned by a Kruise DaemonSet", func() {
+			ds := test.KruiseDaemonSet()
+			ExpectApplied(ctx, env.Client, nodePool, ds)
+
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps.kruise.io/v1alpha1",
 								Kind:               "DaemonSet",
 								Name:               ds.Name,
 								UID:                ds.UID,
