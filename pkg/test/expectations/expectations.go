@@ -32,6 +32,8 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
 	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
+	kruisev1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	kruisev1beta1 "github.com/openkruise/kruise/apis/apps/v1beta1"
 	"github.com/prometheus/client_golang/prometheus"
 	prometheusmodel "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
@@ -234,6 +236,8 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.NodePool{},
 		&v1alpha1.TestNodeClass{},
 		&v1.NodeClaim{},
+		&kruisev1beta1.StatefulSet{},
+		&kruisev1alpha1.DaemonSet{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)

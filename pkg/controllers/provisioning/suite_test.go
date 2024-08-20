@@ -71,7 +71,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithCRDs(test.KruiseCRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
@@ -87,7 +87,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = BeforeEach(func() {
-	ctx = options.ToContext(ctx, test.Options())
+	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{SupportKruise: lo.ToPtr(true)}))
 	cloudProvider.Reset()
 })
 
@@ -603,6 +603,38 @@ var _ = Describe("Provisioning", func() {
 			allocatable := instanceTypeMap[node.Labels[corev1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for overhead with kruise daemonset", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+				}},
+			))
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.KruiseDaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
+				}},
+			))
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+				},
+			)
+			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 4)),
+				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+			})
+			cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 8)),
+				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 8)),
+			})
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+
+			ExpectResources(corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			}, node.Status.Capacity)
 		})
 		It("should account for overhead (with startup taint)", func() {
 			nodePool := test.NodePool(v1.NodePool{
