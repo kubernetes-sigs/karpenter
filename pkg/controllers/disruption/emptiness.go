@@ -68,7 +68,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonEmpty] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][e.Reason()] == 0 {
 			// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 			constrainedByBudgets = true
 			continue
@@ -76,7 +76,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
 		empty = append(empty, candidate)
-		disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonEmpty]--
+		disruptionBudgetMapping[candidate.nodePool.Name][e.Reason()]--
 	}
 	// none empty, so do nothing
 	if len(empty) == 0 {
@@ -102,7 +102,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	case <-e.clock.After(consolidationTTL):
 	}
 
-	v := NewValidation(e.clock, e.cluster, e.kubeClient, e.provisioner, e.cloudProvider, e.recorder, e.queue, v1.DisruptionReasonEmpty)
+	v := NewValidation(e.clock, e.cluster, e.kubeClient, e.provisioner, e.cloudProvider, e.recorder, e.queue, e.Reason())
 	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
 	if err != nil {
 		if IsValidationError(err) {

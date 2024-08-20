@@ -64,6 +64,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	// check if sync succeeded but setting the registered status condition failed
 	// if sync succeeded, then the label will be present and the taint will be gone
 	if _, ok := node.Labels[v1.NodeRegisteredLabelKey]; !ok && !hasStartupTaint {
+		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRegistered, "UnregisteredTaintNotFound", fmt.Sprintf("Invariant violated, %s taint must be present on Karpenter-managed nodes", v1.UnregisteredTaintKey))
 		return reconcile.Result{}, fmt.Errorf("missing required startup taint, %s", v1.UnregisteredTaintKey)
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))

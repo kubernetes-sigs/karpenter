@@ -50,7 +50,7 @@ var _ = Describe("Drift", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidateAfter: v1.NillableDuration{Duration: nil},
+					ConsolidateAfter: v1.MustParseNillableDuration("Never"),
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
@@ -79,7 +79,7 @@ var _ = Describe("Drift", func() {
 	})
 	Context("Metrics", func() {
 		var eligibleNodesLabels = map[string]string{
-			metrics.ReasonLabel: string(v1.DisruptionReasonDrifted),
+			metrics.ReasonLabel: "drifted",
 		}
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
@@ -316,7 +316,7 @@ var _ = Describe("Drift", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidateAfter: v1.NillableDuration{Duration: nil},
+						ConsolidateAfter: v1.MustParseNillableDuration("Never"),
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
 							Nodes: "50%",
@@ -324,7 +324,7 @@ var _ = Describe("Drift", func() {
 					},
 					Template: v1.NodeClaimTemplate{
 						Spec: v1.NodeClaimTemplateSpec{
-							ExpireAfter: v1.NillableDuration{Duration: nil},
+							ExpireAfter: v1.MustParseNillableDuration("Never"),
 						},
 					},
 				},
@@ -383,7 +383,7 @@ var _ = Describe("Drift", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidateAfter: v1.NillableDuration{Duration: nil},
+						ConsolidateAfter: v1.MustParseNillableDuration("Never"),
 						Budgets: []v1.Budget{{
 							Nodes: "100%",
 						}},

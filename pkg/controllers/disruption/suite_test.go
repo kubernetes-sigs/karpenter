@@ -162,7 +162,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
+					ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
 					ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
 				},
 			},
@@ -203,7 +203,7 @@ var _ = Describe("Simulate Scheduling", func() {
 				},
 			},
 		})
-		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: nil}
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, nodes[0])
 
@@ -246,7 +246,7 @@ var _ = Describe("Simulate Scheduling", func() {
 				},
 			},
 			Spec: v1.NodeClaimSpec{
-				ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)},
+				ExpireAfter: v1.MustParseNillableDuration("5m"),
 			},
 			Status: v1.NodeClaimStatus{
 				Allocatable: map[corev1.ResourceName]resource.Quantity{
@@ -281,7 +281,7 @@ var _ = Describe("Simulate Scheduling", func() {
 			},
 		})
 
-		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: nil}
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "3"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 
@@ -523,7 +523,7 @@ var _ = Describe("Disruption Taints", func() {
 				},
 			},
 		})
-		nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{Duration: nil}
+		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
@@ -1752,7 +1752,7 @@ var _ = Describe("Metrics", func() {
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
 					ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-					ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Duration(0))},
+					ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
@@ -1793,7 +1793,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "delete",
-			metrics.ReasonLabel: string(v1.DisruptionReasonDrifted),
+			metrics.ReasonLabel: "drifted",
 		})
 	})
 	It("should fire metrics for single node delete disruption", func() {
@@ -1820,7 +1820,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "delete",
-			metrics.ReasonLabel: string(v1.DisruptionReasonDrifted),
+			metrics.ReasonLabel: "drifted",
 		})
 	})
 	It("should fire metrics for single node replace disruption", func() {
@@ -1845,7 +1845,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "replace",
-			metrics.ReasonLabel: string(v1.DisruptionReasonDrifted),
+			metrics.ReasonLabel: "drifted",
 		})
 	})
 	It("should fire metrics for multi-node empty disruption", func() {
@@ -1863,7 +1863,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "delete",
-			metrics.ReasonLabel:  string(v1.DisruptionReasonEmpty),
+			metrics.ReasonLabel:  "empty",
 			"consolidation_type": "empty",
 		})
 	})
@@ -1905,7 +1905,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "delete",
-			metrics.ReasonLabel:  string(v1.DisruptionReasonUnderutilized),
+			metrics.ReasonLabel:  "underutilized",
 			"consolidation_type": "multi",
 		})
 	})
@@ -1967,7 +1967,7 @@ var _ = Describe("Metrics", func() {
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "replace",
-			metrics.ReasonLabel:  string(v1.DisruptionReasonUnderutilized),
+			metrics.ReasonLabel:  "underutilized",
 			"consolidation_type": "multi",
 		})
 	})

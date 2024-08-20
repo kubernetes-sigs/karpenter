@@ -162,7 +162,7 @@ func (env *Environment) DefaultNodePool(nodeClass *v1alpha1.KWOKNodeClass) *v1.N
 	nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
 		Name:  nodeClass.Name,
 		Kind:  object.GVK(nodeClass).Kind,
-		Group: object.GVK(nodeClass).GroupVersion().String(),
+		Group: object.GVK(nodeClass).Group,
 	}
 	nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 		{
@@ -180,7 +180,7 @@ func (env *Environment) DefaultNodePool(nodeClass *v1alpha1.KWOKNodeClass) *v1.N
 			},
 		},
 	}
-	nodePool.Spec.Disruption.ConsolidateAfter = v1.NillableDuration{}
+	nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 	nodePool.Spec.Template.Spec.ExpireAfter.Duration = nil
 	nodePool.Spec.Limits = v1.Limits(corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse("1000"),

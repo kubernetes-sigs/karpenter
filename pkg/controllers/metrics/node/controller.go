@@ -61,7 +61,7 @@ var (
 			Namespace: "karpenter",
 			Subsystem: "nodes",
 			Name:      "total_pod_requests",
-			Help:      "Node total pod requests are the resources requested by non-DaemonSet pods bound to nodes.",
+			Help:      "Node total pod requests are the resources requested by pods bound to nodes, including the DaemonSet pods.",
 		},
 		nodeLabelNames(),
 	)
@@ -70,7 +70,7 @@ var (
 			Namespace: "karpenter",
 			Subsystem: "nodes",
 			Name:      "total_pod_limits",
-			Help:      "Node total pod limits are the resources specified by non-DaemonSet pod limits.",
+			Help:      "Node total pod limits are the resources specified by pod limits, including the DaemonSet pods.",
 		},
 		nodeLabelNames(),
 	)
@@ -160,8 +160,8 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]corev1.ResourceList{
 		systemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
-		totalPodRequests:    resources.Subtract(n.PodRequests(), n.DaemonSetRequests()),
-		totalPodLimits:      resources.Subtract(n.PodLimits(), n.DaemonSetLimits()),
+		totalPodRequests:    n.PodRequests(),
+		totalPodLimits:      n.PodLimits(),
 		totalDaemonRequests: n.DaemonSetRequests(),
 		totalDaemonLimits:   n.DaemonSetLimits(),
 		allocatable:         n.Node.Status.Allocatable,

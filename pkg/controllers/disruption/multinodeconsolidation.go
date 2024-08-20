@@ -61,7 +61,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	for _, candidate := range candidates {
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonUnderutilized] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][m.Reason()] == 0 {
 			constrainedByBudgets = true
 			continue
 		}
@@ -73,7 +73,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		}
 		// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 		disruptableCandidates = append(disruptableCandidates, candidate)
-		disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonUnderutilized]--
+		disruptionBudgetMapping[candidate.nodePool.Name][m.Reason()]--
 	}
 
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.
@@ -95,7 +95,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, scheduling.Results{}, nil
 	}
 
-	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue, v1.DisruptionReasonUnderutilized).IsValid(ctx, cmd, consolidationTTL); err != nil {
+	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue, m.Reason()).IsValid(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
 			return Command{}, scheduling.Results{}, nil

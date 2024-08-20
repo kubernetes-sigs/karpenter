@@ -138,7 +138,7 @@ var _ = Describe("Termination", func() {
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // now all the nodes are gone so nodeClaim deletion continues
 		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
@@ -182,7 +182,7 @@ var _ = Describe("Termination", func() {
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // this will ensure that we call cloudProvider Get to check if the instance is still around
 		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 	})
 	It("should delete multiple Nodes if multiple Nodes map to the NodeClaim", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)

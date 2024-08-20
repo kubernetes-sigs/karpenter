@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -130,7 +131,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		c.recordRun(fmt.Sprintf("%T", m))
 		success, err := c.disrupt(ctx, m)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("disrupting via %q, %w", m.Reason(), err)
+			return reconcile.Result{}, fmt.Errorf("disrupting via reason=%q, %w", strings.ToLower(string(m.Reason())), err)
 		}
 		if success {
 			return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
@@ -143,7 +144,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
 	defer metrics.Measure(EvaluationDurationSeconds.With(map[string]string{
-		metrics.ReasonLabel:    string(disruption.Reason()),
+		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		consolidationTypeLabel: disruption.ConsolidationType(),
 	}))()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
@@ -151,7 +152,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
 	EligibleNodes.With(map[string]string{
-		metrics.ReasonLabel: string(disruption.Reason()),
+		metrics.ReasonLabel: strings.ToLower(string(disruption.Reason())),
 	}).Set(float64(len(candidates)))
 
 	// If there are no candidates, move to the next disruption
@@ -184,7 +185,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
 	commandID := uuid.NewUUID()
-	log.FromContext(ctx).WithValues("command-id", commandID).Info(fmt.Sprintf("disrupting via %s %s", m.Reason(), cmd))
+	log.FromContext(ctx).WithValues("command-id", commandID, "reason", strings.ToLower(string(m.Reason()))).Info(fmt.Sprintf("disrupting nodeclaim(s) via %s", cmd))
 
 	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode {
 		return c.StateNode
@@ -228,7 +229,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
 	DecisionsPerformedTotal.With(map[string]string{
 		decisionLabel:          string(cmd.Decision()),
-		metrics.ReasonLabel:    string(m.Reason()),
+		metrics.ReasonLabel:    strings.ToLower(string(m.Reason())),
 		consolidationTypeLabel: m.ConsolidationType(),
 	}).Inc()
 	return nil
@@ -236,7 +237,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 
 // createReplacementNodeClaims creates replacement NodeClaims
 func (c *Controller) createReplacementNodeClaims(ctx context.Context, m Method, cmd Command) ([]string, error) {
-	nodeClaimNames, err := c.provisioner.CreateNodeClaims(ctx, cmd.replacements, provisioning.WithReason(string(m.Reason())))
+	nodeClaimNames, err := c.provisioner.CreateNodeClaims(ctx, cmd.replacements, provisioning.WithReason(strings.ToLower(string(m.Reason()))))
 	if err != nil {
 		return nil, err
 	}

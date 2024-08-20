@@ -54,7 +54,7 @@ var _ = Describe("Emptiness", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Second * 0)},
+					ConsolidateAfter:    v1.MustParseNillableDuration("0s"),
 					ConsolidationPolicy: v1.ConsolidationPolicyWhenEmpty,
 					// Disrupt away!
 					Budgets: []v1.Budget{{
@@ -97,7 +97,7 @@ var _ = Describe("Emptiness", func() {
 			fakeClock.Step(10 * time.Minute)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
-				metrics.ReasonLabel: string(v1.DisruptionReasonEmpty),
+				metrics.ReasonLabel: "empty",
 			})
 
 			ExpectDeleted(ctx, env.Client, pod)
@@ -110,7 +110,7 @@ var _ = Describe("Emptiness", func() {
 			wg.Wait()
 
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
-				metrics.ReasonLabel: string(v1.DisruptionReasonEmpty),
+				metrics.ReasonLabel: "empty",
 			})
 		})
 	})
@@ -256,7 +256,7 @@ var _ = Describe("Emptiness", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+						ConsolidateAfter:    v1.MustParseNillableDuration("30s"),
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmpty,
 						Budgets: []v1.Budget{{
 							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
@@ -326,7 +326,7 @@ var _ = Describe("Emptiness", func() {
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
-						ConsolidateAfter:    v1.NillableDuration{Duration: lo.ToPtr(time.Second * 30)},
+						ConsolidateAfter:    v1.MustParseNillableDuration("30s"),
 						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmpty,
 						Budgets: []v1.Budget{{
 							Nodes: "100%",

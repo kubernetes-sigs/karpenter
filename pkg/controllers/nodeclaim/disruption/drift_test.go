@@ -368,7 +368,7 @@ var _ = Describe("Drift", func() {
 							NodeClassRef: &v1.NodeClassReference{
 								Kind:  "fakeKind",
 								Name:  "fakeName",
-								Group: "fakeGroup/fakeVerion",
+								Group: "fakeGroup",
 							},
 							Taints: []corev1.Taint{
 								{
@@ -382,7 +382,7 @@ var _ = Describe("Drift", func() {
 									Effect: corev1.TaintEffectNoExecute,
 								},
 							},
-							ExpireAfter:            v1.NillableDuration{Duration: lo.ToPtr(5 * time.Minute)},
+							ExpireAfter:            v1.MustParseNillableDuration("5m"),
 							TerminationGracePeriod: &metav1.Duration{Duration: 5 * time.Minute},
 						},
 					},
@@ -416,7 +416,7 @@ var _ = Describe("Drift", func() {
 			Entry("NodeClassRef APIVersion", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Group: "testVersion"}}}}}),
 			Entry("NodeClassRef Name", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Name: "testName"}}}}}),
 			Entry("NodeClassRef Kind", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Kind: "testKind"}}}}}),
-			Entry("ExpireAfter", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{ExpireAfter: v1.NillableDuration{Duration: lo.ToPtr(100 * time.Minute)}}}}}),
+			Entry("ExpireAfter", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{ExpireAfter: v1.MustParseNillableDuration("100m")}}}}),
 			Entry("TerminationGracePeriod", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{TerminationGracePeriod: &metav1.Duration{Duration: 100 * time.Minute}}}}}),
 		)
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodePool", func() {

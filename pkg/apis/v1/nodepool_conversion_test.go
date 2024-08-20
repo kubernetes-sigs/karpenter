@@ -188,33 +188,43 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 						Group: object.GVK(&v1alpha1.TestNodeClass{}).Group,
 					}
 					Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind))
 					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Name))
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].GroupVersion().String()))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(BeEmpty())
 				})
-				It("should not include APIVersion for v1beta1 if Group and Kind is not in the supported nodeclass", func() {
+				It("should retain NodeClassReference details when the karpenter.sh/v1beta1-nodeclass-reference annotation exists", func() {
+					nodeClassReference := &v1beta1.NodeClassReference{
+						APIVersion: object.GVK(&v1alpha1.TestNodeClass{}).GroupVersion().String(),
+						Name:       "nodeclass-test",
+						Kind:       object.GVK(&v1alpha1.TestNodeClass{}).Kind,
+					}
+					nodeClassAnnotation, err := json.Marshal(nodeClassReference)
+					Expect(err).ToNot(HaveOccurred())
+					v1nodepool.Annotations = lo.Assign(map[string]string{
+						NodeClassReferenceAnnotationKey: string(nodeClassAnnotation),
+					})
 					v1nodepool.Spec.Template.Spec.NodeClassRef = &NodeClassReference{
-						Kind:  "test-kind",
+						Kind:  object.GVK(&v1alpha1.TestNodeClass{}).Kind,
 						Name:  "nodeclass-test",
-						Group: "testgroup.sh",
+						Group: object.GVK(&v1alpha1.TestNodeClass{}).Group,
 					}
 					Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind))
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(v1nodepool.Spec.Template.Spec.NodeClassRef.Name))
-					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(""))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(nodeClassReference.Name))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(nodeClassReference.Kind))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(nodeClassReference.APIVersion))
 				})
 			})
 		})
 		Context("Disruption", func() {
 			It("should convert v1 nodepool consolidateAfter to nil with WhenEmptyOrUnderutilized", func() {
 				v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmptyOrUnderutilized
-				v1nodepool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
+				v1nodepool.Spec.Disruption.ConsolidateAfter = MustParseNillableDuration("2121s")
 				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
 				Expect(v1beta1nodepool.Spec.Disruption.ConsolidateAfter).To(BeNil())
 			})
 			It("should convert v1 nodepool consolidateAfter with WhenEmpty", func() {
 				v1nodepool.Spec.Disruption.ConsolidationPolicy = ConsolidationPolicyWhenEmpty
-				v1nodepool.Spec.Disruption.ConsolidateAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
+				v1nodepool.Spec.Disruption.ConsolidateAfter = MustParseNillableDuration("2121s")
 				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
 				Expect(lo.FromPtr(v1beta1nodepool.Spec.Disruption.ConsolidateAfter.Duration)).To(Equal(lo.FromPtr(v1nodepool.Spec.Disruption.ConsolidateAfter.Duration)))
 			})
@@ -224,7 +234,7 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 				Expect(string(v1beta1nodepool.Spec.Disruption.ConsolidationPolicy)).To(Equal(string(v1nodepool.Spec.Disruption.ConsolidationPolicy)))
 			})
 			It("should convert v1 nodepool ExpireAfter", func() {
-				v1nodepool.Spec.Template.Spec.ExpireAfter = NillableDuration{Duration: lo.ToPtr(time.Second * 2121)}
+				v1nodepool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("2121s")
 				Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
 				Expect(v1beta1nodepool.Spec.Disruption.ExpireAfter.Duration).To(Equal(v1nodepool.Spec.Template.Spec.ExpireAfter.Duration))
 			})
@@ -268,6 +278,40 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 		for _, resource := range lo.Keys(v1nodepool.Status.Resources) {
 			Expect(v1beta1nodepool.Status.Resources[resource]).To(Equal(v1nodepool.Status.Resources[resource]))
 		}
+	})
+	Context("Round Trip", func() {
+		It("spec.template.spec.expireAfter", func() {
+			v1nodepool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("10h")
+			Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+			Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+			result, err := json.Marshal(v1nodepool.Spec.Template.Spec.ExpireAfter)
+			Expect(err).To(BeNil())
+			Expect(string(result)).To(Equal(`"10h"`))
+		})
+		It("spec.template.spec.expireAfter (Never)", func() {
+			v1nodepool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("Never")
+			Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+			Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+			result, err := json.Marshal(v1nodepool.Spec.Template.Spec.ExpireAfter)
+			Expect(err).To(BeNil())
+			Expect(string(result)).To(Equal(`"Never"`))
+		})
+		It("spec.disruption.consolidateAfter", func() {
+			v1nodepool.Spec.Disruption.ConsolidateAfter = MustParseNillableDuration("10h")
+			Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+			Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+			result, err := json.Marshal(v1nodepool.Spec.Disruption.ConsolidateAfter)
+			Expect(err).To(BeNil())
+			Expect(string(result)).To(Equal(`"10h"`))
+		})
+		It("spec.disruption.consolidateAfter (Never)", func() {
+			v1nodepool.Spec.Disruption.ConsolidateAfter = MustParseNillableDuration("Never")
+			Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+			Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+			result, err := json.Marshal(v1nodepool.Spec.Disruption.ConsolidateAfter)
+			Expect(err).To(BeNil())
+			Expect(string(result)).To(Equal(`"Never"`))
+		})
 	})
 })
 
@@ -457,19 +501,27 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 						Name:       "nodeclass-test",
 						APIVersion: "testgroup.sh/testversion",
 					}
+					nodeClassReferenceAnnotation, err := json.Marshal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef)
+					Expect(err).ToNot(HaveOccurred())
+
 					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind))
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name))
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Group).To(Equal("testgroup.sh"))
+					Expect(v1nodepool.Annotations).To(HaveKeyWithValue(NodeClassReferenceAnnotationKey, string(nodeClassReferenceAnnotation)))
 				})
 				It("should set default nodeclass group and kind on v1beta1 nodeclassRef", func() {
 					v1beta1nodepool.Spec.Template.Spec.NodeClassRef = &v1beta1.NodeClassReference{
 						Name: "nodeclass-test",
 					}
+					nodeClassReferenceAnnotation, err := json.Marshal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef)
+					Expect(err).ToNot(HaveOccurred())
+
 					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].Kind))
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name))
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Group).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].Group))
+					Expect(v1nodepool.Annotations).To(HaveKeyWithValue(NodeClassReferenceAnnotationKey, string(nodeClassReferenceAnnotation)))
 				})
 			})
 		})
@@ -536,5 +588,39 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 		for _, resource := range lo.Keys(v1beta1nodepool.Status.Resources) {
 			Expect(v1beta1nodepool.Status.Resources[resource]).To(Equal(v1nodepool.Status.Resources[resource]))
 		}
+	})
+	Context("Round Trip", func() {
+		It("spec.disruption.expireAfter", func() {
+			v1beta1nodepool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("10h")
+			Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+			Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+			result, err := json.Marshal(v1beta1nodepool.Spec.Disruption.ExpireAfter)
+			Expect(err).To(BeNil())
+			Expect(string(result)).To(Equal(`"10h"`))
+		})
+		It("spec.disruption.expireAfter (Never)", func() {
+			v1beta1nodepool.Spec.Disruption.ExpireAfter = v1beta1.MustParseNillableDuration("Never")
+			Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+			Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+			result, err := json.Marshal(v1beta1nodepool.Spec.Disruption.ExpireAfter)
+			Expect(err).To(BeNil())
+			Expect(string(result)).To(Equal(`"Never"`))
+		})
+		It("spec.disruption.consolidateAfter", func() {
+			v1beta1nodepool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("10h"))
+			Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+			Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+			result, err := json.Marshal(lo.FromPtr(v1beta1nodepool.Spec.Disruption.ConsolidateAfter))
+			Expect(err).To(BeNil())
+			Expect(string(result)).To(Equal(`"10h"`))
+		})
+		It("spec.disruption.consolidateAfter (Never)", func() {
+			v1beta1nodepool.Spec.Disruption.ConsolidateAfter = lo.ToPtr(v1beta1.MustParseNillableDuration("Never"))
+			Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+			Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+			result, err := json.Marshal(lo.FromPtr(v1beta1nodepool.Spec.Disruption.ConsolidateAfter))
+			Expect(err).To(BeNil())
+			Expect(string(result)).To(Equal(`"Never"`))
+		})
 	})
 })

@@ -46,7 +46,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	}
 	candidates = s.sortCandidates(candidates)
 
-	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, v1.DisruptionReasonUnderutilized)
+	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, s.Reason())
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
@@ -56,7 +56,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name][v1.DisruptionReasonUnderutilized] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][s.Reason()] == 0 {
 			constrainedByBudgets = true
 			continue
 		}
