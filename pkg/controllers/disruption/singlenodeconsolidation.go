@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -51,12 +52,16 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
 	constrainedByBudgets := false
+
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
+		_, found := disruptionBudgetMapping[candidate.nodePool.Name][s.Reason()]
+		reason := lo.Ternary(found, s.Reason(), v1.DisruptionReasonAll)
+
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name][s.Reason()] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][reason] == 0 {
 			constrainedByBudgets = true
 			continue
 		}

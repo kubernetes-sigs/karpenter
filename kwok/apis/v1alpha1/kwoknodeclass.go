@@ -18,6 +18,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 // KWOKNodeClass is the Schema for the KWOKNodeClass API
@@ -38,3 +40,5 @@ type KWOKNodeClassList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []KWOKNodeClass `json:"items"`
 }
+
+const DisruptionReasonExampleReason v1.DisruptionReason = "ExampleReason"

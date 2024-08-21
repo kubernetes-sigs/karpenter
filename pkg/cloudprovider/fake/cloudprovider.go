@@ -236,7 +236,7 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool) ([]
 }
 
 func (c *CloudProvider) DisruptionReasons() []v1.DisruptionReason {
-	return nil
+	return []v1.DisruptionReason{"CloudProviderDisruptionReason"}
 }
 
 func (c *CloudProvider) Delete(_ context.Context, nc *v1.NodeClaim) error {

@@ -41,7 +41,6 @@ import (
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 )
 
@@ -237,14 +236,7 @@ func BuildDisruptionBudgets(ctx context.Context, cluster *state.Cluster, clk clo
 			// Allowing this value to be negative breaks assumptions in the code used to calculate how many nodes can be disrupted.
 			allowedDisruptions := lo.Clamp(minDisruptions-disrupting[nodePool.Name], 0, math.MaxInt32)
 			disruptionBudgetMapping[nodePool.Name][reason] = allowedDisruptions
-
 			allowedDisruptionsTotal += allowedDisruptions
-			NodePoolAllowedDisruptions.With(map[string]string{
-				metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
-			}).Set(float64(allowedDisruptions))
-			if allowedDisruptions == 0 {
-				recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(lo.ToPtr(nodePool), reason))
-			}
 		}
 		if allowedDisruptionsTotal == 0 {
 			recorder.Publish(disruptionevents.NodePoolBlocked(lo.ToPtr(nodePool)))

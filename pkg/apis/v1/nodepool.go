@@ -30,7 +30,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 )
 
@@ -135,18 +134,10 @@ const (
 type DisruptionReason string
 
 const (
+	DisruptionReasonAll           DisruptionReason = "All"
 	DisruptionReasonUnderutilized DisruptionReason = "Underutilized"
 	DisruptionReasonEmpty         DisruptionReason = "Empty"
 	DisruptionReasonDrifted       DisruptionReason = "Drifted"
-)
-
-var (
-	// WellKnownDisruptionReasons is a list of all valid reasons for disruption budgets.
-	WellKnownDisruptionReasons = sets.New(
-		DisruptionReasonUnderutilized,
-		DisruptionReasonEmpty,
-		DisruptionReasonDrifted,
-	)
 )
 
 type Limits v1.ResourceList
@@ -321,7 +312,7 @@ func (nl *NodePoolList) OrderByWeight() {
 // amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptionsByReason()
 // to bubble up any errors in validation.
 func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) map[DisruptionReason]int {
-	allowedDisruptions, err := in.GetAllowedDisruptionsByReason(ctx, c, numNodes)
+	allowedDisruptions, err := in.GetAllowedDisruptionsByReason(c, numNodes)
 	if err != nil {
 		return map[DisruptionReason]int{}
 	}
@@ -329,22 +320,33 @@ func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock
 }
 
 // GetAllowedDisruptionsByReason returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
-func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
+func (in *NodePool) GetAllowedDisruptionsByReason(c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
 	var multiErr error
 	allowedDisruptions := map[DisruptionReason]int{}
-	for reason := range WellKnownDisruptionReasons {
-		allowedDisruptions[reason] = math.MaxInt32
-	}
+	allowedDisruptions[DisruptionReasonAll] = math.MaxInt32
 
 	for _, budget := range in.Spec.Disruption.Budgets {
 		val, err := budget.GetAllowedDisruptions(c, numNodes)
 		if err != nil {
 			multiErr = multierr.Append(multiErr, err)
 		}
-		// If reasons is nil, it applies to all well known disruption reasons
-		for _, reason := range lo.Ternary(budget.Reasons == nil, WellKnownDisruptionReasons.UnsortedList(), budget.Reasons) {
-			allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], val})
+
+		if budget.Reasons == nil {
+			allowedDisruptions[DisruptionReasonAll] = lo.Min([]int{allowedDisruptions[DisruptionReasonAll], val})
+			continue
 		}
+		for _, reason := range budget.Reasons {
+			if reasonVal, found := allowedDisruptions[reason]; found {
+				allowedDisruptions[reason] = lo.Min([]int{reasonVal, val})
+				continue
+			}
+			allowedDisruptions[reason] = val
+		}
+	}
+
+	// All the node count for a specific reason needs to be less or equal then disruption reason shared for all disruption
+	for _, reason := range lo.Keys(allowedDisruptions) {
+		allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], allowedDisruptions[DisruptionReasonAll]})
 	}
 
 	return allowedDisruptions, multiErr

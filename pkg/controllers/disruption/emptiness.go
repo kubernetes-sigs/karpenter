@@ -65,10 +65,12 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	empty := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
 	for _, candidate := range candidates {
+		_, found := disruptionBudgetMapping[candidate.nodePool.Name][e.Reason()]
+		reason := lo.Ternary(found, e.Reason(), v1.DisruptionReasonAll)
 		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
-		if disruptionBudgetMapping[candidate.nodePool.Name][e.Reason()] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][reason] == 0 {
 			// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 			constrainedByBudgets = true
 			continue
@@ -76,7 +78,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
 		empty = append(empty, candidate)
-		disruptionBudgetMapping[candidate.nodePool.Name][e.Reason()]--
+		disruptionBudgetMapping[candidate.nodePool.Name][reason]--
 	}
 	// none empty, so do nothing
 	if len(empty) == 0 {
