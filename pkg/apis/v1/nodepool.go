@@ -30,6 +30,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 )
 
@@ -89,7 +90,7 @@ type Disruption struct {
 type Budget struct {
 	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
-	// allowed reasons are Underutilized, Empty, and Drifted.
+	// allowed reasons are Underutilized, Empty, and Drifted and additional CloudProvider-specific reasons.
 	// +optional
 	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
@@ -129,6 +130,7 @@ const (
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.
+// CloudProviders will need to append to the list of enums when implementing cloud provider disruption reasons
 // +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
 type DisruptionReason string
 
@@ -140,7 +142,11 @@ const (
 
 var (
 	// WellKnownDisruptionReasons is a list of all valid reasons for disruption budgets.
-	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonEmpty, DisruptionReasonDrifted}
+	WellKnownDisruptionReasons = sets.New(
+		DisruptionReasonUnderutilized,
+		DisruptionReasonEmpty,
+		DisruptionReasonDrifted,
+	)
 )
 
 type Limits v1.ResourceList
@@ -326,7 +332,7 @@ func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock
 func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
 	var multiErr error
 	allowedDisruptions := map[DisruptionReason]int{}
-	for _, reason := range WellKnownDisruptionReasons {
+	for reason := range WellKnownDisruptionReasons {
 		allowedDisruptions[reason] = math.MaxInt32
 	}
 
@@ -336,7 +342,7 @@ func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.C
 			multiErr = multierr.Append(multiErr, err)
 		}
 		// If reasons is nil, it applies to all well known disruption reasons
-		for _, reason := range lo.Ternary(budget.Reasons == nil, WellKnownDisruptionReasons, budget.Reasons) {
+		for _, reason := range lo.Ternary(budget.Reasons == nil, WellKnownDisruptionReasons.UnsortedList(), budget.Reasons) {
 			allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], val})
 		}
 	}
