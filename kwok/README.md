@@ -45,7 +45,8 @@ spec:
   limits:
     cpu: 1000
   disruption:
-    consolidationPolicy: WhenUnderutilized
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 10s
 ---
 apiVersion: karpenter.kwok.sh/v1alpha1
 kind: KWOKNodeClass
