@@ -18,6 +18,7 @@ package consistency
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -122,7 +123,7 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 			return fmt.Errorf("checking node with %T, %w", check, err)
 		}
 		for _, issue := range issues {
-			log.FromContext(ctx).Error(err, "consistency error")
+			log.FromContext(ctx).Error(stderrors.New(string(issue)), "consistency error")
 			c.recorder.Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
 		}
 		hasIssues = hasIssues || (len(issues) > 0)

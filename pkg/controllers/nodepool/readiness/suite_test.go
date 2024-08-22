@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
+
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,6 +75,16 @@ var _ = Describe("Readiness", func() {
 		nodeClass = test.NodeClass(v1alpha1.TestNodeClass{
 			ObjectMeta: metav1.ObjectMeta{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name},
 		})
+		nodePool.Spec.Template.Spec.NodeClassRef.Group = object.GVK(nodeClass).Group
+		nodePool.Spec.Template.Spec.NodeClassRef.Kind = object.GVK(nodeClass).Kind
+	})
+	It("should have status condition on nodePool as not ready if nodeClass referenced in nodePool is not in supported nodeClasses", func() {
+		nodePool.Spec.Template.Spec.NodeClassRef.Group = "group"
+		nodePool.Spec.Template.Spec.NodeClassRef.Kind = "kind"
+		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
+		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 	})
 	It("should have status condition on nodePool as not ready when nodeClass does not exist", func() {
 		ExpectApplied(ctx, env.Client, nodePool)

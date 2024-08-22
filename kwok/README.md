@@ -40,12 +40,13 @@ spec:
       nodeClassRef:
         name: default
         kind: KWOKNodeClass
-        group: karpenter.kwok.sh/v1alpha1
+        group: karpenter.kwok.sh
       expireAfter: 720h # 30 * 24h = 720h
   limits:
     cpu: 1000
   disruption:
-    consolidationPolicy: WhenUnderutilized
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 10s
 ---
 apiVersion: karpenter.kwok.sh/v1alpha1
 kind: KWOKNodeClass

@@ -117,7 +117,7 @@ var _ = Describe("Termination", func() {
 			// The first reconciliation should trigger the Delete, and set the terminating status condition
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			nc := ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nc.StatusConditions().Get(v1.ConditionTypeTerminating).IsTrue()).To(BeTrue())
+			Expect(nc.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 			ExpectNodeExists(ctx, env.Client, node.Name)
 
 			// The second reconciliation should call get, see the "instance" is terminated, and remove the node.
