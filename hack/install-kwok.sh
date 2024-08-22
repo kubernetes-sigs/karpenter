@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# This script uses kustomize to generate the manifests of the latest 
-# version of kwok, and will then either apply/delete the resources 
-# depending on the UNINSTALL_KWOK environment variable. Set this to 
+# This script uses kustomize to generate the manifests of the latest
+# version of kwok, and will then either apply/delete the resources
+# depending on the UNINSTALL_KWOK environment variable. Set this to
 # true if you want to delete the generated objects.
 
-# This will create 1 partition (should be expanded to multiple once https://github.com/kubernetes-sigs/kwok/issues/1122 is fixed). 
+# This will create 1 partition (should be expanded to multiple once https://github.com/kubernetes-sigs/kwok/issues/1122 is fixed).
 # The more partitions, the higher number of nodes that can be managed by kwok.
-# Note: Beware that when using kind clusters, the total compute of nodes is limited, so 
-# the higher number of partitions, the less effective each partition might be, since 
+# Note: Beware that when using kind clusters, the total compute of nodes is limited, so
+# the higher number of partitions, the less effective each partition might be, since
 # the controller pods could be competing for limited CPU.
 
 set -euo pipefail
@@ -22,7 +22,7 @@ mkdir ${BASE}
 
 # make the alphabet, so that we can set be flexible to the number of allowed partitions (inferred max at 26)
 alphabet=( {a..z} )
-# set the number of partitions to 1. Currently only one partition is supported. 
+# set the number of partitions to 1. Currently only one partition is supported.
 num_partitions=1
 
 # allow it to schedule to critical addons, but not schedule onto kwok nodes.
@@ -37,7 +37,7 @@ spec:
     spec:
       tolerations:
       - operator: "Equal"
-        key: CriticalAddonsOnly 
+        key: CriticalAddonsOnly
         effect: NoSchedule
       affinity:
         nodeAffinity:
@@ -49,7 +49,7 @@ spec:
 EOF
 
 # TODO: Simplify the kustomize to only use one copy of the RBAC that all
-# controllers can use.  
+# controllers can use.
 cat <<EOF > "${BASE}/kustomization.yaml"
   apiVersion: kustomize.config.k8s.io/v1beta1
   kind: Kustomization
@@ -62,7 +62,10 @@ cat <<EOF > "${BASE}/kustomization.yaml"
   - path: tolerate-all.yaml
 EOF
 
-# Create num_partitions
+# Create num_partitions.
+# Set node-lease-duration-seconds=0 to disable having KWOK controller
+# create and manage Leases to help with scaling as we don't really need
+# to have KWOK handle node leases from cluster autoscaling perspective.
 for ((i=0; i<num_partitions; i++))
 do
   SUB_LET_DIR=$HOME_DIR/${alphabet[i]}
@@ -72,6 +75,9 @@ do
   - op: replace
     path: /spec/template/spec/containers/0/args/2
     value: --manage-nodes-with-label-selector=kwok-partition=${alphabet[i]}
+  - op: replace
+    path: /spec/template/spec/containers/0/args/9
+    value: --node-lease-duration-seconds=0
 EOF
 
 cat <<EOF > "${SUB_LET_DIR}/kustomization.yaml"
