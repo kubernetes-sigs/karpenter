@@ -55,7 +55,6 @@ import (
 	"k8s.io/utils/clock"
 	knativeinjection "knative.dev/pkg/injection"
 	"knative.dev/pkg/signals"
-	"knative.dev/pkg/system"
 	"knative.dev/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -113,7 +112,6 @@ type Operator struct {
 func NewOperator() (context.Context, *Operator) {
 	// Root Context
 	ctx := signals.NewContext()
-	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
 
 	// Options
 	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
@@ -154,7 +152,6 @@ func NewOperator() (context.Context, *Operator) {
 		LeaderElection:                !options.FromContext(ctx).DisableLeaderElection,
 		LeaderElectionID:              "karpenter-leader-election",
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
-		LeaderElectionNamespace:       system.Namespace(),
 		LeaderElectionReleaseOnCancel: true,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),

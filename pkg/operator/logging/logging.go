@@ -27,8 +27,6 @@ import (
 	"go.uber.org/zap/zapcore"
 	"knative.dev/pkg/changeset"
 
-	"knative.dev/pkg/logging/logkey"
-
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
@@ -84,7 +82,7 @@ func WithCommit(logger *zap.Logger) *zap.Logger {
 		return logger
 	}
 	// Enrich logs with the components git revision.
-	return logger.With(zap.String(logkey.Commit, revision))
+	return logger.With(zap.String("commit", revision))
 }
 
 type ignoreDebugEventsSink struct {
