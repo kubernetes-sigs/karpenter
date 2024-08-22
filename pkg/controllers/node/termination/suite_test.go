@@ -361,66 +361,6 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
-		It("should evict pods in order", func() {
-			daemonEvict := test.DaemonSet()
-			daemonNodeCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-node-critical"}})
-			daemonClusterCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-cluster-critical"}})
-			ExpectApplied(ctx, env.Client, daemonEvict, daemonNodeCritical, daemonClusterCritical)
-
-			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
-			podDaemonEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "apps/v1",
-				Kind:               "DaemonSet",
-				Name:               daemonEvict.Name,
-				UID:                daemonEvict.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
-			}}}})
-			podNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
-			podClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
-			podDaemonNodeCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-node-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "apps/v1",
-				Kind:               "DaemonSet",
-				Name:               daemonNodeCritical.Name,
-				UID:                daemonNodeCritical.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
-			}}}})
-			podDaemonClusterCritical := test.Pod(test.PodOptions{NodeName: node.Name, PriorityClassName: "system-cluster-critical", ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         "apps/v1",
-				Kind:               "DaemonSet",
-				Name:               daemonClusterCritical.Name,
-				UID:                daemonClusterCritical.UID,
-				Controller:         lo.ToPtr(true),
-				BlockOwnerDeletion: lo.ToPtr(true),
-			}}}})
-
-			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podNodeCritical, podClusterCritical, podDaemonEvict, podDaemonNodeCritical, podDaemonClusterCritical)
-
-			// Trigger Termination Controller
-			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-
-			for _, podGroup := range [][]*corev1.Pod{{podEvict}, {podDaemonEvict}, {podNodeCritical, podClusterCritical}, {podDaemonNodeCritical, podDaemonClusterCritical}} {
-				for _, p := range podGroup {
-					ExpectPodExists(ctx, env.Client, p.Name, p.Namespace)
-				}
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-				ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
-				for range podGroup {
-					ExpectSingletonReconciled(ctx, queue)
-				}
-				EventuallyExpectTerminating(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
-				ExpectDeleted(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
-			}
-
-			// Reconcile to delete node
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
-			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectNotFound(ctx, env.Client, node)
-		})
 		It("should evict pods in order and wait until pods are fully deleted", func() {
 			daemonEvict := test.DaemonSet()
 			daemonNodeCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-node-critical"}})
