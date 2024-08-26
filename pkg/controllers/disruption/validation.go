@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -139,10 +140,12 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 		if v.cluster.IsNodeNominated(vc.ProviderID()) {
 			return nil, NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
 		}
-		if disruptionBudgetMapping[vc.nodePool.Name][v.reason] == 0 {
+		_, found := disruptionBudgetMapping[vc.nodePool.Name][v.reason]
+		r := lo.Ternary(found, v.reason, v1.DisruptionReasonAll)
+		if disruptionBudgetMapping[vc.nodePool.Name][r] == 0 {
 			return nil, NewValidationError(fmt.Errorf("a candidate can no longer be disrupted without violating budgets"))
 		}
-		disruptionBudgetMapping[vc.nodePool.Name][v.reason]--
+		disruptionBudgetMapping[vc.nodePool.Name][r]--
 	}
 	return validatedCandidates, nil
 }

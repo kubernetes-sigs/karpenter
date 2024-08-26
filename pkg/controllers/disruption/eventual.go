@@ -88,10 +88,12 @@ func (d *EventualDisruption) ComputeCommand(ctx context.Context, disruptionBudge
 	}
 
 	for _, candidate := range candidates {
+		_, found := disruptionBudgetMapping[candidate.nodePool.Name][d.Reason()]
+		reason := lo.Ternary(found, d.Reason(), v1.DisruptionReasonAll)
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since drift commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name][d.Reason()] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name][reason] == 0 {
 			continue
 		}
 		// Check if we need to create any NodeClaims.
