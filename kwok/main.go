@@ -22,7 +22,6 @@ import (
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers"
 	"sigs.k8s.io/karpenter/pkg/operator"
-	"sigs.k8s.io/karpenter/pkg/webhooks"
 )
 
 func main() {
@@ -34,12 +33,11 @@ func main() {
 
 	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
 	op.
-		WithWebhooks(ctx, webhooks.NewWebhooks()...).
 		WithControllers(ctx, controllers.NewControllers(
 			op.Manager,
 			op.Clock,
 			op.GetClient(),
 			op.EventRecorder,
 			cloudProvider,
-		)...).Start(ctx, cloudProvider)
+		)...).Start(ctx)
 }
