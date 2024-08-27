@@ -234,13 +234,20 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error 
 		if err := c.kubeClient.Patch(ctx, n, client.StrategicMergeFrom(stored)); err != nil {
 			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
 		}
+
 		metrics.NodesTerminatedTotal.With(prometheus.Labels{
 			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
 		}).Inc()
+
 		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
 		TerminationDurationSeconds.With(prometheus.Labels{
 			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
 		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
+
+		NodeLifetimeDurationSeconds.With(map[string]string{
+			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
+		}).Observe(time.Since(n.CreationTimestamp.Time).Seconds())
+
 		log.FromContext(ctx).Info("deleted node")
 	}
 	return nil
