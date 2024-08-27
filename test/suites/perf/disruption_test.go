@@ -57,12 +57,6 @@ var _ = Describe("Disruption", func() {
 			Expect(env.Client.Status().Update(env, &nodeClaimList.Items[i])).To(Succeed())
 		}
 
-		// Eventually expect one node to have an ExampleReason
-		Eventually(func(g Gomega) {
-			nodeClaims := &v1.NodeClaimList{}
-			g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": "ExampleReason"})).To(Succeed())
-			g.Expect(len(nodeClaims.Items)).ToNot(Equal(0))
-		}).WithTimeout(5 * time.Second).Should(Succeed())
 		// Then eventually expect no node to have an ExampleReason
 		Eventually(func(g Gomega) {
 			nodeClaims := &v1.NodeClaimList{}

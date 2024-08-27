@@ -17,7 +17,6 @@ limitations under the License.
 package v1
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -134,7 +133,6 @@ const (
 type DisruptionReason string
 
 const (
-	DisruptionReasonAll           DisruptionReason = "All"
 	DisruptionReasonUnderutilized DisruptionReason = "Underutilized"
 	DisruptionReasonEmpty         DisruptionReason = "Empty"
 	DisruptionReasonDrifted       DisruptionReason = "Drifted"
@@ -311,45 +309,28 @@ func (nl *NodePoolList) OrderByWeight() {
 // MustGetAllowedDisruptions calls GetAllowedDisruptionsByReason if the error is not nil. This reduces the
 // amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptionsByReason()
 // to bubble up any errors in validation.
-func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) map[DisruptionReason]int {
-	allowedDisruptions, err := in.GetAllowedDisruptionsByReason(c, numNodes)
+func (in *NodePool) MustGetAllowedDisruptions(c clock.Clock, numNodes int, reason DisruptionReason) int {
+	allowedDisruptions, err := in.GetAllowedDisruptionsByReason(c, numNodes, reason)
 	if err != nil {
-		return map[DisruptionReason]int{}
+		return 0
 	}
 	return allowedDisruptions
 }
 
 // GetAllowedDisruptionsByReason returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
-func (in *NodePool) GetAllowedDisruptionsByReason(c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
+func (in *NodePool) GetAllowedDisruptionsByReason(c clock.Clock, numNodes int, reason DisruptionReason) (int, error) {
+	allowedNodes := math.MaxInt32
 	var multiErr error
-	allowedDisruptions := map[DisruptionReason]int{}
-	allowedDisruptions[DisruptionReasonAll] = math.MaxInt32
-
 	for _, budget := range in.Spec.Disruption.Budgets {
 		val, err := budget.GetAllowedDisruptions(c, numNodes)
 		if err != nil {
 			multiErr = multierr.Append(multiErr, err)
 		}
-
-		if budget.Reasons == nil {
-			allowedDisruptions[DisruptionReasonAll] = lo.Min([]int{allowedDisruptions[DisruptionReasonAll], val})
-			continue
-		}
-		for _, reason := range budget.Reasons {
-			if reasonVal, found := allowedDisruptions[reason]; found {
-				allowedDisruptions[reason] = lo.Min([]int{reasonVal, val})
-				continue
-			}
-			allowedDisruptions[reason] = val
+		if budget.Reasons == nil || lo.Contains(budget.Reasons, reason) {
+			allowedNodes = lo.Min([]int{allowedNodes, val})
 		}
 	}
-
-	// All the node count for a specific reason needs to be less or equal then disruption reason shared for all disruption
-	for _, reason := range lo.Keys(allowedDisruptions) {
-		allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], allowedDisruptions[DisruptionReasonAll]})
-	}
-
-	return allowedDisruptions, multiErr
+	return allowedNodes, multiErr
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison

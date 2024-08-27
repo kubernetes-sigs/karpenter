@@ -25,12 +25,9 @@ import (
 	"sync"
 	"time"
 
-	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -75,7 +72,8 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 
 	// Generate eventually disruptable reason based on a combination of drift and cloudprovider disruption reason
 	eventualDisruptionMethods := []Method{}
-	for _, reason := range append([]v1.DisruptionReason{v1.DisruptionReasonDrifted}, cp.DisruptionReasons()...) {
+
+	for _, reason := range append(cp.DisruptionReasons(), v1.DisruptionReasonDrifted) {
 		eventualDisruptionMethods = append(eventualDisruptionMethods, NewEventualDisruption(kubeClient, cluster, provisioner, recorder, reason))
 	}
 
@@ -118,6 +116,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	c.recordRun("disruption-loop")
 
 	// Log if there are any budgets that are misconfigured that weren't caught by validation.
+	// Only validate the first reason, since CEL validation will catch invalid disruption reasons
 	c.logInvalidBudgets(ctx)
 
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
@@ -170,25 +169,10 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(candidates) == 0 {
 		return false, nil
 	}
-	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient, c.recorder)
+	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.recorder, disruption.Reason())
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
-	// Emit metric for every nodepool
-	for _, nodePoolName := range lo.Keys(disruptionBudgetMapping) {
-		allowedDisruption, exists := disruptionBudgetMapping[nodePoolName][disruption.Reason()]
-		NodePoolAllowedDisruptions.With(map[string]string{
-			metrics.NodePoolLabel: nodePoolName, metrics.ReasonLabel: string(disruption.Reason()),
-		}).Set(float64(lo.Ternary(exists, allowedDisruption, disruptionBudgetMapping[nodePoolName][v1.DisruptionReasonAll])))
-		if allowedDisruption == 0 {
-			np := &v1.NodePool{}
-			if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, np); err != nil {
-				return false, fmt.Errorf("getting nodepool, %w", err)
-			}
-			c.recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(np, disruption.Reason()))
-		}
-	}
-
 	// Determine the disruption action
 	cmd, schedulingResults, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
@@ -301,8 +285,11 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	var buf bytes.Buffer
 	for _, np := range nodePoolList.Items {
 		// Use a dummy value of 100 since we only care if this errors.
-		if _, err := np.GetAllowedDisruptionsByReason(c.clock, 100); err != nil {
-			fmt.Fprintf(&buf, "invalid disruption budgets in nodepool %s, %s", np.Name, err)
+		for _, method := range c.methods {
+			if _, err := np.GetAllowedDisruptionsByReason(c.clock, 100, method.Reason()); err != nil {
+				fmt.Fprintf(&buf, "invalid disruption budgets in nodepool %s, %s", np.Name, err)
+				break // Prevent duplicate error message
+			}
 		}
 	}
 	if buf.Len() > 0 {

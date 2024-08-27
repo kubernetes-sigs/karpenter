@@ -21,7 +21,6 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -57,7 +56,7 @@ func (d *EventualDisruption) ShouldDisrupt(ctx context.Context, c *Candidate) bo
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (d *EventualDisruption) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (d *EventualDisruption) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
@@ -68,16 +67,14 @@ func (d *EventualDisruption) ComputeCommand(ctx context.Context, disruptionBudge
 	// add it to the existing command.
 	empty := make([]*Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		_, found := disruptionBudgetMapping[candidate.nodePool.Name][d.Reason()]
-		reason := lo.Ternary(found, d.Reason(), v1.DisruptionReasonAll)
 		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name][reason] > 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
 			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name][reason]--
+			disruptionBudgetMapping[candidate.nodePool.Name]--
 		}
 	}
 	// Disrupt all empty drifted candidates, as they require no scheduling simulations.
@@ -88,12 +85,10 @@ func (d *EventualDisruption) ComputeCommand(ctx context.Context, disruptionBudge
 	}
 
 	for _, candidate := range candidates {
-		_, found := disruptionBudgetMapping[candidate.nodePool.Name][d.Reason()]
-		reason := lo.Ternary(found, d.Reason(), v1.DisruptionReasonAll)
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since drift commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name][reason] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
 			continue
 		}
 		// Check if we need to create any NodeClaims.
