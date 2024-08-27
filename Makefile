@@ -102,7 +102,6 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	hack/validation/status.sh
 	cp -r pkg/apis/crds kwok/charts
 	hack/kwok/requirements.sh
-	hack/kwok/conversion.sh
 	hack/dependabot.sh
 	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
 	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756

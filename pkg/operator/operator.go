@@ -24,11 +24,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sync"
-	"time"
-
-	"github.com/awslabs/operatorpkg/object"
-	"github.com/awslabs/operatorpkg/status"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
@@ -42,7 +37,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -56,7 +50,6 @@ import (
 	knativeinjection "knative.dev/pkg/injection"
 	"knative.dev/pkg/signals"
 	"knative.dev/pkg/system"
-	"knative.dev/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -69,7 +62,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/webhooks"
 )
 
 const (
@@ -105,8 +97,6 @@ type Operator struct {
 	KubernetesInterface kubernetes.Interface
 	EventRecorder       events.Recorder
 	Clock               clock.Clock
-
-	webhooks []knativeinjection.ControllerConstructor
 }
 
 // NewOperator instantiates a controller manager or panics
@@ -124,14 +114,6 @@ func NewOperator() (context.Context, *Operator) {
 		newLimit := int64(float64(options.FromContext(ctx).MemoryLimit) * 0.9)
 		debug.SetMemoryLimit(newLimit)
 	}
-
-	// Webhook
-	ctx = webhook.WithOptions(ctx, webhook.Options{
-		Port:        options.FromContext(ctx).WebhookPort,
-		ServiceName: options.FromContext(ctx).ServiceName,
-		SecretName:  fmt.Sprintf("%s-cert", options.FromContext(ctx).ServiceName),
-		GracePeriod: 5 * time.Second,
-	})
 
 	// Logging
 	logger := zapr.NewLogger(logging.NewLogger(ctx, component))
@@ -241,36 +223,12 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...controlle
 	return o
 }
 
-func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.ControllerConstructor) *Operator {
-	if !options.FromContext(ctx).DisableWebhook {
-		o.webhooks = append(o.webhooks, ctors...)
-		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
-		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
-	}
-	return o
-}
-
-func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
+func (o *Operator) Start(ctx context.Context) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		lo.Must0(o.Manager.Start(ctx))
 	}()
-	if options.FromContext(ctx).DisableWebhook {
-		log.FromContext(ctx).Info("conversion webhooks are disabled")
-	} else {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			// Taking the first supported NodeClass to be the default NodeClass
-			gvk := lo.Map(cp.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
-				return object.GVK(nc)
-			})
-			ctx = injection.WithNodeClasses(ctx, gvk)
-			ctx = injection.WithClient(ctx, o.GetClient())
-			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
-		}()
-	}
 	wg.Wait()
 }
