@@ -71,6 +71,7 @@ var nodeClaimStateController *informer.NodeClaimController
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
 var queue *orchestration.Queue
+var allKnownDisruptionReasons []v1.DisruptionReason
 
 var onDemandInstances []*cloudprovider.InstanceType
 var spotInstances []*cloudprovider.InstanceType
@@ -149,6 +150,10 @@ var _ = BeforeEach(func() {
 	})
 	leastExpensiveSpotInstance, mostExpensiveSpotInstance = spotInstances[0], spotInstances[len(spotInstances)-1]
 	leastExpensiveSpotOffering, mostExpensiveSpotOffering = leastExpensiveSpotInstance.Offerings[0], mostExpensiveSpotInstance.Offerings[0]
+	allKnownDisruptionReasons = append([]v1.DisruptionReason{
+		v1.DisruptionReasonEmpty,
+		v1.DisruptionReasonUnderutilized,
+		v1.DisruptionReasonDrifted}, cloudProvider.DisruptionReasons()...)
 })
 
 var _ = AfterEach(func() {
@@ -631,11 +636,11 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		unmanaged := test.Node()
 		ExpectApplied(ctx, env.Client, unmanaged)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{unmanaged}, []*v1.NodeClaim{})
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-		// This should not bring in the unmanaged node.
-		for _, reason := range v1.WellKnownDisruptionReasons {
-			Expect(budgets[nodePool.Name][reason]).To(Equal(10))
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			Expect(err).To(Succeed())
+			// This should not bring in the unmanaged node.
+			Expect(budgets[nodePool.Name]).To(Equal(10))
 		}
 	})
 	It("should not consider nodes that are not initialized as part of disruption count", func() {
@@ -662,11 +667,11 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-		// This should not bring in the uninitialized node.
-		for _, reason := range v1.WellKnownDisruptionReasons {
-			Expect(budgets[nodePool.Name][reason]).To(Equal(10))
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			Expect(err).To(Succeed())
+			// This should not bring in the uninitialized node.
+			Expect(budgets[nodePool.Name]).To(Equal(10))
 		}
 	})
 	It("should not return a negative disruption value", func() {
@@ -684,10 +689,10 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
 		}
 
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-		for _, reason := range v1.WellKnownDisruptionReasons {
-			Expect(budgets[nodePool.Name][reason]).To(Equal(0))
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			Expect(err).To(Succeed())
+			Expect(budgets[nodePool.Name]).To(Equal(0))
 		}
 	})
 	It("should consider nodes with a deletion timestamp set and MarkedForDeletion to the disruption count", func() {
@@ -708,11 +713,10 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
 		}
 
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-
-		for _, reason := range v1.WellKnownDisruptionReasons {
-			Expect(budgets[nodePool.Name][reason]).To(Equal(8))
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			Expect(err).To(Succeed())
+			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}
 	})
 	It("should consider not ready nodes to the disruption count", func() {
@@ -730,10 +734,10 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
 		}
 
-		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
-		Expect(err).To(Succeed())
-		for _, reason := range v1.WellKnownDisruptionReasons {
-			Expect(budgets[nodePool.Name][reason]).To(Equal(8))
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			Expect(err).To(Succeed())
+			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}
 	})
 })

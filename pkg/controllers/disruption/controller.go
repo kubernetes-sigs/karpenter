@@ -69,6 +69,14 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *orchestration.Queue,
 ) *Controller {
 	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+
+	// Generate eventually disruptable reason based on a combination of drift and cloudprovider disruption reason
+	eventualDisruptionMethods := []Method{}
+
+	for _, reason := range append(cp.DisruptionReasons(), v1.DisruptionReasonDrifted) {
+		eventualDisruptionMethods = append(eventualDisruptionMethods, NewEventualDisruption(kubeClient, cluster, provisioner, recorder, reason))
+	}
+
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
@@ -78,16 +86,17 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
-		methods: []Method{
-			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-			NewDrift(kubeClient, cluster, provisioner, recorder),
-			// Delete any empty NodeClaims as there is zero cost in terms of disruption.
-			NewEmptiness(c),
-			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
-			NewMultiNodeConsolidation(c),
-			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
-			NewSingleNodeConsolidation(c),
-		},
+		methods: append(
+			// Terminate any NodeClaims that have need to be eventually disrupted from provisioning specifications, allowing the pods to reschedule.
+			eventualDisruptionMethods,
+			[]Method{
+				// Delete any empty NodeClaims as there is zero cost in terms of disruption.
+				NewEmptiness(c),
+				// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
+				NewMultiNodeConsolidation(c),
+				// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
+				NewSingleNodeConsolidation(c),
+			}...),
 	}
 }
 
@@ -107,6 +116,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	c.recordRun("disruption-loop")
 
 	// Log if there are any budgets that are misconfigured that weren't caught by validation.
+	// Only validate the first reason, since CEL validation will catch invalid disruption reasons
 	c.logInvalidBudgets(ctx)
 
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
@@ -159,7 +169,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(candidates) == 0 {
 		return false, nil
 	}
-	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, c.cluster, c.clock, c.kubeClient, c.recorder)
+	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.recorder, disruption.Reason())
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
@@ -275,8 +285,11 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	var buf bytes.Buffer
 	for _, np := range nodePoolList.Items {
 		// Use a dummy value of 100 since we only care if this errors.
-		if _, err := np.GetAllowedDisruptionsByReason(ctx, c.clock, 100); err != nil {
-			fmt.Fprintf(&buf, "invalid disruption budgets in nodepool %s, %s", np.Name, err)
+		for _, method := range c.methods {
+			if _, err := np.GetAllowedDisruptionsByReason(c.clock, 100, method.Reason()); err != nil {
+				fmt.Fprintf(&buf, "invalid disruption budgets in nodepool %s, %s", np.Name, err)
+				break // Prevent duplicate error message
+			}
 		}
 	}
 	if buf.Len() > 0 {
