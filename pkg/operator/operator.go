@@ -25,6 +25,8 @@ import (
 	"runtime/debug"
 	"sync"
 
+	"sigs.k8s.io/karpenter/pkg/utils/env"
+
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
@@ -32,7 +34,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/klog/v2"
-	"knative.dev/pkg/changeset"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -47,9 +48,6 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/clock"
-	knativeinjection "knative.dev/pkg/injection"
-	"knative.dev/pkg/signals"
-	"knative.dev/pkg/system"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -88,7 +86,7 @@ func init() {
 	crmetrics.Registry.MustRegister(BuildInfo)
 	opmetrics.RegisterClientMetrics(crmetrics.Registry)
 
-	BuildInfo.WithLabelValues(Version, runtime.Version(), runtime.GOARCH, changeset.Get()).Set(1)
+	BuildInfo.WithLabelValues(Version, runtime.Version(), runtime.GOARCH, env.GetRevision()).Set(1)
 }
 
 type Operator struct {
@@ -102,8 +100,7 @@ type Operator struct {
 // NewOperator instantiates a controller manager or panics
 func NewOperator() (context.Context, *Operator) {
 	// Root Context
-	ctx := signals.NewContext()
-	ctx = knativeinjection.WithNamespaceScope(ctx, system.Namespace())
+	ctx := context.Background()
 
 	// Options
 	ctx = injection.WithOptionsOrDie(ctx, options.Injectables...)
@@ -136,7 +133,6 @@ func NewOperator() (context.Context, *Operator) {
 		LeaderElection:                !options.FromContext(ctx).DisableLeaderElection,
 		LeaderElectionID:              "karpenter-leader-election",
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
-		LeaderElectionNamespace:       system.Namespace(),
 		LeaderElectionReleaseOnCancel: true,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
