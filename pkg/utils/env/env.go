@@ -18,6 +18,8 @@ package env
 
 import (
 	"os"
+	"regexp"
+	"runtime/debug"
 	"strconv"
 	"time"
 )
@@ -86,4 +88,39 @@ func WithDefaultDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return parsedVal
+}
+
+// GetRevision function is based on the function defined under https://pkg.go.dev/knative.dev/pkg@v0.0.0-20240815051656-89743d9bbf7c/changeset
+// at https://github.com/knative/pkg/blob/89743d9bbf7c/changeset/commit.go#L51
+func GetRevision() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+
+	var revision string
+	var modified bool
+
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			revision = s.Value
+		case "vcs.modified":
+			modified, _ = strconv.ParseBool(s.Value)
+		}
+	}
+
+	if revision == "" {
+		return "unknown"
+	}
+
+	if regexp.MustCompile(`^[a-f0-9]{40,64}$`).MatchString(revision) {
+		revision = revision[:7]
+	}
+
+	if modified {
+		revision += "-dirty"
+	}
+
+	return revision
 }

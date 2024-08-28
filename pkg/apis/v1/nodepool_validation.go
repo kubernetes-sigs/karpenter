@@ -19,42 +19,39 @@ package v1
 import (
 	"fmt"
 
+	"go.uber.org/multierr"
+
 	"k8s.io/apimachinery/pkg/util/validation"
-	"knative.dev/pkg/apis"
 )
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
-func (in *NodePool) RuntimeValidate() (errs *apis.FieldError) {
-	return errs.Also(
-		in.Spec.Template.validateLabels().ViaField("spec.template.metadata"),
-		in.Spec.Template.Spec.validateTaints().ViaField("spec.template.spec"),
-		in.Spec.Template.Spec.validateRequirements().ViaField("spec.template.spec"),
-		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist().ViaField("spec.template.spec"),
-	)
+func (in *NodePool) RuntimeValidate() (errs error) {
+	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist())
+	return errs
 }
 
-func (in *NodeClaimTemplate) validateLabels() (errs *apis.FieldError) {
+func (in *NodeClaimTemplate) validateLabels() (errs error) {
 	for key, value := range in.Labels {
 		if key == NodePoolLabelKey {
-			errs = errs.Also(apis.ErrInvalidKeyName(key, "labels", "restricted"))
+			errs = multierr.Append(errs, fmt.Errorf("invalid key name %q in labels, restricted", key))
 		}
 		for _, err := range validation.IsQualifiedName(key) {
-			errs = errs.Also(apis.ErrInvalidKeyName(key, "labels", err))
+			errs = multierr.Append(errs, fmt.Errorf("invalid key name %q in labels, %q", key, err))
 		}
 		for _, err := range validation.IsValidLabelValue(value) {
-			errs = errs.Also(apis.ErrInvalidValue(fmt.Sprintf("%s, %s", value, err), fmt.Sprintf("labels[%s]", key)))
+			errs = multierr.Append(errs, fmt.Errorf("invalid value: %s for label[%s], %s", value, key, err))
 		}
 		if err := IsRestrictedLabel(key); err != nil {
-			errs = errs.Also(apis.ErrInvalidKeyName(key, "labels", err.Error()))
+			errs = multierr.Append(errs, fmt.Errorf("invalid key name %q in labels, %s", key, err.Error()))
 		}
 	}
 	return errs
 }
 
-func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs *apis.FieldError) {
-	for i, requirement := range in.Spec.Requirements {
+func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs error) {
+	for _, requirement := range in.Spec.Requirements {
 		if requirement.Key == NodePoolLabelKey {
-			errs = errs.Also(apis.ErrInvalidArrayValue(fmt.Sprintf("%s is restricted", requirement.Key), "requirements", i))
+			errs = multierr.Append(errs, fmt.Errorf("invalid key: %q in requirements, restricted", requirement.Key))
 		}
 	}
 	return errs
