@@ -18,7 +18,6 @@ package terminator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -109,7 +108,7 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 		if len(group) > 0 {
 			// Only add pods to the eviction queue that haven't been evicted yet
 			t.evictionQueue.Add(lo.Filter(group, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p) })...)
-			return NewNodeDrainError(errors.New("pods are waiting to be evicted"))
+			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", lo.SumBy(podGroups, func(pods []*corev1.Pod) int { return len(pods) })))
 		}
 	}
 	return nil
