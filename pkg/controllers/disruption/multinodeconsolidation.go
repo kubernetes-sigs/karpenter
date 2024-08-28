@@ -43,7 +43,7 @@ func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidat
 	return &MultiNodeConsolidation{consolidation: consolidation}
 }
 
-func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if m.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
@@ -61,7 +61,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	for _, candidate := range candidates {
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name][m.Reason()] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
 			constrainedByBudgets = true
 			continue
 		}
@@ -73,7 +73,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		}
 		// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 		disruptableCandidates = append(disruptableCandidates, candidate)
-		disruptionBudgetMapping[candidate.nodePool.Name][m.Reason()]--
+		disruptionBudgetMapping[candidate.nodePool.Name]--
 	}
 
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.

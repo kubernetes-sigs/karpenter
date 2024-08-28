@@ -17,7 +17,6 @@ limitations under the License.
 package v1
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -89,7 +88,7 @@ type Disruption struct {
 type Budget struct {
 	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
-	// allowed reasons are Underutilized, Empty, and Drifted.
+	// allowed reasons are Underutilized, Empty, and Drifted and additional CloudProvider-specific reasons.
 	// +optional
 	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
@@ -129,6 +128,7 @@ const (
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.
+// CloudProviders will need to append to the list of enums when implementing cloud provider disruption reasons
 // +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
 type DisruptionReason string
 
@@ -136,11 +136,6 @@ const (
 	DisruptionReasonUnderutilized DisruptionReason = "Underutilized"
 	DisruptionReasonEmpty         DisruptionReason = "Empty"
 	DisruptionReasonDrifted       DisruptionReason = "Drifted"
-)
-
-var (
-	// WellKnownDisruptionReasons is a list of all valid reasons for disruption budgets.
-	WellKnownDisruptionReasons = []DisruptionReason{DisruptionReasonUnderutilized, DisruptionReasonEmpty, DisruptionReasonDrifted}
 )
 
 type Limits v1.ResourceList
@@ -314,34 +309,28 @@ func (nl *NodePoolList) OrderByWeight() {
 // MustGetAllowedDisruptions calls GetAllowedDisruptionsByReason if the error is not nil. This reduces the
 // amount of state that the disruption controller must reconcile, while allowing the GetAllowedDisruptionsByReason()
 // to bubble up any errors in validation.
-func (in *NodePool) MustGetAllowedDisruptions(ctx context.Context, c clock.Clock, numNodes int) map[DisruptionReason]int {
-	allowedDisruptions, err := in.GetAllowedDisruptionsByReason(ctx, c, numNodes)
+func (in *NodePool) MustGetAllowedDisruptions(c clock.Clock, numNodes int, reason DisruptionReason) int {
+	allowedDisruptions, err := in.GetAllowedDisruptionsByReason(c, numNodes, reason)
 	if err != nil {
-		return map[DisruptionReason]int{}
+		return 0
 	}
 	return allowedDisruptions
 }
 
 // GetAllowedDisruptionsByReason returns the minimum allowed disruptions across all disruption budgets, for all disruption methods for a given nodepool
-func (in *NodePool) GetAllowedDisruptionsByReason(ctx context.Context, c clock.Clock, numNodes int) (map[DisruptionReason]int, error) {
+func (in *NodePool) GetAllowedDisruptionsByReason(c clock.Clock, numNodes int, reason DisruptionReason) (int, error) {
+	allowedNodes := math.MaxInt32
 	var multiErr error
-	allowedDisruptions := map[DisruptionReason]int{}
-	for _, reason := range WellKnownDisruptionReasons {
-		allowedDisruptions[reason] = math.MaxInt32
-	}
-
 	for _, budget := range in.Spec.Disruption.Budgets {
 		val, err := budget.GetAllowedDisruptions(c, numNodes)
 		if err != nil {
 			multiErr = multierr.Append(multiErr, err)
 		}
-		// If reasons is nil, it applies to all well known disruption reasons
-		for _, reason := range lo.Ternary(budget.Reasons == nil, WellKnownDisruptionReasons, budget.Reasons) {
-			allowedDisruptions[reason] = lo.Min([]int{allowedDisruptions[reason], val})
+		if budget.Reasons == nil || lo.Contains(budget.Reasons, reason) {
+			allowedNodes = lo.Min([]int{allowedNodes, val})
 		}
 	}
-
-	return allowedDisruptions, multiErr
+	return allowedNodes, multiErr
 }
 
 // GetAllowedDisruptions returns an intstr.IntOrString that can be used a comparison

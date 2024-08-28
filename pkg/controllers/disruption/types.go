@@ -46,7 +46,7 @@ const (
 
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
-	ComputeCommand(context.Context, map[string]map[v1.DisruptionReason]int, ...*Candidate) (Command, scheduling.Results, error)
+	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, scheduling.Results, error)
 	Reason() v1.DisruptionReason
 	Class() string
 	ConsolidationType() string

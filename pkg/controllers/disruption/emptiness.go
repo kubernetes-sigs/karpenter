@@ -56,7 +56,7 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 // ComputeCommand generates a disruption command given candidates
 //
 //nolint:gocyclo
-func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if e.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
@@ -68,7 +68,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
-		if disruptionBudgetMapping[candidate.nodePool.Name][e.Reason()] == 0 {
+		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
 			// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 			constrainedByBudgets = true
 			continue
@@ -76,7 +76,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
 		empty = append(empty, candidate)
-		disruptionBudgetMapping[candidate.nodePool.Name][e.Reason()]--
+		disruptionBudgetMapping[candidate.nodePool.Name]--
 	}
 	// none empty, so do nothing
 	if len(empty) == 0 {
