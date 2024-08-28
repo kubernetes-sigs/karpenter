@@ -20,6 +20,8 @@ import (
 	"context"
 	"time"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -30,7 +32,6 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -94,7 +95,7 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 	// We don't check the deletion timestamp here, as we expect the termination controller to eventually set
 	// the taint when it picks up the node from being deleted.
 	if !lo.ContainsBy(n.Spec.Taints, func(taint corev1.Taint) bool {
-		return v1.IsDisruptingTaint(taint)
+		return taint.MatchTaint(&v1.DisruptedNoScheduleTaint)
 	}) {
 		return reconcile.Result{}, nil
 	}

@@ -20,7 +20,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
-	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 )
 
 // Karpenter specific taints
@@ -41,8 +40,3 @@ var (
 		Effect: v1.TaintEffectNoExecute,
 	}
 )
-
-// IsDisruptingTaint checks if the taint is either the v1 or v1beta1 disruption taint.
-func IsDisruptingTaint(taint v1.Taint) bool {
-	return taint.MatchTaint(&DisruptedNoScheduleTaint) || v1beta1.IsDisruptingTaint(taint)
-}
