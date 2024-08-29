@@ -97,6 +97,7 @@ var _ = Describe("Termination", func() {
 		// Reset the metrics collectors
 		metrics.NodesTerminatedTotal.Reset()
 		termination.TerminationDurationSeconds.Reset()
+		termination.NodeLifetimeDurationSeconds.Reset()
 	})
 
 	Context("Reconciliation", func() {
@@ -845,6 +846,18 @@ var _ = Describe("Termination", func() {
 			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated_total", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
+		})
+		It("should fire the lifetime duration histogram metric when deleting nodes", func() {
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_lifetime_duration_seconds", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.GetHistogram().SampleCount)).To(BeNumerically("==", 1))
 		})
 		It("should update the eviction queueDepth metric when reconciling pods", func() {
 			minAvailable := intstr.FromInt32(0)

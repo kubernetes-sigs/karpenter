@@ -78,14 +78,18 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Node Metrics", func() {
-	It("should update the allocatable metric", func() {
-		resources := corev1.ResourceList{
+	var node *corev1.Node
+	var resources corev1.ResourceList
+
+	BeforeEach(func() {
+		resources = corev1.ResourceList{
 			corev1.ResourcePods:   resource.MustParse("100"),
 			corev1.ResourceCPU:    resource.MustParse("5000"),
 			corev1.ResourceMemory: resource.MustParse("32Gi"),
 		}
-
-		node := test.Node(test.NodeOptions{Allocatable: resources})
+		node = test.Node(test.NodeOptions{Allocatable: resources})
+	})
+	It("should update the allocatable metric", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectSingletonReconciled(ctx, metricsStateController)
@@ -99,14 +103,27 @@ var _ = Describe("Node Metrics", func() {
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
 		}
 	})
-	It("should remove the node metric gauge when the node is deleted", func() {
-		resources := corev1.ResourceList{
-			corev1.ResourcePods:   resource.MustParse("100"),
-			corev1.ResourceCPU:    resource.MustParse("5000"),
-			corev1.ResourceMemory: resource.MustParse("32Gi"),
-		}
+	It("should update the node lifetime and cluster utilization metrics", func() {
 
-		node := test.Node(test.NodeOptions{Allocatable: resources})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectSingletonReconciled(ctx, metricsStateController)
+
+		metric, found := FindMetricWithLabelValues("karpenter_nodes_current_lifetime_seconds", map[string]string{
+			"node_name": node.GetName(),
+		})
+		Expect(found).To(BeTrue())
+		Expect(metric.GetGauge().GetValue()).To(BeNumerically(">=", 0))
+
+		for resourceName := range resources {
+			metric, found := FindMetricWithLabelValues("karpenter_cluster_utilization_percent", map[string]string{
+				"resource_type": resourceName.String(),
+			})
+			Expect(found).To(BeTrue())
+			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
+		}
+	})
+	It("should remove the node metric gauge when the node is deleted", func() {
 		ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectSingletonReconciled(ctx, metricsStateController)
