@@ -129,8 +129,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		RateLimitingInterface: workqueue.NewRateLimitingQueueWithConfig(
 			workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay),
 			workqueue.RateLimitingQueueConfig{
-				Name:            "disruption.workqueue",
-				MetricsProvider: metrics.WorkqueueMetricsProvider{},
+				Name: "disruption.workqueue",
 			}),
 		providerIDToCommand: map[string]*Command{},
 		kubeClient:          kubeClient,

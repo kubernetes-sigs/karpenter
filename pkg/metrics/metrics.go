@@ -93,5 +93,5 @@ var (
 
 func init() {
 	crmetrics.Registry.MustRegister(NodeClaimsCreatedTotal, NodeClaimsTerminatedTotal, NodeClaimsDisruptedTotal,
-		NodesCreatedTotal, NodesTerminatedTotal, workqueueDepth, workqueueAdds, workqueueLatency, workDuration, workqueueUnfinished, workqueueLongestRunningProcessor, workqueueRetries)
+		NodesCreatedTotal, NodesTerminatedTotal)
 }
