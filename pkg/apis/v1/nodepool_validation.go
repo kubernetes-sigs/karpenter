@@ -41,8 +41,8 @@ func (in *NodeClaimTemplate) validateLabels() (errs error) {
 		for _, err := range validation.IsValidLabelValue(value) {
 			errs = multierr.Append(errs, fmt.Errorf("invalid value: %s for label[%s], %s", value, key, err))
 		}
-		if err := IsRestrictedLabel(key); err != nil {
-			errs = multierr.Append(errs, fmt.Errorf("invalid key name %q in labels, %s", key, err.Error()))
+		if IsRestrictedNodeLabel(key) {
+			errs = multierr.Append(errs, fmt.Errorf("restricted key name %q in labels", key))
 		}
 	}
 	return errs

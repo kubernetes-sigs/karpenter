@@ -512,7 +512,7 @@ func validateNodeSelectorTerm(term corev1.NodeSelectorTerm) (errs error) {
 	}
 	if term.MatchExpressions != nil {
 		for _, requirement := range term.MatchExpressions {
-			errs = multierr.Append(errs, v1.ValidateRequirement(v1.NodeSelectorRequirementWithMinValues{
+			errs = multierr.Append(errs, v1.ValidateBasicRequirements(v1.NodeSelectorRequirementWithMinValues{
 				NodeSelectorRequirement: requirement,
 			}))
 		}

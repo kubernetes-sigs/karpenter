@@ -411,26 +411,26 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
 			}
 		})
-		It("should allow restricted domains exceptions", func() {
+		It("should fail for the allow restricted domains exceptions", func() {
 			oldNodePool := nodePool.DeepCopy()
 			for label := range LabelDomainExceptions {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 				}
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-				Expect(nodePool.RuntimeValidate()).To(Succeed())
+				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
 				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
 				nodePool = oldNodePool.DeepCopy()
 			}
 		})
-		It("should allow restricted subdomains exceptions", func() {
+		It("should fail for allow restricted subdomains exceptions", func() {
 			oldNodePool := nodePool.DeepCopy()
 			for label := range LabelDomainExceptions {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 				}
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-				Expect(nodePool.RuntimeValidate()).To(Succeed())
+				Expect(nodePool.RuntimeValidate()).ToNot(Succeed())
 				Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
 				nodePool = oldNodePool.DeepCopy()
 			}
