@@ -42,7 +42,6 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 
-	"knative.dev/pkg/system"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -77,7 +76,6 @@ func NewEnvironment(t *testing.T) *Environment {
 	config := NewConfig()
 	client := NewClient(ctx, config)
 
-	lo.Must0(os.Setenv(system.NamespaceEnvKey, "kube-system"))
 	if val, ok := os.LookupEnv("GIT_REF"); ok {
 		ctx = context.WithValue(ctx, GitRefContextKey, val)
 	}

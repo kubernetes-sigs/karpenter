@@ -19,7 +19,6 @@ package test
 import (
 	"context"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/awslabs/operatorpkg/option"
@@ -30,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
-	"knative.dev/pkg/system"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -88,7 +86,6 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 	opts := option.Resolve(options...)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	os.Setenv(system.NamespaceEnvKey, "default")
 	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.30.x"), ".x", ".0", -1))
 	environment := envtest.Environment{Scheme: scheme.Scheme, CRDs: opts.crds}
 	if version.Minor() >= 21 {

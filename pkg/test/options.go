@@ -29,10 +29,7 @@ import (
 type OptionsFields struct {
 	// Vendor Neutral
 	ServiceName           *string
-	DisableWebhook        *bool
-	WebhookPort           *int
 	MetricsPort           *int
-	WebhookMetricsPort    *int
 	HealthProbePort       *int
 	KubeClientQPS         *int
 	KubeClientBurst       *int
@@ -62,10 +59,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 
 	return &options.Options{
 		ServiceName:           lo.FromPtrOr(opts.ServiceName, ""),
-		DisableWebhook:        lo.FromPtrOr(opts.DisableWebhook, false),
-		WebhookPort:           lo.FromPtrOr(opts.WebhookPort, 8443),
 		MetricsPort:           lo.FromPtrOr(opts.MetricsPort, 8080),
-		WebhookMetricsPort:    lo.FromPtrOr(opts.WebhookMetricsPort, 8001),
 		HealthProbePort:       lo.FromPtrOr(opts.HealthProbePort, 8081),
 		KubeClientQPS:         lo.FromPtrOr(opts.KubeClientQPS, 200),
 		KubeClientBurst:       lo.FromPtrOr(opts.KubeClientBurst, 300),

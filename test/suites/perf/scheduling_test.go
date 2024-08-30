@@ -33,9 +33,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var replicas int = 100
-
 var _ = Describe("Performance", func() {
+	var replicas = 100
+
 	Context("Provisioning", func() {
 		It("should do simple provisioning", func() {
 			deployment := test.Deployment(test.DeploymentOptions{

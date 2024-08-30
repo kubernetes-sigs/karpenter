@@ -20,14 +20,13 @@ import (
 	"context"
 	"strings"
 
+	"sigs.k8s.io/karpenter/pkg/utils/env"
+
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"knative.dev/pkg/changeset"
-
-	"knative.dev/pkg/logging/logkey"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
@@ -35,6 +34,11 @@ import (
 // NopLogger is used to throw away logs when we don't actually want to log in
 // certain portions of the code since logging would be too noisy
 var NopLogger = zapr.NewLogger(zap.NewNop())
+
+const (
+	Unknown = "unknown"
+	Commit  = "commit"
+)
 
 func DefaultZapConfig(ctx context.Context, component string) zap.Config {
 	logLevel := lo.Ternary(component != "webhook", zap.NewAtomicLevelAt(zap.InfoLevel), zap.NewAtomicLevelAt(zap.ErrorLevel))
@@ -78,13 +82,13 @@ func NewLogger(ctx context.Context, component string) *zap.Logger {
 }
 
 func WithCommit(logger *zap.Logger) *zap.Logger {
-	revision := changeset.Get()
-	if revision == changeset.Unknown {
+	revision := env.GetRevision()
+	if revision == Unknown {
 		logger.Info("Unable to read vcs.revision from binary")
 		return logger
 	}
 	// Enrich logs with the components git revision.
-	return logger.With(zap.String(logkey.Commit, revision))
+	return logger.With(zap.String(Commit, revision))
 }
 
 type ignoreDebugEventsSink struct {

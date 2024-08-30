@@ -67,10 +67,7 @@ func Merge(resources ...v1.ResourceList) v1.ResourceList {
 // constructing a new one for each sum like Merge
 func MergeInto(dest v1.ResourceList, src v1.ResourceList) v1.ResourceList {
 	if dest == nil {
-		sz := len(dest)
-		if len(src) > sz {
-			sz = len(src)
-		}
+		sz := len(src)
 		dest = make(v1.ResourceList, sz)
 	}
 	for resourceName, quantity := range src {
