@@ -429,7 +429,7 @@ var _ = Describe("Termination", func() {
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 
-			podGroups := [][]*corev1.Pod{{podEvict}, {podDaemonEvict}, {podNodeCritical, podClusterCritical}, {podDaemonNodeCritical, podDaemonClusterCritical}}
+			podGroups := [][]*corev1.Pod{{podEvict}, {podDaemonEvict, podKruiseDaemonEvict}, {podNodeCritical, podClusterCritical}, {podDaemonNodeCritical, podDaemonClusterCritical, podKruiseDaemonNodeCritical, podKruiseDaemonClusterCritical}}
 			for i, podGroup := range podGroups {
 				node = ExpectNodeExists(ctx, env.Client, node.Name)
 				for _, p := range podGroup {
