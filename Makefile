@@ -36,6 +36,7 @@ verify: ## Verify code. Includes codegen, dependencies, linting, formatting, etc
 	hack/validation/requirements.sh
 	hack/validation/labels.sh
 	hack/validation/status.sh
+	hack/mutation/conversion_webhook_injection.sh
 	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
 	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
