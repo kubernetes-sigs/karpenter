@@ -96,7 +96,7 @@ var _ = Describe("Options", func() {
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
 				ServiceName:          lo.ToPtr(""),
-				DisableWebhook:       lo.ToPtr(true),
+				DisableWebhook:       lo.ToPtr(false),
 				WebhookPort:          lo.ToPtr(8443),
 				MetricsPort:          lo.ToPtr(8000),
 				WebhookMetricsPort:   lo.ToPtr(8001),
@@ -254,7 +254,7 @@ var _ = Describe("Options", func() {
 			Entry("explicit true", "--disable-webhook=true", true),
 			Entry("explicit false", "--disable-webhook=false", false),
 			Entry("implicit true", "--disable-webhook", true),
-			Entry("implicit true", "", true),
+			Entry("implicit false", "", false),
 		)
 	})
 
