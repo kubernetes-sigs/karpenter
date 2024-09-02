@@ -79,7 +79,7 @@ func NewQueueKey(pod *corev1.Pod) QueueKey {
 }
 
 type Queue struct {
-	workqueue.RateLimitingInterface
+	workqueue.TypedRateLimitingInterface[QueueKey]
 
 	mu  sync.Mutex
 	set sets.Set[QueueKey]
@@ -90,9 +90,9 @@ type Queue struct {
 
 func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	queue := &Queue{
-		RateLimitingInterface: workqueue.NewRateLimitingQueueWithConfig(
-			workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay),
-			workqueue.RateLimitingQueueConfig{
+		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig[QueueKey](
+			workqueue.NewTypedItemExponentialFailureRateLimiter[QueueKey](evictionQueueBaseDelay, evictionQueueMaxDelay),
+			workqueue.TypedRateLimitingQueueConfig[QueueKey]{
 				Name: "eviction.workqueue",
 			}),
 		set:        sets.New[QueueKey](),
@@ -118,7 +118,7 @@ func (q *Queue) Add(pods ...*corev1.Pod) {
 		qk := NewQueueKey(pod)
 		if !q.set.Has(qk) {
 			q.set.Insert(qk)
-			q.RateLimitingInterface.Add(qk)
+			q.TypedRateLimitingInterface.Add(qk)
 		}
 	}
 }
@@ -135,29 +135,28 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
-	if q.RateLimitingInterface.Len() == 0 {
+	if q.TypedRateLimitingInterface.Len() == 0 {
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	// Get pod from queue. This waits until queue is non-empty.
-	item, shutdown := q.RateLimitingInterface.Get()
+	item, shutdown := q.TypedRateLimitingInterface.Get()
 	if shutdown {
 		return reconcile.Result{}, fmt.Errorf("EvictionQueue is broken and has shutdown")
 	}
 
-	qk := item.(QueueKey)
-	defer q.RateLimitingInterface.Done(qk)
+	defer q.TypedRateLimitingInterface.Done(item)
 
 	// Evict the pod
-	if q.Evict(ctx, qk) {
-		q.RateLimitingInterface.Forget(qk)
+	if q.Evict(ctx, item) {
+		q.TypedRateLimitingInterface.Forget(item)
 		q.mu.Lock()
-		q.set.Delete(qk)
+		q.set.Delete(item)
 		q.mu.Unlock()
 		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
 	// Requeue pod if eviction failed
-	q.RateLimitingInterface.AddRateLimited(qk)
+	q.TypedRateLimitingInterface.AddRateLimited(item)
 	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
@@ -196,14 +195,12 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	return true
 }
 
-func (q *Queue) Reset() {
+// Reset allows you to reset the
+func (q *Queue) Reset(typedRateLimitingInterface workqueue.TypedRateLimitingInterface[QueueKey]) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	q.RateLimitingInterface = workqueue.NewRateLimitingQueueWithConfig(
-		workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay),
-		workqueue.RateLimitingQueueConfig{
-			Name: "eviction.workqueue",
-		})
+	q.TypedRateLimitingInterface.ShutDown()
+	q.TypedRateLimitingInterface = typedRateLimitingInterface
 	q.set = sets.New[QueueKey]()
 }

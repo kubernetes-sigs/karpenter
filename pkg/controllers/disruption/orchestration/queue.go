@@ -38,7 +38,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -126,6 +125,8 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	provisioner *provisioning.Provisioner,
 ) *Queue {
 	queue := &Queue{
+		// nolint:staticcheck
+		// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
 		RateLimitingInterface: workqueue.NewRateLimitingQueueWithConfig(
 			workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay),
 			workqueue.RateLimitingQueueConfig{
@@ -137,22 +138,6 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		cluster:             cluster,
 		clock:               clock,
 		provisioner:         provisioner,
-	}
-	return queue
-}
-
-// NewTestingQueue uses a test RateLimitingInterface that will immediately re-queue items.
-func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner,
-) *Queue {
-	queue := &Queue{
-		RateLimitingInterface: &controllertest.Queue{Interface: workqueue.New()},
-		providerIDToCommand:   map[string]*Command{},
-		kubeClient:            kubeClient,
-		recorder:              recorder,
-		cluster:               cluster,
-		clock:                 clock,
-		provisioner:           provisioner,
 	}
 	return queue
 }
@@ -345,11 +330,12 @@ func (q *Queue) Remove(cmd *Command) {
 	q.mu.Unlock()
 }
 
-// Reset is used for testing and clears all internal data structures
-func (q *Queue) Reset() {
+func (q *Queue) Reset(rateLimitingInterface workqueue.RateLimitingInterface) { // nolint:staticcheck
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
+
+	q.RateLimitingInterface.ShutDown()
+	q.RateLimitingInterface = rateLimitingInterface
 	q.providerIDToCommand = map[string]*Command{}
 }
 

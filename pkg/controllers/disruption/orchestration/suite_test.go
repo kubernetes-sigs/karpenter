@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/util/workqueue"
+
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -81,7 +83,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster)
-	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	queue = orchestration.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
 })
 
 var _ = AfterSuite(func() {
@@ -90,13 +92,13 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	recorder.Reset() // Reset the events that we captured during the run
-
-	fakeClock.SetTime(time.Now())
 	cluster.Reset()
 	cloudProvider.Reset()
+	queue.Reset(test.NewRateLimitingInterface(workqueue.QueueConfig{Name: "disruption.workqueue"}))
+	fakeClock.SetTime(time.Now())
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	cluster.MarkUnconsolidated()
-	queue.Reset()
+
 })
 
 var _ = AfterEach(func() {
