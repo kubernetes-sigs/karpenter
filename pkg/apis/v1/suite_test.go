@@ -74,7 +74,8 @@ var _ = Describe("OrderByWeight", func() {
 		nodePoolList.OrderByWeight()
 
 		lastWeight := 101 // This is above the allowed weight values
-		for _, np := range nodePoolList.Items {
+		for i := range nodePoolList.Items {
+			np := &nodePoolList.Items[i]
 			Expect(lo.FromPtr(np.Spec.Weight)).To(BeNumerically("<=", lastWeight))
 			lastWeight = int(lo.FromPtr(np.Spec.Weight))
 		}
@@ -96,7 +97,8 @@ var _ = Describe("OrderByWeight", func() {
 		nodePoolList.OrderByWeight()
 
 		lastName := "zzzzzzzzzzzzzzzzzzzzzzzz" // large string value
-		for _, np := range nodePoolList.Items {
+		for i := range nodePoolList.Items {
+			np := &nodePoolList.Items[i]
 			Expect(np.Name < lastName).To(BeTrue())
 			lastName = np.Name
 		}
