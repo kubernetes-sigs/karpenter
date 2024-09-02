@@ -225,7 +225,8 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	if err := kubeClient.List(ctx, nodePoolList); err != nil {
 		return disruptionBudgetMapping, fmt.Errorf("listing node pools, %w", err)
 	}
-	for _, nodePool := range nodePoolList.Items {
+	for i := range nodePoolList.Items {
+		nodePool := &nodePoolList.Items[i]
 		allowedDisruptions := nodePool.MustGetAllowedDisruptions(clk, numNodes[nodePool.Name], reason)
 		disruptionBudgetMapping[nodePool.Name] = lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
 
@@ -233,7 +234,7 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
 		}).Set(float64(allowedDisruptions))
 		if allowedDisruptions == 0 {
-			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(lo.ToPtr(nodePool), reason))
+			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(nodePool, reason))
 		}
 	}
 	return disruptionBudgetMapping, nil
