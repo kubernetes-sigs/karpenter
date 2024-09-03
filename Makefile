@@ -94,11 +94,9 @@ licenses: download ## Verifies dependency licenses
 verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
 	go generate ./...
-	hack/validation/kubelet.sh
 	hack/validation/taint.sh
 	hack/validation/requirements.sh
 	hack/validation/labels.sh
-	hack/validation/resources.sh
 	hack/validation/status.sh
 	cp -r pkg/apis/crds kwok/charts
 	hack/kwok/requirements.sh

@@ -25,7 +25,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
-	"knative.dev/pkg/apis"
 )
 
 var (
@@ -60,41 +59,39 @@ type taintKeyEffect struct {
 	Effect   v1.TaintEffect
 }
 
-func (in *NodeClaimTemplateSpec) validateTaints() (errs *apis.FieldError) {
+func (in *NodeClaimTemplateSpec) validateTaints() (errs error) {
 	existing := map[taintKeyEffect]struct{}{}
-	errs = errs.Also(validateTaintsField(in.Taints, existing, "taints"))
-	errs = errs.Also(validateTaintsField(in.StartupTaints, existing, "startupTaints"))
+	errs = multierr.Combine(validateTaintsField(in.Taints, existing, "taints"), validateTaintsField(in.StartupTaints, existing, "startupTaints"))
 	return errs
 }
 
-func validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}, fieldName string) *apis.FieldError {
-	var errs *apis.FieldError
-	for i, taint := range taints {
+func validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}, fieldName string) error {
+	var errs error
+	for _, taint := range taints {
 		// Validate OwnerKey
 		if len(taint.Key) == 0 {
-			errs = errs.Also(apis.ErrInvalidArrayValue(errs, fieldName, i))
+			errs = multierr.Append(errs, fmt.Errorf("invalid value: %w in %s", errs, fieldName))
 		}
 		for _, err := range validation.IsQualifiedName(taint.Key) {
-			errs = errs.Also(apis.ErrInvalidArrayValue(err, fieldName, i))
+			errs = multierr.Append(errs, fmt.Errorf("invalid value: %s in %s", err, fieldName))
 		}
 		// Validate Value
 		if len(taint.Value) != 0 {
 			for _, err := range validation.IsQualifiedName(taint.Value) {
-				errs = errs.Also(apis.ErrInvalidArrayValue(err, fieldName, i))
+				errs = multierr.Append(errs, fmt.Errorf("invalid value: %s in %s", err, fieldName))
 			}
 		}
 		// Validate effect
 		switch taint.Effect {
 		case v1.TaintEffectNoSchedule, v1.TaintEffectPreferNoSchedule, v1.TaintEffectNoExecute, "":
 		default:
-			errs = errs.Also(apis.ErrInvalidArrayValue(taint.Effect, fieldName, i))
+			errs = multierr.Append(errs, fmt.Errorf("invalid value: %q in %s", taint.Effect, fieldName))
 		}
 
 		// Check for duplicate OwnerKey/Effect pairs
 		key := taintKeyEffect{OwnerKey: taint.Key, Effect: taint.Effect}
 		if _, ok := existing[key]; ok {
-			errs = errs.Also(apis.ErrGeneric(fmt.Sprintf("duplicate taint Key/Effect pair %s=%s", taint.Key, taint.Effect), apis.CurrentField).
-				ViaFieldIndex("taints", i))
+			errs = multierr.Append(errs, fmt.Errorf("duplicate taint Key/Effect pair %s=%s", taint.Key, taint.Effect))
 		}
 		existing[key] = struct{}{}
 	}
@@ -104,10 +101,10 @@ func validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}
 // This function is used by the NodeClaim validation webhook to verify the nodepool requirements.
 // When this function is called, the nodepool's requirements do not include the requirements from labels.
 // NodeClaim requirements only support well known labels.
-func (in *NodeClaimTemplateSpec) validateRequirements() (errs *apis.FieldError) {
-	for i, requirement := range in.Requirements {
+func (in *NodeClaimTemplateSpec) validateRequirements() (errs error) {
+	for _, requirement := range in.Requirements {
 		if err := ValidateRequirement(requirement); err != nil {
-			errs = errs.Also(apis.ErrInvalidArrayValue(err, "requirements", i))
+			errs = multierr.Append(errs, fmt.Errorf("invalid value: %w in requirements, restricted", err))
 		}
 	}
 	return errs

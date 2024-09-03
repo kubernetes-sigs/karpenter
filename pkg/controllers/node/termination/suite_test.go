@@ -97,6 +97,7 @@ var _ = Describe("Termination", func() {
 		// Reset the metrics collectors
 		metrics.NodesTerminatedTotal.Reset()
 		termination.TerminationDurationSeconds.Reset()
+		termination.NodeLifetimeDurationSeconds.Reset()
 	})
 
 	Context("Reconciliation", func() {
@@ -361,11 +362,11 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
-		It("should evict pods in order", func() {
+		It("should evict pods in order and wait until pods are fully deleted", func() {
 			daemonEvict := test.DaemonSet()
 			daemonNodeCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-node-critical"}})
 			daemonClusterCritical := test.DaemonSet(test.DaemonSetOptions{PodOptions: test.PodOptions{PriorityClassName: "system-cluster-critical"}})
-			ExpectApplied(ctx, env.Client, node, nodeClaim, daemonEvict, daemonNodeCritical, daemonClusterCritical)
+			ExpectApplied(ctx, env.Client, daemonEvict, daemonNodeCritical, daemonClusterCritical)
 
 			podEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs}})
 			podDaemonEvict := test.Pod(test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{{
@@ -399,48 +400,31 @@ var _ = Describe("Termination", func() {
 
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectPodExists(ctx, env.Client, podEvict.Name, podEvict.Namespace)
-			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
-			// Expect node to exist and be draining
-			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
-			// Expect podEvict to be evicting, and delete it
-			EventuallyExpectTerminating(ctx, env.Client, podEvict)
-			ExpectDeleted(ctx, env.Client, podEvict)
+			podGroups := [][]*corev1.Pod{{podEvict}, {podDaemonEvict}, {podNodeCritical, podClusterCritical}, {podDaemonNodeCritical, podDaemonClusterCritical}}
+			for i, podGroup := range podGroups {
+				node = ExpectNodeExists(ctx, env.Client, node.Name)
+				for _, p := range podGroup {
+					ExpectPodExists(ctx, env.Client, p.Name, p.Namespace)
+				}
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+				for range podGroup {
+					ExpectSingletonReconciled(ctx, queue)
+				}
+				// Start draining the pod group, but don't complete it yet
+				EventuallyExpectTerminating(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
 
-			// Expect the noncritical Daemon pod to be evicted
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectPodExists(ctx, env.Client, podDaemonEvict.Name, podDaemonEvict.Namespace)
-			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
-			EventuallyExpectTerminating(ctx, env.Client, podDaemonEvict)
-			ExpectDeleted(ctx, env.Client, podDaemonEvict)
-
-			// Expect the critical pods to be evicted and deleted
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectPodExists(ctx, env.Client, podNodeCritical.Name, podNodeCritical.Namespace)
-			ExpectPodExists(ctx, env.Client, podClusterCritical.Name, podClusterCritical.Namespace)
-			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
-			ExpectSingletonReconciled(ctx, queue)
-
-			EventuallyExpectTerminating(ctx, env.Client, podNodeCritical, podClusterCritical)
-			ExpectDeleted(ctx, env.Client, podNodeCritical)
-			ExpectDeleted(ctx, env.Client, podClusterCritical)
-
-			// Expect the critical daemon pods to be evicted and deleted
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectPodExists(ctx, env.Client, podDaemonNodeCritical.Name, podDaemonNodeCritical.Namespace)
-			ExpectPodExists(ctx, env.Client, podDaemonClusterCritical.Name, podDaemonClusterCritical.Namespace)
-			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
-			ExpectSingletonReconciled(ctx, queue)
-
-			EventuallyExpectTerminating(ctx, env.Client, podDaemonNodeCritical, podDaemonClusterCritical)
-			ExpectDeleted(ctx, env.Client, podDaemonNodeCritical)
-			ExpectDeleted(ctx, env.Client, podDaemonClusterCritical)
+				// Look at the next pod group and ensure that none of the pods have started terminating on it
+				if i != len(podGroups)-1 {
+					for range podGroups[i+1] {
+						ExpectSingletonReconciled(ctx, queue)
+					}
+					ConsistentlyExpectNotTerminating(ctx, env.Client, lo.Map(podGroups[i+1], func(p *corev1.Pod, _ int) client.Object { return p })...)
+				}
+				// Expect that the pods are deleted -- which should unblock the next pod group
+				ExpectDeleted(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
+			}
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -863,6 +847,18 @@ var _ = Describe("Termination", func() {
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetCounter().Value)).To(BeNumerically("==", 1))
 		})
+		It("should fire the lifetime duration histogram metric when deleting nodes", func() {
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+
+			m, ok := FindMetricWithLabelValues("karpenter_nodes_lifetime_duration_seconds", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.GetHistogram().SampleCount)).To(BeNumerically("==", 1))
+		})
 		It("should update the eviction queueDepth metric when reconciling pods", func() {
 			minAvailable := intstr.FromInt32(0)
 			labelSelector := map[string]string{test.RandomName(): test.RandomName()}
@@ -878,13 +874,13 @@ var _ = Describe("Termination", func() {
 			}})
 			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
 
-			wqDepthBefore, _ := FindMetricWithLabelValues("karpenter_workqueue_depth", map[string]string{"name": "eviction.workqueue"})
+			wqDepthBefore, _ := FindMetricWithLabelValues("workqueue_adds_total", map[string]string{"name": "eviction.workqueue"})
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			wqDepthAfter, ok := FindMetricWithLabelValues("karpenter_workqueue_depth", map[string]string{"name": "eviction.workqueue"})
+			wqDepthAfter, ok := FindMetricWithLabelValues("workqueue_adds_total", map[string]string{"name": "eviction.workqueue"})
 			Expect(ok).To(BeTrue())
-			Expect(lo.FromPtr(wqDepthAfter.GetGauge().Value) - lo.FromPtr(wqDepthBefore.GetGauge().Value)).To(BeNumerically("==", 5))
+			Expect(lo.FromPtr(wqDepthAfter.GetCounter().Value) - lo.FromPtr(wqDepthBefore.GetCounter().Value)).To(BeNumerically("==", 5))
 		})
 	})
 })

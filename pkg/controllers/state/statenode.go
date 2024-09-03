@@ -481,7 +481,7 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		}
 		// If the node already has the taint, continue to the next
 		_, hasTaint := lo.Find(node.Spec.Taints, func(taint corev1.Taint) bool {
-			return v1.IsDisruptingTaint(taint)
+			return taint.MatchTaint(&v1.DisruptedNoScheduleTaint)
 		})
 		// Node is being deleted, so no need to remove taint as the node will be gone soon.
 		// This ensures that the disruption controller doesn't modify taints that the Termination
@@ -493,13 +493,13 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		// If the taint is present and we want to remove the taint, remove it.
 		if !addTaint {
 			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint corev1.Taint, _ int) bool {
-				return v1.IsDisruptingTaint(taint)
+				return taint.MatchTaint(&v1.DisruptedNoScheduleTaint)
 			})
 			// otherwise, add it.
 		} else if addTaint && !hasTaint {
 			// If the taint key is present (but with a different value or effect), remove it.
 			node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint corev1.Taint, _ int) bool {
-				return v1.IsDisruptingTaint(taint)
+				return taint.MatchTaint(&v1.DisruptedNoScheduleTaint)
 			})
 			node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 		}

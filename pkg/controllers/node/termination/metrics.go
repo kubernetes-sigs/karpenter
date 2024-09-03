@@ -17,6 +17,8 @@ limitations under the License.
 package termination
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -24,8 +26,12 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(TerminationDurationSeconds)
+	crmetrics.Registry.MustRegister(
+		TerminationDurationSeconds,
+		NodeLifetimeDurationSeconds)
 }
+
+const dayDuration = time.Hour * 24
 
 var (
 	TerminationDurationSeconds = prometheus.NewSummaryVec(
@@ -35,6 +41,41 @@ var (
 			Name:       "termination_duration_seconds",
 			Help:       "The time taken between a node's deletion request and the removal of its finalizer",
 			Objectives: metrics.SummaryObjectives(),
+		},
+		[]string{metrics.NodePoolLabel},
+	)
+	NodeLifetimeDurationSeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "lifetime_duration_seconds",
+			Help:      "The lifetime duration of the nodes since creation.",
+			Buckets: []float64{
+
+				(time.Minute * 15).Seconds(),
+				(time.Minute * 30).Seconds(),
+				(time.Minute * 45).Seconds(),
+
+				time.Hour.Seconds(),
+				(time.Hour * 2).Seconds(),
+				(time.Hour * 4).Seconds(),
+				(time.Hour * 6).Seconds(),
+				(time.Hour * 8).Seconds(),
+				(time.Hour * 10).Seconds(),
+				(time.Hour * 12).Seconds(),
+				(time.Hour * 16).Seconds(),
+				(time.Hour * 20).Seconds(),
+
+				dayDuration.Seconds(),
+				(dayDuration * 2).Seconds(),
+				(dayDuration * 3).Seconds(),
+				(dayDuration * 5).Seconds(),
+				(dayDuration * 10).Seconds(),
+				(dayDuration * 15).Seconds(),
+				(dayDuration * 20).Seconds(),
+				(dayDuration * 25).Seconds(),
+				(dayDuration * 30).Seconds(),
+			},
 		},
 		[]string{metrics.NodePoolLabel},
 	)

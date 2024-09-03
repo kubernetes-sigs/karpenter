@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"sigs.k8s.io/karpenter/pkg/metrics"
-
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -95,8 +93,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 		RateLimitingInterface: workqueue.NewRateLimitingQueueWithConfig(
 			workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay),
 			workqueue.RateLimitingQueueConfig{
-				Name:            "eviction.workqueue",
-				MetricsProvider: metrics.WorkqueueMetricsProvider{},
+				Name: "eviction.workqueue",
 			}),
 		set:        sets.New[QueueKey](),
 		kubeClient: kubeClient,
@@ -206,8 +203,7 @@ func (q *Queue) Reset() {
 	q.RateLimitingInterface = workqueue.NewRateLimitingQueueWithConfig(
 		workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay),
 		workqueue.RateLimitingQueueConfig{
-			Name:            "eviction.workqueue",
-			MetricsProvider: metrics.WorkqueueMetricsProvider{},
+			Name: "eviction.workqueue",
 		})
 	q.set = sets.New[QueueKey]()
 }
