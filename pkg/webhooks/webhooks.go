@@ -210,11 +210,14 @@ func HealthProbe(ctx context.Context) healthz.Checker {
 		return nil
 	}
 }
+
 func ValidateConversionWebhooks(ctx context.Context, kubeclient client.Client) {
-	listCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	// allow context to exist longer than cache sync timeout
+	listCtx, cancel := context.WithTimeout(ctx, 130*time.Second)
 	defer cancel()
 	// sleep for cache hydration
-	time.Sleep(60 * time.Second)
+	// wait for cache to sync, controller-runtime defaults to 120 seconds
+	time.Sleep(120 * time.Second)
 	v1np := &v1.NodePoolList{}
 	if err := kubeclient.List(listCtx, v1np); err != nil {
 		panic("Conversion webhook enabled but unable to complete call: " + err.Error())
