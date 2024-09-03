@@ -253,7 +253,7 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			webhooks.ValidateConversionWebhooks(ctx, o.GetClient())
+			webhooks.ValidateConversionEnabled(ctx, o.GetClient())
 		}()
 	}
 	wg.Wait()

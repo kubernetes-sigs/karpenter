@@ -211,7 +211,7 @@ func HealthProbe(ctx context.Context) healthz.Checker {
 	}
 }
 
-func ValidateConversionWebhooks(ctx context.Context, kubeclient client.Client) {
+func ValidateConversionEnabled(ctx context.Context, kubeclient client.Client) {
 	// allow context to exist longer than cache sync timeout
 	listCtx, cancel := context.WithTimeout(ctx, 130*time.Second)
 	defer cancel()
