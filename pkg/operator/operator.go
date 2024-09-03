@@ -214,6 +214,11 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 			ctx = injection.WithClient(ctx, o.GetClient())
 			webhooks.Start(ctx, o.GetConfig(), o.webhooks...)
 		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			webhooks.ValidateConversionEnabled(ctx, o.GetClient())
+		}()
 	}
 	wg.Wait()
 }

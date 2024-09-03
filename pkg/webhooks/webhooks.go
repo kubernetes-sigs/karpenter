@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -39,6 +40,7 @@ import (
 	"knative.dev/pkg/webhook/resourcesemantics"
 	"knative.dev/pkg/webhook/resourcesemantics/conversion"
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -202,5 +204,18 @@ func HealthProbe(ctx context.Context) healthz.Checker {
 			return fmt.Errorf("webhook probe failed with status code %d", res.StatusCode)
 		}
 		return nil
+	}
+}
+
+func ValidateConversionEnabled(ctx context.Context, kubeclient client.Client) {
+	// allow context to exist longer than cache sync timeout
+	listCtx, cancel := context.WithTimeout(ctx, 130*time.Second)
+	defer cancel()
+	// sleep for cache hydration
+	// wait for cache to sync, controller-runtime defaults to 120 seconds
+	time.Sleep(120 * time.Second)
+	v1np := &v1.NodePoolList{}
+	if err := kubeclient.List(listCtx, v1np); err != nil {
+		panic("Conversion webhook enabled but unable to complete call: " + err.Error())
 	}
 }
