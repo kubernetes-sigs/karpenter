@@ -18,6 +18,7 @@ package consistency
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -101,7 +102,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1beta1.NodeClaim
 			return reconcile.Result{}, fmt.Errorf("checking node with %T, %w", check, err)
 		}
 		for _, issue := range issues {
-			log.FromContext(ctx).Error(err, "consistency error")
+			log.FromContext(ctx).Error(errors.New(string(issue)), "consistency error")
 			consistencyErrors.With(prometheus.Labels{checkLabel: reflect.TypeOf(check).Elem().Name()}).Inc()
 			c.recorder.Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
 		}
