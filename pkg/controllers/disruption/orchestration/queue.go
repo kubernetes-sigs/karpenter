@@ -28,6 +28,8 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/karpenter/pkg/test"
+
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -38,7 +40,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -126,6 +127,8 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	provisioner *provisioning.Provisioner,
 ) *Queue {
 	queue := &Queue{
+		// nolint:staticcheck
+		// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
 		RateLimitingInterface: workqueue.NewRateLimitingQueueWithConfig(
 			workqueue.NewItemExponentialFailureRateLimiter(queueBaseDelay, queueMaxDelay),
 			workqueue.RateLimitingQueueConfig{
@@ -141,12 +144,13 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
-// NewTestingQueue uses a test RateLimitingInterface that will immediately re-queue items.
 func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner,
-) *Queue {
+	provisioner *provisioning.Provisioner) *Queue {
+
 	queue := &Queue{
-		RateLimitingInterface: &controllertest.Queue{Interface: workqueue.New()},
+		// nolint:staticcheck
+		// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
+		RateLimitingInterface: test.NewRateLimitingInterface(workqueue.QueueConfig{Name: "disruption.workqueue"}),
 		providerIDToCommand:   map[string]*Command{},
 		kubeClient:            kubeClient,
 		recorder:              recorder,
@@ -343,14 +347,6 @@ func (q *Queue) Remove(cmd *Command) {
 		delete(q.providerIDToCommand, candidate.ProviderID())
 	}
 	q.mu.Unlock()
-}
-
-// Reset is used for testing and clears all internal data structures
-func (q *Queue) Reset() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.RateLimitingInterface = &controllertest.Queue{Interface: workqueue.New()}
-	q.providerIDToCommand = map[string]*Command{}
 }
 
 func (q *Queue) IsEmpty() bool {

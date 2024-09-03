@@ -114,7 +114,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
-	queue.Reset()
+	*queue = lo.FromPtr(orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov))
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults

@@ -64,7 +64,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.Client, recorder)
+	queue = terminator.NewTestingQueue(env.Client, recorder)
 	terminatorInstance = terminator.NewTerminator(fakeClock, env.Client, queue, recorder)
 })
 
@@ -75,7 +75,7 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	recorder.Reset() // Reset the events that we captured during the run
 	// Shut down the queue and restart it to ensure no races
-	queue.Reset()
+	*queue = lo.FromPtr(terminator.NewTestingQueue(env.Client, recorder))
 })
 
 var _ = AfterEach(func() {

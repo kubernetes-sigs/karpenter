@@ -68,7 +68,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.Client, recorder)
+	queue = terminator.NewTestingQueue(env.Client, recorder)
 	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
 })
 
@@ -82,6 +82,10 @@ var _ = Describe("Termination", func() {
 	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
+		fakeClock.SetTime(time.Now())
+		cloudProvider.Reset()
+		*queue = lo.FromPtr(terminator.NewTestingQueue(env.Client, recorder))
+
 		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
 		node.Labels[v1.NodePoolLabelKey] = test.NodePool().Name
@@ -90,9 +94,6 @@ var _ = Describe("Termination", func() {
 
 	AfterEach(func() {
 		ExpectCleanedUp(ctx, env.Client)
-		fakeClock.SetTime(time.Now())
-		cloudProvider.Reset()
-		queue.Reset()
 
 		// Reset the metrics collectors
 		metrics.NodesTerminatedTotal.Reset()
@@ -341,15 +342,18 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
 
 			// Expect node to exist and be draining
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
+			// Expect podNoEvict to be added to the queue
+			Expect(queue.Has(podNoEvict)).To(BeTrue())
+
+			// Attempt to evict the pod, but fail to do so
+			ExpectSingletonReconciled(ctx, queue)
+
 			// Expect podNoEvict to fail eviction due to PDB, and be retried
-			Eventually(func() int {
-				return queue.NumRequeues(terminator.NewQueueKey(podNoEvict))
-			}).Should(BeNumerically(">=", 1))
+			Expect(queue.Has(podNoEvict)).To(BeTrue())
 
 			// Delete pod to simulate successful eviction
 			ExpectDeleted(ctx, env.Client, podNoEvict)

@@ -203,10 +203,10 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			}),
 		).
 		WithOptions(controller.Options{
-			RateLimiter: workqueue.NewMaxOfRateLimiter(
-				workqueue.NewItemExponentialFailureRateLimiter(time.Second, time.Minute),
+			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
+				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](time.Second, time.Minute),
 				// 10 qps, 100 bucket size
-				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
 			MaxConcurrentReconciles: 100, // higher concurrency limit since we want fast reaction to termination
 		}).

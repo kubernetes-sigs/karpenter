@@ -275,10 +275,10 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		For(&corev1.Node{}).
 		WithOptions(
 			controller.Options{
-				RateLimiter: workqueue.NewMaxOfRateLimiter(
-					workqueue.NewItemExponentialFailureRateLimiter(100*time.Millisecond, 10*time.Second),
+				RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
+					workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](100*time.Millisecond, 10*time.Second),
 					// 10 qps, 100 bucket size
-					&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+					&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 				),
 				MaxConcurrentReconciles: 100,
 			},
