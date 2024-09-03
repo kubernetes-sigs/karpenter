@@ -35,6 +35,7 @@ import (
 	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -89,7 +90,7 @@ type Queue struct {
 }
 
 func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
-	queue := &Queue{
+	return &Queue{
 		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig[QueueKey](
 			workqueue.NewTypedItemExponentialFailureRateLimiter[QueueKey](evictionQueueBaseDelay, evictionQueueMaxDelay),
 			workqueue.TypedRateLimitingQueueConfig[QueueKey]{
@@ -99,7 +100,15 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 		kubeClient: kubeClient,
 		recorder:   recorder,
 	}
-	return queue
+}
+
+func NewTestingQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
+	return &Queue{
+		TypedRateLimitingInterface: &controllertest.TypedQueue[QueueKey]{TypedInterface: workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[QueueKey]{Name: "eviction.workqueue"})},
+		set:                        sets.New[QueueKey](),
+		kubeClient:                 kubeClient,
+		recorder:                   recorder,
+	}
 }
 
 func (q *Queue) Register(_ context.Context, m manager.Manager) error {
@@ -193,14 +202,4 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	}
 	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
 	return true
-}
-
-// Reset allows you to reset the
-func (q *Queue) Reset(typedRateLimitingInterface workqueue.TypedRateLimitingInterface[QueueKey]) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	q.TypedRateLimitingInterface.ShutDown()
-	q.TypedRateLimitingInterface = typedRateLimitingInterface
-	q.set = sets.New[QueueKey]()
 }

@@ -24,8 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/client-go/util/workqueue"
-
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -96,7 +94,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster)
-	queue = orchestration.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
+	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
 	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
@@ -116,7 +114,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
-	queue.Reset(test.NewRateLimitingInterface(workqueue.QueueConfig{Name: "disruption.workqueue"}))
+	*queue = lo.FromPtr(orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov))
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults

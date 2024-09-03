@@ -22,9 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/client-go/util/workqueue"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
-
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -67,7 +64,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	ctx = options.ToContext(ctx, test.Options())
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.Client, recorder)
+	queue = terminator.NewTestingQueue(env.Client, recorder)
 	terminatorInstance = terminator.NewTerminator(fakeClock, env.Client, queue, recorder)
 })
 
@@ -78,7 +75,7 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	recorder.Reset() // Reset the events that we captured during the run
 	// Shut down the queue and restart it to ensure no races
-	queue.Reset(&controllertest.TypedQueue[terminator.QueueKey]{TypedInterface: workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[terminator.QueueKey]{Name: "eviction.workqueue"})})
+	*queue = lo.FromPtr(terminator.NewTestingQueue(env.Client, recorder))
 })
 
 var _ = AfterEach(func() {

@@ -22,9 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/client-go/util/workqueue"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
-
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -71,7 +68,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.Client, recorder)
+	queue = terminator.NewTestingQueue(env.Client, recorder)
 	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
 })
 
@@ -87,7 +84,7 @@ var _ = Describe("Termination", func() {
 	BeforeEach(func() {
 		fakeClock.SetTime(time.Now())
 		cloudProvider.Reset()
-		queue.Reset(&controllertest.TypedQueue[terminator.QueueKey]{TypedInterface: workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[terminator.QueueKey]{Name: "eviction.workqueue"})})
+		*queue = lo.FromPtr(terminator.NewTestingQueue(env.Client, recorder))
 
 		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
