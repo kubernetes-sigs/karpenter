@@ -217,9 +217,14 @@ func ValidateConversionEnabled(ctx context.Context, kubeclient client.Client) {
 	defer cancel()
 	// sleep for cache hydration
 	// wait for cache to sync, controller-runtime defaults to 120 seconds
-	time.Sleep(120 * time.Second)
+	var err error
 	v1np := &v1.NodePoolList{}
-	if err := kubeclient.List(listCtx, v1np); err != nil {
-		panic("Conversion webhook enabled but unable to complete call: " + err.Error())
+	deadline, _ := listCtx.Deadline()
+	for time.Now().Before(deadline) {
+		if err = kubeclient.List(listCtx, v1np, &client.ListOptions{Limit: 1}); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Second)
 	}
+	panic("Conversion webhook enabled but unable to complete call: " + err.Error())
 }
