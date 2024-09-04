@@ -217,12 +217,15 @@ func ValidateConversionEnabled(ctx context.Context, kubeclient client.Client) {
 	defer cancel()
 	var err error
 	v1np := &v1.NodePoolList{}
-	deadline, _ := listCtx.Deadline()
-	for time.Now().Before(deadline) {
-		if err = kubeclient.List(listCtx, v1np, &client.ListOptions{Limit: 1}); err == nil {
+	for {
+		err = kubeclient.List(listCtx, v1np, &client.ListOptions{Limit: 1})
+		if err == nil {
 			return
 		}
-		time.Sleep(10 * time.Second)
+		select {
+		case <-listCtx.Done():
+			panic("Conversion webhook enabled but unable to complete call: " + err.Error())
+		case <-time.After(10 * time.Second):
+		}
 	}
-	panic("Conversion webhook enabled but unable to complete call: " + err.Error())
 }
