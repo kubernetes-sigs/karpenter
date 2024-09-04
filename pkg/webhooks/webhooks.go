@@ -212,11 +212,9 @@ func HealthProbe(ctx context.Context) healthz.Checker {
 }
 
 func ValidateConversionEnabled(ctx context.Context, kubeclient client.Client) {
-	// allow context to exist longer than cache sync timeout
+	// allow context to exist longer than cache sync timeout which has a default of 120 seconds
 	listCtx, cancel := context.WithTimeout(ctx, 130*time.Second)
 	defer cancel()
-	// sleep for cache hydration
-	// wait for cache to sync, controller-runtime defaults to 120 seconds
 	var err error
 	v1np := &v1.NodePoolList{}
 	deadline, _ := listCtx.Deadline()
