@@ -18,6 +18,7 @@ package webhooks
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -187,10 +188,16 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Cont
 }
 
 func HealthProbe(ctx context.Context) healthz.Checker {
+	// Create new transport that doesn't validate the TLS certificate
+	// This transport is just polling so validating the server certificate isn't necessary
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // nolint:gosec
+	client := &http.Client{Transport: transport}
+
 	// TODO: Add knative health check port for webhooks when health port can be configured
 	// Issue: https://github.com/knative/pkg/issues/2765
 	return func(req *http.Request) (err error) {
-		res, err := http.Get(fmt.Sprintf("http://localhost:%d", options.FromContext(ctx).WebhookPort))
+		res, err := client.Get(fmt.Sprintf("https://localhost:%d", options.FromContext(ctx).WebhookPort))
 		// If the webhook connection errors out, liveness/readiness should fail
 		if err != nil {
 			return err
