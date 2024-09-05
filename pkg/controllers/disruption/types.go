@@ -72,7 +72,10 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	var err error
 	var pods []*corev1.Pod
 	if err = node.ValidateNodeDisruptable(ctx, kubeClient); err != nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
+		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
+		if node.NodeClaim != nil {
+			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
+		}
 		return nil, err
 	}
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
