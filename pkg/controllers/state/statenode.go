@@ -189,8 +189,11 @@ func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*cor
 //
 //nolint:gocyclo
 func (in *StateNode) ValidateNodeDisruptable(ctx context.Context, kubeClient client.Client) error {
-	if in.Node == nil || in.NodeClaim == nil {
-		return fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
+	if in.NodeClaim == nil {
+		return fmt.Errorf("state node does not have a nodeclaim representation")
+	}
+	if in.Node == nil {
+		return fmt.Errorf("state node does not have a node representation")
 	}
 	if !in.Initialized() {
 		return fmt.Errorf("state node isn't initialized")
