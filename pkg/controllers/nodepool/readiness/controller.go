@@ -21,9 +21,8 @@ import (
 	logger "log"
 
 	"github.com/awslabs/operatorpkg/object"
-	"github.com/samber/lo"
-
 	"github.com/awslabs/operatorpkg/status"
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"

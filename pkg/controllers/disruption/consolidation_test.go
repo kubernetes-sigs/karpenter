@@ -25,8 +25,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"sigs.k8s.io/karpenter/pkg/metrics"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -44,6 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
