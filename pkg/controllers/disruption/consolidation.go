@@ -189,15 +189,6 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		return Command{}, pscheduling.Results{}, nil
 	}
 
-	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
-	// assumption, that the spot variant will launch. We also need to add a requirement to the node to ensure that if
-	// spot capacity is insufficient we don't replace the node with a more expensive on-demand node.  Instead the launch
-	// should fail and we'll just leave the node alone.
-	ctReq := results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey)
-	if ctReq.Has(v1.CapacityTypeSpot) && ctReq.Has(v1.CapacityTypeOnDemand) {
-		results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
-	}
-
 	return Command{
 		candidates:   candidates,
 		replacements: results.NewNodeClaims,
