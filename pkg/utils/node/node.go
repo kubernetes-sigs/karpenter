@@ -134,7 +134,7 @@ func GetReschedulablePods(ctx context.Context, kubeClient client.Client, nodes .
 // GetProvisionablePods grabs all the pods from the passed nodes that satisfy the IsProvisionable criteria
 func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
 	var podList corev1.PodList
-	if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": ""}); err != nil {
+	if err := kubeClient.List(ctx, &podList, client.MatchingFields{"spec.nodeName": "", "status.nominatedNodeName": ""}); err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}
 	return lo.FilterMap(podList.Items, func(p corev1.Pod, _ int) (*corev1.Pod, bool) {
