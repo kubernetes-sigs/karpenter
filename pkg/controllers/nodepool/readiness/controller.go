@@ -71,7 +71,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 		c.setReadyCondition(nodePool, nodeClass)
 	}
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
-		if err = c.kubeClient.Status().Update(ctx, nodePool); client.IgnoreNotFound(err) != nil {
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the status condition list
+		if err = c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}

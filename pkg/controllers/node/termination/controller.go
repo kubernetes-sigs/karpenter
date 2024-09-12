@@ -91,7 +91,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, fmt.Errorf("listing nodeclaims, %w", err)
 	}
 
-	if err := c.deleteAllNodeClaims(ctx, nodeClaims...); err != nil {
+	if err = c.deleteAllNodeClaims(ctx, nodeClaims...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
 	}
 
@@ -100,10 +100,13 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, err
 	}
 
-	if err := c.terminator.Taint(ctx, node, v1.DisruptedNoScheduleTaint); err != nil {
-		return reconcile.Result{}, fmt.Errorf("tainting node with %s, %w", v1.DisruptedTaintKey, err)
+	if err = c.terminator.Taint(ctx, node, v1.DisruptedNoScheduleTaint); err != nil {
+		if errors.IsConflict(err) {
+			return reconcile.Result{Requeue: true}, nil
+		}
+		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("tainting node with %s, %w", v1.DisruptedTaintKey, err))
 	}
-	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
+	if err = c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
@@ -114,7 +117,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		// if the Node Ready condition is true
 		// Similar logic to: https://github.com/kubernetes/kubernetes/blob/3a75a8c8d9e6a1ebd98d8572132e675d4980f184/staging/src/k8s.io/cloud-provider/controllers/nodelifecycle/node_lifecycle_controller.go#L144
 		if nodeutils.GetCondition(node, corev1.NodeReady).Status != corev1.ConditionTrue {
-			if _, err := c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
+			if _, err = c.cloudProvider.Get(ctx, node.Spec.ProviderID); err != nil {
 				if cloudprovider.IsNodeClaimNotFoundError(err) {
 					return reconcile.Result{}, c.removeFinalizer(ctx, node)
 				}
@@ -231,8 +234,11 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error 
 	stored := n.DeepCopy()
 	controllerutil.RemoveFinalizer(n, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, n) {
+		// We use client.StrategicMergeFrom here since the node object supports it and
+		// a strategic merge patch represents the finalizer list as a keyed "set" so removing
+		// an item from the list doesn't replace the full list
 		if err := c.kubeClient.Patch(ctx, n, client.StrategicMergeFrom(stored)); err != nil {
-			return client.IgnoreNotFound(fmt.Errorf("patching node, %w", err))
+			return client.IgnoreNotFound(fmt.Errorf("removing finalizer, %w", err))
 		}
 
 		metrics.NodesTerminatedTotal.With(prometheus.Labels{
