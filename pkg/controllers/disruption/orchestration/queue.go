@@ -45,7 +45,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 const (
@@ -137,23 +136,6 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		cluster:             cluster,
 		clock:               clock,
 		provisioner:         provisioner,
-	}
-	return queue
-}
-
-func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner) *Queue {
-
-	queue := &Queue{
-		// nolint:staticcheck
-		// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
-		RateLimitingInterface: test.NewRateLimitingInterface(workqueue.QueueConfig{Name: "disruption.workqueue"}),
-		providerIDToCommand:   map[string]*Command{},
-		kubeClient:            kubeClient,
-		recorder:              recorder,
-		cluster:               cluster,
-		clock:                 clock,
-		provisioner:           provisioner,
 	}
 	return queue
 }
