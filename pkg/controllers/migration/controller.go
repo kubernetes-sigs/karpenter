@@ -19,6 +19,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/awslabs/operatorpkg/object"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -67,13 +68,14 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 	annotations[v1.StorageVersion] = "v1"
 
 	ctx = injection.WithControllerName(ctx, "migration")
-	log.FromContext(ctx).V(1).Info(fmt.Sprintf("Ensuring storage version migration by annotating %s: %s",
+	log.FromContext(ctx).V(1).Info(fmt.Sprintf("Annotating v1 stored version on %s: %s",
 		o.GetObjectKind().GroupVersionKind().Kind, o.GetName()))
 	o.SetAnnotations(annotations)
 
 	if !equality.Semantic.DeepEqual(stored, o) {
-		if err := c.kubeClient.Update(ctx, o); err != nil {
-			return reconcile.Result{}, fmt.Errorf("syncing node, %w", err)
+		if err := c.kubeClient.Patch(ctx, o, client.MergeFromWithOptions(client.Object(o), client.MergeFromWithOptimisticLock{})); err != nil {
+			return reconcile.Result{}, fmt.Errorf("annotating %s: %s",
+				o.GetObjectKind().GroupVersionKind().Kind, o.GetName())
 		}
 	}
 
@@ -81,9 +83,10 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 }
 
 func (c *Controller[T]) Register(_ context.Context, m manager.Manager) error {
+	o := object.New[T]()
 	return controllerruntime.NewControllerManagedBy(m).
-		For(object.New[T]()).
+		For(o).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Named("migration").
+		Named(fmt.Sprintf("migration.%v", reflect.TypeOf(o))).
 		Complete(c)
 }
