@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/awslabs/operatorpkg/object"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -68,7 +69,7 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 	annotations[v1.StorageVersion] = "v1"
 
 	ctx = injection.WithControllerName(ctx, "migration")
-	log.FromContext(ctx).V(1).Info(fmt.Sprintf("Annotating v1 stored version on %s: %s",
+	log.FromContext(ctx).V(1).Info(fmt.Sprintf("annotating v1 stored version on %s: %s",
 		o.GetObjectKind().GroupVersionKind().Kind, o.GetName()))
 	o.SetAnnotations(annotations)
 
@@ -87,6 +88,6 @@ func (c *Controller[T]) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		For(o).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Named(fmt.Sprintf("migration.%v", reflect.TypeOf(o))).
+		Named(fmt.Sprintf("migration.%s", strings.ToLower(reflect.TypeOf(object.New[T]()).Elem().Name()))).
 		Complete(c)
 }
