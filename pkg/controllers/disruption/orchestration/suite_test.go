@@ -21,9 +21,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
+	"k8s.io/client-go/util/workqueue"
+
+	"sigs.k8s.io/karpenter/pkg/events"
+
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,8 +47,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
+
+	clockiface "k8s.io/utils/clock"
 )
 
 var ctx context.Context
@@ -79,7 +86,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster)
-	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	queue = NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
 })
 
 var _ = AfterSuite(func() {
@@ -87,7 +94,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = BeforeEach(func() {
-	*queue = lo.FromPtr(orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov))
+	*queue = lo.FromPtr(NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov))
 	recorder.Reset() // Reset the events that we captured during the run
 	cluster.Reset()
 	cloudProvider.Reset()
@@ -341,3 +348,13 @@ var _ = Describe("Queue", func() {
 
 	})
 })
+
+func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clockiface.Clock,
+	provisioner *provisioning.Provisioner) *orchestration.Queue {
+
+	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
+	// nolint:staticcheck
+	// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
+	q.RateLimitingInterface = test.NewRateLimitingInterface(workqueue.QueueConfig{Name: "disruption.workqueue"})
+	return q
+}
