@@ -21,10 +21,9 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/util/sets"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"

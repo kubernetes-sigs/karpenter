@@ -21,22 +21,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/awslabs/operatorpkg/object"
-
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-
-	"sigs.k8s.io/karpenter/pkg/test"
-
 	"github.com/Pallinder/go-randomdata"
+	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-
-	. "sigs.k8s.io/karpenter/pkg/apis/v1"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	. "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 var _ = Describe("Validation", func() {
