@@ -51,6 +51,7 @@ const (
 	KubeletCompatibilityAnnotationKey          = apis.CompatibilityGroup + "/v1beta1-kubelet-conversion"
 	NodeClassReferenceAnnotationKey            = apis.CompatibilityGroup + "/v1beta1-nodeclass-reference"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
+	StorageVersion                             = apis.Group + "/storage-version"
 )
 
 // Karpenter specific finalizers
