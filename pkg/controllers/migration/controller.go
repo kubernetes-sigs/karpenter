@@ -62,7 +62,6 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 	}
 	stored := o.DeepCopyObject()
 	annotations := o.GetAnnotations()
-	// if annotation exists on the nodeclaim, do nothing
 	if _, ok := annotations[v1.StorageVersion]; ok {
 		return reconcile.Result{}, nil
 	}
