@@ -213,6 +213,13 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(nodeClassReference.Kind))
 					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(nodeClassReference.APIVersion))
 				})
+				It("should not panic when the v1 nodeclassRef is not defined", func() {
+					v1nodepool.Spec.Template.Spec.NodeClassRef = nil
+					Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(""))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(""))
+					Expect(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.APIVersion).To(Equal(""))
+				})
 			})
 		})
 		Context("Disruption", func() {
@@ -522,6 +529,13 @@ var _ = Describe("Convert V1beta1 to V1 NodePool API", func() {
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(v1beta1nodepool.Spec.Template.Spec.NodeClassRef.Name))
 					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Group).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].Group))
 					Expect(v1nodepool.Annotations).To(HaveKeyWithValue(NodeClassReferenceAnnotationKey, string(nodeClassReferenceAnnotation)))
+				})
+				It("should not panic when the v1beta1 nodeclassRef is not defined", func() {
+					v1beta1nodepool.Spec.Template.Spec.NodeClassRef = nil
+					Expect(v1nodepool.ConvertFrom(ctx, v1beta1nodepool)).To(Succeed())
+					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Kind).To(Equal(""))
+					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Name).To(Equal(""))
+					Expect(v1nodepool.Spec.Template.Spec.NodeClassRef.Group).To(Equal(""))
 				})
 			})
 		})
