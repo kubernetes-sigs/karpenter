@@ -24,9 +24,8 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
-	"github.com/awslabs/operatorpkg/status"
-
 	"github.com/awslabs/operatorpkg/singleton"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -38,26 +37,22 @@ import (
 	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
-
-	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
-
-	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/utils/pretty"
-
 	"github.com/patrickmn/go-cache"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 // LaunchOptions are the set of options that can be used to trigger certain

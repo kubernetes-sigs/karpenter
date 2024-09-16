@@ -21,8 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/patrickmn/go-cache"
@@ -32,15 +30,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	. "sigs.k8s.io/karpenter/pkg/utils/testing"
-
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
-
 	"sigs.k8s.io/karpenter/pkg/apis"
-
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 var nodePoolController *hash.Controller

@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/awslabs/operatorpkg/object"
-
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"

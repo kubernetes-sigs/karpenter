@@ -21,22 +21,17 @@ import (
 	"fmt"
 	"testing"
 
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-
-	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	. "sigs.k8s.io/karpenter/pkg/utils/testing"
-
 	"sigs.k8s.io/karpenter/pkg/apis"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
-
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 var (

@@ -20,11 +20,10 @@ import (
 	"context"
 
 	"github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	. "github.com/onsi/gomega"
 )
 
 const (

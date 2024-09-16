@@ -23,10 +23,7 @@ import (
 	"sort"
 	"sync"
 
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-
 	"github.com/awslabs/operatorpkg/status"
-
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -38,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 

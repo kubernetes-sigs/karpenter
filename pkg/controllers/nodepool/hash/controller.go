@@ -32,10 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/patrickmn/go-cache"
-
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
-
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.

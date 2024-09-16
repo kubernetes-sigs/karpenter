@@ -30,7 +30,6 @@ import (
 	"k8s.io/csi-translation-lib/plugins"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"

@@ -24,6 +24,10 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/util/workqueue"
+	clockiface "k8s.io/utils/clock"
+
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -41,9 +45,6 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"sigs.k8s.io/karpenter/pkg/utils/pdb"
-	. "sigs.k8s.io/karpenter/pkg/utils/testing"
-
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -58,6 +59,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 var ctx context.Context
@@ -96,7 +99,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, cache.New(time.Hour*24, time.Hour))
-	queue = orchestration.NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	queue = NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
 	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
@@ -116,7 +119,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
-	queue.Reset()
+	*queue = lo.FromPtr(NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov))
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -1494,7 +1497,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal("state node doesn't contain both a node and a nodeclaim"))
+		Expect(err.Error()).To(Equal("state node does not have a nodeclaim representation"))
 	})
 	It("should not consider candidate that has just a NodeClaim representation", func() {
 		nodeClaim, _ := test.NodeClaimAndNode(v1.NodeClaim{
@@ -1513,7 +1516,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal("state node doesn't contain both a node and a nodeclaim"))
+		Expect(err.Error()).To(Equal("state node does not have a node representation"))
 	})
 	It("should not consider candidates that are nominated", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -2118,4 +2121,14 @@ func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, wg *sync
 			}
 		}
 	}()
+}
+
+func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clockiface.Clock,
+	provisioner *provisioning.Provisioner) *orchestration.Queue {
+
+	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
+	// nolint:staticcheck
+	// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
+	q.RateLimitingInterface = test.NewRateLimitingInterface(workqueue.QueueConfig{Name: "disruption.workqueue"})
+	return q
 }

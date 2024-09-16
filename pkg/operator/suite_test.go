@@ -19,11 +19,10 @@ package operator_test
 import (
 	"testing"
 
-	"github.com/samber/lo"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	prometheusmodel "github.com/prometheus/client_model/go"
+	"github.com/samber/lo"
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
