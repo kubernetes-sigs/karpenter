@@ -102,7 +102,10 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 		v1.NodeRegisteredLabelKey: "true",
 	})
 	if !equality.Semantic.DeepEqual(stored, node) {
-		if err := r.kubeClient.Update(ctx, node); err != nil {
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the taint list
+		if err := r.kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return fmt.Errorf("syncing node, %w", err)
 		}
 	}

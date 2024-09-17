@@ -24,12 +24,15 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
+	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -149,6 +152,31 @@ var _ = Describe("Termination", func() {
 		// Expect the nodeClaim to be gone from the cloudprovider
 		_, err = cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
+	})
+	It("should delete the NodeClaim when the spec resource.Quantity values will change during deserialization", func() {
+		nodeClaim.SetGroupVersionKind(object.GVK(nodeClaim)) // This is needed so that the GVK is set on the unstructured object
+		u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(nodeClaim)
+		Expect(err).ToNot(HaveOccurred())
+		// Set a value in resources that will get to converted to a value with a suffix e.g. 50k
+		Expect(unstructured.SetNestedStringMap(u, map[string]string{"memory": "50000"}, "spec", "resources", "requests")).To(Succeed())
+
+		obj := &unstructured.Unstructured{}
+		Expect(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj)).To(Succeed())
+
+		ExpectApplied(ctx, env.Client, nodePool, obj)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimLifecycleController, nodeClaim)
+
+		// Expect the node and the nodeClaim to both be gone
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // triggers the nodeclaim deletion
+
+		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
+
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimTerminationController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should requeue reconciliation if cloudProvider Get returns an error other than NodeClaimNotFoundError", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
