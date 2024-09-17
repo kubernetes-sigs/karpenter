@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -105,8 +106,19 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	podGroups := t.groupPodsByPriority(lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsWaitingEviction(p, t.clock) }))
 	for _, group := range podGroups {
 		if len(group) > 0 {
+			// If the deployment corresponding to the pod has only one pod,
+			// or all the pods of the deployment are on this node,
+			// restarting the deployment can reduce the service interruption time.
+			restartDeployments, drainPods, err := t.GetRestartdeploymentsAndDrainPods(ctx, group)
+			if err != nil {
+				return fmt.Errorf("get deployment and drain pod from node %w", err)
+			}
+			if err = t.RestartDeployments(ctx, restartDeployments, node.Name); err != nil {
+				return fmt.Errorf("restart deployments from node %s, %w", node.Name, err)
+			}
+
 			// Only add pods to the eviction queue that haven't been evicted yet
-			t.evictionQueue.Add(lo.Filter(group, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p) })...)
+			t.evictionQueue.Add(lo.Filter(drainPods, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p) })...)
 			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", lo.SumBy(podGroups, func(pods []*corev1.Pod) int { return len(pods) })))
 		}
 	}
@@ -171,4 +183,91 @@ func (t *Terminator) podDeleteTimeWithGracePeriod(nodeGracePeriodExpirationTime 
 	// eg: if a node will be force terminated in 30m, but the current pod has a grace period of 45m, we return a time of 15m ago
 	deleteTime := nodeGracePeriodExpirationTime.Add(time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second * -1)
 	return &deleteTime
+}
+
+func (t *Terminator) GetDeploymentFromPod(ctx context.Context, pod *corev1.Pod) (*appsv1.Deployment, error) {
+	var rsName string
+	for _, ownerRef := range pod.GetOwnerReferences() {
+		if *ownerRef.Controller && ownerRef.Kind == "ReplicaSet" {
+			rsName = ownerRef.Name
+			break
+		}
+	}
+	if rsName == "" {
+		return nil, nil
+	}
+
+	replicaSet := &appsv1.ReplicaSet{}
+	if err := t.kubeClient.Get(ctx, client.ObjectKey{Name: rsName, Namespace: pod.Namespace}, replicaSet); err != nil {
+		return nil, fmt.Errorf("get rs, %w", err)
+	}
+
+	var dpName string
+	for _, ownerRef := range replicaSet.GetOwnerReferences() {
+		if *ownerRef.Controller && ownerRef.Kind == "Deployment" {
+			dpName = ownerRef.Name
+			break
+		}
+	}
+	if dpName == "" {
+		return nil, nil
+	}
+	deployment := &appsv1.Deployment{}
+	if err := t.kubeClient.Get(ctx, client.ObjectKey{Name: dpName, Namespace: pod.Namespace}, deployment); err != nil {
+		return nil, fmt.Errorf("get deployment, %w", err)
+	}
+
+	return deployment, nil
+}
+
+func (t *Terminator) RestartDeployments(ctx context.Context, deployments []*appsv1.Deployment, nodeName string) error {
+	for _, deployment := range deployments {
+		if deployment.Spec.Template.Annotations == nil {
+			deployment.Spec.Template.Annotations = make(map[string]string)
+		}
+		restartedNode, exists := deployment.Spec.Template.Annotations["kubectl.kubernetes.io/restartedNode"]
+		if exists && restartedNode == nodeName {
+			continue
+		}
+
+		deployment.Spec.Template.Annotations["kubectl.kubernetes.io/restartedNode"] = nodeName
+		if err := t.kubeClient.Update(ctx, deployment); err != nil {
+			return err
+		}
+
+	}
+	return nil
+}
+
+func (t *Terminator) GetRestartdeploymentsAndDrainPods(ctx context.Context, pods []*corev1.Pod) ([]*appsv1.Deployment, []*corev1.Pod, error) {
+
+	var drainPods []*corev1.Pod
+	var restartDeployments []*appsv1.Deployment
+	nodeDeploymentReplicas := make(map[string]int32)
+
+	for _, pod := range pods {
+		deployment, err := t.GetDeploymentFromPod(ctx, pod)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if deployment != nil {
+			nodeDeploymentReplicas[deployment.Namespace+"/"+deployment.Name] += 1
+		}
+	}
+
+	for _, pod := range pods {
+		deployment, err := t.GetDeploymentFromPod(ctx, pod)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if deployment != nil && nodeDeploymentReplicas[deployment.Namespace+"/"+deployment.Name] == *deployment.Spec.Replicas {
+			restartDeployments = append(restartDeployments, deployment)
+		} else {
+			drainPods = append(drainPods, pod)
+		}
+	}
+
+	return restartDeployments, drainPods, nil
 }
