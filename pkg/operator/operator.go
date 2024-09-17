@@ -164,42 +164,79 @@ func NewOperator() (context.Context, *Operator) {
 		})
 	}
 	mgr, err := ctrl.NewManager(config, mgrOpts)
-	mgr = lo.Must(mgr, err, "failed to setup manager")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup manager")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*corev1.Pod).Spec.NodeName}
-	}), "failed to setup pod indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &corev1.Node{}, "spec.providerID", func(o client.Object) []string {
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup pod indexer")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &corev1.Node{}, "spec.providerID", func(o client.Object) []string {
 		return []string{o.(*corev1.Node).Spec.ProviderID}
-	}), "failed to setup node provider id indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup node provider id indexer")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
 		return []string{o.(*v1.NodeClaim).Status.ProviderID}
-	}), "failed to setup nodeclaim provider id indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.group", func(o client.Object) []string {
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup nodeclaim provider id indexer")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.group", func(o client.Object) []string {
 		return []string{o.(*v1.NodeClaim).Spec.NodeClassRef.Group}
-	}), "failed to setup nodeclaim nodeclassref apiversion indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.kind", func(o client.Object) []string {
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup nodeclaim nodeclassref apiversion indexer")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.kind", func(o client.Object) []string {
 		return []string{o.(*v1.NodeClaim).Spec.NodeClassRef.Kind}
-	}), "failed to setup nodeclaim nodeclassref kind indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.name", func(o client.Object) []string {
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup nodeclaim nodeclassref kind indexer")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.name", func(o client.Object) []string {
 		return []string{o.(*v1.NodeClaim).Spec.NodeClassRef.Name}
-	}), "failed to setup nodeclaim nodeclassref name indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.group", func(o client.Object) []string {
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup nodeclaim nodeclassref name indexer")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.group", func(o client.Object) []string {
 		return []string{o.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Group}
-	}), "failed to setup nodepool nodeclassref apiversion indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.kind", func(o client.Object) []string {
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup nodepool nodeclassref apiversion indexer")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.kind", func(o client.Object) []string {
 		return []string{o.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Kind}
-	}), "failed to setup nodepool nodeclassref kind indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(o client.Object) []string {
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup nodepool nodeclassref kind indexer")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(o client.Object) []string {
 		return []string{o.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
-	}), "failed to setup nodepool nodeclassref name indexer")
-	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &storagev1.VolumeAttachment{}, "spec.nodeName", func(o client.Object) []string {
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup nodepool nodeclassref name indexer")
+	}
+	err = mgr.GetFieldIndexer().IndexField(ctx, &storagev1.VolumeAttachment{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*storagev1.VolumeAttachment).Spec.NodeName}
-	}), "failed to setup volumeattachment indexer")
-	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
-		return lo.Ternary(mgr.GetCache().WaitForCacheSync(req.Context()), nil, fmt.Errorf("failed to sync caches"))
-	}))
-	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
-	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to setup volumeattachment indexer")
+	}
+
+	err = mgr.AddHealthzCheck("healthz", healthz.Ping)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to add healthz check")
+	}
+
+	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to add readyz check")
+	}
 
 	return ctx, &Operator{
 		Manager:             mgr,
