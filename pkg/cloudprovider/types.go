@@ -220,10 +220,12 @@ type InstanceTypeOverhead struct {
 	SystemReserved corev1.ResourceList
 	// EvictionThreshold returns the resources used to maintain a hard eviction threshold
 	EvictionThreshold corev1.ResourceList
+	// VmReserved returns the additional overhead resources reserved for things like hypervisor or OS
+	VmReserved corev1.ResourceList
 }
 
 func (i InstanceTypeOverhead) Total() corev1.ResourceList {
-	return resources.Merge(i.KubeReserved, i.SystemReserved, i.EvictionThreshold)
+	return resources.Merge(i.KubeReserved, i.SystemReserved, i.EvictionThreshold, i.VmReserved)
 }
 
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
