@@ -39,6 +39,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
@@ -104,7 +106,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("tainting node with %s, %w", v1.DisruptedTaintKey, err))
+		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("tainting node with %s, %w", pretty.Taint(v1.DisruptedNoScheduleTaint), err))
 	}
 	if err = c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
@@ -237,6 +239,7 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error 
 		// We use client.StrategicMergeFrom here since the node object supports it and
 		// a strategic merge patch represents the finalizer list as a keyed "set" so removing
 		// an item from the list doesn't replace the full list
+		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
 		if err := c.kubeClient.Patch(ctx, n, client.StrategicMergeFrom(stored)); err != nil {
 			return client.IgnoreNotFound(fmt.Errorf("removing finalizer, %w", err))
 		}
