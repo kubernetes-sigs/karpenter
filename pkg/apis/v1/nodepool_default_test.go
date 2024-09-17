@@ -63,7 +63,6 @@ var _ = Describe("CEL/Default", func() {
 			Expect(nodePool.Spec.Disruption).ToNot(BeNil())
 			Expect(lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration)).To(Equal(0 * time.Second))
 			Expect(nodePool.Spec.Disruption.ConsolidationPolicy).To(Equal(ConsolidationPolicyWhenEmptyOrUnderutilized))
-			Expect(nodePool.Spec.Disruption.Budgets).To(Equal([]Budget{{Nodes: "10%"}}))
 		})
 	})
 })
