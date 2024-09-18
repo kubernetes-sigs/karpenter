@@ -18,10 +18,12 @@ package provisioning_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -247,6 +249,38 @@ var _ = Describe("Provisioning", func() {
 		for _, pod := range pods {
 			ExpectScheduled(ctx, env.Client, pod)
 		}
+	})
+	It("should add the NodePool's karpenter.sh/v1beta1-kubelet-conversion annotation when scheduling", func() {
+		nodePool := test.NodePool()
+		kubeletConfig := v1beta1.KubeletConfiguration{
+			ClusterDNS:                  []string{"test-cluster-dns"},
+			MaxPods:                     lo.ToPtr(int32(9383)),
+			PodsPerCore:                 lo.ToPtr(int32(9334283)),
+			SystemReserved:              map[string]string{"system-key": "reserved"},
+			KubeReserved:                map[string]string{"kube-key": "reserved"},
+			EvictionHard:                map[string]string{"eviction-key": "eviction"},
+			EvictionSoft:                map[string]string{"eviction-key": "eviction"},
+			EvictionSoftGracePeriod:     map[string]metav1.Duration{"test-soft-grace": {Duration: time.Hour}},
+			EvictionMaxPodGracePeriod:   lo.ToPtr(int32(382902)),
+			ImageGCHighThresholdPercent: lo.ToPtr(int32(382902)),
+			CPUCFSQuota:                 lo.ToPtr(false),
+		}
+		raw, err := json.Marshal(kubeletConfig)
+		Expect(err).ToNot(HaveOccurred())
+		nodePool.Annotations = lo.Assign(nodePool.Annotations, map[string]string{
+			v1.KubeletCompatibilityAnnotationKey: string(raw),
+		})
+
+		ExpectApplied(ctx, env.Client, nodePool)
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+
+		nodeClaims := &v1.NodeClaimList{}
+		Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+		Expect(nodeClaims.Items).To(HaveLen(1))
+
+		Expect(nodeClaims.Items[0].Annotations).To(HaveKeyWithValue(v1.KubeletCompatibilityAnnotationKey, nodePool.Annotations[v1.KubeletCompatibilityAnnotationKey]))
+		ExpectScheduled(ctx, env.Client, pod)
 	})
 	It("should schedule all pods on one inflight node when node is in deleting state", func() {
 		nodePool := test.NodePool()
