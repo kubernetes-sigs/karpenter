@@ -48,8 +48,9 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 		return reconcile.Result{Requeue: true}, nil
 	}
 	// If the Registered statusCondition hasn't gone True during the TTL since we first updated it, we should terminate the NodeClaim
-	if l.clock.Since(registered.LastTransitionTime.Time) < registrationTTL {
-		return reconcile.Result{RequeueAfter: registrationTTL - l.clock.Since(registered.LastTransitionTime.Time)}, nil
+	// NOTE: ttl has to be stored and checked in the same place since l.clock can advance after the check causing a race
+	if ttl := registrationTTL - l.clock.Since(registered.LastTransitionTime.Time); ttl > 0 {
+		return reconcile.Result{RequeueAfter: ttl}, nil
 	}
 	// Delete the NodeClaim if we believe the NodeClaim won't register since we haven't seen the node
 	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
