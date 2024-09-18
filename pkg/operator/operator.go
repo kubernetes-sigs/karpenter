@@ -261,4 +261,3 @@ func setupIndexers(ctx context.Context, mgr manager.Manager) {
 		log.FromContext(ctx).Error(err, "failed to setup volumeattachment indexer")
 	}
 }
-
