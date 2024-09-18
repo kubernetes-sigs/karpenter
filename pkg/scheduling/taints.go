@@ -24,6 +24,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
@@ -49,7 +51,7 @@ func (ts Taints) Tolerates(pod *corev1.Pod) (errs error) {
 			tolerates = tolerates || t.ToleratesTaint(&taint)
 		}
 		if !tolerates {
-			errs = multierr.Append(errs, fmt.Errorf("did not tolerate %s=%s:%s", taint.Key, taint.Value, taint.Effect))
+			errs = multierr.Append(errs, fmt.Errorf("did not tolerate %s", pretty.Taint(taint)))
 		}
 	}
 	return errs

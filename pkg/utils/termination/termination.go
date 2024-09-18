@@ -34,13 +34,14 @@ func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1.NodeCl
 	// Check if the status condition on nodeClaim is Terminating
 	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
 		// If not then call Delete on cloudProvider to trigger termination and always requeue reconciliation
-		if err := cloudProvider.Delete(ctx, nodeClaim); err != nil {
+		if err = cloudProvider.Delete(ctx, nodeClaim); err != nil {
 			if cloudprovider.IsNodeClaimNotFoundError(err) {
+				stored := nodeClaim.DeepCopy()
 				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
-				// We call Update() here rather than Patch() because patching a list with a JSON merge patch
+				// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 				// can cause races due to the fact that it fully replaces the list on a change
-				// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
-				if err = c.Status().Update(ctx, nodeClaim); err != nil {
+				// Here, we are updating the status condition list
+				if err = c.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 					return false, err
 				}
 				// Instance is terminated
@@ -49,11 +50,12 @@ func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1.NodeCl
 			return false, fmt.Errorf("terminating cloudprovider instance, %w", err)
 		}
 
+		stored := nodeClaim.DeepCopy()
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
-		// We call Update() here rather than Patch() because patching a list with a JSON merge patch
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
-		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
-		if err := c.Status().Update(ctx, nodeClaim); err != nil {
+		// Here, we are updating the status condition list
+		if err = c.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return false, err
 		}
 		return false, nil

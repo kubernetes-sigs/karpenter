@@ -35,14 +35,14 @@ import (
 	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
-
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
 const (
@@ -79,7 +79,7 @@ func NewQueueKey(pod *corev1.Pod) QueueKey {
 }
 
 type Queue struct {
-	workqueue.RateLimitingInterface
+	workqueue.TypedRateLimitingInterface[QueueKey]
 
 	mu  sync.Mutex
 	set sets.Set[QueueKey]
@@ -89,17 +89,25 @@ type Queue struct {
 }
 
 func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
-	queue := &Queue{
-		RateLimitingInterface: workqueue.NewRateLimitingQueueWithConfig(
-			workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay),
-			workqueue.RateLimitingQueueConfig{
+	return &Queue{
+		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig[QueueKey](
+			workqueue.NewTypedItemExponentialFailureRateLimiter[QueueKey](evictionQueueBaseDelay, evictionQueueMaxDelay),
+			workqueue.TypedRateLimitingQueueConfig[QueueKey]{
 				Name: "eviction.workqueue",
 			}),
 		set:        sets.New[QueueKey](),
 		kubeClient: kubeClient,
 		recorder:   recorder,
 	}
-	return queue
+}
+
+func NewTestingQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
+	return &Queue{
+		TypedRateLimitingInterface: &controllertest.TypedQueue[QueueKey]{TypedInterface: workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[QueueKey]{Name: "eviction.workqueue"})},
+		set:                        sets.New[QueueKey](),
+		kubeClient:                 kubeClient,
+		recorder:                   recorder,
+	}
 }
 
 func (q *Queue) Register(_ context.Context, m manager.Manager) error {
@@ -118,7 +126,7 @@ func (q *Queue) Add(pods ...*corev1.Pod) {
 		qk := NewQueueKey(pod)
 		if !q.set.Has(qk) {
 			q.set.Insert(qk)
-			q.RateLimitingInterface.Add(qk)
+			q.TypedRateLimitingInterface.Add(qk)
 		}
 	}
 }
@@ -135,29 +143,28 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
-	if q.RateLimitingInterface.Len() == 0 {
+	if q.TypedRateLimitingInterface.Len() == 0 {
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	// Get pod from queue. This waits until queue is non-empty.
-	item, shutdown := q.RateLimitingInterface.Get()
+	item, shutdown := q.TypedRateLimitingInterface.Get()
 	if shutdown {
 		return reconcile.Result{}, fmt.Errorf("EvictionQueue is broken and has shutdown")
 	}
 
-	qk := item.(QueueKey)
-	defer q.RateLimitingInterface.Done(qk)
+	defer q.TypedRateLimitingInterface.Done(item)
 
 	// Evict the pod
-	if q.Evict(ctx, qk) {
-		q.RateLimitingInterface.Forget(qk)
+	if q.Evict(ctx, item) {
+		q.TypedRateLimitingInterface.Forget(item)
 		q.mu.Lock()
-		q.set.Delete(qk)
+		q.set.Delete(item)
 		q.mu.Unlock()
 		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
 	// Requeue pod if eviction failed
-	q.RateLimitingInterface.AddRateLimited(qk)
+	q.TypedRateLimitingInterface.AddRateLimited(item)
 	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
@@ -194,16 +201,4 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	}
 	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
 	return true
-}
-
-func (q *Queue) Reset() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	q.RateLimitingInterface = workqueue.NewRateLimitingQueueWithConfig(
-		workqueue.NewItemExponentialFailureRateLimiter(evictionQueueBaseDelay, evictionQueueMaxDelay),
-		workqueue.RateLimitingQueueConfig{
-			Name: "eviction.workqueue",
-		})
-	q.set = sets.New[QueueKey]()
 }

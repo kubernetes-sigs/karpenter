@@ -22,13 +22,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/samber/lo"
-
-	"sigs.k8s.io/karpenter/pkg/utils/termination"
-
-	"sigs.k8s.io/karpenter/pkg/metrics"
-
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -46,13 +40,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
-
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/utils/termination"
 )
 
 // Controller is a NodeClaim Termination controller that triggers deletion of the Node and the
@@ -84,7 +79,6 @@ func (c *Controller) Reconcile(ctx context.Context, n *v1.NodeClaim) (reconcile.
 //nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName), "provider-id", nodeClaim.Status.ProviderID))
-	stored := nodeClaim.DeepCopy()
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
@@ -130,12 +124,14 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).LastTransitionTime.Time).Seconds())
 	}
+	stored := nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
 	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		// We call Update() here rather than Patch() because patching a list with a JSON merge patch
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the finalizer list
 		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
-		if err = c.kubeClient.Update(ctx, nodeClaim); err != nil {
+		if err = c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
@@ -175,7 +171,7 @@ func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.C
 	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 
 	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
-		return client.IgnoreNotFound(fmt.Errorf("patching nodeclaim, %w", err))
+		return client.IgnoreNotFound(err)
 	}
 	log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated nodeclaim")
 	c.recorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, terminationTime))
@@ -203,10 +199,10 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			}),
 		).
 		WithOptions(controller.Options{
-			RateLimiter: workqueue.NewMaxOfRateLimiter(
-				workqueue.NewItemExponentialFailureRateLimiter(time.Second, time.Minute),
+			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
+				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](time.Second, time.Minute),
 				// 10 qps, 100 bucket size
-				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
 			MaxConcurrentReconciles: 100, // higher concurrency limit since we want fast reaction to termination
 		}).

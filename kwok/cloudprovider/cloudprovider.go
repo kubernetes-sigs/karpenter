@@ -24,7 +24,6 @@ import (
 	"strings"
 
 	"github.com/awslabs/operatorpkg/status"
-
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"

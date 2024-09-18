@@ -59,6 +59,12 @@ linters-settings:
       WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
       See the License for the specific language governing permissions and
       limitations under the License.
+  gci:
+    sections:
+      - standard # Standard section: captures all standard packages.
+      - default # Default section: contains all imports that could not be matched to another section type.
+      - localmodule # Local module section: contains all local packages. This section is not present unless explicitly enabled.
+    skip-generated: true
 issues:
   fix: true
   exclude: ['declaration of "(err|ctx)" shadows declaration at']

@@ -189,8 +189,11 @@ func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*cor
 //
 //nolint:gocyclo
 func (in *StateNode) ValidateNodeDisruptable(ctx context.Context, kubeClient client.Client) error {
-	if in.Node == nil || in.NodeClaim == nil {
-		return fmt.Errorf("state node doesn't contain both a node and a nodeclaim")
+	if in.NodeClaim == nil {
+		return fmt.Errorf("state node does not have a nodeclaim representation")
+	}
+	if in.Node == nil {
+		return fmt.Errorf("state node does not have a node representation")
 	}
 	if !in.Initialized() {
 		return fmt.Errorf("state node isn't initialized")
@@ -504,7 +507,10 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 			node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 		}
 		if !equality.Semantic.DeepEqual(stored, node) {
-			if err := kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
+			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+			// can cause races due to the fact that it fully replaces the list on a change
+			// Here, we are updating the taint list
+			if err := kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
 			}
 		}

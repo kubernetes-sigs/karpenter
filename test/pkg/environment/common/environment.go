@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/object"
-
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -36,18 +35,16 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-
-	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
-	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
-	"sigs.k8s.io/karpenter/test/pkg/debug"
-
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
+	"sigs.k8s.io/karpenter/pkg/test"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
+	"sigs.k8s.io/karpenter/test/pkg/debug"
 )
 
 type ContextKey string

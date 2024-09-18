@@ -22,11 +22,6 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
-
-	"sigs.k8s.io/karpenter/pkg/metrics"
-	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
-	"sigs.k8s.io/karpenter/pkg/utils/pdb"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
@@ -41,7 +36,10 @@ import (
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")

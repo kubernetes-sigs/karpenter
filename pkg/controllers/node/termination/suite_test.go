@@ -22,11 +22,12 @@ import (
 	"testing"
 	"time"
 
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -37,14 +38,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-
-	. "sigs.k8s.io/karpenter/pkg/utils/testing"
-
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 var ctx context.Context
@@ -68,7 +64,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewQueue(env.Client, recorder)
+	queue = terminator.NewTestingQueue(env.Client, recorder)
 	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
 })
 
@@ -82,6 +78,10 @@ var _ = Describe("Termination", func() {
 	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
+		fakeClock.SetTime(time.Now())
+		cloudProvider.Reset()
+		*queue = lo.FromPtr(terminator.NewTestingQueue(env.Client, recorder))
+
 		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
 		node.Labels[v1.NodePoolLabelKey] = test.NodePool().Name
@@ -90,9 +90,6 @@ var _ = Describe("Termination", func() {
 
 	AfterEach(func() {
 		ExpectCleanedUp(ctx, env.Client)
-		fakeClock.SetTime(time.Now())
-		cloudProvider.Reset()
-		queue.Reset()
 
 		// Reset the metrics collectors
 		metrics.NodesTerminatedTotal.Reset()
@@ -341,15 +338,18 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			ExpectSingletonReconciled(ctx, queue)
 
 			// Expect node to exist and be draining
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
+			// Expect podNoEvict to be added to the queue
+			Expect(queue.Has(podNoEvict)).To(BeTrue())
+
+			// Attempt to evict the pod, but fail to do so
+			ExpectSingletonReconciled(ctx, queue)
+
 			// Expect podNoEvict to fail eviction due to PDB, and be retried
-			Eventually(func() int {
-				return queue.NumRequeues(terminator.NewQueueKey(podNoEvict))
-			}).Should(BeNumerically(">=", 1))
+			Expect(queue.Has(podNoEvict)).To(BeTrue())
 
 			// Delete pod to simulate successful eviction
 			ExpectDeleted(ctx, env.Client, podNoEvict)

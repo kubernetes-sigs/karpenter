@@ -20,8 +20,6 @@ import (
 	"context"
 	"strings"
 
-	"sigs.k8s.io/karpenter/pkg/utils/env"
-
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/samber/lo"
@@ -29,6 +27,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
 // NopLogger is used to throw away logs when we don't actually want to log in

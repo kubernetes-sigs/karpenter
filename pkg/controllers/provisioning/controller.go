@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -30,8 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 

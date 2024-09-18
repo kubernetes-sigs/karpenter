@@ -27,8 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/utils/pod"
-
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
@@ -37,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 const (
@@ -72,7 +71,10 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	var err error
 	var pods []*corev1.Pod
 	if err = node.ValidateNodeDisruptable(ctx, kubeClient); err != nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
+		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
+		if node.NodeClaim != nil {
+			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
+		}
 		return nil, err
 	}
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.

@@ -25,24 +25,23 @@ import (
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
-
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
@@ -87,7 +86,13 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	stored := nodeClaim.DeepCopy()
 	controllerutil.AddFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(nodeClaim, stored) {
-		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the finalizer list
+		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
@@ -140,11 +145,11 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			nodeclaimutil.NodeEventHandler(c.kubeClient),
 		).
 		WithOptions(controller.Options{
-			RateLimiter: workqueue.NewMaxOfRateLimiter(
+			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
 				// back off until last attempt occurs ~90 seconds before nodeclaim expiration
-				workqueue.NewItemExponentialFailureRateLimiter(time.Second, 300*time.Second),
+				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](time.Second, 300*time.Second),
 				// 10 qps, 100 bucket size
-				&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
 			MaxConcurrentReconciles: 1000, // higher concurrency limit since we want fast reaction to node syncing and launch
 		}).
