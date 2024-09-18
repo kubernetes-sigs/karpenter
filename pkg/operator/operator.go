@@ -164,10 +164,43 @@ func NewOperator() (context.Context, *Operator) {
 		})
 	}
 	mgr, err := ctrl.NewManager(config, mgrOpts)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to setup manager")
+	mgr = lo.Must(mgr, err, "failed to setup manager")
+
+	setupIndexers(ctx, mgr)
+
+	lo.Must0(mgr.AddReadyzCheck("manager", func(req *http.Request) error {
+		return lo.Ternary(mgr.GetCache().WaitForCacheSync(req.Context()), nil, fmt.Errorf("failed to sync caches"))
+	}))
+	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
+	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
+
+	return ctx, &Operator{
+		Manager:             mgr,
+		KubernetesInterface: kubernetesInterface,
+		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(appName)),
+		Clock:               clock.RealClock{},
 	}
-	err = mgr.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
+}
+
+func (o *Operator) WithControllers(ctx context.Context, controllers ...controller.Controller) *Operator {
+	for _, c := range controllers {
+		lo.Must0(c.Register(ctx, o.Manager))
+	}
+	return o
+}
+
+func (o *Operator) Start(ctx context.Context) {
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		lo.Must0(o.Manager.Start(ctx))
+	}()
+	wg.Wait()
+}
+
+func setupIndexers(ctx context.Context, mgr manager.Manager) {
+	err := mgr.GetFieldIndexer().IndexField(ctx, &corev1.Pod{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*corev1.Pod).Spec.NodeName}
 	})
 	if err != nil {
@@ -227,38 +260,5 @@ func NewOperator() (context.Context, *Operator) {
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to setup volumeattachment indexer")
 	}
-
-	err = mgr.AddHealthzCheck("healthz", healthz.Ping)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to add healthz check")
-	}
-
-	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to add readyz check")
-	}
-
-	return ctx, &Operator{
-		Manager:             mgr,
-		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(appName)),
-		Clock:               clock.RealClock{},
-	}
 }
 
-func (o *Operator) WithControllers(ctx context.Context, controllers ...controller.Controller) *Operator {
-	for _, c := range controllers {
-		lo.Must0(c.Register(ctx, o.Manager))
-	}
-	return o
-}
-
-func (o *Operator) Start(ctx context.Context) {
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		lo.Must0(o.Manager.Start(ctx))
-	}()
-	wg.Wait()
-}
