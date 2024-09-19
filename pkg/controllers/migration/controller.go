@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,18 +50,10 @@ func NewController[T client.Object](client client.Client) *Controller[T] {
 func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "migration")
 
-	// get object definition
-	o := object.New[T]()
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, o); err != nil {
-		if errors.IsNotFound(err) {
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, fmt.Errorf("getting object, %w", err)
-	}
-
 	// create object list
+	o := object.New[T]()
 	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(o.GetObjectKind().GroupVersionKind())
+	list.SetGroupVersionKind(object.GVK(o))
 	if err := c.kubeClient.List(ctx, list); err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing objects, %w", err)
 	}
@@ -70,12 +61,12 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 	// update annotations on all CRs
 	for _, item := range list.Items {
 		stored := item.DeepCopyObject()
-		o.SetAnnotations(lo.Assign(o.GetAnnotations(), map[string]string{
+		item.SetAnnotations(lo.Assign(item.GetAnnotations(), map[string]string{
 			"stored-version": "v1",
 		}))
-		if !equality.Semantic.DeepEqual(stored, o) {
-			if err := c.kubeClient.Update(ctx, o); err != nil {
-				return reconcile.Result{}, fmt.Errorf("annotating")
+		if !equality.Semantic.DeepEqual(stored, item) {
+			if err := c.kubeClient.Update(ctx, &item); err != nil {
+				return reconcile.Result{}, fmt.Errorf("annotating: %w", err)
 			}
 		}
 	}
