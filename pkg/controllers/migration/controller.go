@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -47,7 +48,7 @@ func NewController[T client.Object](client client.Client) *Controller[T] {
 	}
 }
 
-func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (c *Controller[T]) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "migration")
 
 	// create object list
@@ -93,11 +94,11 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 func (c *Controller[T]) Register(_ context.Context, m manager.Manager) error {
 	o := object.New[T]()
 	return controllerruntime.NewControllerManagedBy(m).
+		Named(fmt.Sprintf("migration.%s", strings.ToLower(reflect.TypeOf(o).Elem().Name()))).
 		For(o).
 		Watches(&apiextensionsv1.CustomResourceDefinition{}, CRDEventHandler(c.kubeClient)).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Named(fmt.Sprintf("migration.%s", strings.ToLower(reflect.TypeOf(o).Elem().Name()))).
-		Complete(c)
+		Complete(singleton.AsReconciler(c))
 }
 
 func CRDEventHandler(kubeClient client.Client) handler.EventHandler {
