@@ -85,13 +85,15 @@ func (in *NodeClaimTemplate) convertTo(v1beta1np *v1beta1.NodeClaimTemplate, kub
 	})
 	// Convert the NodeClassReference depending on whether the annotation exists
 	v1beta1np.Spec.NodeClassRef = &v1beta1.NodeClassReference{}
-	if nodeClassReferenceAnnotation != "" {
-		if err := json.Unmarshal([]byte(nodeClassReferenceAnnotation), v1beta1np.Spec.NodeClassRef); err != nil {
-			return fmt.Errorf("unmarshaling nodeClassRef annotation, %w", err)
+	if in.Spec.NodeClassRef != nil {
+		if nodeClassReferenceAnnotation != "" {
+			if err := json.Unmarshal([]byte(nodeClassReferenceAnnotation), v1beta1np.Spec.NodeClassRef); err != nil {
+				return fmt.Errorf("unmarshaling nodeClassRef annotation, %w", err)
+			}
+		} else {
+			v1beta1np.Spec.NodeClassRef.Name = in.Spec.NodeClassRef.Name
+			v1beta1np.Spec.NodeClassRef.Kind = in.Spec.NodeClassRef.Kind
 		}
-	} else {
-		v1beta1np.Spec.NodeClassRef.Name = in.Spec.NodeClassRef.Name
-		v1beta1np.Spec.NodeClassRef.Kind = in.Spec.NodeClassRef.Kind
 	}
 	if kubeletAnnotation != "" {
 		v1beta1kubelet := &v1beta1.KubeletConfiguration{}
@@ -168,11 +170,14 @@ func (in *NodeClaimTemplate) convertFrom(ctx context.Context, v1beta1np *v1beta1
 			}}
 	})
 
-	defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
-	in.Spec.NodeClassRef = &NodeClassReference{
-		Name:  v1beta1np.Spec.NodeClassRef.Name,
-		Kind:  lo.Ternary(v1beta1np.Spec.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1np.Spec.NodeClassRef.Kind),
-		Group: lo.Ternary(v1beta1np.Spec.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, strings.Split(v1beta1np.Spec.NodeClassRef.APIVersion, "/")[0]),
+	in.Spec.NodeClassRef = &NodeClassReference{}
+	if v1beta1np.Spec.NodeClassRef != nil {
+		defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
+		in.Spec.NodeClassRef = &NodeClassReference{
+			Name:  v1beta1np.Spec.NodeClassRef.Name,
+			Kind:  lo.Ternary(v1beta1np.Spec.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1np.Spec.NodeClassRef.Kind),
+			Group: lo.Ternary(v1beta1np.Spec.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, strings.Split(v1beta1np.Spec.NodeClassRef.APIVersion, "/")[0]),
+		}
 	}
 	if v1beta1np.Spec.Kubelet != nil {
 		kubelet, err := json.Marshal(v1beta1np.Spec.Kubelet)
