@@ -26,7 +26,6 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
@@ -61,14 +61,14 @@ func (c *Controller[T]) Reconcile(ctx context.Context) (reconcile.Result, error)
 
 	// update annotations on all CRs
 	for _, item := range list.Items {
-		stored := item.DeepCopyObject()
+		if lo.HasKey(item.GetAnnotations(), v1.StoredVersionMigrated) {
+			continue
+		}
 		item.SetAnnotations(lo.Assign(item.GetAnnotations(), map[string]string{
-			"stored-version": "v1",
+			v1.StoredVersionMigrated: "true",
 		}))
-		if !equality.Semantic.DeepEqual(stored, item) {
-			if err := c.kubeClient.Update(ctx, &item); err != nil {
-				return reconcile.Result{}, fmt.Errorf("annotating: %w", err)
-			}
+		if err := c.kubeClient.Update(ctx, &item); err != nil {
+			return reconcile.Result{}, fmt.Errorf("annotating: %w", err)
 		}
 	}
 

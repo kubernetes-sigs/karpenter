@@ -77,7 +77,7 @@ var _ = Describe("Migration", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			operatorexpectations.ExpectSingletonReconciled(ctx, migrationController)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.Annotations).To(HaveKeyWithValue("stored-version", "v1"))
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.StoredVersionMigrated, "true"))
 		})
 		It("should patch CRD status stored versions", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodeClass)
