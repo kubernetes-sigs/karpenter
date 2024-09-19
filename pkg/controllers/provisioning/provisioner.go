@@ -344,7 +344,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
-	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
+	results := s.Solve(ctx, pods, scheduler.MaxInstanceTypes)
 	if len(results.NewNodeClaims) > 0 {
 		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
 	}

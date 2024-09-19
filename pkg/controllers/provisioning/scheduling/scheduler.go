@@ -173,7 +173,7 @@ func (r Results) NonPendingPodSchedulingErrors() string {
 
 // TruncateInstanceTypes filters the result based on the maximum number of instanceTypes that needs
 // to be considered. This filters all instance types generated in NewNodeClaims in the Results
-func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
+func (r *Results) TruncateInstanceTypes(maxInstanceTypes int) {
 	var validNewNodeClaims []*NodeClaim
 	for _, newNodeClaim := range r.NewNodeClaims {
 		// The InstanceTypeOptions are truncated due to limitations in sending the number of instances to launch API.
@@ -190,10 +190,10 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 		}
 	}
 	r.NewNodeClaims = validNewNodeClaims
-	return r
+
 }
 
-func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
+func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod, maxInstanceTypes int) Results {
 	defer metrics.Measure(SchedulingDurationSeconds.With(
 		prometheus.Labels{ControllerLabel: injection.GetControllerName(ctx)},
 	))()
@@ -239,11 +239,13 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			delete(errors, k)
 		}
 	}
-	return Results{
+	var results = Results{
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
 		PodErrors:     errors,
 	}
+	results.TruncateInstanceTypes(MaxInstanceTypes)
+	return results
 }
 
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
