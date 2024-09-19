@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 
@@ -75,6 +76,15 @@ var _ = Describe("Migration", func() {
 			operatorexpectations.ExpectSingletonReconciled(ctx, migrationController)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue("stored-version", "v1"))
+		})
+		It("should patch CRD status", func() {
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			operatorexpectations.ExpectSingletonReconciled(ctx, migrationController)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			crds := ExpectListExists(ctx, env.Client, &apiextensionsv1.CustomResourceDefinition{})
+			for _, crd := range crds {
+				Expect(crd.Object["status"]).To(HaveKeyWithValue("storedVersions", []interface{}{"v1"}))
+			}
 		})
 	})
 })

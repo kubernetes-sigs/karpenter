@@ -28,6 +28,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
@@ -43,6 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -92,6 +94,14 @@ func ExpectExists[T client.Object](ctx context.Context, c client.Client, obj T) 
 	resp := reflect.New(reflect.TypeOf(*new(T)).Elem()).Interface().(T)
 	Expect(c.Get(ctx, client.ObjectKeyFromObject(obj), resp)).To(Succeed())
 	return resp
+}
+
+func ExpectListExists[T client.Object](ctx context.Context, c client.Client, obj T) []unstructured.Unstructured {
+	GinkgoHelper()
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(object.GVK(obj))
+	Expect(c.List(ctx, list)).To(Succeed())
+	return list.Items
 }
 
 func ExpectPodExists(ctx context.Context, c client.Client, name string, namespace string) *corev1.Pod {

@@ -77,6 +77,7 @@ func (c *Controller[T]) Reconcile(ctx context.Context) (reconcile.Result, error)
 	if err := c.kubeClient.List(ctx, crdList); err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting crds, %w", err)
 	}
+	// should filter tighter than this
 	crds := lo.Filter(crdList.Items, func(crd apiextensionsv1.CustomResourceDefinition, _ int) bool {
 		return strings.Contains(crd.ObjectMeta.Name, strings.ToLower(o.GetObjectKind().GroupVersionKind().Kind))
 	})
