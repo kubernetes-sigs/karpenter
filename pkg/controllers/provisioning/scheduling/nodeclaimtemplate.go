@@ -50,6 +50,11 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 		NodePoolName: nodePool.Name,
 		Requirements: scheduling.NewRequirements(),
 	}
+	if v, ok := nodePool.Annotations[v1.KubeletCompatibilityAnnotationKey]; ok {
+		nct.Annotations = lo.Assign(nct.Annotations, map[string]string{
+			v1.KubeletCompatibilityAnnotationKey: v,
+		})
+	}
 	nct.Labels = lo.Assign(nct.Labels, map[string]string{v1.NodePoolLabelKey: nodePool.Name})
 	nct.Requirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(nct.Spec.Requirements...).Values()...)
 	nct.Requirements.Add(scheduling.NewLabelRequirements(nct.Labels).Values()...)

@@ -32,7 +32,7 @@ import (
 )
 
 // Convert v1 NodePool to v1beta1 NodePool
-func (in *NodePool) ConvertTo(ctx context.Context, to apis.Convertible) error {
+func (in *NodePool) ConvertTo(_ context.Context, to apis.Convertible) error {
 	v1beta1NP := to.(*v1beta1.NodePool)
 	v1beta1NP.ObjectMeta = in.ObjectMeta
 
@@ -123,7 +123,7 @@ func (in *NodePool) ConvertFrom(ctx context.Context, v1beta1np apis.Convertible)
 		return err
 	}
 	if kubeletAnnotation == "" {
-		in.Annotations = lo.OmitByKeys(in.Annotations, []string{KubeletCompatibilityAnnotationKey})
+		delete(in.Annotations, KubeletCompatibilityAnnotationKey)
 	} else {
 		in.Annotations = lo.Assign(in.Annotations, map[string]string{KubeletCompatibilityAnnotationKey: kubeletAnnotation})
 	}
