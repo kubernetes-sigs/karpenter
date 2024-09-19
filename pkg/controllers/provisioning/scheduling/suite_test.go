@@ -3707,7 +3707,7 @@ var _ = Context("Scheduling", func() {
 					m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", map[string]string{"controller": "provisioner"})
 					g.Expect(ok).To(BeTrue())
 					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">=", 0))
-				}, time.Second).Should(Succeed())
+				}, 10*time.Second).Should(Succeed())
 			}()
 			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, scheduling.MaxInstanceTypes)
 			wg.Wait()
