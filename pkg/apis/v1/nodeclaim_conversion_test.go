@@ -210,6 +210,13 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(nodeClassReference.Kind))
 				Expect(v1beta1nodeclaim.Spec.NodeClassRef.APIVersion).To(Equal(nodeClassReference.APIVersion))
 			})
+			It("should not panic when the v1 nodeclassRef is not defined", func() {
+				v1nodeclaim.Spec.NodeClassRef = nil
+				Expect(v1nodeclaim.ConvertTo(ctx, v1beta1nodeclaim)).To(Succeed())
+				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(""))
+				Expect(v1beta1nodeclaim.Spec.NodeClassRef.Name).To(Equal(""))
+				Expect(v1beta1nodeclaim.Spec.NodeClassRef.APIVersion).To(Equal(""))
+			})
 		})
 	})
 	Context("NodeClaim Status", func() {
@@ -486,6 +493,13 @@ var _ = Describe("Convert V1beta1 to V1 NodeClaim API", func() {
 				Expect(v1nodeclaim.Spec.NodeClassRef.Name).To(Equal(v1beta1nodeclaim.Spec.NodeClassRef.Name))
 				Expect(v1nodeclaim.Spec.NodeClassRef.Group).To(Equal(cloudProvider.NodeClassGroupVersionKind[0].Group))
 				Expect(v1nodeclaim.Annotations).To(HaveKeyWithValue(NodeClassReferenceAnnotationKey, string(nodeClassReferenceAnnotation)))
+			})
+			It("should not panic when the v1beta1 nodeclassRef is not defined", func() {
+				v1beta1nodeclaim.Spec.NodeClassRef = nil
+				Expect(v1nodeclaim.ConvertFrom(ctx, v1beta1nodeclaim)).To(Succeed())
+				Expect(v1nodeclaim.Spec.NodeClassRef.Kind).To(Equal(""))
+				Expect(v1nodeclaim.Spec.NodeClassRef.Name).To(Equal(""))
+				Expect(v1nodeclaim.Spec.NodeClassRef.Group).To(Equal(""))
 			})
 		})
 	})

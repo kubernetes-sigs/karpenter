@@ -63,13 +63,15 @@ func (in *NodeClaimSpec) convertTo(v1beta1nc *v1beta1.NodeClaimSpec, kubeletAnno
 	})
 	// Convert the NodeClassReference depending on whether the annotation exists
 	v1beta1nc.NodeClassRef = &v1beta1.NodeClassReference{}
-	if nodeClassReferenceAnnotation != "" {
-		if err := json.Unmarshal([]byte(nodeClassReferenceAnnotation), v1beta1nc.NodeClassRef); err != nil {
-			return fmt.Errorf("unmarshaling nodeClassRef annotation, %w", err)
+	if in.NodeClassRef != nil {
+		if nodeClassReferenceAnnotation != "" {
+			if err := json.Unmarshal([]byte(nodeClassReferenceAnnotation), v1beta1nc.NodeClassRef); err != nil {
+				return fmt.Errorf("unmarshaling nodeClassRef annotation, %w", err)
+			}
+		} else {
+			v1beta1nc.NodeClassRef.Name = in.NodeClassRef.Name
+			v1beta1nc.NodeClassRef.Kind = in.NodeClassRef.Kind
 		}
-	} else {
-		v1beta1nc.NodeClassRef.Name = in.NodeClassRef.Name
-		v1beta1nc.NodeClassRef.Kind = in.NodeClassRef.Kind
 	}
 	if kubeletAnnotation != "" {
 		v1beta1kubelet := &v1beta1.KubeletConfiguration{}
@@ -151,11 +153,14 @@ func (in *NodeClaimSpec) convertFrom(ctx context.Context, v1beta1nc *v1beta1.Nod
 		}
 	})
 
-	defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
-	in.NodeClassRef = &NodeClassReference{
-		Name:  v1beta1nc.NodeClassRef.Name,
-		Kind:  lo.Ternary(v1beta1nc.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1nc.NodeClassRef.Kind),
-		Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, strings.Split(v1beta1nc.NodeClassRef.APIVersion, "/")[0]),
+	in.NodeClassRef = &NodeClassReference{}
+	if v1beta1nc.NodeClassRef != nil {
+		defaultNodeClassGVK := injection.GetNodeClasses(ctx)[0]
+		in.NodeClassRef = &NodeClassReference{
+			Name:  v1beta1nc.NodeClassRef.Name,
+			Kind:  lo.Ternary(v1beta1nc.NodeClassRef.Kind == "", defaultNodeClassGVK.Kind, v1beta1nc.NodeClassRef.Kind),
+			Group: lo.Ternary(v1beta1nc.NodeClassRef.APIVersion == "", defaultNodeClassGVK.Group, strings.Split(v1beta1nc.NodeClassRef.APIVersion, "/")[0]),
+		}
 	}
 
 	if v1beta1nc.Kubelet != nil {
