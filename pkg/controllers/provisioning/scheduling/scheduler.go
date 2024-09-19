@@ -203,7 +203,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod, maxInstanceTy
 	// had 5xA pods and 5xB pods were they have a zonal topology spread, but A can only go in one zone and B in another.
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
 	errors := map[*corev1.Pod]error{}
-	QueueDepth.DeletePartialMatch(prometheus.Labels{ControllerLabel: injection.GetControllerName(ctx)}) // Reset the metric for the controller, so we don't keep old ids around
+	UnschedulablePodsCount.DeletePartialMatch(prometheus.Labels{ControllerLabel: injection.GetControllerName(ctx)}) // Reset the metric for the controller, so we don't keep old ids around
+	QueueDepth.DeletePartialMatch(prometheus.Labels{ControllerLabel: injection.GetControllerName(ctx)})             // Reset the metric for the controller, so we don't keep old ids around
 	q := NewQueue(pods...)
 	for {
 		QueueDepth.With(
@@ -245,6 +246,9 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod, maxInstanceTy
 		PodErrors:     errors,
 	}
 	results.TruncateInstanceTypes(MaxInstanceTypes)
+	UnschedulablePodsCount.With(
+		prometheus.Labels{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)},
+	).Set(float64(len(results.PodErrors)))
 	return results
 }
 

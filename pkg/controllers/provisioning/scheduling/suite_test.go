@@ -112,6 +112,7 @@ var _ = AfterEach(func() {
 	cluster.Reset()
 	scheduling.QueueDepth.Reset()
 	scheduling.SchedulingDurationSeconds.Reset()
+	scheduling.UnschedulablePodsCount.Reset()
 })
 
 var _ = Context("Scheduling", func() {
@@ -3673,8 +3674,44 @@ var _ = Context("Scheduling", func() {
 					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
 				}, time.Second).Should(Succeed())
 			}()
-			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
+			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, scheduling.MaxInstanceTypes)
 			wg.Wait()
+		})
+		It("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool)
+			// all of these pods have anti-affinity to each other
+			labels := map[string]string{
+				"app": "nginx",
+			}
+			pods := test.Pods(1000, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				PodAntiRequirements: []corev1.PodAffinityTerm{
+					{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+						TopologyKey:   corev1.LabelHostname,
+					},
+				},
+			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the UnschedulablePodsCount metric with a value
+			s, err := prov.NewScheduler(ctx, pods, nil)
+			Expect(err).To(BeNil())
+
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				Eventually(func(g Gomega) {
+					m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", map[string]string{"controller": "provisioner"})
+					g.Expect(ok).To(BeTrue())
+					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">=", 0))
+				}, time.Second).Should(Succeed())
+			}()
+			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, scheduling.MaxInstanceTypes)
+			wg.Wait()
+
 		})
 		It("should surface the schedulingDuration metric after executing a scheduling loop", func() {
 			nodePool := test.NodePool()
@@ -3696,7 +3733,7 @@ var _ = Context("Scheduling", func() {
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
 			s, err := prov.NewScheduler(ctx, pods, nil)
 			Expect(err).To(BeNil())
-			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
+			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, scheduling.MaxInstanceTypes)
 
 			m, ok := FindMetricWithLabelValues("karpenter_scheduler_scheduling_duration_seconds", map[string]string{"controller": "provisioner"})
 			Expect(ok).To(BeTrue())
