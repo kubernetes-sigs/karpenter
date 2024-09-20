@@ -800,6 +800,25 @@ var _ = Describe("Termination", func() {
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectNotFound(ctx, env.Client, node)
 			})
+			It("should not wait for volume attachments with released persistent volumes", func() {
+				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
+					NodeName:   node.Name,
+					VolumeName: "foo",
+				})
+				pv := test.PersistentVolume(test.PersistentVolumeOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "foo",
+					},
+				})
+				pv.Status.Phase = corev1.VolumeReleased
+
+				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pv, va)
+				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				ExpectNotFound(ctx, env.Client, node)
+			})
 			It("should wait for volume attachments until the nodeclaim's termination grace period expires", func() {
 				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
 					NodeName:   node.Name,

@@ -225,6 +225,7 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 			}
 		}
 	}
+
 	filteredVolumeAttachments := lo.Reject(volumeAttachments, func(v *storagev1.VolumeAttachment, _ int) bool {
 		pvName := v.Spec.Source.PersistentVolumeName
 		return pvName == nil || shouldFilterOutVolume.Has(*pvName)
