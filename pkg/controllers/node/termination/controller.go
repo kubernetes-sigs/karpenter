@@ -28,6 +28,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
@@ -193,6 +194,15 @@ func (c *Controller) ensureVolumesDetached(ctx context.Context, node *corev1.Nod
 	return len(filteredVolumeAttachments) == 0, nil
 }
 
+// volumeIsNotAttachedOrBound returns true if the persistent volume storage is neither Attached nor Bound
+func volumeIsNotAttachedOrBound(ctx context.Context, kubeClient client.Client, pvName string) (bool, error) {
+	pv := &corev1.PersistentVolume{}
+	if err := kubeClient.Get(ctx, types.NamespacedName{Name: pvName}, pv); err != nil {
+		return false, fmt.Errorf("getting persistent volume %q, %w", pvName, err)
+	}
+	return pv.Status.Phase == corev1.VolumePending || pv.Status.Phase == corev1.VolumeReleased || pv.Status.Phase == corev1.VolumeFailed, nil
+}
+
 // filterVolumeAttachments filters out storagev1.VolumeAttachments that should not block the termination
 // of the passed corev1.Node
 func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node *corev1.Node, volumeAttachments []*storagev1.VolumeAttachment, clk clock.Clock) ([]*storagev1.VolumeAttachment, error) {
@@ -205,13 +215,13 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 	if err != nil {
 		return nil, err
 	}
-	unDrainablePods := lo.Reject(pods, func(p *corev1.Pod, _ int) bool {
+	drainablePods := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
 		return pod.IsDrainable(p, clk)
 	})
-	// Filter out VolumeAttachments associated with non-drain-able Pods
+	// Filter VolumeAttachments associated remaining drainable Pods
 	// Match on Pod -> PersistentVolumeClaim -> PersistentVolume Name <- VolumeAttachment
-	shouldFilterOutVolume := sets.New[string]()
-	for _, p := range unDrainablePods {
+	shouldBlockOnVolume := sets.New[string]()
+	for _, p := range drainablePods {
 		for _, v := range p.Spec.Volumes {
 			pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, p, v)
 			if errors.IsNotFound(err) {
@@ -221,13 +231,14 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 				return nil, err
 			}
 			if pvc != nil {
-				shouldFilterOutVolume.Insert(pvc.Spec.VolumeName)
+				shouldBlockOnVolume.Insert(pvc.Spec.VolumeName)
 			}
 		}
 	}
-	filteredVolumeAttachments := lo.Reject(volumeAttachments, func(v *storagev1.VolumeAttachment, _ int) bool {
+
+	filteredVolumeAttachments := lo.Filter(volumeAttachments, func(v *storagev1.VolumeAttachment, _ int) bool {
 		pvName := v.Spec.Source.PersistentVolumeName
-		return pvName == nil || shouldFilterOutVolume.Has(*pvName)
+		return pvName != nil && shouldBlockOnVolume.Has(*pvName)
 	})
 	return filteredVolumeAttachments, nil
 }

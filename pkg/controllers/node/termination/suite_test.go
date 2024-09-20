@@ -748,23 +748,6 @@ var _ = Describe("Termination", func() {
 			ExpectDeleted(ctx, env.Client, pod)
 		})
 		Context("VolumeAttachments", func() {
-			It("should wait for volume attachments", func() {
-				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
-					NodeName:   node.Name,
-					VolumeName: "foo",
-				})
-				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va)
-				Expect(env.Client.Delete(ctx, node)).To(Succeed())
-
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-				ExpectExists(ctx, env.Client, node)
-
-				ExpectDeleted(ctx, env.Client, va)
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-				ExpectNotFound(ctx, env.Client, node)
-			})
 			It("should only wait for volume attachments associated with drainable pods", func() {
 				vaDrainable := test.VolumeAttachment(test.VolumeAttachmentOptions{
 					NodeName:   node.Name,
@@ -774,10 +757,13 @@ var _ = Describe("Termination", func() {
 					NodeName:   node.Name,
 					VolumeName: "bar",
 				})
-				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				pvcNonDrainable := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 					VolumeName: "bar",
 				})
-				pod := test.Pod(test.PodOptions{
+				pvcDrainable := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					VolumeName: "foo",
+				})
+				podNonDrainable := test.Pod(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: defaultOwnerRefs,
 					},
@@ -785,37 +771,54 @@ var _ = Describe("Termination", func() {
 						Key:      v1.DisruptedTaintKey,
 						Operator: corev1.TolerationOpExists,
 					}},
-					PersistentVolumeClaims: []string{pvc.Name},
+					PersistentVolumeClaims: []string{pvcNonDrainable.Name},
 				})
-				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, vaDrainable, vaNonDrainable, pod, pvc)
-				ExpectManualBinding(ctx, env.Client, pod, node)
+				podDrainable := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: defaultOwnerRefs,
+					},
+					PersistentVolumeClaims: []string{pvcDrainable.Name},
+				})
+				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, vaDrainable, vaNonDrainable, podDrainable, podNonDrainable, pvcDrainable, pvcNonDrainable)
+				ExpectManualBinding(ctx, env.Client, podDrainable, node)
+				ExpectManualBinding(ctx, env.Client, podNonDrainable, node)
+
 				Expect(env.Client.Delete(ctx, node)).To(Succeed())
 
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectExists(ctx, env.Client, node)
 
+				ExpectDeleted(ctx, env.Client, podDrainable)
 				ExpectDeleted(ctx, env.Client, vaDrainable)
+
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectNotFound(ctx, env.Client, node)
 			})
-			It("should wait for volume attachments until the nodeclaim's termination grace period expires", func() {
+			It("should not wait for volume attachments that don't belong to a pod on the node", func() {
 				va := test.VolumeAttachment(test.VolumeAttachmentOptions{
 					NodeName:   node.Name,
 					VolumeName: "foo",
 				})
-				nodeClaim.Annotations = map[string]string{
-					v1.NodeClaimTerminationTimestampAnnotationKey: fakeClock.Now().Add(time.Minute).Format(time.RFC3339),
-				}
-				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va)
+
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					VolumeName: "foo",
+				})
+				anotherNode := test.Node()
+				Expect(anotherNode.Name).NotTo(Equal(node.Name))
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						OwnerReferences: defaultOwnerRefs,
+					},
+					PersistentVolumeClaims: []string{pvc.Name},
+				})
+
+				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va, pod, anotherNode)
+				ExpectManualBinding(ctx, env.Client, pod, anotherNode)
+
 				Expect(env.Client.Delete(ctx, node)).To(Succeed())
 
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-				ExpectExists(ctx, env.Client, node)
-
-				fakeClock.Step(5 * time.Minute)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectNotFound(ctx, env.Client, node)
