@@ -28,6 +28,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
@@ -193,6 +194,15 @@ func (c *Controller) ensureVolumesDetached(ctx context.Context, node *corev1.Nod
 	return len(filteredVolumeAttachments) == 0, nil
 }
 
+// volumeIsNotAttachedOrBound returns true if the persistent volume storage is neither Attached nor Bound
+func volumeIsNotAttachedOrBound(ctx context.Context, kubeClient client.Client, pvName string) (bool, error) {
+	pv := &corev1.PersistentVolume{}
+	if err := kubeClient.Get(ctx, types.NamespacedName{Name: pvName}, pv); err != nil {
+		return false, fmt.Errorf("getting persistent volume %q, %w", pvName, err)
+	}
+	return pv.Status.Phase == corev1.VolumePending || pv.Status.Phase == corev1.VolumeReleased || pv.Status.Phase == corev1.VolumeFailed, nil
+}
+
 // filterVolumeAttachments filters out storagev1.VolumeAttachments that should not block the termination
 // of the passed corev1.Node
 func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node *corev1.Node, volumeAttachments []*storagev1.VolumeAttachment, clk clock.Clock) ([]*storagev1.VolumeAttachment, error) {
@@ -223,6 +233,20 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 			if pvc != nil {
 				shouldFilterOutVolume.Insert(pvc.Spec.VolumeName)
 			}
+		}
+	}
+
+	// ignore volume attachments associated with volumes that are no longer bound
+	for _, va := range volumeAttachments {
+		unattached, err := volumeIsNotAttachedOrBound(ctx, kubeClient, *va.Spec.Source.PersistentVolumeName)
+		if errors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if unattached {
+			shouldFilterOutVolume.Insert(*va.Spec.Source.PersistentVolumeName)
 		}
 	}
 
