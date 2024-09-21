@@ -46,20 +46,21 @@ type FeatureGates struct {
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
 type Options struct {
-	ServiceName           string
-	MetricsPort           int
-	HealthProbePort       int
-	KubeClientQPS         int
-	KubeClientBurst       int
-	EnableProfiling       bool
-	DisableLeaderElection bool
-	MemoryLimit           int64
-	LogLevel              string
-	LogOutputPaths        string
-	LogErrorOutputPaths   string
-	BatchMaxDuration      time.Duration
-	BatchIdleDuration     time.Duration
-	FeatureGates          FeatureGates
+	ServiceName             string
+	MetricsPort             int
+	HealthProbePort         int
+	KubeClientQPS           int
+	KubeClientBurst         int
+	EnableProfiling         bool
+	DisableLeaderElection   bool
+	LeaderElectionNamespace string
+	MemoryLimit             int64
+	LogLevel                string
+	LogOutputPaths          string
+	LogErrorOutputPaths     string
+	BatchMaxDuration        time.Duration
+	BatchIdleDuration       time.Duration
+	FeatureGates            FeatureGates
 }
 
 type FlagSet struct {
@@ -87,6 +88,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.IntVar(&o.KubeClientBurst, "kube-client-burst", env.WithDefaultInt("KUBE_CLIENT_BURST", 300), "The maximum allowed burst of queries to the kube-apiserver")
 	fs.BoolVarWithEnv(&o.EnableProfiling, "enable-profiling", "ENABLE_PROFILING", false, "Enable the profiling on the metric endpoint")
 	fs.BoolVarWithEnv(&o.DisableLeaderElection, "disable-leader-election", "DISABLE_LEADER_ELECTION", false, "Disable the leader election client before executing the main loop. Disable when running replicated components for high availability is not desired.")
+	fs.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", env.WithDefaultString("LEADER_ELECTION_NAMESPACE", ""), "Leader election namespace to create and monitor the lease if running outside the cluster")
 	fs.Int64Var(&o.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
 	fs.StringVar(&o.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", "info"), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
 	fs.StringVar(&o.LogOutputPaths, "log-output-paths", env.WithDefaultString("LOG_OUTPUT_PATHS", "stdout"), "Optional comma separated paths for directing log output")
@@ -105,7 +107,7 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	}
 
 	if !lo.Contains(validLogLevels, o.LogLevel) {
-		return fmt.Errorf("validating cli flags / env vars, invalid log level %q", o.LogLevel)
+		return fmt.Errorf("validating cli flags / env vars, invalid LOG_LEVEL %q", o.LogLevel)
 	}
 	gates, err := ParseFeatureGates(o.FeatureGates.inputStr)
 	if err != nil {
