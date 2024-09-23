@@ -84,7 +84,6 @@ func (c *Controller) Reconcile(ctx context.Context, n *v1.NodeClaim) (reconcile.
 //nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName), "provider-id", nodeClaim.Status.ProviderID))
-	stored := nodeClaim.DeepCopy()
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
@@ -130,12 +129,14 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).LastTransitionTime.Time).Seconds())
 	}
+	stored := nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
 	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		// We call Update() here rather than Patch() because patching a list with a JSON merge patch
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the finalizer list
 		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
-		if err = c.kubeClient.Update(ctx, nodeClaim); err != nil {
+		if err = c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
@@ -175,7 +176,7 @@ func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.C
 	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 
 	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
-		return client.IgnoreNotFound(fmt.Errorf("patching nodeclaim, %w", err))
+		return client.IgnoreNotFound(err)
 	}
 	log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated nodeclaim")
 	c.recorder.Publish(terminatorevents.NodeClaimTerminationGracePeriodExpiring(nodeClaim, terminationTime))

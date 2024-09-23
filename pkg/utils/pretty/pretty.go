@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/exp/constraints"
 	"golang.org/x/exp/slices"
+	v1 "k8s.io/api/core/v1"
 )
 
 func Concise(o interface{}) string {
@@ -76,4 +77,11 @@ func Map[K constraints.Ordered, V any](values map[K]V, maxItems int) string {
 		fmt.Fprintf(&buf, " and %d other(s)", len(values)-count)
 	}
 	return buf.String()
+}
+
+func Taint(t v1.Taint) string {
+	if t.Value == "" {
+		return fmt.Sprintf("%s:%s", t.Key, t.Effect)
+	}
+	return fmt.Sprintf("%s=%s:%s", t.Key, t.Value, t.Effect)
 }

@@ -199,7 +199,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
-			// store the error that is causing us to fail so we can bubble it up later if this times out.
+			// store the error that is causing us to fail, so we can bubble it up later if this times out.
 			cmd.lastError = err
 			// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
 			q.RateLimitingInterface.Done(cmd)
