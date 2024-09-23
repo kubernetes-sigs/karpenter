@@ -25,7 +25,8 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
-	"sigs.k8s.io/karpenter/pkg/controllers/migration"
+	migrationcrd "sigs.k8s.io/karpenter/pkg/controllers/migration/crd"
+	migration "sigs.k8s.io/karpenter/pkg/controllers/migration/resource"
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -96,5 +97,6 @@ func NewControllers(
 		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 		migration.NewController[*v1.NodeClaim](kubeClient),
 		migration.NewController[*v1.NodePool](kubeClient),
+		migrationcrd.NewController(kubeClient, cloudProvider),
 	}
 }
