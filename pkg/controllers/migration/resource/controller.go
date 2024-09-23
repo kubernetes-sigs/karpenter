@@ -79,7 +79,7 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 func (c *Controller[T]) Register(_ context.Context, m manager.Manager) error {
 	o := object.New[T]()
 	return controllerruntime.NewControllerManagedBy(m).
-		Named(fmt.Sprintf("migration.%s", strings.ToLower(reflect.TypeOf(o).Elem().Name()))).
+		Named(fmt.Sprintf("migration.resource.%s", strings.ToLower(reflect.TypeOf(o).Elem().Name()))).
 		For(o).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(c)
