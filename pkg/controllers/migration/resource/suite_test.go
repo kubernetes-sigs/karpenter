@@ -78,7 +78,7 @@ var _ = Describe("Migration", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			ExpectReconcileSucceeded(ctx, resourceController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.StoredVersionMigrated, "true"))
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.StoredVersionMigratedKey, "true"))
 		})
 	})
 })

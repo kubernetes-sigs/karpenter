@@ -65,7 +65,7 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 	}
 	stored := o.DeepCopyObject()
 	o.SetAnnotations(lo.Assign(o.GetAnnotations(), map[string]string{
-		v1.StoredVersionMigrated: "true",
+		v1.StoredVersionMigratedKey: "true",
 	}))
 	// update annotation on CR
 	if !equality.Semantic.DeepEqual(stored, o) {

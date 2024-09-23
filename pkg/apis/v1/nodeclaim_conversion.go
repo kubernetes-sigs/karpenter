@@ -45,6 +45,7 @@ func (in *NodeClaim) ConvertTo(ctx context.Context, to apis.Convertible) error {
 	// Remove the annotations from the v1beta1 NodeClaim on the convert back
 	delete(v1beta1NC.Annotations, KubeletCompatibilityAnnotationKey)
 	delete(v1beta1NC.Annotations, NodeClassReferenceAnnotationKey)
+	delete(v1beta1NC.Annotations, StoredVersionMigratedKey)
 	return nil
 }
 

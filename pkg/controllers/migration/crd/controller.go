@@ -78,7 +78,7 @@ func (c *Controller) Reconcile(ctx context.Context, crd *apiextensionsv1.CustomR
 	}
 	for _, item := range list.Items {
 		// requeue if a custom resource is found without annotation
-		if !lo.HasKey(item.GetAnnotations(), v1.StoredVersionMigrated) {
+		if !lo.HasKey(item.GetAnnotations(), v1.StoredVersionMigratedKey) {
 			return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
 		}
 	}
