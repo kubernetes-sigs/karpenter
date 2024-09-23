@@ -61,7 +61,7 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 		if errors.IsNotFound(err) {
 			return reconcile.Result{}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("getting object %v, %w", req.Name, err)
+		return reconcile.Result{}, fmt.Errorf("getting %v, %w", req.Name, err)
 	}
 	stored := o.DeepCopyObject()
 	o.SetAnnotations(lo.Assign(o.GetAnnotations(), map[string]string{

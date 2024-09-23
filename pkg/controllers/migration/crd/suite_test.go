@@ -85,7 +85,7 @@ var _ = Describe("Migration", func() {
 			ExpectReconcileSucceeded(ctx, resourceController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.StoredVersionMigrated, "true"))
-			ExpectReconcileSucceeded(ctx, crdController, client.ObjectKeyFromObject(v1alpha1.CRDs[0]))
+			ExpectObjectReconciled(ctx, env.Client, crdController, v1alpha1.CRDs[0])
 			for _, crd := range env.CRDs {
 				if strings.Contains(crd.Name, strings.ToLower(nodeClass.Name)) {
 					Expect(crd.Status.StoredVersions).To(HaveExactElements("v1"))

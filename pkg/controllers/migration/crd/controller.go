@@ -19,7 +19,6 @@ package crd
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/awslabs/operatorpkg/object"
@@ -52,33 +51,18 @@ func NewController(client client.Client, cloudProvider cloudprovider.CloudProvid
 	}
 }
 
-/*
-however many concurrent reconciles
-any change to CR re-reconciles, which then lists all CRs
+func (c *Controller) Reconcile(ctx context.Context, crd *apiextensionsv1.CustomResourceDefinition) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "migration.crd")
 
-3 Get CR controllers to add annotation -> all resources annotated
-1 CRD controller filter on group (karpenter.sh) and cp.GetSupported
-
-*/
-
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, fmt.Sprintf("migration.crd.%s", req.Name))
-
-	crd := &apiextensionsv1.CustomResourceDefinition{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, crd); err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting crd %v, %w", req.NamespacedName, err)
-	}
-	karpenterCrd := lo.Filter(apis.CRDs, func(item *apiextensionsv1.CustomResourceDefinition, _ int) bool {
-		return item.ObjectMeta.Name == req.Name
-	})
 	nodeClassGvk := lo.Map(c.cloudProvider.GetSupportedNodeClasses(), func(nc status.Object, _ int) schema.GroupVersionKind {
 		return object.GVK(nc)
 	})[0]
-	// do nothing for non-Karpenter CRDs
-	if len(karpenterCrd) == 0 && !strings.EqualFold(crd.Spec.Names.Kind, nodeClassGvk.Kind) {
+	if _, ok := lo.Find(apis.CRDs, func(item *apiextensionsv1.CustomResourceDefinition) bool {
+		return item.ObjectMeta.Name == crd.Name
+	}); !ok && nodeClassGvk.Kind != crd.Spec.Names.Kind {
 		return reconcile.Result{}, nil
 	}
-	// do nothing for CRDs that have dropped v1beta1
+	fmt.Println("Matched crd: ", crd.Spec.Names.Kind)
 	if !lo.Contains(crd.Status.StoredVersions, "v1beta1") {
 		return reconcile.Result{}, nil
 	}
@@ -91,7 +75,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		},
 	)
 	if err := c.kubeClient.List(ctx, list); err != nil {
-		return reconcile.Result{}, fmt.Errorf("listing resources for %v, %w", crd.Spec.Names.Kind, err)
+		return reconcile.Result{}, fmt.Errorf("listing %s(s), %w", crd.Spec.Names.Kind, err)
 	}
 	for _, item := range list.Items {
 		// requeue if a custom resource is found without annotation
@@ -101,9 +85,9 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 	// if all custom resources have been updated, patch the CRD
 	stored := crd.DeepCopy()
-	crd.Status.StoredVersions = []string{"v1"}
+	crd.Status.StoredVersions = []string{"v1beta1"}
 	if err := c.kubeClient.Status().Patch(ctx, crd, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-		return reconcile.Result{}, fmt.Errorf("patching crd status version %v, %w", req.Name, err)
+		return reconcile.Result{}, fmt.Errorf("patching crd status version %v, %w", crd.Name, err)
 	}
 	return reconcile.Result{}, nil
 }
@@ -112,5 +96,5 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("migration.crd").
 		For(&apiextensionsv1.CustomResourceDefinition{}).
-		Complete(c)
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
