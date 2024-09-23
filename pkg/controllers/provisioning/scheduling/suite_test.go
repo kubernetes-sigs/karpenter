@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/record"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/csi-translation-lib/plugins"
@@ -3679,22 +3680,16 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
 			nodePool := test.NodePool()
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"default-instance-type"}}}}
 			ExpectApplied(ctx, env.Client, nodePool)
-			// all of these pods have anti-affinity to each other
-			labels := map[string]string{
-				"app": "nginx",
+			//Creates 15 pods, 5 schedulable and 10 unschedulable and adds and UID
+			podsUnschedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "unknown"}}, 10)
+			podsSchedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "default-instance-type"}}, 5)
+			pods := append(podsUnschedulable, podsSchedulable...)
+			for _, i := range pods {
+				i.UID = uuid.NewUUID()
 			}
-			pods := test.Pods(1000, test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
-				},
-				PodAntiRequirements: []corev1.PodAffinityTerm{
-					{
-						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
-						TopologyKey:   corev1.LabelHostname,
-					},
-				},
-			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the UnschedulablePodsCount metric with a value
 			s, err := prov.NewScheduler(ctx, pods, nil)
 			Expect(err).To(BeNil())
 
@@ -3706,7 +3701,7 @@ var _ = Context("Scheduling", func() {
 				Eventually(func(g Gomega) {
 					m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", map[string]string{"controller": "provisioner"})
 					g.Expect(ok).To(BeTrue())
-					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">=", 0))
+					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 10))
 				}, 10*time.Second).Should(Succeed())
 			}()
 			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, scheduling.MaxInstanceTypes)
