@@ -226,7 +226,7 @@ func setupIndexers(ctx context.Context, mgr manager.Manager) {
 	}), "failed to setup node provider id indexer")
 	lo.Must0(mgr.GetFieldIndexer().IndexField(ctx, &storagev1.VolumeAttachment{}, "spec.nodeName", func(o client.Object) []string {
 		return []string{o.(*storagev1.VolumeAttachment).Spec.NodeName}
-	}),  "failed to setup volumeattachment indexer")
+	}), "failed to setup volumeattachment indexer")
 
 	// If the CRD does not exist, we should fail open when setting up indexers. This ensures controllers that aren't reliant on those CRDs may continue to function
 	handleCRDIndexerError := func(err error, msg string) {
