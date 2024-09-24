@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -41,6 +42,7 @@ type NodeClaimTemplate struct {
 	v1.NodeClaim
 
 	NodePoolName        string
+	NodePoolUUID        types.UID
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Requirements        scheduling.Requirements
 	cache               *cache.Cache
@@ -50,36 +52,37 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 	nct := &NodeClaimTemplate{
 		NodeClaim:    *nodePool.Spec.Template.ToNodeClaim(),
 		NodePoolName: nodePool.Name,
+		NodePoolUUID: nodePool.UID,
 		Requirements: scheduling.NewRequirements(),
 	}
+	nct.Annotations = lo.Assign(nct.Annotations, map[string]string{
+		v1.NodePoolHashAnnotationKey:        nodePool.Hash(),
+		v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
+	})
 	nct.Labels = lo.Assign(nct.Labels, map[string]string{v1.NodePoolLabelKey: nodePool.Name})
 	nct.Requirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(nct.Spec.Requirements...).Values()...)
 	nct.Requirements.Add(scheduling.NewLabelRequirements(nct.Labels).Values()...)
 	return nct
 }
 
-func (i *NodeClaimTemplate) ToNodeClaim(nodePool *v1.NodePool) *v1.NodeClaim {
+func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 	// Order the instance types by price and only take the first 100 of them to decrease the instance type size in the requirements
 	instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
 	i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
 		return i.Name
 	})...))
 
-	gvk := object.GVK(nodePool)
 	nc := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("%s-", i.NodePoolName),
-			Annotations: lo.Assign(i.Annotations, map[string]string{
-				v1.NodePoolHashAnnotationKey:        nodePool.Hash(),
-				v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
-			}),
-			Labels: i.Labels,
+			Annotations:  i.Annotations,
+			Labels:       i.Labels,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion:         gvk.GroupVersion().String(),
-					Kind:               gvk.Kind,
-					Name:               nodePool.Name,
-					UID:                nodePool.UID,
+					APIVersion:         object.GVK(&v1.NodePool{}).GroupVersion().String(),
+					Kind:               object.GVK(&v1.NodePool{}).Kind,
+					Name:               i.NodePoolName,
+					UID:                i.NodePoolUUID,
 					BlockOwnerDeletion: lo.ToPtr(true),
 				},
 			},

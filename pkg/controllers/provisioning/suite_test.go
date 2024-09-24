@@ -31,6 +31,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
@@ -247,6 +248,37 @@ var _ = Describe("Provisioning", func() {
 		for _, pod := range pods {
 			ExpectScheduled(ctx, env.Client, pod)
 		}
+	})
+	It("should not use a different NodePool hash on the NodeClaim if the NodePool changes during scheduling", func() {
+		// This test was added since we were generating the NodeClaim's NodePool hash from a NodePool that was re-retrieved
+		// after scheduling had been completed. This could have resulted in the hash not accurately reflecting the actual NodePool
+		// state that it was generated from
+
+		nodePool := test.NodePool()
+		pod := test.UnschedulablePod()
+		hash := nodePool.Hash()
+		ExpectApplied(ctx, env.Client, nodePool, pod)
+
+		results, err := prov.Schedule(ctx)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(results.NewNodeClaims).To(HaveLen(1))
+		Expect(results.NewNodeClaims[0].ToNodeClaim().Annotations).To(HaveKeyWithValue(v1.NodePoolHashAnnotationKey, hash))
+
+		nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{
+			"new-label": "new-value",
+		})
+		Expect(nodePool.Hash()).ToNot(Equal(hash))
+		ExpectApplied(ctx, env.Client, nodePool) // apply the changed NodePool but expect no change in the hash on the NodeClaim
+
+		nodeClaims, err := prov.CreateNodeClaims(ctx, results.NewNodeClaims)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(nodeClaims).To(HaveLen(1))
+
+		nodeClaim := &v1.NodeClaim{}
+		Expect(env.Client.Get(ctx, types.NamespacedName{Name: nodeClaims[0]}, nodeClaim)).To(Succeed())
+
+		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodePoolHashAnnotationKey, hash))
 	})
 	It("should schedule all pods on one inflight node when node is in deleting state", func() {
 		nodePool := test.NodePool()

@@ -366,7 +366,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
 		return "", err
 	}
-	nodeClaim := n.ToNodeClaim(latest)
+	nodeClaim := n.ToNodeClaim()
 
 	if err := p.kubeClient.Create(ctx, nodeClaim); err != nil {
 		return "", err
