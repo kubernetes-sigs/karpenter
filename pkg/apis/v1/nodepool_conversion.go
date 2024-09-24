@@ -46,6 +46,7 @@ func (in *NodePool) ConvertTo(_ context.Context, to apis.Convertible) error {
 	// Remove the annotations from the v1beta1 NodeClaim on the convert back
 	delete(v1beta1NP.Annotations, KubeletCompatibilityAnnotationKey)
 	delete(v1beta1NP.Annotations, NodeClassReferenceAnnotationKey)
+	// Drop the annotation so when roundtripping from v1, to v1beta1, and back to v1 the migration resource controller can re-annotate it
 	delete(v1beta1NP.Annotations, StoredVersionMigratedKey)
 	return nil
 }

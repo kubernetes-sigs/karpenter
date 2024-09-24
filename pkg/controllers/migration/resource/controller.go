@@ -61,7 +61,7 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 		if errors.IsNotFound(err) {
 			return reconcile.Result{}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("getting %v, %w", req.Name, err)
+		return reconcile.Result{}, fmt.Errorf("getting %s, %w", object.GVK(o), err)
 	}
 	stored := o.DeepCopyObject()
 	o.SetAnnotations(lo.Assign(o.GetAnnotations(), map[string]string{
@@ -70,7 +70,7 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 	// update annotation on CR
 	if !equality.Semantic.DeepEqual(stored, o) {
 		if err := c.kubeClient.Patch(ctx, o, client.MergeFromWithOptions(stored.(client.Object), client.MergeFromWithOptimisticLock{})); err != nil {
-			return reconcile.Result{}, fmt.Errorf("adding stored version migration annotation %v, %w", req.Name, err)
+			return reconcile.Result{}, fmt.Errorf("adding %s annotation to %s, %w", v1.StoredVersionMigratedKey, object.GVK(o), err)
 		}
 	}
 	return reconcile.Result{}, nil
