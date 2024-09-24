@@ -3699,10 +3699,12 @@ var _ = Context("Scheduling", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			//Creates 15 pods, 5 schedulable and 10 unschedulable and adds and UID
+			//Creates 15 pods, 5 schedulable and 10 unschedulable
 			podsUnschedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "unknown"}}, 10)
 			podsSchedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "default-instance-type"}}, 5)
 			pods := append(podsUnschedulable, podsSchedulable...)
+			//Adds UID to pods for queue in solve. Solve pushes any unschedulable pod back onto the queue and
+			//then maps the current length of the queue to the pod using the UID
 			for _, i := range pods {
 				i.UID = uuid.NewUUID()
 			}
