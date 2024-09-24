@@ -3679,9 +3679,25 @@ var _ = Context("Scheduling", func() {
 			wg.Wait()
 		})
 		It("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
-			nodePool := test.NodePool()
-			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"default-instance-type"}}}}
+			nodePool := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+										Key:      corev1.LabelInstanceTypeStable,
+										Operator: corev1.NodeSelectorOpIn,
+										Values: []string{
+											"default-instance-type",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
 			ExpectApplied(ctx, env.Client, nodePool)
 			//Creates 15 pods, 5 schedulable and 10 unschedulable and adds and UID
 			podsUnschedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "unknown"}}, 10)
