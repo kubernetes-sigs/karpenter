@@ -180,6 +180,11 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 				},
 			},
 		}); err != nil {
+		var apiStatus apierrors.APIStatus
+		if errors.As(err, &apiStatus) {
+			code := apiStatus.Status().Code
+			NodesEvictionRequestsTotal.With(map[string]string{CodeLabel: fmt.Sprint(code)}).Inc()
+		}
 		// status codes for the eviction API are defined here:
 		// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#how-api-initiated-eviction-works
 		if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
@@ -199,6 +204,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 		log.FromContext(ctx).Error(err, "failed evicting pod")
 		return false
 	}
+	NodesEvictionRequestsTotal.With(map[string]string{CodeLabel: "200"}).Inc()
 	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
 	return true
 }

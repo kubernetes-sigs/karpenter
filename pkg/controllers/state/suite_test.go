@@ -88,6 +88,7 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	fakeClock.SetTime(time.Now())
+	state.ClusterStateUnsyncedTimeSeconds.Reset()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	nodePool = test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
 	ExpectApplied(ctx, env.Client, nodePool)
@@ -1126,6 +1127,27 @@ var _ = Describe("Cluster State Sync", func() {
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 1.0, nil)
 		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
+		metric, found := FindMetricWithLabelValues("karpenter_cluster_state_unsynced_time_seconds", map[string]string{})
+		Expect(found).To(BeTrue())
+		Expect(metric.GetGauge().GetValue()).To(BeEquivalentTo(0))
+	})
+	It("should emit cluster_state_unsynced_time_seconds metric when cluster state is unsynced", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			Status: v1.NodeClaimStatus{
+				ProviderID: "",
+			},
+		})
+		nodeClaim.Status.ProviderID = ""
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+
+		fakeClock.Step(2 * time.Minute)
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Expect(cluster.Synced(ctx)).To(BeFalse())
+		metric, found := FindMetricWithLabelValues("karpenter_cluster_state_unsynced_time_seconds", map[string]string{})
+		Expect(found).To(BeTrue())
+		Expect(metric.GetGauge().GetValue()).To(BeNumerically(">=", 120))
 	})
 	It("should consider the cluster state synced when nodes don't have provider id", func() {
 		// Deploy 1000 nodes and sync them all with the cluster

@@ -95,6 +95,7 @@ var _ = Describe("Termination", func() {
 		metrics.NodesTerminatedTotal.Reset()
 		termination.TerminationDurationSeconds.Reset()
 		termination.NodeLifetimeDurationSeconds.Reset()
+		termination.NodesDrainedTotal.Reset()
 	})
 
 	Context("Reconciliation", func() {
@@ -841,6 +842,7 @@ var _ = Describe("Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectMetricCounterValue(termination.NodesDrainedTotal, 1, map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 
 			m, ok := FindMetricWithLabelValues("karpenter_nodes_terminated_total", map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})

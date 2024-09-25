@@ -45,8 +45,17 @@ var (
 			Help:      "Returns 1 if cluster state is synced and 0 otherwise. Synced checks that nodeclaims and nodes that are stored in the APIServer have the same representation as Karpenter's cluster state",
 		},
 	)
+	ClusterStateUnsyncedTimeSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: stateSubsystem,
+			Name:      "unsynced_time_seconds",
+			Help:      "The time for which cluster state is not synced",
+		},
+		[]string{},
+	)
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(ClusterStateNodesCount, ClusterStateSynced)
+	crmetrics.Registry.MustRegister(ClusterStateNodesCount, ClusterStateSynced, ClusterStateUnsyncedTimeSeconds)
 }

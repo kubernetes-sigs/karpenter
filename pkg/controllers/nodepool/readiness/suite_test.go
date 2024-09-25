@@ -92,6 +92,7 @@ var _ = Describe("Readiness", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
 	})
 	It("should have status condition on nodePool as not ready if nodeClass is not ready", func() {

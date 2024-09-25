@@ -28,20 +28,21 @@ import (
 
 type OptionsFields struct {
 	// Vendor Neutral
-	ServiceName           *string
-	MetricsPort           *int
-	HealthProbePort       *int
-	KubeClientQPS         *int
-	KubeClientBurst       *int
-	EnableProfiling       *bool
-	DisableLeaderElection *bool
-	MemoryLimit           *int64
-	LogLevel              *string
-	LogOutputPaths        *string
-	LogErrorOutputPaths   *string
-	BatchMaxDuration      *time.Duration
-	BatchIdleDuration     *time.Duration
-	FeatureGates          FeatureGates
+	ServiceName             *string
+	MetricsPort             *int
+	HealthProbePort         *int
+	KubeClientQPS           *int
+	KubeClientBurst         *int
+	EnableProfiling         *bool
+	DisableLeaderElection   *bool
+	LeaderElectionNamespace *string
+	MemoryLimit             *int64
+	LogLevel                *string
+	LogOutputPaths          *string
+	LogErrorOutputPaths     *string
+	BatchMaxDuration        *time.Duration
+	BatchIdleDuration       *time.Duration
+	FeatureGates            FeatureGates
 }
 
 type FeatureGates struct {
