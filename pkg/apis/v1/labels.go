@@ -47,6 +47,7 @@ const (
 	KubeletCompatibilityAnnotationKey          = CompatibilityGroup + "/v1beta1-kubelet-conversion"
 	NodeClassReferenceAnnotationKey            = CompatibilityGroup + "/v1beta1-nodeclass-reference"
 	NodeClaimTerminationTimestampAnnotationKey = Group + "/nodeclaim-termination-timestamp"
+	StoredVersionMigratedKey                   = Group + "/stored-version-migrated"
 )
 
 // Karpenter specific finalizers
