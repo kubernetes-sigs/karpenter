@@ -28,7 +28,8 @@ import (
 func init() {
 	crmetrics.Registry.MustRegister(
 		TerminationDurationSeconds,
-		NodeLifetimeDurationSeconds)
+		NodeLifetimeDurationSeconds,
+		NodesDrainedTotal)
 }
 
 const dayDuration = time.Hour * 24
@@ -41,6 +42,15 @@ var (
 			Name:       "termination_duration_seconds",
 			Help:       "The time taken between a node's deletion request and the removal of its finalizer",
 			Objectives: metrics.SummaryObjectives(),
+		},
+		[]string{metrics.NodePoolLabel},
+	)
+	NodesDrainedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.NodeSubsystem,
+			Name:      "drained_total",
+			Help:      "The total number of nodes drained by Karpenter",
 		},
 		[]string{metrics.NodePoolLabel},
 	)

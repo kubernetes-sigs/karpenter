@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -98,6 +100,7 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
 	cluster.Reset()
+	pscheduling.IgnoredPodCount.Set(0)
 })
 
 var _ = Describe("Provisioning", func() {
@@ -1370,6 +1373,7 @@ var _ = Describe("Provisioning", func() {
 				PersistentVolumeClaims: []string{"invalid"},
 			})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectMetricGaugeValue(pscheduling.IgnoredPodCount, 1, nil)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should schedule with an empty storage class if the pvc is bound", func() {
