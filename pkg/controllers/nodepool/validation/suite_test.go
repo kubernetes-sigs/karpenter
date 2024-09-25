@@ -69,6 +69,7 @@ var _ = Describe("Counter", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
 		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
 	})
