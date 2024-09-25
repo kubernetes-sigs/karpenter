@@ -62,7 +62,8 @@ func (c *Controller) Reconcile(ctx context.Context, crd *apiextensionsv1.CustomR
 	}); !ok && nodeClassGvk.Kind != crd.Spec.Names.Kind {
 		return reconcile.Result{}, nil
 	}
-	if !lo.Contains(crd.Status.StoredVersions, "v1") {
+	// If v1beta1 is not stored, no-op
+	if !lo.Contains(crd.Status.StoredVersions, "v1beta1") {
 		return reconcile.Result{}, nil
 	}
 	list := &unstructured.UnstructuredList{}
