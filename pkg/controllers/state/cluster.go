@@ -59,8 +59,9 @@ type Cluster struct {
 	// changed about the cluster that might make consolidation possible. By recording
 	// the state, interested disruption methods can check to see if this has changed to
 	// optimize and not try to disrupt if nothing about the cluster has changed.
-	clusterState     time.Time
-	antiAffinityPods sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
+	clusterState      time.Time
+	unsyncedStartTime time.Time
+	antiAffinityPods  sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
 }
 
 func NewCluster(clk clock.Clock, client client.Client) *Cluster {
@@ -82,6 +83,18 @@ func NewCluster(clk clock.Clock, client client.Client) *Cluster {
 //
 //nolint:gocyclo
 func (c *Cluster) Synced(ctx context.Context) (synced bool) {
+	// Set the metric depending on the result of the Synced() call
+	defer func() {
+		if synced {
+			c.unsyncedStartTime = time.Time{}
+			ClusterStateUnsyncedTimeSeconds.With(map[string]string{}).Set(0)
+		} else {
+			if c.unsyncedStartTime.IsZero() {
+				c.unsyncedStartTime = c.clock.Now()
+			}
+			ClusterStateUnsyncedTimeSeconds.With(map[string]string{}).Set(c.clock.Since(c.unsyncedStartTime).Seconds())
+		}
+	}()
 	// Set the metric to whatever the result of the Synced() call is
 	defer func() {
 		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
