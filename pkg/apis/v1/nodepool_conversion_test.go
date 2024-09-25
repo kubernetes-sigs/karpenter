@@ -78,6 +78,19 @@ var _ = Describe("Convert V1 to V1beta1 NodePool API", func() {
 		Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
 		Expect(v1beta1nodepool.ObjectMeta).To(BeEquivalentTo(v1nodepool.ObjectMeta))
 	})
+	It("should drop v1 specific annotations on conversion", func() {
+		v1nodepool.ObjectMeta = test.ObjectMeta(
+			metav1.ObjectMeta{
+				Annotations: map[string]string{
+					StoredVersionMigratedKey: "true",
+				},
+			},
+		)
+		v1np := v1nodepool.DeepCopy()
+		Expect(v1nodepool.ConvertTo(ctx, v1beta1nodepool)).To(Succeed())
+		Expect(v1np.Annotations).To(HaveKey(StoredVersionMigratedKey))
+		Expect(v1beta1nodepool.Annotations).NotTo(HaveKey(StoredVersionMigratedKey))
+	})
 	Context("NodePool Spec", func() {
 		It("should convert v1 nodepool weights", func() {
 			v1nodepool.Spec.Weight = lo.ToPtr(int32(62))

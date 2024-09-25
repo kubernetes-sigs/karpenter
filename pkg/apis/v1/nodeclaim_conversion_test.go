@@ -98,6 +98,19 @@ var _ = Describe("Convert v1 to v1beta1 NodeClaim API", func() {
 		v1beta1nodeclaim.Annotations = nil
 		Expect(v1beta1nodeclaim.ObjectMeta).To(BeEquivalentTo(v1nodeclaim.ObjectMeta))
 	})
+	It("should drop v1 specific annotations on conversion", func() {
+		v1nodeclaim.ObjectMeta = test.ObjectMeta(
+			metav1.ObjectMeta{
+				Annotations: map[string]string{
+					StoredVersionMigratedKey: "true",
+				},
+			},
+		)
+		v1nc := v1nodeclaim.DeepCopy()
+		Expect(v1nodeclaim.ConvertTo(ctx, v1beta1nodeclaim)).To(Succeed())
+		Expect(v1nc.Annotations).To(HaveKey(StoredVersionMigratedKey))
+		Expect(v1beta1nodeclaim.Annotations).NotTo(HaveKey(StoredVersionMigratedKey))
+	})
 	Context("NodeClaim Spec", func() {
 		It("should convert v1 nodeclaim taints", func() {
 			v1nodeclaim.Spec.Taints = []v1.Taint{
