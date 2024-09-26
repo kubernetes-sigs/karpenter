@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -62,10 +63,21 @@ func (c *Controller) Reconcile(ctx context.Context, crd *apiextensionsv1.CustomR
 	}); !ok && nodeClassGvk.Kind != crd.Spec.Names.Kind {
 		return reconcile.Result{}, nil
 	}
+
 	// If v1beta1 is not stored, no-op
 	if !lo.Contains(crd.Status.StoredVersions, "v1beta1") {
 		return reconcile.Result{}, nil
 	}
+	// We only want to reconcile against CRDs that have v1 as the storage version.
+	// Note: we don't need to check this in the resource migration controller since the conversion webhook drops the
+	// annotation when applying the v1 resource with the annotation.
+	if storageVersion, found := lo.Find(crd.Spec.Versions, func(v apiextensionsv1.CustomResourceDefinitionVersion) bool {
+		return v.Storage
+	}); !found || storageVersion.Name != "v1" {
+		log.FromContext(ctx).Info("failed to migrate CRD, expected storage version to be v1 (make sure you've upgraded your CRDs)")
+		return reconcile.Result{}, nil
+	}
+
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(
 		schema.GroupVersionKind{

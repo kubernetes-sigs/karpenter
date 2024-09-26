@@ -23,8 +23,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -91,6 +94,23 @@ var _ = Describe("Migration", func() {
 					Expect(crd.Status.StoredVersions).To(HaveExactElements("v1"))
 				}
 			}
+		})
+		It("shouldn't update the stored version to v1 if the storage version is v1beta1", func() {
+			v1beta1CRDs := lo.Map(env.CRDs, func(crd *apiextensionsv1.CustomResourceDefinition, _ int) *apiextensionsv1.CustomResourceDefinition {
+				v1beta1CRD := crd.DeepCopy()
+				for i := range v1beta1CRD.Spec.Versions {
+					version := &v1beta1CRD.Spec.Versions[i]
+					version.Storage = version.Name == "v1beta1"
+				}
+				v1beta1CRD.Status.StoredVersions = []string{"v1beta1"}
+				return v1beta1CRD
+			})
+			for _, crd := range v1beta1CRDs {
+				ExpectObjectReconciled(ctx, env.Client, crdController, crd)
+				// Note: since we're passing the CRD in by pointer, we don't need to re-read from the API server
+				Expect(crd.Status.StoredVersions).To(HaveExactElements("v1beta1"))
+			}
+
 		})
 	})
 })
