@@ -230,13 +230,13 @@ func setupIndexers(ctx context.Context, mgr manager.Manager) {
 
 	// If the CRD does not exist, we should fail open when setting up indexers. This ensures controllers that aren't reliant on those CRDs may continue to function
 	handleCRDIndexerError := func(err error, msg string) {
-		if errors.As(err, &meta.NoKindMatchError{}) {
+		noKindMatchError := &meta.NoKindMatchError{}
+		if errors.As(err, &noKindMatchError) {
 			log.FromContext(ctx).Error(err, msg)
 		} else if err != nil {
 			// lo.Must0 also does a panic
 			panic(fmt.Sprintf("%s, %s", err, msg))
 		}
-		return
 	}
 	handleCRDIndexerError(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(o client.Object) []string {
 		return []string{o.(*v1.NodeClaim).Status.ProviderID}
