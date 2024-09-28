@@ -92,6 +92,7 @@ var _ = Describe("Eviction/Queue", func() {
 				Labels: testLabels,
 			},
 		})
+		terminator.NodesEvictionRequestsTotal.Reset()
 	})
 
 	Context("Eviction API", func() {
@@ -102,11 +103,13 @@ var _ = Describe("Eviction/Queue", func() {
 		It("should succeed with no event when the pod UID conflicts", func() {
 			ExpectApplied(ctx, env.Client, pod)
 			Expect(queue.Evict(ctx, terminator.QueueKey{NamespacedName: client.ObjectKeyFromObject(pod), UID: uuid.NewUUID()})).To(BeTrue())
+			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "409"})
 			Expect(recorder.Events()).To(HaveLen(0))
 		})
 		It("should succeed with an evicted event when there are no PDBs", func() {
 			ExpectApplied(ctx, env.Client, pod)
 			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeTrue())
+			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls("Evicted")).To(Equal(1))
 		})
 		It("should succeed with no event when there are PDBs that allow an eviction", func() {
@@ -130,6 +133,7 @@ var _ = Describe("Eviction/Queue", func() {
 			})
 			ExpectApplied(ctx, env.Client, pdb, pdb2, pod)
 			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod))).To(BeFalse())
+			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "500"})
 		})
 		It("should ensure that calling Evict() is valid while making Add() calls", func() {
 			cancelCtx, cancel := context.WithCancel(ctx)

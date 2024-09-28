@@ -164,13 +164,14 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}
-	pods = lo.Reject(pods, func(po *corev1.Pod, _ int) bool {
+	rejectedPods, pods := lo.FilterReject(pods, func(po *corev1.Pod, _ int) bool {
 		if err := p.Validate(ctx, po); err != nil {
 			log.FromContext(ctx).WithValues("Pod", klog.KRef(po.Namespace, po.Name)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
 		return false
 	})
+	scheduler.IgnoredPodCount.Set(float64(len(rejectedPods)))
 	p.consolidationWarnings(ctx, pods)
 	return pods, nil
 }

@@ -129,6 +129,9 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
+	NodesDrainedTotal.With(prometheus.Labels{
+		metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey],
+	}).Inc()
 	// In order for Pods associated with PersistentVolumes to smoothly migrate from the terminating Node, we wait
 	// for VolumeAttachments of drain-able Pods to be cleaned up before terminating Node and removing its finalizer.
 	// However, if TerminationGracePeriod is configured for Node, and we are past that period, we will skip waiting.
