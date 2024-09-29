@@ -45,6 +45,8 @@ const (
 // Karpenter specific annotations
 const (
 	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
+	DoNotDisruptScheduleKey                    = apis.Group + "/do-not-disrupt-schedule"
+	DoNotDisruptScheduleDurationKey            = apis.Group + "/do-not-disrupt-schedule-duration"
 	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
