@@ -38,7 +38,6 @@ import (
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	podevents "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/podevents"
-	nodeclaimtermination "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/termination"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
@@ -85,7 +84,6 @@ func NewControllers(
 		nodeclaimconsistency.NewController(clock, kubeClient, recorder),
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
-		nodeclaimtermination.NewController(kubeClient, cloudProvider, recorder),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),
