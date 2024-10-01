@@ -55,17 +55,19 @@ import (
 
 const component = "webhook"
 
-var Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
-	v1beta1.SchemeGroupVersion.WithKind("NodePool"):  &v1beta1.NodePool{},
-	v1beta1.SchemeGroupVersion.WithKind("NodeClaim"): &v1beta1.NodeClaim{},
-}
+var (
+	Resources = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
+		v1beta1.SchemeGroupVersion.WithKind("NodePool"):  &v1beta1.NodePool{},
+		v1beta1.SchemeGroupVersion.WithKind("NodeClaim"): &v1beta1.NodeClaim{},
+	}
+)
 
-func NewWebhooks() []knativeinjection.ControllerConstructor {
-	return []knativeinjection.ControllerConstructor{
-		certificates.NewController,
-		NewCRDValidationWebhook,
-		NewConfigValidationWebhook,
-		NewCRDConversionWebhook,
+func NewWebhooks() []knativeinjection.NamedControllerConstructor {
+	return []knativeinjection.NamedControllerConstructor{
+		{Name: "certificates", ControllerConstructor: certificates.NewController},
+		{Name: "validation.webhook.karpenter.sh", ControllerConstructor: NewCRDValidationWebhook},
+		{Name: "validation.webhook.config.karpenter.sh", ControllerConstructor: NewConfigValidationWebhook},
+		{Name: "conversion.webhook.karpenter.sh", ControllerConstructor: NewCRDConversionWebhook},
 	}
 }
 
@@ -125,13 +127,15 @@ func NewConfigValidationWebhook(ctx context.Context, _ configmap.Watcher) *contr
 
 // Start copies the relevant portions for starting the webhooks from sharedmain.MainWithConfig
 // https://github.com/knative/pkg/blob/0f52db700d63/injection/sharedmain/main.go#L227
-func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.ControllerConstructor) {
+func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.NamedControllerConstructor) {
 	ctx, startInformers := knativeinjection.EnableInjectionOrDie(ctx, cfg)
 	logger := logging.NewLogger(ctx, component)
 	ctx = knativelogging.WithLogger(ctx, logger)
 
 	cmw := sharedmain.SetupConfigMapWatchOrDie(ctx, knativelogging.FromContext(ctx))
-	controllers, webhooks := sharedmain.ControllersAndWebhooksFromCtors(ctx, cmw, ctors...)
+	controllers, webhooks := sharedmain.ControllersAndWebhooksFromCtors(ctx, cmw, lo.Map(ctors, func(ncc knativeinjection.NamedControllerConstructor, _ int) knativeinjection.ControllerConstructor {
+		return ncc.ControllerConstructor
+	})...)
 
 	// Many of the webhooks rely on configuration, e.g. configurable defaults, feature flags.
 	// So make sure that we have synchronized our configuration state before launching the
