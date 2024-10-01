@@ -17,6 +17,8 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
+
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/utils/clock"
@@ -24,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 
 	migrationcrd "sigs.k8s.io/karpenter/pkg/controllers/migration/crd"
 	migration "sigs.k8s.io/karpenter/pkg/controllers/migration/resource"
@@ -55,6 +58,7 @@ import (
 )
 
 func NewControllers(
+	ctx context.Context,
 	mgr manager.Manager,
 	clock clock.Clock,
 	kubeClient client.Client,
@@ -67,7 +71,7 @@ func NewControllers(
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
 
-	return []controller.Controller{
+	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewPodController(kubeClient, p),
@@ -95,8 +99,13 @@ func NewControllers(
 		leasegarbagecollection.NewController(kubeClient),
 		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),
-		migration.NewController[*v1.NodeClaim](kubeClient),
-		migration.NewController[*v1.NodePool](kubeClient),
-		migrationcrd.NewController(kubeClient, cloudProvider),
 	}
+
+	if !options.FromContext(ctx).DisableWebhook {
+		controllers = append(controllers, migration.NewController[*v1.NodeClaim](kubeClient))
+		controllers = append(controllers, migration.NewController[*v1.NodePool](kubeClient))
+		controllers = append(controllers, migrationcrd.NewController(kubeClient, cloudProvider))
+	}
+
+	return controllers
 }

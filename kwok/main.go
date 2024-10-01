@@ -36,6 +36,7 @@ func main() {
 	op.
 		WithWebhooks(ctx, webhooks.NewWebhooks()...).
 		WithControllers(ctx, controllers.NewControllers(
+			ctx,
 			op.Manager,
 			op.Clock,
 			op.GetClient(),
