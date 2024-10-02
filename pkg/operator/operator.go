@@ -27,10 +27,15 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/pkg/changeset"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"sigs.k8s.io/karpenter/pkg/controllers/webhookownerreference"
+
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"github.com/go-logr/zapr"
@@ -54,7 +59,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/controller"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -94,7 +98,7 @@ type Operator struct {
 	EventRecorder       events.Recorder
 	Clock               clock.Clock
 
-	webhooks []knativeinjection.ControllerConstructor
+	webhooks []knativeinjection.NamedControllerConstructor
 }
 
 // NewOperator instantiates a controller manager or panics
@@ -115,10 +119,11 @@ func NewOperator() (context.Context, *Operator) {
 
 	// Webhook
 	ctx = webhook.WithOptions(ctx, webhook.Options{
-		Port:        options.FromContext(ctx).WebhookPort,
-		ServiceName: options.FromContext(ctx).ServiceName,
-		SecretName:  fmt.Sprintf("%s-cert", options.FromContext(ctx).ServiceName),
-		GracePeriod: 5 * time.Second,
+		Port:                      options.FromContext(ctx).WebhookPort,
+		ServiceName:               options.FromContext(ctx).ServiceName,
+		SecretName:                fmt.Sprintf("%s-cert", options.FromContext(ctx).ServiceName),
+		GracePeriod:               5 * time.Second,
+		DisableNamespaceOwnership: true,
 	})
 
 	// Client Config
@@ -210,11 +215,27 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...controlle
 	return o
 }
 
-func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.ControllerConstructor) *Operator {
+func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.NamedControllerConstructor) *Operator {
 	if !options.FromContext(ctx).DisableWebhook {
 		o.webhooks = append(o.webhooks, ctors...)
 		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
 		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
+
+		kCtx, _ := knativeinjection.EnableInjectionOrDie(ctx, o.GetConfig())
+		kCtx = injection.WithClient(kCtx, o.GetClient())
+		kCtx = injection.WithNodeClasses(kCtx, []schema.GroupVersionKind{})
+
+		// Add webhook OwnerReference controller (to clean-up owner references added by knative)
+		// for any Validating or Mutating WebhookConfigurations
+		for _, ctor := range ctors {
+			c := ctor.ControllerConstructor(kCtx, nil)
+			if c.Name == "ValidationWebhook" || c.Name == "ConfigMapWebhook" {
+				lo.Must0(webhookownerreference.NewController[*admissionregistrationv1.ValidatingWebhookConfiguration](o.GetClient(), ctor.Name).Register(ctx, o.Manager))
+			}
+			if c.Name == "DefaultingWebhook" {
+				lo.Must0(webhookownerreference.NewController[*admissionregistrationv1.MutatingWebhookConfiguration](o.GetClient(), ctor.Name).Register(ctx, o.Manager))
+			}
+		}
 	}
 	return o
 }
