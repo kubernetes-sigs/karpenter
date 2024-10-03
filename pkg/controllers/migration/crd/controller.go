@@ -99,7 +99,7 @@ func (c *Controller) Reconcile(ctx context.Context, crd *apiextensionsv1.CustomR
 	// if all custom resources have been updated, patch the CRD
 	stored := crd.DeepCopy()
 	crd.Status.StoredVersions = []string{"v1"}
-	if err := c.kubeClient.Status().Patch(ctx, crd, client.StrategicMergeFrom(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+	if err := c.kubeClient.Status().Patch(ctx, crd, client.StrategicMergeFrom(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
