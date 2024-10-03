@@ -692,12 +692,10 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
-		for _, reason := range allKnownDisruptionReasons {
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
-			Expect(err).To(Succeed())
-			// This should not bring in the terminating node.
-			Expect(budgets[nodePool.Name]).To(Equal(10))
-		}
+		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+		Expect(err).To(Succeed())
+		// This should not bring in the terminating node.
+		Expect(budgets[nodePool.Name]).To(Equal(10))
 	})
 	It("should not return a negative disruption value", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "10%"}}
