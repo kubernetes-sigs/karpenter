@@ -695,7 +695,9 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 		Expect(err).To(Succeed())
 		// This should not bring in the terminating node.
-		Expect(budgets[nodePool.Name]).To(Equal(10))
+		for _, reason := range v1.WellKnownDisruptionReasons {
+			Expect(budgets[nodePool.Name][reason]).To(Equal(10))
+		}
 	})
 	It("should not return a negative disruption value", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "10%"}}
