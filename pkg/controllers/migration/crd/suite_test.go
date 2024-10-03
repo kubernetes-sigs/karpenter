@@ -18,8 +18,8 @@ package crd_test
 
 import (
 	"context"
-	"strings"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -44,11 +44,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
-var ctx context.Context
-var env *test.Environment
-var resourceController *resource.Controller[*v1.NodeClaim]
-var crdController *crd.Controller
-var cloudProvider *fake.CloudProvider
+var (
+	ctx                context.Context
+	env                *test.Environment
+	resourceController *resource.Controller[*v1.NodeClaim]
+	crdController      *crd.Controller
+	cloudProvider      *fake.CloudProvider
+)
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -70,10 +72,8 @@ var _ = AfterSuite(func() {
 var _ = Describe("Migration", func() {
 	var node *corev1.Node
 	var nodeClaim *v1.NodeClaim
-	var nodeClass *v1alpha1.TestNodeClass
 
 	BeforeEach(func() {
-		nodeClass = test.NodeClass()
 		nodeClaim, node = test.NodeClaimAndNode()
 		node.Labels[v1.NodePoolLabelKey] = test.NodePool().Name
 	})
@@ -84,15 +84,26 @@ var _ = Describe("Migration", func() {
 
 	Context("Stored Version", func() {
 		It("should update to v1 after custom resources have migrated", func() {
+			for _, item := range apis.CRDs {
+				crd := &apiextensionsv1.CustomResourceDefinition{}
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(item), crd)).To(Succeed())
+				stored := crd.DeepCopy()
+				crd.Status.StoredVersions = append(crd.Status.StoredVersions, "v1beta1")
+				Eventually(func(g Gomega) {
+					g.Expect(env.Client.Status().Patch(ctx, crd, client.StrategicMergeFrom(stored, client.MergeFromWithOptimisticLock{}))).To(Succeed())
+				}).WithTimeout(time.Second * 10).Should(Succeed())
+			}
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			ExpectReconcileSucceeded(ctx, resourceController, client.ObjectKeyFromObject(nodeClaim))
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.StoredVersionMigratedKey, "true"))
-			ExpectObjectReconciled(ctx, env.Client, crdController, v1alpha1.CRDs[0])
-			for _, crd := range env.CRDs {
-				if strings.Contains(crd.Name, strings.ToLower(nodeClass.Name)) {
-					Expect(crd.Status.StoredVersions).To(HaveExactElements("v1"))
-				}
+			for _, item := range apis.CRDs {
+				crd := &apiextensionsv1.CustomResourceDefinition{}
+				ExpectObjectReconciled(ctx, env.Client, crdController, item)
+				Eventually(func(g Gomega) {
+					g.Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(item), crd)).To(Succeed())
+					g.Expect(crd.Status.StoredVersions).To(HaveExactElements("v1"))
+				}).WithTimeout(time.Second * 10).Should(Succeed())
 			}
 		})
 		It("shouldn't update the stored version to v1 if the storage version is v1beta1", func() {
