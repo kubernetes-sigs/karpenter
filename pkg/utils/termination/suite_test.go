@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package termination
+package termination_test
 
 import (
 	"context"
@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/utils/termination"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
@@ -69,7 +70,7 @@ var _ = Describe("TerminationUtils", func() {
 	It("should not call cloudProvider Delete if the status condition is already Terminating", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		instanceTerminated, err := EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
+		instanceTerminated, err := termination.EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
 		Expect(len(cloudProvider.DeleteCalls)).To(BeEquivalentTo(0))
 		Expect(len(cloudProvider.GetCalls)).To(BeEquivalentTo(1))
 		Expect(instanceTerminated).To(BeFalse())
@@ -78,14 +79,14 @@ var _ = Describe("TerminationUtils", func() {
 	It("should call cloudProvider Delete followed by Get and return true when the cloudProvider instance is terminated", func() {
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		// This will call cloudProvider.Delete()
-		instanceTerminated, err := EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
+		instanceTerminated, err := termination.EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
 		Expect(len(cloudProvider.DeleteCalls)).To(BeEquivalentTo(1))
 		Expect(instanceTerminated).To(BeFalse())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
 		//This will call cloudProvider.Get(). Instance is terminated at this point
-		instanceTerminated, err = EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
+		instanceTerminated, err = termination.EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
 		Expect(len(cloudProvider.GetCalls)).To(BeEquivalentTo(1))
 
 		Expect(instanceTerminated).To(BeTrue())
@@ -94,7 +95,7 @@ var _ = Describe("TerminationUtils", func() {
 	It("should call cloudProvider Delete followed by Get and return false when the cloudProvider instance is not terminated", func() {
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		// This will call cloudProvider.Delete()
-		instanceTerminated, err := EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
+		instanceTerminated, err := termination.EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
 		Expect(len(cloudProvider.DeleteCalls)).To(BeEquivalentTo(1))
 		Expect(instanceTerminated).To(BeFalse())
 		Expect(err).NotTo(HaveOccurred())
@@ -104,7 +105,7 @@ var _ = Describe("TerminationUtils", func() {
 		// To model the behavior of having cloudProvider instance not terminated, we add it back here.
 		cloudProvider.CreatedNodeClaims[nodeClaim.Status.ProviderID] = nodeClaim
 		//This will call cloudProvider.Get(). Instance is not terminated at this point
-		instanceTerminated, err = EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
+		instanceTerminated, err = termination.EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
 		Expect(len(cloudProvider.GetCalls)).To(BeEquivalentTo(1))
 
 		Expect(instanceTerminated).To(BeFalse())
@@ -114,7 +115,7 @@ var _ = Describe("TerminationUtils", func() {
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		cloudProvider.NextDeleteErr = cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("no nodeclaim exists"))
-		instanceTerminated, err := EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
+		instanceTerminated, err := termination.EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
 		Expect(len(cloudProvider.GetCalls)).To(BeEquivalentTo(0))
 
 		Expect(instanceTerminated).To(BeTrue())
