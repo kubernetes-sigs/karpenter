@@ -796,6 +796,16 @@ var _ = Describe("Pod Eviction Cost", func() {
 		})
 		Expect(cost).To(BeNumerically("<", standardPodCost))
 	})
+	It("should have a high disruptionCost for a pod with a do-not-disrupt annotation set", func() {
+		cost := disruptionutils.EvictionCost(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					v1.DoNotDisruptAnnotationKey: "true",
+				},
+			},
+		})
+		Expect(cost).To(BeNumerically(">", standardPodCost))
+	})
 })
 
 var _ = Describe("Candidate Filtering", func() {
