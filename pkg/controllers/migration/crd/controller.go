@@ -54,6 +54,7 @@ func NewController(client client.Client, cloudProvider cloudprovider.CloudProvid
 	}
 }
 
+// nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, crd *apiextensionsv1.CustomResourceDefinition) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "migration.crd")
 
