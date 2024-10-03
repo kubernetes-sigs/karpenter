@@ -411,10 +411,10 @@ func (in *StateNode) PodLimits() corev1.ResourceList {
 func (in *StateNode) MarkedForDeletion() bool {
 	// The Node is marked for deletion if:
 	//  1. The Node has MarkedForDeletion set
-	//  2. The Node has a NodeClaim counterpart and is actively deleting
+	//  2. The Node has a NodeClaim counterpart and is actively deleting (or the nodeclaim is marked as terminating)
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
 	return in.markedForDeletion ||
-		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
+		(in.NodeClaim != nil && (!in.NodeClaim.DeletionTimestamp.IsZero() || in.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue())) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }
 
