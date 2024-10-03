@@ -31,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -52,6 +54,7 @@ func NewController(client client.Client, cloudProvider cloudprovider.CloudProvid
 	}
 }
 
+// nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, crd *apiextensionsv1.CustomResourceDefinition) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "migration.crd")
 
@@ -98,8 +101,13 @@ func (c *Controller) Reconcile(ctx context.Context, crd *apiextensionsv1.CustomR
 	// if all custom resources have been updated, patch the CRD
 	stored := crd.DeepCopy()
 	crd.Status.StoredVersions = []string{"v1"}
-	if err := c.kubeClient.Status().Patch(ctx, crd, client.StrategicMergeFrom(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-		return reconcile.Result{}, fmt.Errorf("patching crd status version %s, %w", crd.Name, err)
+	if !equality.Semantic.DeepEqual(stored, crd) {
+		if err := c.kubeClient.Status().Patch(ctx, crd, client.StrategicMergeFrom(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, fmt.Errorf("patching crd status version %s, %w", crd.Name, err)
+		}
 	}
 	return reconcile.Result{}, nil
 }

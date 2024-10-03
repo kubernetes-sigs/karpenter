@@ -69,7 +69,7 @@ func (c *Controller[T]) Reconcile(ctx context.Context, req reconcile.Request) (r
 	}))
 	// update annotation on CR
 	if !equality.Semantic.DeepEqual(stored, o) {
-		if err := c.kubeClient.Patch(ctx, o, client.MergeFromWithOptions(stored.(client.Object), client.MergeFromWithOptimisticLock{})); err != nil {
+		if err := c.kubeClient.Patch(ctx, o, client.MergeFrom(stored.(client.Object))); client.IgnoreNotFound(err) != nil {
 			return reconcile.Result{}, fmt.Errorf("adding %s annotation to %s, %w", v1.StoredVersionMigratedKey, object.GVK(o), err)
 		}
 	}
