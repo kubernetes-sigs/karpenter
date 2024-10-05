@@ -93,7 +93,7 @@ func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Nod
 	return pods, nil
 }
 
-// GetNodeClaims grabs nodeClaim owner for the node
+// GetNodeClaims grabs all NodeClaims with a providerID that matches the provided Node
 func GetNodeClaims(ctx context.Context, node *corev1.Node, kubeClient client.Client) ([]*v1.NodeClaim, error) {
 	nodeClaimList := &v1.NodeClaimList{}
 	if err := kubeClient.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
@@ -102,22 +102,22 @@ func GetNodeClaims(ctx context.Context, node *corev1.Node, kubeClient client.Cli
 	return lo.ToSlicePtr(nodeClaimList.Items), nil
 }
 
-// NodeForNodeClaim is a helper function that takes a v1.NodeClaim and attempts to find the matching corev1.Node by its providerID
+// NodeClaimForNode is a helper function that takes a corev1.Node and attempts to find the matching v1.NodeClaim by its providerID
 // This function will return errors if:
-//  1. No corev1.Nodes match the v1.NodeClaim providerID
-//  2. Multiple corev1.Nodes match the v1.NodeClaim providerID
+//  1. No v1.NodeClaims match the corev1.Node's providerID
+//  2. Multiple v1.NodeClaims match the corev1.Node's providerID
 func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (*v1.NodeClaim, error) {
-	nodes, err := GetNodeClaims(ctx, node, c)
+	nodeClaims, err := GetNodeClaims(ctx, node, c)
 	if err != nil {
 		return nil, err
 	}
-	if len(nodes) > 1 {
+	if len(nodeClaims) > 1 {
 		return nil, &DuplicateNodeClaimError{ProviderID: node.Spec.ProviderID}
 	}
-	if len(nodes) == 0 {
-		return nil, &DuplicateNodeClaimError{ProviderID: node.Spec.ProviderID}
+	if len(nodeClaims) == 0 {
+		return nil, &NodeClaimNotFoundError{ProviderID: node.Spec.ProviderID}
 	}
-	return nodes[0], nil
+	return nodeClaims[0], nil
 }
 
 // GetReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria
