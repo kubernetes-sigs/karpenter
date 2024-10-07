@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -40,7 +41,7 @@ import (
 
 const (
 	podName             = "name"
-	podNameSpace        = "namespace"
+	podNamespace        = "namespace"
 	ownerSelfLink       = "owner"
 	podHostName         = "node"
 	podNodePool         = "nodepool"
@@ -71,6 +72,33 @@ var (
 			Objectives: metrics.SummaryObjectives(),
 		},
 	)
+	podBoundDurationSeconds = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "karpenter",
+			Subsystem: metrics.PodSubsystem,
+			Name:      "bound_duration_seconds",
+			Help:      "The time from pod creation until the pod is bound.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+	)
+	podCurrentUnboundTimeSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "karpenter",
+			Subsystem: metrics.PodSubsystem,
+			Name:      "current_unbound_time_seconds",
+			Help:      "The time from pod creation until the pod is bound.",
+		},
+		[]string{podName, podNamespace},
+	)
+	podUnstartedTimeSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "karpenter",
+			Subsystem: metrics.PodSubsystem,
+			Name:      "unstarted_time_seconds",
+			Help:      "The time from pod creation until the pod is running.",
+		},
+		[]string{podName, podNamespace},
+	)
 )
 
 // Controller for the resource
@@ -78,17 +106,18 @@ type Controller struct {
 	kubeClient  client.Client
 	metricStore *metrics.Store
 
-	pendingPods sets.Set[string]
+	pendingPods     sets.Set[string]
+	unscheduledPods sets.Set[string]
 }
 
 func init() {
-	crmetrics.Registry.MustRegister(podState, podStartupDurationSeconds)
+	crmetrics.Registry.MustRegister(podState, podStartupDurationSeconds, podBoundDurationSeconds, podCurrentUnboundTimeSeconds, podUnstartedTimeSeconds)
 }
 
 func labelNames() []string {
 	return []string{
 		podName,
-		podNameSpace,
+		podNamespace,
 		ownerSelfLink,
 		podHostName,
 		podNodePool,
@@ -103,9 +132,10 @@ func labelNames() []string {
 // NewController constructs a podController instance
 func NewController(kubeClient client.Client) *Controller {
 	return &Controller{
-		kubeClient:  kubeClient,
-		metricStore: metrics.NewStore(),
-		pendingPods: sets.New[string](),
+		kubeClient:      kubeClient,
+		metricStore:     metrics.NewStore(),
+		pendingPods:     sets.New[string](),
+		unscheduledPods: sets.New[string](),
 	}
 }
 
@@ -117,6 +147,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
 			c.pendingPods.Delete(req.NamespacedName.String())
+			c.unscheduledPods.Delete(req.NamespacedName.String())
 			c.metricStore.Delete(req.NamespacedName.String())
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -133,21 +164,64 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		},
 	})
 	c.recordPodStartupMetric(pod)
+	c.recordPodBoundMetric(pod)
 	return reconcile.Result{}, nil
 }
 
 func (c *Controller) recordPodStartupMetric(pod *corev1.Pod) {
 	key := client.ObjectKeyFromObject(pod).String()
 	if pod.Status.Phase == phasePending {
+		podUnstartedTimeSeconds.With(map[string]string{
+			podName:      pod.Name,
+			podNamespace: pod.Namespace,
+		}).Set(time.Since(pod.CreationTimestamp.Time).Seconds())
 		c.pendingPods.Insert(key)
 		return
 	}
 	cond, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
 		return c.Type == corev1.PodReady
 	})
-	if c.pendingPods.Has(key) && ok {
-		podStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds())
-		c.pendingPods.Delete(key)
+	if c.pendingPods.Has(key) {
+		if !ok || cond.Status != corev1.ConditionTrue {
+			podUnstartedTimeSeconds.With(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			}).Set(time.Since(pod.CreationTimestamp.Time).Seconds())
+		} else {
+			// Delete the unstarted metric since the pod is now started
+			podUnstartedTimeSeconds.Delete(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			})
+			podStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds())
+			c.pendingPods.Delete(key)
+		}
+	}
+}
+func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
+	key := client.ObjectKeyFromObject(pod).String()
+	condScheduled, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+		return c.Type == corev1.PodScheduled
+	})
+	if pod.Status.Phase == phasePending {
+		// If the podScheduled condition does not exist, or it exists and is not set to true, we emit pod_current_unbound_time_seconds metric.
+		if !ok || condScheduled.Status != corev1.ConditionTrue {
+			podCurrentUnboundTimeSeconds.With(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			}).Set(time.Since(pod.CreationTimestamp.Time).Seconds())
+		}
+		c.unscheduledPods.Insert(key)
+		return
+	}
+	if c.unscheduledPods.Has(key) && ok && condScheduled.Status == corev1.ConditionTrue {
+		// Delete the unbound metric since the pod is now bound
+		podCurrentUnboundTimeSeconds.Delete(map[string]string{
+			podName:      pod.Name,
+			podNamespace: pod.Namespace,
+		})
+		podBoundDurationSeconds.Observe(condScheduled.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds())
+		c.unscheduledPods.Delete(key)
 	}
 }
 
@@ -155,7 +229,7 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod) {
 func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheus.Labels, error) {
 	metricLabels := prometheus.Labels{}
 	metricLabels[podName] = pod.Name
-	metricLabels[podNameSpace] = pod.Namespace
+	metricLabels[podNamespace] = pod.Namespace
 	// Selflink has been deprecated after v.1.20
 	// Manually generate the selflink for the first owner reference
 	// Currently we do not support multiple owner references
