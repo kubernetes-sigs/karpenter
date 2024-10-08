@@ -18,7 +18,7 @@ package state
 
 import (
 	"context"
-	"errors"
+	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -26,6 +26,7 @@ import (
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -53,7 +54,7 @@ func IsPodBlockEvictionError(err error) bool {
 		return false
 	}
 	var podBlockEvictionError *PodBlockEvictionError
-	return errors.As(err, &podBlockEvictionError)
+	return stderrors.As(err, &podBlockEvictionError)
 }
 
 //go:generate controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
@@ -516,4 +517,32 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		}
 	}
 	return multiErr
+}
+
+// ClearNodeClaimsCondition will remove the conditionType from the NodeClaim status of the provided statenodes
+func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, conditionType string, nodes ...*StateNode) (err error, requeue bool) {
+	return multierr.Combine(lo.Map(nodes, func(s *StateNode, _ int) error {
+		if !s.Initialized() || s.NodeClaim == nil {
+			return nil
+		}
+		nodeClaim := &v1.NodeClaim{}
+		err := kubeClient.Get(ctx, client.ObjectKeyFromObject(s.NodeClaim), nodeClaim)
+		if err != nil {
+			return err
+		}
+		if !nodeClaim.StatusConditions().IsTrue(conditionType) {
+			return nil
+		}
+		stored := nodeClaim.DeepCopy()
+		_ = nodeClaim.StatusConditions().Clear(conditionType)
+
+		if err := kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				requeue = true
+				return nil
+			}
+			return client.IgnoreNotFound(err)
+		}
+		return nil
+	})...), requeue
 }
