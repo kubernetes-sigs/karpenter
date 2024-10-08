@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/client-go/util/workqueue"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -87,30 +88,29 @@ func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1.NodePool) e
 	}
 
 	errs := make([]error, len(ncList.Items))
-	for i := range ncList.Items {
-		nc := ncList.Items[i]
-		stored := nc.DeepCopy()
+	workqueue.ParallelizeUntil(ctx, 20, len(ncList.Items), func(i int) {
+		stored := ncList.Items[i].DeepCopy()
 
-		if nc.Annotations[v1.NodePoolHashVersionAnnotationKey] != v1.NodePoolHashVersion {
-			nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
+		if ncList.Items[i].Annotations[v1.NodePoolHashVersionAnnotationKey] != v1.NodePoolHashVersion {
+			ncList.Items[i].Annotations = lo.Assign(ncList.Items[i].Annotations, map[string]string{
 				v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 			})
 
 			// Any NodeClaim that is already drifted will remain drifted if the karpenter.sh/nodepool-hash-version doesn't match
 			// Since the hashing mechanism has changed we will not be able to determine if the drifted status of the NodeClaim has changed
-			if nc.StatusConditions().Get(v1.ConditionTypeDrifted) == nil {
-				nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
+			if ncList.Items[i].StatusConditions().Get(v1.ConditionTypeDrifted) == nil {
+				ncList.Items[i].Annotations = lo.Assign(ncList.Items[i].Annotations, map[string]string{
 					v1.NodePoolHashAnnotationKey: np.Hash(),
 				})
 			}
 
-			if !equality.Semantic.DeepEqual(stored, nc) {
-				if err := c.kubeClient.Patch(ctx, &nc, client.MergeFrom(stored)); err != nil {
+			if !equality.Semantic.DeepEqual(stored, ncList.Items[i]) {
+				if err := c.kubeClient.Patch(ctx, &ncList.Items[i], client.MergeFrom(stored)); err != nil {
 					errs[i] = client.IgnoreNotFound(err)
 				}
 			}
 		}
-	}
+	})
 
 	return multierr.Combine(errs...)
 }
