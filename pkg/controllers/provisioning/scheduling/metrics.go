@@ -24,7 +24,7 @@ import (
 )
 
 func init() {
-	crmetrics.Registry.MustRegister(SchedulingDurationSeconds, QueueDepth, IgnoredPodCount)
+	crmetrics.Registry.MustRegister(SchedulingDurationSeconds, QueueDepth, IgnoredPodCount, UnschedulablePodsCount)
 }
 
 const (
@@ -63,6 +63,17 @@ var (
 			Namespace: metrics.Namespace,
 			Name:      "ignored_pod_count",
 			Help:      "Number of pods ignored during scheduling by Karpenter",
+		},
+	)
+	UnschedulablePodsCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: schedulerSubsystem,
+			Name:      "unschedulable_pods_count",
+			Help:      "The number of unschedulable Pods.",
+		},
+		[]string{
+			ControllerLabel,
 		},
 	)
 )
