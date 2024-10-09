@@ -37,7 +37,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/record"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/csi-translation-lib/plugins"
@@ -103,6 +102,7 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	// reset instance types
 	newCP := fake.CloudProvider{}
+	//ctx = options.ToContext(ctx, test.Options())
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
 	scheduling.MaxInstanceTypes = 60
@@ -3675,10 +3675,10 @@ var _ = Context("Scheduling", func() {
 					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
 				}, time.Second).Should(Succeed())
 			}()
-			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, scheduling.MaxInstanceTypes)
+			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods).TruncateInstanceTypes(scheduling.MaxInstanceTypes)
 			wg.Wait()
 		})
-		It("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
+		FIt("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
@@ -3703,14 +3703,12 @@ var _ = Context("Scheduling", func() {
 			podsUnschedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "unknown"}}, 10)
 			podsSchedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "default-instance-type"}}, 5)
 			pods := append(podsUnschedulable, podsSchedulable...)
+			ExpectApplied(ctx, env.Client, nodePool)
 			//Adds UID to pods for queue in solve. Solve pushes any unschedulable pod back onto the queue and
 			//then maps the current length of the queue to the pod using the UID
 			for _, i := range pods {
-				i.UID = uuid.NewUUID()
+				ExpectApplied(ctx, env.Client, i)
 			}
-			s, err := prov.NewScheduler(ctx, pods, nil)
-			Expect(err).To(BeNil())
-
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
@@ -3722,7 +3720,8 @@ var _ = Context("Scheduling", func() {
 					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 10))
 				}, 10*time.Second).Should(Succeed())
 			}()
-			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, scheduling.MaxInstanceTypes)
+			_, err := prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
+			Expect(err).To(BeNil())
 			wg.Wait()
 
 		})
@@ -3746,7 +3745,7 @@ var _ = Context("Scheduling", func() {
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
 			s, err := prov.NewScheduler(ctx, pods, nil)
 			Expect(err).To(BeNil())
-			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, scheduling.MaxInstanceTypes)
+			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods).TruncateInstanceTypes(scheduling.MaxInstanceTypes)
 
 			m, ok := FindMetricWithLabelValues("karpenter_scheduler_scheduling_duration_seconds", map[string]string{"controller": "provisioner"})
 			Expect(ok).To(BeTrue())

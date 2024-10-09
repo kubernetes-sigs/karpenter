@@ -74,7 +74,6 @@ var (
 		},
 		[]string{
 			ControllerLabel,
-			schedulingIDLabel,
 		},
 	)
 )

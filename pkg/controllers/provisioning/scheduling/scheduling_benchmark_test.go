@@ -183,7 +183,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	podsScheduledInRound1 := 0
 	nodesInRound1 := 0
 	for i := 0; i < b.N; i++ {
-		results := scheduler.Solve(ctx, pods, scheduling.MaxInstanceTypes)
+		results := scheduler.Solve(ctx, pods).TruncateInstanceTypes(scheduling.MaxInstanceTypes)
 		if i == 0 {
 
 			minPods := math.MaxInt64
