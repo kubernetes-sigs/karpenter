@@ -102,7 +102,6 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	// reset instance types
 	newCP := fake.CloudProvider{}
-	//ctx = options.ToContext(ctx, test.Options())
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
 	scheduling.MaxInstanceTypes = 60

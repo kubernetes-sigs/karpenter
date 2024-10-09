@@ -250,7 +250,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 		}
 	})
-	FIt("should not use a different NodePool hash on the NodeClaim if the NodePool changes during scheduling", func() {
+	It("should not use a different NodePool hash on the NodeClaim if the NodePool changes during scheduling", func() {
 		// This test was added since we were generating the NodeClaim's NodePool hash from a NodePool that was re-retrieved
 		// after scheduling had been completed. This could have resulted in the hash not accurately reflecting the actual NodePool
 		// state that it was generated from
