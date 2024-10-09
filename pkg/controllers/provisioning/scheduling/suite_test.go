@@ -3677,7 +3677,7 @@ var _ = Context("Scheduling", func() {
 			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods).TruncateInstanceTypes(scheduling.MaxInstanceTypes)
 			wg.Wait()
 		})
-		FIt("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
+		It("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
