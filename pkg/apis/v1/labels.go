@@ -103,13 +103,22 @@ var (
 	}
 )
 
-// IsRestrictedLabel returns an error if the label is restricted.
-func IsRestrictedLabel(key string) error {
+// IsRestrictedRequirements returns an error if the requirement label is restricted.
+func IsRestrictedRequirements(key string) error {
 	if WellKnownLabels.Has(key) {
 		return nil
 	}
+
+	// In the node pool requirements configuration, labels like kops.k8s.io/x should not be allowed, as they do not make sense.
+	labelDomain := GetLabelDomain(key)
+	for exceptionLabelDomain := range LabelDomainExceptions {
+		if strings.HasSuffix(labelDomain, exceptionLabelDomain) {
+			return fmt.Errorf("requirement label key %s is restricted; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, sets.List(WellKnownLabels), sets.List(RestrictedLabelDomains))
+		}
+	}
+
 	if IsRestrictedNodeLabel(key) {
-		return fmt.Errorf("label %s is restricted; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, sets.List(WellKnownLabels), sets.List(RestrictedLabelDomains))
+		return fmt.Errorf("requirement label key %s is restricted; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, sets.List(WellKnownLabels), sets.List(RestrictedLabelDomains))
 	}
 	return nil
 }

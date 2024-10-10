@@ -110,16 +110,23 @@ func (in *NodeClaimTemplateSpec) validateRequirements() (errs error) {
 	return errs
 }
 
+// ValidateRequirement checks if the requirements are valid, including restricted labels, and the format of the requirements.
 func ValidateRequirement(requirement NodeSelectorRequirementWithMinValues) error { //nolint:gocyclo
+	errs := ValidateBasicRequirements(requirement)
+	if e := IsRestrictedRequirements(requirement.Key); e != nil {
+		errs = multierr.Append(errs, e)
+	}
+	return errs
+}
+
+// ValidateBasicRequirements checks if the requirements are valid, including the format of the requirements.
+func ValidateBasicRequirements(requirement NodeSelectorRequirementWithMinValues) error { //nolint:gocyclo
 	var errs error
 	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
 		requirement.Key = normalized
 	}
 	if !SupportedNodeSelectorOps.Has(string(requirement.Operator)) {
 		errs = multierr.Append(errs, fmt.Errorf("key %s has an unsupported operator %s not in %s", requirement.Key, requirement.Operator, SupportedNodeSelectorOps.UnsortedList()))
-	}
-	if e := IsRestrictedLabel(requirement.Key); e != nil {
-		errs = multierr.Append(errs, e)
 	}
 	for _, err := range validation.IsQualifiedName(requirement.Key) {
 		errs = multierr.Append(errs, fmt.Errorf("key %s is not a qualified name, %s", requirement.Key, err))
