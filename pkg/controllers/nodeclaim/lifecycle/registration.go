@@ -50,7 +50,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	if err != nil {
 		if nodeclaimutil.IsNodeNotFoundError(err) {
 			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeRegistered, "NodeNotFound", "Node not registered with cluster")
-			return reconcile.Result{}, nil
+			return reconcile.Result{Requeue: true}, nil
 		}
 		if nodeclaimutil.IsDuplicateNodeError(err) {
 			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRegistered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
