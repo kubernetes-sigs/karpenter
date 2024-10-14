@@ -49,6 +49,8 @@ const (
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
+	// When a deployment is restarted, this annotation is used to mark which node was terminated and restarted.
+	DeploymentRestartNodeAnnotationKey = apis.Group + "/restart-node"
 )
 
 // Karpenter specific finalizers
