@@ -19,15 +19,13 @@ package disruption
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
-
-const SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 
 // SingleNodeConsolidation is the consolidation controller that performs single-node consolidation.
 type SingleNodeConsolidation struct {
@@ -49,7 +47,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, s.Reason())
 
 	// Set a timeout
-	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
+	timeout := s.clock.Now().Add(options.FromContext(ctx).SinglenodeConsolidationTimeout)
 	constrainedByBudgets := false
 
 	// binary search to find the maximum number of NodeClaims we can terminate

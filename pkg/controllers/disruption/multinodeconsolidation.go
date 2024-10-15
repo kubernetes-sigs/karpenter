@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"time"
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -29,10 +28,9 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
-
-const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
 
 type MultiNodeConsolidation struct {
 	consolidation
@@ -119,7 +117,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	lastSavedCommand := Command{}
 	lastSavedResults := scheduling.Results{}
 	// Set a timeout
-	timeout := m.clock.Now().Add(MultiNodeConsolidationTimeoutDuration)
+	timeout := m.clock.Now().Add(options.FromContext(ctx).SinglenodeConsolidationTimeout)
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for min <= max {
 		if m.clock.Now().After(timeout) {
