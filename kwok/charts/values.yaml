@@ -45,7 +45,7 @@ podDisruptionBudget:
   name: karpenter
   maxUnavailable: 1
 # -- SecurityContext for the pod.
-podSecurityContext: 
+podSecurityContext:
   fsGroup: 65536
 # -- PriorityClass name for the pod.
 priorityClassName: system-cluster-critical
@@ -91,7 +91,7 @@ controller:
     # -- Repository path to the controller image.
     repository: ""
     # -- Tag of the controller image.
-    tag: "" 
+    tag: ""
     # -- SHA256 digest of the controller image.
     digest: ""
   # -- Additional environment variables for the controller pod.

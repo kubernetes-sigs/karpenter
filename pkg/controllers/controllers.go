@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/expiration"
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/notready"
 	podevents "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/podevents"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
@@ -68,6 +69,7 @@ func NewControllers(
 		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient),
 		expiration.NewController(clock, kubeClient),
+		notready.NewController(kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
