@@ -47,7 +47,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, s.Reason())
 
 	// Set a timeout
-	timeout := s.clock.Now().Add(options.FromContext(ctx).SinglenodeConsolidationTimeout)
+	timeout := s.clock.Now().Add(options.FromContext(ctx).SingleNodeConsolidationTimeout)
 	constrainedByBudgets := false
 
 	// binary search to find the maximum number of NodeClaims we can terminate
