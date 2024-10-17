@@ -8,10 +8,16 @@ Before using the kwok provider, make sure that you don't have an installed versi
 - Have a cluster that you can install Karpenter on to.
   - For an example on how to make a cluster in AWS, refer to [karpenter.sh](https://karpenter.sh/docs/getting-started/getting-started-with-karpenter/)
 
+If you use a kind cluster, please set the the following environment variables:
+```bash
+export KWOK_REPO=kind.local
+export KIND_CLUSTER_NAME=<kind cluster name, for example, chart-testing>
+```
+
 ## Installing
 ```bash
 make install-kwok
-make apply
+make apply # Run this command again to redeploy if the code has changed
 ```
 
 ## Create a NodePool
@@ -55,6 +61,13 @@ metadata:
 EOF
 ```
 
+## Taint the existing nodes
+
+```bash
+kubectl taint nodes <existing node name> CriticalAddonsOnly:NoSchedule
+```
+After doing this, you can create a deployment to test node scaling with kwok provider.
+
 ## Specifying Instance Types
 
 By default, the KWOK provider will create a hypothetical set of instance types that it uses for node provisioning.  You
@@ -64,6 +77,16 @@ Karpenter+KWOK support, you will need to adjust the embedded data and recompile.
 
 There is an example instance types file in [examples/instance\_types.json](examples/instance_types.json) that you can
 regenerate with `make gen_instance_types`.
+
+## Testing
+
+To test the provider, run `make e2etests` in the root of the repository.
+
+If you want to test a specific e2e case, run the following command:
+```bash
+export FOCUS="<e2e case name>"
+make e2etests
+```
 
 ## Notes
 The kwok provider will have additional labels `karpenter.kwok.sh/instance-type`, `karpenter.kwok.sh/instance-size`,
