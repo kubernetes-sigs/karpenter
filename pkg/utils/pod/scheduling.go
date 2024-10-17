@@ -17,8 +17,11 @@ limitations under the License.
 package pod
 
 import (
+	"context"
 	"fmt"
 	"time"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/robfig/cron/v3"
 
@@ -56,11 +59,11 @@ func IsReschedulable(pod *corev1.Pod) bool {
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
 // - Does not have the "karpenter.sh/do-not-disrupt=true" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls) or has an active disruption schedule
-func IsEvictable(pod *corev1.Pod) bool {
+func IsEvictable(ctx context.Context, pod *corev1.Pod) bool {
 	return IsActive(pod) &&
 		!ToleratesDisruptedNoScheduleTaint(pod) &&
 		!IsOwnedByNode(pod) &&
-		(!HasDoNotDisrupt(pod) || HasActiveDisruptionSchedule(pod))
+		(!HasDoNotDisrupt(pod) || HasActiveDisruptionSchedule(ctx, pod))
 }
 
 // IsWaitingEviction checks if this is a pod that we are waiting to be removed from the node by ensuring that the pod:
@@ -104,8 +107,8 @@ func IsProvisionable(pod *corev1.Pod) bool {
 // - Is an actively running pod
 // - Has the `karpenter.sh/do-not-disrupt` annotation
 // - Has an active disruption schedule with `karpenter.sh/do-not-disrupt-schedule` annotation
-func IsDisruptable(pod *corev1.Pod) bool {
-	return !(IsActive(pod) && HasDoNotDisrupt(pod) && HasActiveDisruptionSchedule(pod))
+func IsDisruptable(ctx context.Context, pod *corev1.Pod) bool {
+	return !(IsActive(pod) && HasDoNotDisrupt(pod) && HasActiveDisruptionSchedule(ctx, pod))
 }
 
 // FailedToSchedule ensures that the kube-scheduler has seen this pod and has intentionally
@@ -184,27 +187,30 @@ func HasDoNotDisrupt(pod *corev1.Pod) bool {
 	return pod.Annotations[v1.DoNotDisruptAnnotationKey] == "true"
 }
 
-// HasActiveDisruptionSchedule returns true if the current time is within the pods disruption schedule
-// by checking the `karpenter.sh/do-not-disrupt-schedule` and `karpenter.sh/do-not-disrupt-schedule-duration` annotations
-func HasActiveDisruptionSchedule(pod *corev1.Pod) bool {
-	// Attempt to parse the disruption schedule annotation
-	disruptionSchedule := pod.Annotations[v1.DoNotDisruptScheduleKey]
-	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=UTC %s", disruptionSchedule))
-	if err != nil {
-		// Return true by default if schedule parsing fails
+// HasActiveDisruptionSchedule checks if the current time is within the pod's disruption schedule
+func HasActiveDisruptionSchedule(ctx context.Context, pod *corev1.Pod) bool {
+	// Return true if no disruption schedule annotation is set
+	disruptionSchedule, ok := pod.Annotations[v1.DoNotDisruptScheduleKey]
+	if !ok {
 		return true
 	}
-	// Parse the disruption schedule duration, defaulting to "1h" if not set or invalid
+	// Parse the schedule, defaulting to true if parsing fails
+	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=UTC %s", disruptionSchedule))
+	if err != nil {
+		log.FromContext(ctx).V(1).Error(err, "failed to parse disruption schedule", "pod", fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
+		return true
+	}
+	// Parse the schedule duration, defaulting to 1 hour if not set or invalid
 	disruptionScheduleDuration := pod.Annotations[v1.DoNotDisruptScheduleDurationKey]
 	duration, err := time.ParseDuration(disruptionScheduleDuration)
-	if err != nil || disruptionScheduleDuration == "" {
+	if err != nil || disruptionScheduleDuration == "" || duration < time.Hour {
+		log.FromContext(ctx).V(1).Error(err, "failed to parse disruption schedule or less than minimum of 1hr", "pod", fmt.Sprintf("%s/%s", pod.Namespace, pod.Name), "duration", duration)
 		duration = time.Hour
 	}
-	// Determine if current time is within the disruption schedule
+	// Check if the current time is within the schedule window
 	now := time.Now().UTC()
 	checkPoint := now.Add(-duration)
 	nextHit := schedule.Next(checkPoint)
-	// Return true if next scheduled hit is within the time window
 	return !nextHit.After(now)
 }
 

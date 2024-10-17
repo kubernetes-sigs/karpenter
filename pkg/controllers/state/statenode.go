@@ -235,11 +235,11 @@ func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient cli
 	for _, po := range pods {
 		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
 		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
-		if !podutils.IsDisruptable(po) {
+		if !podutils.IsDisruptable(ctx, po) {
 			return pods, NewPodBlockEvictionError(fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po)))
 		}
 	}
-	if pdbKey, ok := pdbs.CanEvictPods(pods); !ok {
+	if pdbKey, ok := pdbs.CanEvictPods(ctx, pods); !ok {
 		return pods, NewPodBlockEvictionError(fmt.Errorf("pdb %q prevents pod evictions", pdbKey))
 	}
 
