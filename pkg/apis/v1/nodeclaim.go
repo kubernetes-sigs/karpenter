@@ -73,6 +73,14 @@ type NodeClaimSpec struct {
 	// +kubebuilder:validation:Schemaless
 	// +optional
 	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
+	// unreachableTimeout is the duration the controller will wait
+	// before terminating a node, measured from when the node is tainted unreachable
+	// +kubebuilder:default:="Never"
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// +kubebuilder:validation:Type="string"
+	// +kubebuilder:validation:Schemaless
+	// +optional
+	UnreachableTimeout NillableDuration `json:"unreachableTimeout,omitempty"`
 }
 
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
