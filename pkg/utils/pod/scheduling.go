@@ -190,7 +190,7 @@ func HasDoNotDisrupt(pod *corev1.Pod) bool {
 // HasActiveDisruptionSchedule checks if the current time is within the pod's disruption schedule
 func HasActiveDisruptionSchedule(ctx context.Context, pod *corev1.Pod) bool {
 	// Return true if no disruption schedule annotation is set
-	disruptionSchedule, ok := pod.Annotations[v1.DoNotDisruptScheduleKey]
+	disruptionSchedule, ok := pod.Annotations[v1.DoNotDisruptScheduleAnnotationKey]
 	if !ok {
 		return true
 	}
@@ -201,7 +201,7 @@ func HasActiveDisruptionSchedule(ctx context.Context, pod *corev1.Pod) bool {
 		return true
 	}
 	// Parse the schedule duration, defaulting to 1 hour if not set or invalid
-	disruptionScheduleDuration := pod.Annotations[v1.DoNotDisruptScheduleDurationKey]
+	disruptionScheduleDuration := pod.Annotations[v1.DoNotDisruptScheduleDurationAnnotationKey]
 	duration, err := time.ParseDuration(disruptionScheduleDuration)
 	if err != nil || disruptionScheduleDuration == "" || duration < time.Hour {
 		log.FromContext(ctx).V(1).Error(err, "failed to parse disruption schedule or less than minimum of 1hr", "pod", fmt.Sprintf("%s/%s", pod.Namespace, pod.Name), "duration", duration)
