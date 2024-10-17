@@ -56,7 +56,7 @@ func (t *Termination) Check(ctx context.Context, node *corev1.Node, nodeClaim *v
 		return nil, err
 	}
 	var issues []Issue
-	if pdbKey, ok := pdbs.CanEvictPods(pods); !ok {
+	if pdbKey, ok := pdbs.CanEvictPods(ctx, pods); !ok {
 		issues = append(issues, Issue(fmt.Sprintf("can't drain node, PDB %q is blocking evictions", pdbKey)))
 	}
 	return issues, nil
