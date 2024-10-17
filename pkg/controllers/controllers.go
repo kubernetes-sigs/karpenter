@@ -17,11 +17,15 @@ limitations under the License.
 package controllers
 
 import (
+	"time"
+
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/patrickmn/go-cache"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -57,7 +61,9 @@ func NewControllers(
 ) []controller.Controller {
 
 	cluster := state.NewCluster(clock, kubeClient)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster)
+	sharedCache := cache.New(time.Hour*24, time.Hour)
+
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, sharedCache)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
 
@@ -66,7 +72,7 @@ func NewControllers(
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewPodController(kubeClient, p),
 		provisioning.NewNodeController(kubeClient, p),
-		nodepoolhash.NewController(kubeClient),
+		nodepoolhash.NewController(kubeClient, sharedCache),
 		expiration.NewController(clock, kubeClient),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
@@ -82,7 +88,7 @@ func NewControllers(
 		nodepoolvalidation.NewController(kubeClient),
 		podevents.NewController(clock, kubeClient),
 		nodeclaimconsistency.NewController(clock, kubeClient, recorder),
-		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, sharedCache),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),

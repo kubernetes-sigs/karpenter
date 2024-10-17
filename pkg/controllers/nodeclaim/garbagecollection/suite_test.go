@@ -23,6 +23,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	gocache "github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -68,7 +70,7 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	garbageCollectionController = nodeclaimgarbagecollection.NewController(fakeClock, env.Client, cloudProvider)
-	nodeClaimController = nodeclaimlifcycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
+	nodeClaimController = nodeclaimlifcycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), gocache.New(time.Hour*24, time.Hour))
 })
 
 var _ = AfterSuite(func() {
