@@ -22,6 +22,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -94,6 +95,15 @@ func byCPUAndMemoryDescending(pods []*v1.Pod) func(i int, j int) bool {
 			return false
 		} else if memCmp > 0 {
 			return true
+		}
+
+		// anti-affinity pods should be sorted before normal pods
+		if affinityCmp := pod.PodAffinityCmp(lhsPod, rhsPod); affinityCmp != 0 {
+			return affinityCmp > 0
+		}
+
+		if len(lhsPod.Spec.TopologySpreadConstraints) != len(rhsPod.Spec.TopologySpreadConstraints) {
+			return len(lhsPod.Spec.TopologySpreadConstraints) > len(rhsPod.Spec.TopologySpreadConstraints)
 		}
 
 		// If all else is equal, give a consistent ordering. This reduces the number of NominatePod events as we
