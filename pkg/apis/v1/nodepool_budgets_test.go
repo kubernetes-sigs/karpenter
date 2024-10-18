@@ -211,7 +211,7 @@ var _ = Describe("Budgets", func() {
 	})
 
 	Context("IsActive", func() {
-		It("should always consider a schedule and time in UTC", func() {
+		It("should consider a schedule and time in UTC when no TZ defined", func() {
 			// Set the time to start of June 2000 in a time zone 1 hour ahead of UTC
 			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 0, 0, 0, 0, 0, time.FixedZone("fake-zone", 3600)))
 			budgets[0].Schedule = lo.ToPtr("@daily")
@@ -221,9 +221,11 @@ var _ = Describe("Budgets", func() {
 			Expect(err).To(Succeed())
 			Expect(active).To(BeFalse())
 		})
-		It("should return that a schedule is active when schedule and duration are nil", func() {
+		It("should return that a schedule is active when schedule, duration, startDateTime, and endDateTime are nil", func() {
 			budgets[0].Schedule = nil
 			budgets[0].Duration = nil
+			budgets[0].StartDateTime = nil
+			budgets[0].EndDateTime = nil
 			active, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(Succeed())
 			Expect(active).To(BeTrue())
@@ -249,7 +251,7 @@ var _ = Describe("Budgets", func() {
 			Expect(active).To(BeTrue())
 		})
 		It("should return that a schedule is active when the duration is longer than the recurrence", func() {
-			// Set the date to the first monday in 2024, the best year ever
+			// Set the date to the first SUNDAY in 2024, the best year ever
 			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
 			budgets[0].Schedule = lo.ToPtr("@daily")
 			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("48h"))})
@@ -258,8 +260,180 @@ var _ = Describe("Budgets", func() {
 			Expect(active).To(BeTrue())
 		})
 		It("should return that a schedule is inactive when the schedule hit is after the duration", func() {
-			// Set the date to the first monday in 2024, the best year ever
+			// Set the date to the first SUNDAY in 2024, the best year ever
 			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].Schedule = lo.ToPtr("30 6 * * SUN")
+			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("6h"))})
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).ToNot(BeTrue())
+		})
+		It("should return that a schedule is active when a startime is defined and time is after that startDateTime", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].StartDateTime = lo.ToPtr("2024-01-06T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive when a startime is defined and time is before that startDateTime", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].StartDateTime = lo.ToPtr("2024-01-08T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).ToNot(BeTrue())
+		})
+		It("should return that a schedule is active when an endDateTime is defined and time is before that endDateTime", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].EndDateTime = lo.ToPtr("2024-01-08T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive when a endDateTime is defined and time is before that endDateTime", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].EndDateTime = lo.ToPtr("2024-01-06T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).ToNot(BeTrue())
+		})
+		It("should return that a schedule is active when a startDateTime and endDateTime is defined and time is between those dateTimes", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].StartDateTime = lo.ToPtr("2024-01-05T05:00:00")
+			budgets[0].EndDateTime = lo.ToPtr("2024-01-08T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive when a startDateTime and endDateTime is defined and time is between those dateTimes", func() {
+			// Set the date to the first THURSDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 4, 0, 0, 0, 0, time.UTC))
+			budgets[0].StartDateTime = lo.ToPtr("2024-01-05T05:00:00")
+			budgets[0].EndDateTime = lo.ToPtr("2024-01-08T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).ToNot(BeTrue())
+		})
+	})
+	Context("IsActiveWithTZ", func() {
+		It("should return that a schedule is active with tz set", func() {
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive with tz set", func() {
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].Schedule = lo.ToPtr("@yearly")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeFalse())
+		})
+		It("should return that a schedule is active when the schedule hit is in the middle of the duration with tz set", func() {
+			// Set the date to the start of the year 1000, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(1000, time.January, 1, 12, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].Schedule = lo.ToPtr("@yearly")
+			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("24h"))})
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is active when the duration is longer than the recurrence", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].Schedule = lo.ToPtr("@daily")
+			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("48h"))})
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive when the schedule hit is after the duration", func() {
+			// Set the date to the first MONDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].Schedule = lo.ToPtr("30 6 * * SUN")
+			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("6h"))})
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).ToNot(BeTrue())
+		})
+		It("should return that a schedule is active when the schedule hit is during the duration in set tz", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever, at 5:00 PM UTC, 9:00 AM PST
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 17, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].Schedule = lo.ToPtr("30 6 * * SUN")
+			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("6h"))})
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is active when a startime is defined and time is after that startDateTime in set tz", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].StartDateTime = lo.ToPtr("2024-01-06T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive when a startime is defined and time is before that startDateTime in set tz", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].StartDateTime = lo.ToPtr("2024-01-08T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).ToNot(BeTrue())
+		})
+		It("should return that a schedule is active when an endDateTime is defined and time is before that endDateTime in set tz", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].EndDateTime = lo.ToPtr("2024-01-08T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive when a endDateTime is defined and time is before that endDateTime in set tz", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].EndDateTime = lo.ToPtr("2024-01-06T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).ToNot(BeTrue())
+		})
+		It("should return that a schedule is active when a startDateTime and endDateTime is defined and time is between those dateTimes in set tz", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].StartDateTime = lo.ToPtr("2024-01-05T05:00:00")
+			budgets[0].EndDateTime = lo.ToPtr("2024-01-08T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive when a startDateTime and endDateTime is defined and time is between those dateTimes in set tz", func() {
+			// Set the date to the first THURSDAY in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 4, 0, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].StartDateTime = lo.ToPtr("2024-01-05T05:00:00")
+			budgets[0].EndDateTime = lo.ToPtr("2024-01-08T05:00:00")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).ToNot(BeTrue())
+		})
+		It("should return that a schedule is inactive when a endDateTime, schedule, duration is defined, but the endtime comes before the end of duration in set tz", func() {
+			// Set the date to the first SUNDAY in 2024, the best year ever, at 5:00 PM UTC, 9:00 AM PST
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 17, 0, 0, 0, time.UTC))
+			budgets[0].TZ = lo.ToPtr("America/Los_Angeles")
+			budgets[0].EndDateTime = lo.ToPtr("2024-01-07T08:00:00")
 			budgets[0].Schedule = lo.ToPtr("30 6 * * SUN")
 			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("6h"))})
 			active, err := budgets[0].IsActive(fakeClock)
