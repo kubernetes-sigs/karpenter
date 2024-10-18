@@ -174,6 +174,19 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		return reconcile.Result{}, fmt.Errorf("adding nodeclaim terminationGracePeriod annotation, %w", err)
 	}
 
+	// set a disruption reason if the nodeclaim was deleted manually
+	if !nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeDisruptionReason) {
+		stored := nodeClaim.DeepCopy()
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, "termination", "Forceful termination")
+
+		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+	}
+
 	nodes, err := nodeclaimutil.AllNodesForNodeClaim(ctx, c.kubeClient, nodeClaim)
 	if err != nil {
 		return reconcile.Result{}, err
