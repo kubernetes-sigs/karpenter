@@ -227,10 +227,10 @@ func (r filterResults) FailureReason() string {
 		return "no instance type which met the scheduling requirements and had enough resources, had a required offering"
 	}
 	if r.fitsAndOffering {
-		return "no instance type which had enough resources and the required offering met the scheduling requirements"
+		return "no instance type which had enough resources and the required offering, met the scheduling requirements"
 	}
 	if r.requirementsAndOffering {
-		return "no instance type which met the scheduling requirements and the required offering had the required resources"
+		return "no instance type which met the scheduling requirements and the required offering, had the required resources"
 	}
 
 	// finally all instances were filtered out, but we had at least one instance that met each criteria, and met each
