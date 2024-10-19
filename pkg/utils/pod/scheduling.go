@@ -189,10 +189,10 @@ func HasDoNotDisrupt(pod *corev1.Pod) bool {
 
 // HasActiveDisruptionSchedule checks if the current time is within the pod's disruption schedule
 func HasActiveDisruptionSchedule(ctx context.Context, pod *corev1.Pod) bool {
-	// Return true if no disruption schedule annotation is set
+	// Always treat pods with no annotation as non-disruptable
 	disruptionSchedule, ok := pod.Annotations[v1.DoNotDisruptScheduleAnnotationKey]
 	if !ok {
-		return true
+		return false
 	}
 	// Parse the schedule, defaulting to true if parsing fails
 	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=UTC %s", disruptionSchedule))
