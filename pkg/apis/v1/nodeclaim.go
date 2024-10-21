@@ -73,7 +73,7 @@ type NodeClaimSpec struct {
 	// +kubebuilder:validation:Schemaless
 	// +optional
 	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
-	// unreachableTimeout is the duration the controller will wait
+	// UnreachableTimeout is the duration the controller will wait
 	// before terminating a node, measured from when the node is tainted unreachable
 	// +kubebuilder:default:="Never"
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`

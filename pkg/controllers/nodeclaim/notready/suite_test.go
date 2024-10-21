@@ -115,4 +115,10 @@ var _ = Describe("NotReady", func() {
 		ExpectObjectReconciled(ctx, env.Client, notReadyController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
+	It("should not remove the NodeClaim when UnreachableTimeout is disabled", func() {
+		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, notReadyController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+	})
 })
