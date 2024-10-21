@@ -117,6 +117,13 @@ var _ = Describe("NotReady", func() {
 	})
 	It("should not remove the NodeClaim when UnreachableTimeout is disabled", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
+		node.Spec.Taints = []corev1.Taint{
+			{
+				Key:       corev1.TaintNodeUnreachable,
+				Effect:    corev1.TaintEffectNoSchedule,
+				TimeAdded: &metav1.Time{Time: fakeClock.Now().Add(-12 * time.Minute)},
+			},
+		}
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, notReadyController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
