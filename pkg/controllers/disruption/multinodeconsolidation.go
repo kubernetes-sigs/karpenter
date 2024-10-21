@@ -210,7 +210,7 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 	// swallow the error since we don't allow min values to impact reschedulability in multi node claim
 	newNodeClaim, err := newNodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(newNodeClaim.Requirements, maxPrice)
 	if err != nil {
-		return []*cloudprovider.InstanceType{}, err
+		return nil, err
 	}
 	return newNodeClaim.InstanceTypeOptions, nil
 }
