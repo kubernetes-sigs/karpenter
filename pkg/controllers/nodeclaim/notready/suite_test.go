@@ -101,6 +101,10 @@ var _ = Describe("NotReady", func() {
 		}
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
 		ExpectObjectReconciled(ctx, env.Client, notReadyController, nodeClaim)
+		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			metrics.ReasonLabel: metrics.UnreachableReason,
+			"nodepool":          nodePool.Name,
+		})
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should not remove NodeClaim if unreachable taint is less than the UnreachableTimeout duration", func() {

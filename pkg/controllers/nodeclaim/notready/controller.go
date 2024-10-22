@@ -20,11 +20,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 
@@ -66,6 +68,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 						return reconcile.Result{}, err
 					}
 					log.FromContext(ctx).V(0).Info("Deleted NodeClaim because the node has been unreachable for more than unreachableTimeout", "node", node.Name)
+					metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
+						metrics.ReasonLabel:       metrics.UnreachableReason,
+						metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+						metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+					}).Inc()
 					return reconcile.Result{}, nil
 				} else {
 					// If the node is unreachable and the time since it became unreachable is less than the configured timeout,
