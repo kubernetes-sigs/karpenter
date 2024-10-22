@@ -62,10 +62,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 				if durationSinceTaint > *nodeClaim.Spec.UnreachableTimeout.Duration {
 					// if node is unreachable for too long, delete the nodeclaim
 					if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
-						log.FromContext(ctx).V(0).Error(err, "Failed to delete nodeclaim", "node", node.Name)
+						log.FromContext(ctx).V(0).Error(err, "Failed to delete NodeClaim", "node", node.Name)
 						return reconcile.Result{}, err
 					}
-					log.FromContext(ctx).V(0).Info("Deleted nodeclaim because the node has been unreachable for more than unreachableTimeout", "node", node.Name)
+					log.FromContext(ctx).V(0).Info("Deleted NodeClaim because the node has been unreachable for more than unreachableTimeout", "node", node.Name)
 					return reconcile.Result{}, nil
 				} else {
 					// If the node is unreachable and the time since it became unreachable is less than the configured timeout,
