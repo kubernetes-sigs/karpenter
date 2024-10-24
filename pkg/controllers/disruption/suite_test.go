@@ -154,7 +154,8 @@ var _ = BeforeEach(func() {
 	allKnownDisruptionReasons = []v1.DisruptionReason{
 		v1.DisruptionReasonEmpty,
 		v1.DisruptionReasonUnderutilized,
-		v1.DisruptionReasonDrifted}
+		v1.DisruptionReasonDrifted,
+	}
 })
 
 var _ = AfterEach(func() {

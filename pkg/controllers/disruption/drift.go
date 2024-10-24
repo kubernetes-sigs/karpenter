@@ -21,6 +21,8 @@ import (
 	"errors"
 	"sort"
 
+	"github.com/samber/lo"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -37,14 +39,16 @@ type Drift struct {
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
 	recorder    events.Recorder
+	clk         clock.Clock
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, clk clock.Clock) *Drift {
 	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
 		recorder:    recorder,
+		clk:         clk,
 	}
 }
 
@@ -60,19 +64,25 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
 	})
 
+	disruptionBudgetMappingWithDriftReason, err := d.adjustedBudgetForDriftReason(ctx, disruptionBudgetMapping, candidates)
+	if err != nil {
+		return Command{}, scheduling.Results{}, err
+	}
+
 	// Do a quick check through the candidates to see if they're empty.
 	// For each candidate that is empty with a nodePool allowing its disruption
 	// add it to the existing command.
 	empty := make([]*Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
+		driftReason := candidate.NodeClaim.StatusConditions().Get(string(d.Reason())).Reason
 		if len(candidate.reschedulablePods) > 0 {
 			continue
 		}
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name] > 0 {
+		if disruptionBudgetMappingWithDriftReason[driftReason][candidate.nodePool.Name] > 0 {
 			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.nodePool.Name]--
+			disruptionBudgetMappingWithDriftReason[driftReason][candidate.nodePool.Name]--
 		}
 	}
 	// Disrupt all empty drifted candidates, as they require no scheduling simulations.
@@ -83,10 +93,11 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 	}
 
 	for _, candidate := range candidates {
+		driftReason := candidate.NodeClaim.StatusConditions().Get(string(d.Reason())).Reason
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since drift commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+		if disruptionBudgetMappingWithDriftReason[driftReason][candidate.nodePool.Name] == 0 {
 			continue
 		}
 		// Check if we need to create any NodeClaims.
@@ -122,4 +133,23 @@ func (d *Drift) Class() string {
 
 func (d *Drift) ConsolidationType() string {
 	return ""
+}
+
+func (d *Drift) adjustedBudgetForDriftReason(ctx context.Context, disruptionBudgetMapping map[string]int, candidates []*Candidate) (map[string]map[string]int, error) {
+	result := map[string]map[string]int{}
+	nodePoolList := &v1.NodePoolList{}
+	if err := d.kubeClient.List(ctx, nodePoolList); err != nil {
+		return result, err
+	}
+
+	for _, candidate := range candidates {
+		driftReason := candidate.NodeClaim.StatusConditions().Get(string(d.Reason())).Reason
+		driftReasonAdjustedMap := map[string]int{}
+		for _, nodePool := range nodePoolList.Items {
+			allowedDisruptions := nodePool.MustGetAllowedDisruptions(d.clk, disruptionBudgetMapping[nodePool.Name], v1.DisruptionReason(driftReason))
+			driftReasonAdjustedMap[nodePool.Name] = lo.Max([]int{allowedDisruptions - disruptionBudgetMapping[nodePool.Name], 0})
+		}
+		result[driftReason] = driftReasonAdjustedMap
+	}
+	return result, nil
 }
