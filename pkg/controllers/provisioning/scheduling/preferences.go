@@ -36,28 +36,27 @@ type Preferences struct {
 }
 
 func (p *Preferences) Relax(ctx context.Context, pod *v1.Pod) bool {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)))
 	relaxations := []func(*v1.Pod) *string{
-		p.removeRequiredNodeAffinityTerm,
-		p.removePreferredPodAffinityTerm,
-		p.removePreferredPodAntiAffinityTerm,
-		p.removePreferredNodeAffinityTerm,
-		p.removeTopologySpreadScheduleAnyway}
+		p.RemoveRequiredNodeAffinityTerm,
+		p.RemovePreferredPodAffinityTerm,
+		p.RemovePreferredPodAntiAffinityTerm,
+		p.RemovePreferredNodeAffinityTerm,
+		p.RemoveTopologySpreadScheduleAnyway}
 
 	if p.ToleratePreferNoSchedule {
-		relaxations = append(relaxations, p.toleratePreferNoScheduleTaints)
+		relaxations = append(relaxations, p.ToleratePreferNoScheduleTaints)
 	}
 
 	for _, relaxFunc := range relaxations {
 		if reason := relaxFunc(pod); reason != nil {
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("relaxing soft constraints for pod since it previously failed to schedule, %s", lo.FromPtr(reason)))
+			log.FromContext(ctx).WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)).V(1).Info(fmt.Sprintf("relaxing soft constraints for pod since it previously failed to schedule, %s", lo.FromPtr(reason)))
 			return true
 		}
 	}
 	return false
 }
 
-func (p *Preferences) removePreferredNodeAffinityTerm(pod *v1.Pod) *string {
+func (p *Preferences) RemovePreferredNodeAffinityTerm(pod *v1.Pod) *string {
 	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil || len(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution) == 0 {
 		return nil
 	}
@@ -72,7 +71,7 @@ func (p *Preferences) removePreferredNodeAffinityTerm(pod *v1.Pod) *string {
 	return nil
 }
 
-func (p *Preferences) removeRequiredNodeAffinityTerm(pod *v1.Pod) *string {
+func (p *Preferences) RemoveRequiredNodeAffinityTerm(pod *v1.Pod) *string {
 	if pod.Spec.Affinity == nil ||
 		pod.Spec.Affinity.NodeAffinity == nil ||
 		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil ||
@@ -88,7 +87,7 @@ func (p *Preferences) removeRequiredNodeAffinityTerm(pod *v1.Pod) *string {
 	return nil
 }
 
-func (p *Preferences) removeTopologySpreadScheduleAnyway(pod *v1.Pod) *string {
+func (p *Preferences) RemoveTopologySpreadScheduleAnyway(pod *v1.Pod) *string {
 	for i, tsc := range pod.Spec.TopologySpreadConstraints {
 		if tsc.WhenUnsatisfiable == v1.ScheduleAnyway {
 			msg := fmt.Sprintf("removing: spec.topologySpreadConstraints = %s", pretty.Concise(tsc))
@@ -100,7 +99,7 @@ func (p *Preferences) removeTopologySpreadScheduleAnyway(pod *v1.Pod) *string {
 	return nil
 }
 
-func (p *Preferences) removePreferredPodAffinityTerm(pod *v1.Pod) *string {
+func (p *Preferences) RemovePreferredPodAffinityTerm(pod *v1.Pod) *string {
 	if pod.Spec.Affinity == nil || pod.Spec.Affinity.PodAffinity == nil || len(pod.Spec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution) == 0 {
 		return nil
 	}
@@ -115,7 +114,7 @@ func (p *Preferences) removePreferredPodAffinityTerm(pod *v1.Pod) *string {
 	return nil
 }
 
-func (p *Preferences) removePreferredPodAntiAffinityTerm(pod *v1.Pod) *string {
+func (p *Preferences) RemovePreferredPodAntiAffinityTerm(pod *v1.Pod) *string {
 	if pod.Spec.Affinity == nil || pod.Spec.Affinity.PodAntiAffinity == nil || len(pod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) == 0 {
 		return nil
 	}
@@ -130,7 +129,7 @@ func (p *Preferences) removePreferredPodAntiAffinityTerm(pod *v1.Pod) *string {
 	return nil
 }
 
-func (p *Preferences) toleratePreferNoScheduleTaints(pod *v1.Pod) *string {
+func (p *Preferences) ToleratePreferNoScheduleTaints(pod *v1.Pod) *string {
 	// Tolerate all Taints with PreferNoSchedule effect
 	toleration := v1.Toleration{
 		Operator: v1.TolerationOpExists,
