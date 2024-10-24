@@ -32,31 +32,29 @@ import (
 )
 
 // Drift is a subreconciler that deletes drifted candidates.
-type EventualDisruption struct {
+type Drift struct {
 	kubeClient  client.Client
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
 	recorder    events.Recorder
-	reason      v1.DisruptionReason
 }
 
-func NewEventualDisruption(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder, reason v1.DisruptionReason) *EventualDisruption {
-	return &EventualDisruption{
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
+	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
 		recorder:    recorder,
-		reason:      reason,
 	}
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
-func (d *EventualDisruption) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
+func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 	return c.NodeClaim.StatusConditions().Get(string(d.Reason())).IsTrue()
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (d *EventualDisruption) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
@@ -114,14 +112,14 @@ func (d *EventualDisruption) ComputeCommand(ctx context.Context, disruptionBudge
 	return Command{}, scheduling.Results{}, nil
 }
 
-func (d *EventualDisruption) Reason() v1.DisruptionReason {
-	return d.reason
+func (d *Drift) Reason() v1.DisruptionReason {
+	return v1.ConditionTypeDrifted
 }
 
-func (d *EventualDisruption) Class() string {
+func (d *Drift) Class() string {
 	return EventualDisruptionClass
 }
 
-func (d *EventualDisruption) ConsolidationType() string {
+func (d *Drift) ConsolidationType() string {
 	return ""
 }
