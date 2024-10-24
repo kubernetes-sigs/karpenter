@@ -17,7 +17,13 @@ limitations under the License.
 package pod
 
 import (
+	"context"
+	"fmt"
 	"time"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/robfig/cron/v3"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -52,12 +58,12 @@ func IsReschedulable(pod *corev1.Pod) bool {
 // - Is an active pod (isn't terminal or actively terminating)
 // - Doesn't tolerate the "karpenter.sh/disruption=disrupting" taint
 // - Isn't a mirror pod (https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/)
-// - Does not have the "karpenter.sh/do-not-disrupt=true" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls)
-func IsEvictable(pod *corev1.Pod) bool {
+// - Does not have the "karpenter.sh/do-not-disrupt=true" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls) or has an active disruption schedule
+func IsEvictable(ctx context.Context, pod *corev1.Pod) bool {
 	return IsActive(pod) &&
 		!ToleratesDisruptedNoScheduleTaint(pod) &&
 		!IsOwnedByNode(pod) &&
-		!HasDoNotDisrupt(pod)
+		(!HasDoNotDisrupt(pod) || HasActiveDisruptionSchedule(ctx, pod))
 }
 
 // IsWaitingEviction checks if this is a pod that we are waiting to be removed from the node by ensuring that the pod:
@@ -96,12 +102,13 @@ func IsProvisionable(pod *corev1.Pod) bool {
 		!IsOwnedByNode(pod)
 }
 
-// IsDisruptable checks if a pod can be disrupted based on validating the `karpenter.sh/do-not-disrupt` annotation on the pod.
+// IsDisruptable checks if a pod can be disrupted based on validating the `karpenter.sh/do-not-disrupt` and `karpenter.sh/do-not-disrupt-schedule` annotations on the pod.
 // It checks whether the following is true for the pod:
-// - Has the `karpenter.sh/do-not-disrupt` annotation
 // - Is an actively running pod
-func IsDisruptable(pod *corev1.Pod) bool {
-	return !(IsActive(pod) && HasDoNotDisrupt(pod))
+// - Has the `karpenter.sh/do-not-disrupt` annotation
+// - Has an active disruption schedule with `karpenter.sh/do-not-disrupt-schedule` annotation
+func IsDisruptable(ctx context.Context, pod *corev1.Pod) bool {
+	return !(IsActive(pod) && HasDoNotDisrupt(pod) && HasActiveDisruptionSchedule(ctx, pod))
 }
 
 // FailedToSchedule ensures that the kube-scheduler has seen this pod and has intentionally
@@ -178,6 +185,33 @@ func HasDoNotDisrupt(pod *corev1.Pod) bool {
 		return false
 	}
 	return pod.Annotations[v1.DoNotDisruptAnnotationKey] == "true"
+}
+
+// HasActiveDisruptionSchedule checks if the current time is within the pod's disruption schedule
+func HasActiveDisruptionSchedule(ctx context.Context, pod *corev1.Pod) bool {
+	// Return true if no disruption schedule annotation is set
+	disruptionSchedule, ok := pod.Annotations[v1.DoNotDisruptScheduleAnnotationKey]
+	if !ok {
+		return true
+	}
+	// Parse the schedule, defaulting to true if parsing fails
+	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=UTC %s", disruptionSchedule))
+	if err != nil {
+		log.FromContext(ctx).V(1).Error(err, "failed to parse disruption schedule", "pod", fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
+		return true
+	}
+	// Parse the schedule duration, defaulting to 1 hour if not set or invalid
+	disruptionScheduleDuration := pod.Annotations[v1.DoNotDisruptScheduleDurationAnnotationKey]
+	duration, err := time.ParseDuration(disruptionScheduleDuration)
+	if err != nil || disruptionScheduleDuration == "" || duration < time.Hour {
+		log.FromContext(ctx).V(1).Error(err, "failed to parse disruption schedule or less than minimum of 1hr", "pod", fmt.Sprintf("%s/%s", pod.Namespace, pod.Name), "duration", duration)
+		duration = time.Hour
+	}
+	// Check if the current time is within the schedule window
+	now := time.Now().UTC()
+	checkPoint := now.Add(-duration)
+	nextHit := schedule.Next(checkPoint)
+	return !nextHit.After(now)
 }
 
 // ToleratesDisruptedNoScheduleTaint returns true if the pod tolerates karpenter.sh/disrupted:NoSchedule taint
