@@ -24,7 +24,8 @@ import (
 
 const (
 	// Common namespace for application metrics.
-	Namespace = "karpenter"
+	Namespace      = "karpenter"
+	NamespaceLabel = "namespace"
 
 	NodePoolLabel     = "nodepool"
 	ReasonLabel       = "reason"
