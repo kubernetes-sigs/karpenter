@@ -73,6 +73,7 @@ func NewScheduler(kubeClient client.Client, nodePools []*v1.NodePool,
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
 		}),
+		unschedulablePods: make(map[types.NamespacedName]struct{}),
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
 	return s
@@ -91,6 +92,7 @@ type Scheduler struct {
 	cluster            *state.Cluster
 	recorder           events.Recorder
 	kubeClient         client.Client
+	unschedulablePods  map[types.NamespacedName]struct{}
 }
 
 // Results contains the results of the scheduling operation
@@ -217,8 +219,21 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 
 		// Schedule to existing nodes or create a new node
 		if errors[pod] = s.add(ctx, pod); errors[pod] == nil {
+			// If this pod was previously unschedulable, decrease the counter and remove from unschedulablePods map
+			nsName := types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+			if _, ok := s.unschedulablePods[nsName]; ok {
+				UnschedulablePodsCount.WithLabelValues(pod.Namespace).Dec()
+				delete(s.unschedulablePods, nsName)
+			}
 			delete(errors, pod)
 			continue
+		}
+
+		// If unsuccessful, pod is unschedulable and pod not in unschedulablePods map increase the counter and add to unschedulablePods map
+		nsName := types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+		if _, alreadyCounted := s.unschedulablePods[nsName]; !alreadyCounted {
+			UnschedulablePodsCount.WithLabelValues(pod.Namespace).Inc()
+			s.unschedulablePods[nsName] = struct{}{}
 		}
 
 		// If unsuccessful, relax the pod and recompute topology
