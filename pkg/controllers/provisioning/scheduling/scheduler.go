@@ -241,12 +241,11 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			delete(errors, k)
 		}
 	}
-	results := Results{
+	return Results{
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
 		PodErrors:     errors,
 	}
-	return results
 }
 
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
