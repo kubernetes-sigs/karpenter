@@ -4,9 +4,9 @@ _Note: This RFC pulls various excerpts from the [`aws/karpenter-provider-aws` On
 
 ## Overview
 
-Cloud Providers including GCP, Azure, and AWS allow you to pre-reserve VM capacity before you launch. By reserving VMs ahead of time, you can ensure that you are able to launch the type of capacity you want when you need it. Without reserving capacity, it's possible you may encounter errors when launching specific instance types when there is no more capacity available on the Cloud Provider for that instance type.
+Cloud providers including GCP, Azure, and AWS allow you to pre-reserve VM (or bare-metal server) capacity before you launch. By reserving VMs ahead of time, you can ensure that you are able to launch the type of capacity you want when you need it. Without reserving capacity, it's possible you may encounter errors when launching specific instance types when there is no more capacity available on the Cloud provider for that instance type.
 
-> #### Cloud Provider VM Reservation Docs
+> #### Cloud provider VM reservation docs
 > 1. GCP: Reservations - https://cloud.google.com/compute/docs/instances/reservations-overview
 > 2. Azure: Capacity Reservations - https://learn.microsoft.com/en-us/azure/virtual-machines/capacity-reservation-overview
 > 3. AWS: Capacity Reservations - https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-reservations.html
@@ -26,19 +26,19 @@ Karpenter doesn't currently support reasoning about this capacity type. Karpente
 
 ### `karpenter.sh/capacity-type` API
 
-_Note: Some excerpts taken from [`aws/karepnter-provider-aws` RFC](https://github.com/aws/karpenter-provider-aws/blob/main/designs/odcr.md#nodepool-api)._
+_Note: Some excerpts taken from [`aws/karpenter-provider-aws` RFC](https://github.com/aws/karpenter-provider-aws/blob/main/designs/odcr.md#nodepool-api)._
 
-This RFC proposes the addition of a new `karpenter.sh/capacity-type` label value, called `reserved`. A cluster admin could then select to support only launching ODCR capacity and falling back between ODCR capacity to on-demand capacity respectively. 
+This RFC proposes the addition of a new `karpenter.sh/capacity-type` label value, called `reserved`. A cluster admin could then select to support only launching reserved node capacity and falling back between reserved capacity to on-demand (or even spot) capacity respectively. 
 
-_NOTE: This option requires any applications (pods) that are using node selection on `karpenter.sh/capacity-type: "on-demand"` to expand their selection to include `reserved` or to update it to perform a `NotIn` node affinity on `karpenter.sh/capacity-type: spot`_
+_Note: This option requires any applications (pods) that are using node selection on `karpenter.sh/capacity-type: "on-demand"` to expand their selection to include `reserved` or to update it to perform a `NotIn` node affinity on `karpenter.sh/capacity-type: spot`_
 
-#### Only launch ODCR instances
+#### Only launch nodes using reserved capacity
 
 ```yaml
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
- name: default
+ name: reserved-only
 spec:
  requirements:
  - key: karpenter.sh/capacity-type
@@ -46,13 +46,13 @@ spec:
    values: ["reserved"]
 ```
 
-#### Launch ODCR instances with on-demand fallback
+#### Launch nodes preferring reserved capacity nodes, falling back to on-demand
 
 ```yaml
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
- name: default
+ name: prefer-reserved
 spec:
  requirements:
    - key: karpenter.sh/capacity-type
@@ -60,7 +60,7 @@ spec:
      values: ["on-demand", "reserved"]
 ```
 
-#### Launch ODCR instances with spot and on-demand fallback
+#### Launch nodes preferring reserved capacity nodes, falling back to on-demand and spot
 
 ```yaml
 apiVersion: karpenter.sh/v1
@@ -72,27 +72,27 @@ spec:
  requirements: []
 ```
 
-### Reserved Capacity Type Scheduling Prioritization
+### Reserved capacity type scheduling prioritization
 
-_Note: Some excerpts taken from [`aws/karepnter-provider-aws` RFC](https://github.com/aws/karpenter-provider-aws/blob/main/designs/odcr.md#consider-odcr-first-during-scheduling)._
+_Note: Some excerpts taken from [`aws/karpenter-provider-aws` RFC](https://github.com/aws/karpenter-provider-aws/blob/main/designs/odcr.md#consider-odcr-first-during-scheduling)._
 
 Karpenter's current scheduling algorithm uses [First-Fit Decreasing bin-packing](https://en.wikipedia.org/wiki/First-fit-decreasing_bin_packing#:~:text=First%2Dfit%2Ddecreasing%20FFD,is%20at%20most%20the%20capacity). as a heuristic to optimize pod scheduling to nodes. For a new node that Karpenter chooses to launch, it will continue packing pods onto this new node until there are no more available instances type offerings. This happens regardless of the remaining capacity types in the offerings AND regardless of the price as offerings are removed.
 
-This presents a challenge for prioritizing ODCRs -- since this algorithm may remove `reserved` offerings to continue packing into `on-demand` and `spot` offerings, thus increasing the cost of the cluster and not fully utilizing the available capacity reservations.
+This presents a challenge for prioritizing capacity reservations -- since this algorithm may remove `reserved` offerings to continue packing into `on-demand` and `spot` offerings, thus increasing the cost of the cluster and not fully utilizing the available capacity reservations.
 
 To solve for this problem, Karpenter will implement special handling for `karpenter.sh/capacity-type: reserved`. If there are reserved offerings available, we will consider these offerings as "free" and uniquely prioritize them. This means that if we are about to remove the final `reserved` offering in our scheduling simulation such there are no more `reserved` offerings, rather than scheduling this pod to the same node, we will create a new node, retaining the `reserved` offering, ensuring these offerings are prioritized by the scheduler.
 
-### CloudProvider Interface Changes
+### CloudProvider interface Changes
 
-_Note: Some excerpts taken from [`aws/karepnter-provider-aws` RFC](https://github.com/aws/karpenter-provider-aws/blob/main/designs/odcr.md#representing-odcr-available-instance-counts-in-instance-type-offerings)._
+_Note: Some excerpts taken from [`aws/karpenter-provider-aws` RFC](https://github.com/aws/karpenter-provider-aws/blob/main/designs/odcr.md#representing-odcr-available-instance-counts-in-instance-type-offerings)._
 
-Reserved capacity (unlike spot and on-demand capacity) has much more defined, constrained capacity ceilings. For instance, in an extreme example, a user may select on a capacity reservation with only a single available instance but launch 10,000 pods that contain hostname anti-affinity. The scheduler would do work to determine that it needs to launch 10,000 instances for these pods; however, without any kind of cap on the number of times the capacity reservation offering could be used, the scheduler would think that it could launch 10,000 instances into the capacity reservation offering.
+Reserved capacity (unlike spot and on-demand capacity) has much more defined, constrained capacity ceilings. For instance, in an extreme example, a user may select on a capacity reservation with only a single available node but launch 10,000 pods that contain hostname anti-affinity. The scheduler would do work to determine that it needs to launch 10,000 nodes for these pods; however, without any kind of cap on the number of times the capacity reservation offering could be used, Karpenter would think that it could launch 10,000 nodes into the capacity reservation offering.
 
-Attempting to launch this would result in a success for a single instance and an failure for the other 9,999. The next scheduling loop would remediate this, but this results in a lot of extra, unneeded work.
+Attempting to launch this would result in a success for a single node and failure for the other 9,999. The next scheduling loop would remediate this, but this results in a lot of extra, unneeded work.
 
 A better way to model this would be to track the available instance count as a numerical value associated with an instance type offering. In this modeling, the scheduler could count the number of simulated NodeClaims that might use the offering and know that it can't simulate NodeClaims into particular offerings once they hit their cap.
 
-Today, we already have an [`available` field](https://github.com/kubernetes-sigs/karpenter/blob/bcd33e924905588b1bdecd5413dc7b268370ec4c/pkg/cloudprovider/types.go#L236) attached to instance type offerings. This field is binary and only tells us whether the instance is or isn't available. With the introduction of `karpenter.sh/capacity-type: reserved` offerings, we could extend this field to be an integer rather than a boolean. This would allow us to exactly represent the number of available instances that can be launched into the offering. Existing spot and on-demand offerings would model this `available` field as `MAX_INT` for current `true` values and `0` for `false` values.
+Prior to this RFC, we already had an [`available` field](https://github.com/kubernetes-sigs/karpenter/blob/bcd33e924905588b1bdecd5413dc7b268370ec4c/pkg/cloudprovider/types.go#L236) attached to instance type offerings. This field is binary and only tells us whether the instance is or isn't available. With the introduction of `karpenter.sh/capacity-type: reserved` offerings, we could extend this field to be an integer rather than a boolean. This would allow us to exactly represent the number of available instances that can be launched into the offering. Existing spot and on-demand offerings would model this `available` field as `MAX_INT` for current `true` values and `0` for `false` values.
 
 An updated version of the instance type offerings would look like:
 
@@ -124,13 +124,13 @@ offerings:
 
 ### Consolidation
 
-_Note: Some excerpts taken from [`aws/karepnter-provider-aws` RFC](https://github.com/aws/karpenter-provider-aws/blob/main/designs/odcr.md#consolidation)._
+_Note: Some excerpts taken from [`aws/karpenter-provider-aws` RFC](https://github.com/aws/karpenter-provider-aws/blob/main/designs/odcr.md#consolidation)._
 
-#### Consolidating into Capacity Reserved Instances
+#### Consolidating into reserved capacity nodes
 
 Karpenter would need to update its consolidation algorithm to ensure that consolidating between a `spot` and/or `on-demand` capacity type to a reserved capacity type is always preferred. This can be done during the cost-checking step. When evaluating cost-savings, if we are able to consolidate all existing nodes into a `reserved` capacity type node, we will choose to do so.
 
-#### Consolidating between Capacity Reservations
+#### Consolidating between reserved capacity options
 
 If we prioritize consolidating into `reserved` capacity types, we also need to ensure that we do not continue to use excessively large instance types in capacity reservations when they are no longer needed. More concretely, if there are other, smaller instance types that are available that are also in a capacity reservation, we should ensure that our consolidation algorithm continues to consolidate between them.
 
