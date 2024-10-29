@@ -25,14 +25,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	corev1 "k8s.io/api/core/v1"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 const (
-	NodePoolDrifted     cloudprovider.DriftReason = "NodePoolDrifted"
-	RequirementsDrifted cloudprovider.DriftReason = "RequirementsDrifted"
+	NodePoolDrifted        cloudprovider.DriftReason = "NodePoolDrifted"
+	RequirementsDrifted    cloudprovider.DriftReason = "RequirementsDrifted"
+	StaleInstanceTypeDrift cloudprovider.DriftReason = "StaleInstanceTypeDrifted"
 )
 
 // Drift is a nodeclaim sub-controller that adds or removes status conditions on drifted nodeclaims
@@ -81,6 +84,21 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	}); reason != "" {
 		return reason, nil
 	}
+	// Mark the NodeClaim as drifted due to a stale instance type if
+	// 1. The NodeClaim doesn't have the instance type label
+	// 2. The NodeClaim has an instance type that doesn't exist in the cloudprovider instance types
+	// 3. There are no offerings that match the requirements
+	its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
+	if err != nil {
+		return "", err
+	}
+	it, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool {
+		return it.Name == nodeClaim.Labels[corev1.LabelInstanceTypeStable]
+	})
+	if !ok || len(it.Offerings.Compatible(scheduling.NewLabelRequirements(nodeClaim.Labels))) == 0 {
+		return StaleInstanceTypeDrift, nil
+	}
+	// Then check if it's drifted from the cloud provider side.
 	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
 	if err != nil {
 		return "", err

@@ -40,7 +40,7 @@ var _ = Describe("Underutilized", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.NodePoolLabelKey:            nodePool.Name,
-					corev1.LabelInstanceTypeStable: "default-instance-type", // need the instance type for the cluster state update
+					corev1.LabelInstanceTypeStable: it.Name,
 				},
 			},
 		})
