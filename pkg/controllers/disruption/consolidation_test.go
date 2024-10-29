@@ -125,8 +125,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			Expect(recorder.Calls("Unconsolidatable")).To(Equal(4))
 		})
-		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {)
-
+		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
 			pod := test.Pod()
 			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
