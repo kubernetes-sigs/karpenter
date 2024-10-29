@@ -125,9 +125,25 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			Expect(recorder.Calls("Unconsolidatable")).To(Equal(4))
 		})
-		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
+		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {)
+
 			pod := test.Pod()
 			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
+			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			// We get six calls here because we have Nodes and NodeClaims that fired for this event
+			// and each of the consolidation mechanisms specifies that this event should be fired
+			Expect(recorder.Calls("Unconsolidatable")).To(Equal(6))
+		})
+		It("should fire an event when a candidate does not have a resolvable instance type", func() {
+			pod := test.Pod()
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
+			delete(nodeClaim.Labels, corev1.LabelInstanceTypeStable)
+			delete(node.Labels, corev1.LabelInstanceTypeStable)
+
 			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
