@@ -675,6 +675,38 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			Expect(budgets[nodePool.Name]).To(Equal(10))
 		}
 	})
+	It("should not consider nodes that have the terminating status condition as part of disruption count", func() {
+		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+		ExpectApplied(ctx, env.Client, nodePool)
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Finalizers: []string{"karpenter.sh/test-finalizer"},
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Allocatable: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU:  resource.MustParse("32"),
+					corev1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
+		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+
+		for _, reason := range allKnownDisruptionReasons {
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			Expect(err).To(Succeed())
+			// This should not bring in the terminating node.
+			Expect(budgets[nodePool.Name]).To(Equal(10))
+		}
+	})
 	It("should not return a negative disruption value", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "10%"}}
 		ExpectApplied(ctx, env.Client, nodePool)
@@ -1495,7 +1527,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal("state node does not have a nodeclaim representation"))
+		Expect(err.Error()).To(Equal("node is not managed by karpenter"))
 	})
 	It("should not consider candidate that has just a NodeClaim representation", func() {
 		nodeClaim, _ := test.NodeClaimAndNode(v1.NodeClaim{
@@ -1514,7 +1546,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal("state node does not have a node representation"))
+		Expect(err.Error()).To(Equal("nodeclaim does not have an associated node"))
 	})
 	It("should not consider candidates that are nominated", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{

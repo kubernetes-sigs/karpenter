@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -87,20 +86,6 @@ func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*core
 		pods = append(pods, p...)
 	}
 	return pods, nil
-}
-
-// Disruptable filters StateNodes that are meet the IsDisruptable condition
-func (n StateNodes) Disruptable(ctx context.Context, clk clock.Clock, kubeClient client.Client) (StateNodes, error) {
-	pdbs, err := pdb.NewLimits(ctx, clk, kubeClient)
-	if err != nil {
-		return StateNodes{}, fmt.Errorf("constructing pdbs, %w", err)
-	}
-	n = lo.Filter(n, func(node *StateNode, _ int) bool {
-		nodeDisruptibleErr := node.ValidateNodeDisruptable(ctx, kubeClient)
-		_, podDisruptibleErr := node.ValidatePodsDisruptable(ctx, kubeClient, pdbs)
-		return nodeDisruptibleErr == nil && podDisruptibleErr == nil
-	})
-	return n, nil
 }
 
 func (n StateNodes) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
@@ -190,10 +175,10 @@ func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*cor
 //nolint:gocyclo
 func (in *StateNode) ValidateNodeDisruptable(ctx context.Context, kubeClient client.Client) error {
 	if in.NodeClaim == nil {
-		return fmt.Errorf("state node does not have a nodeclaim representation")
+		return fmt.Errorf("node is not managed by karpenter")
 	}
 	if in.Node == nil {
-		return fmt.Errorf("state node does not have a node representation")
+		return fmt.Errorf("nodeclaim does not have an associated node")
 	}
 	if !in.Initialized() {
 		return fmt.Errorf("state node isn't initialized")
@@ -411,10 +396,10 @@ func (in *StateNode) PodLimits() corev1.ResourceList {
 func (in *StateNode) MarkedForDeletion() bool {
 	// The Node is marked for deletion if:
 	//  1. The Node has MarkedForDeletion set
-	//  2. The Node has a NodeClaim counterpart and is actively deleting
+	//  2. The Node has a NodeClaim counterpart and is actively deleting (or the nodeclaim is marked as terminating)
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
 	return in.markedForDeletion ||
-		(in.NodeClaim != nil && !in.NodeClaim.DeletionTimestamp.IsZero()) ||
+		(in.NodeClaim != nil && (!in.NodeClaim.DeletionTimestamp.IsZero() || in.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue())) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }
 

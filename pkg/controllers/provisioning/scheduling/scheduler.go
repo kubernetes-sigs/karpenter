@@ -219,6 +219,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 
 		// Schedule to existing nodes or create a new node
 		if errors[pod] = s.add(ctx, pod); errors[pod] == nil {
+			delete(errors, pod)
 			continue
 		}
 
@@ -235,12 +236,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	for _, m := range s.newNodeClaims {
 		m.FinalizeScheduling()
 	}
-	// clear any nil errors, so we can know that len(PodErrors) == 0 => all pods scheduled
-	for k, v := range errors {
-		if v == nil {
-			delete(errors, k)
-		}
-	}
+
 	return Results{
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
