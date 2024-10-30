@@ -112,6 +112,7 @@ var _ = AfterEach(func() {
 	cluster.Reset()
 	scheduling.QueueDepth.Reset()
 	scheduling.SchedulingDurationSeconds.Reset()
+	scheduling.UnschedulablePodsCount.Reset()
 })
 
 var _ = Context("Scheduling", func() {
@@ -3675,6 +3676,43 @@ var _ = Context("Scheduling", func() {
 			}()
 			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
 			wg.Wait()
+		})
+		It("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
+			nodePool := test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+										Key:      corev1.LabelInstanceTypeStable,
+										Operator: corev1.NodeSelectorOpIn,
+										Values: []string{
+											"default-instance-type",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			//Creates 15 pods, 5 schedulable and 10 unschedulable
+			podsUnschedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "unknown"}}, 10)
+			podsSchedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "default-instance-type"}}, 5)
+			pods := append(podsUnschedulable, podsSchedulable...)
+			ExpectApplied(ctx, env.Client, nodePool)
+			//Adds UID to pods for queue in solve. Solve pushes any unschedulable pod back onto the queue and
+			//then maps the current length of the queue to the pod using the UID
+			for _, i := range pods {
+				ExpectApplied(ctx, env.Client, i)
+			}
+			_, err := prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
+			m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", map[string]string{"controller": "provisioner"})
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 10))
+			Expect(err).To(BeNil())
 		})
 		It("should surface the schedulingDuration metric after executing a scheduling loop", func() {
 			nodePool := test.NodePool()
