@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -83,10 +84,12 @@ type Provisioner struct {
 	cluster        *state.Cluster
 	recorder       events.Recorder
 	cm             *pretty.ChangeMonitor
+	clock          clock.Clock
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+	clock clock.Clock,
 ) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher(),
@@ -96,6 +99,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		cluster:        cluster,
 		recorder:       recorder,
 		cm:             pretty.NewChangeMonitor(),
+		clock:          clock,
 	}
 	return p
 }
@@ -302,7 +306,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder), nil
+	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
