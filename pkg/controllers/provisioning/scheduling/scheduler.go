@@ -219,7 +219,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		).Set(float64(len(q.pods)))
 
 		if s.clock.Since(lastLogTime) > time.Minute {
-			log.FromContext(ctx).Info("printing scheduling progress", "pods-scheduled", batchSize-len(q.pods), "pods-left", len(q.pods), "time-spent", s.clock.Since(startTime).Truncate(time.Second))
+			log.FromContext(ctx).WithValues("pods-scheduled", batchSize-len(q.pods), "pods-remaining", len(q.pods), "duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.id)).Info("computing pod scheduling")
 			lastLogTime = s.clock.Now()
 		}
 		// Try the next pod
