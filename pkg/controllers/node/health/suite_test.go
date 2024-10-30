@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -47,7 +48,6 @@ var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
 var recorder *test.EventRecorder
 var queue *terminator.Queue
-var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: "appsv1", Name: "rs", UID: "1234567890"}}
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -94,7 +94,7 @@ var _ = Describe("Health", func() {
 		metrics.NodeClaimsDisruptedTotal.Reset()
 	})
 
-	Context("Reconcilation", func() {
+	Context("Reconciliation", func() {
 		It("should delete nodes that are unhealthy by the cloud proivder", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "HealthyNode",

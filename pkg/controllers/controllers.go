@@ -17,10 +17,13 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
+
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	corev1 "k8s.io/api/core/v1"
@@ -49,9 +52,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 func NewControllers(
+	ctx context.Context,
 	mgr manager.Manager,
 	clock clock.Clock,
 	kubeClient client.Client,
@@ -64,7 +69,7 @@ func NewControllers(
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
 
-	return []controller.Controller{
+	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewPodController(kubeClient, p),
@@ -93,4 +98,13 @@ func NewControllers(
 		status.NewGenericObjectController[*corev1.Node](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 		health.NewController(kubeClient, cloudProvider, clock),
 	}
+
+	// The cloud proivder must define status condation for the node repair controller to used for dectecting unhealthy nodes
+	if len(cloudProvider.RepairPolicy()) != 0 && !options.FromContext(ctx).FeatureGates.NodeRepair {
+		controllers = append(controllers, health.NewController(kubeClient, cloudProvider, clock))
+	} else {
+		log.FromContext(ctx).V(1).Info("node repair has been disabled")
+	}
+
+	return controllers
 }
