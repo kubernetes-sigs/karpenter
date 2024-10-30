@@ -22,6 +22,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
@@ -260,6 +261,16 @@ func (c *CloudProvider) IsDrifted(context.Context, *v1.NodeClaim) (cloudprovider
 	defer c.mu.RUnlock()
 
 	return c.Drifted, nil
+}
+
+func (c *CloudProvider) RepairPolicy() []cloudprovider.RepairPolicy {
+	return []cloudprovider.RepairPolicy{
+		{
+			Type:               "HealthyNode",
+			Status:             corev1.ConditionFalse,
+			TolerationDuration: 30 * time.Minute,
+		},
+	}
 }
 
 // Name returns the CloudProvider implementation name.

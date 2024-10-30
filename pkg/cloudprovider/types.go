@@ -23,6 +23,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
@@ -40,6 +41,16 @@ var (
 )
 
 type DriftReason string
+
+type RepairPolicy struct {
+	// Type of unhealthy state that is found on the node
+	Type corev1.NodeConditionType
+	// Status condition of when a node is unhealthy
+	Status corev1.ConditionStatus
+	// TolerationDuration is the duration the controller will wait
+	// before attempting to terminate nodes that are underutilized.
+	TolerationDuration time.Duration
+}
 
 // CloudProvider interface is implemented by cloud providers to support provisioning.
 type CloudProvider interface {
@@ -63,6 +74,9 @@ type CloudProvider interface {
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
 	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
+	// RepairPolicy is for CloudProviders to define a set Unhealthy condition for Karpenter
+	// to monitor on the node.
+	RepairPolicy() []RepairPolicy
 	// Name returns the CloudProvider implementation name.
 	Name() string
 	// GetSupportedNodeClasses returns CloudProvider NodeClass that implements status.Object

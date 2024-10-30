@@ -130,6 +130,10 @@ func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 	return []status.Object{&v1alpha1.KWOKNodeClass{}}
 }
 
+func (c *CloudProvider) RepairPolicy() []cloudprovider.RepairPolicy {
+	return []cloudprovider.RepairPolicy{}
+}
+
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {
 	it, found := lo.Find(c.instanceTypes, func(it *cloudprovider.InstanceType) bool {
 		return it.Name == instanceTypeName
