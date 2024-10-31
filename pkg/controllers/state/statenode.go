@@ -195,9 +195,6 @@ func (in *StateNode) ValidateNodeDisruptable(ctx context.Context, kubeClient cli
 	}
 	// check whether the node has all the labels we need
 	for _, label := range []string{
-		v1.CapacityTypeLabelKey,
-		corev1.LabelTopologyZone,
-		corev1.LabelInstanceTypeStable,
 		v1.NodePoolLabelKey,
 	} {
 		if _, ok := in.Labels()[label]; !ok {

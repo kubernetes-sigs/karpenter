@@ -139,7 +139,6 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("should fire an event when a candidate does not have a resolvable instance type", func() {
 			pod := test.Pod()
-			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 			delete(nodeClaim.Labels, corev1.LabelInstanceTypeStable)
 			delete(node.Labels, corev1.LabelInstanceTypeStable)
 
@@ -148,9 +147,34 @@ var _ = Describe("Consolidation", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
-			// We get six calls here because we have Nodes and NodeClaims that fired for this event
-			// and each of the consolidation mechanisms specifies that this event should be fired
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(6))
+			// We get four calls since we only care about this since we don't emit for empty node consolidation
+			Expect(recorder.Calls("Unconsolidatable")).To(Equal(4))
+		})
+		It("should fire an event when a candidate does not have the capacity type label", func() {
+			pod := test.Pod()
+			delete(nodeClaim.Labels, v1.CapacityTypeLabelKey)
+			delete(node.Labels, v1.CapacityTypeLabelKey)
+
+			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			// We get four calls since we only care about this since we don't emit for empty node consolidation
+			Expect(recorder.Calls("Unconsolidatable")).To(Equal(4))
+		})
+		It("should fire an event when a candidate does not have the zone label", func() {
+			pod := test.Pod()
+			delete(nodeClaim.Labels, corev1.LabelTopologyZone)
+			delete(node.Labels, corev1.LabelTopologyZone)
+
+			ExpectApplied(ctx, env.Client, pod, node, nodeClaim, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			// We get four calls since we only care about this since we don't emit for empty node consolidation
+			Expect(recorder.Calls("Unconsolidatable")).To(Equal(4))
 		})
 	})
 	Context("Metrics", func() {
