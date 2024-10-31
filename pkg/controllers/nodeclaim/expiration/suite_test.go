@@ -164,4 +164,22 @@ var _ = Describe("Expiration", func() {
 		result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
 	})
+	It("shouldn't expire the same NodeClaim multiple times", func() {
+		nodeClaim.ObjectMeta.Finalizers = append(nodeClaim.ObjectMeta.Finalizers, "test-finalizer")
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+		// step forward to make the node expired
+		fakeClock.Step(60 * time.Second)
+		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+		ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			metrics.ReasonLabel: metrics.ExpiredReason,
+			"nodepool":          nodePool.Name,
+		})
+		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			metrics.ReasonLabel: metrics.ExpiredReason,
+			"nodepool":          nodePool.Name,
+		})
+	})
 })
