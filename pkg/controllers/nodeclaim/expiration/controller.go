@@ -22,9 +22,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -46,6 +49,9 @@ func NewController(clk clock.Clock, kubeClient client.Client) *Controller {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+	if !nodeClaim.DeletionTimestamp.IsZero() {
+		return reconcile.Result{}, nil
+	}
 	// From here there are three scenarios to handle:
 	// 1. If ExpireAfter is not configured, exit expiration loop
 	if nodeClaim.Spec.ExpireAfter.Duration == nil {
@@ -59,7 +65,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	// 3. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
-		return reconcile.Result{}, err
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
@@ -72,9 +78,13 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	builder := controllerruntime.NewControllerManagedBy(m)
-	return builder.
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.expiration").
-		For(&v1.NodeClaim{}).
+		For(&v1.NodeClaim{}, builder.WithPredicates(predicate.TypedFuncs[client.Object]{
+			CreateFunc:  func(_ event.TypedCreateEvent[client.Object]) bool { return true },
+			DeleteFunc:  func(_ event.TypedDeleteEvent[client.Object]) bool { return false },
+			UpdateFunc:  func(_ event.TypedUpdateEvent[client.Object]) bool { return false },
+			GenericFunc: func(_ event.TypedGenericEvent[client.Object]) bool { return false },
+		})).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
