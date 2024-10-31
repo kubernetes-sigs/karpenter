@@ -18,16 +18,14 @@ package expiration
 
 import (
 	"context"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -74,17 +72,16 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	}).Inc()
+	// We sleep here after the delete operation since we want to ensure that we are able to read our own writes so that
+	// we avoid duplicating metrics and log lines due to quick re-queues.
+	// USE CAUTION when determining whether to increase this timeout or remove this line
+	time.Sleep(time.Second)
 	return reconcile.Result{}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.expiration").
-		For(&v1.NodeClaim{}, builder.WithPredicates(predicate.TypedFuncs[client.Object]{
-			CreateFunc:  func(_ event.TypedCreateEvent[client.Object]) bool { return true },
-			DeleteFunc:  func(_ event.TypedDeleteEvent[client.Object]) bool { return false },
-			UpdateFunc:  func(_ event.TypedUpdateEvent[client.Object]) bool { return false },
-			GenericFunc: func(_ event.TypedGenericEvent[client.Object]) bool { return false },
-		})).
+		For(&v1.NodeClaim{}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
