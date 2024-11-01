@@ -203,7 +203,7 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			Expect(queue.Has(podSkip)).To(BeFalse())
+			Expect(queue.Has(node, podSkip)).To(BeFalse())
 			ExpectSingletonReconciled(ctx, queue)
 
 			// Expect node to exist and be draining
@@ -233,7 +233,7 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-			Expect(queue.Has(podSkip)).To(BeFalse())
+			Expect(queue.Has(node, podSkip)).To(BeFalse())
 			ExpectSingletonReconciled(ctx, queue)
 
 			// Expect node to exist and be draining
@@ -243,7 +243,7 @@ var _ = Describe("Termination", func() {
 			EventuallyExpectTerminating(ctx, env.Client, podEvict)
 			ExpectDeleted(ctx, env.Client, podEvict)
 
-			Expect(queue.Has(podSkip)).To(BeFalse())
+			Expect(queue.Has(node, podSkip)).To(BeFalse())
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -357,13 +357,13 @@ var _ = Describe("Termination", func() {
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
 			// Expect podNoEvict to be added to the queue
-			Expect(queue.Has(podNoEvict)).To(BeTrue())
+			Expect(queue.Has(node, podNoEvict)).To(BeTrue())
 
 			// Attempt to evict the pod, but fail to do so
 			ExpectSingletonReconciled(ctx, queue)
 
 			// Expect podNoEvict to fail eviction due to PDB, and be retried
-			Expect(queue.Has(podNoEvict)).To(BeTrue())
+			Expect(queue.Has(node, podNoEvict)).To(BeTrue())
 
 			// Delete pod to simulate successful eviction
 			ExpectDeleted(ctx, env.Client, podNoEvict)
@@ -507,7 +507,7 @@ var _ = Describe("Termination", func() {
 			ExpectSingletonReconciled(ctx, queue)
 
 			// Expect mirror pod to not be queued for eviction
-			Expect(queue.Has(podNoEvict)).To(BeFalse())
+			Expect(queue.Has(node, podNoEvict)).To(BeFalse())
 
 			// Expect podEvict to be enqueued for eviction then be successful
 			EventuallyExpectTerminating(ctx, env.Client, podEvict)
@@ -681,7 +681,7 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 
 			// Expect that the old pod's key still exists in the queue
-			Expect(queue.Has(pod)).To(BeTrue())
+			Expect(queue.Has(node, pod)).To(BeTrue())
 
 			// Re-create the pod and node, it should now have the same name, but a different UUID
 			node = test.Node(test.NodeOptions{
