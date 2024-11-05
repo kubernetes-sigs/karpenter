@@ -18,6 +18,7 @@ package expiration
 
 import (
 	"context"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
@@ -46,6 +47,9 @@ func NewController(clk clock.Clock, kubeClient client.Client) *Controller {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+	if !nodeClaim.DeletionTimestamp.IsZero() {
+		return reconcile.Result{}, nil
+	}
 	// From here there are three scenarios to handle:
 	// 1. If ExpireAfter is not configured, exit expiration loop
 	if nodeClaim.Spec.ExpireAfter.Duration == nil {
@@ -59,7 +63,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	// 3. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
-		return reconcile.Result{}, err
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
@@ -68,12 +72,15 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	}).Inc()
+	// We sleep here after the delete operation since we want to ensure that we are able to read our own writes so that
+	// we avoid duplicating metrics and log lines due to quick re-queues.
+	// USE CAUTION when determining whether to increase this timeout or remove this line
+	time.Sleep(time.Second)
 	return reconcile.Result{}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	builder := controllerruntime.NewControllerManagedBy(m)
-	return builder.
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.expiration").
 		For(&v1.NodeClaim{}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
