@@ -130,7 +130,7 @@ func NewOperator() (context.Context, *Operator) {
 	mgrOpts := ctrl.Options{
 		Logger:                        logging.IgnoreDebugEvents(logger),
 		LeaderElection:                !options.FromContext(ctx).DisableLeaderElection,
-		LeaderElectionID:              "karpenter-leader-election",
+		LeaderElectionID:              options.FromContext(ctx).LeaderElectionID,
 		LeaderElectionNamespace:       options.FromContext(ctx).LeaderElectionNamespace,
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionReleaseOnCancel: true,

@@ -35,6 +35,7 @@ type OptionsFields struct {
 	KubeClientBurst         *int
 	EnableProfiling         *bool
 	DisableLeaderElection   *bool
+	LeaderElectionID        *string
 	LeaderElectionNamespace *string
 	MemoryLimit             *int64
 	LogLevel                *string
