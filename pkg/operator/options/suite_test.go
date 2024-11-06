@@ -102,7 +102,7 @@ var _ = Describe("Options", func() {
 				KubeClientBurst:         lo.ToPtr(300),
 				EnableProfiling:         lo.ToPtr(false),
 				DisableLeaderElection:   lo.ToPtr(false),
-				LeaderElectionID:        lo.ToPtr("karpenter-leader-election"),
+				LeaderElectionName:      lo.ToPtr("karpenter-leader-election"),
 				LeaderElectionNamespace: lo.ToPtr(""),
 				MemoryLimit:             lo.ToPtr[int64](-1),
 				LogLevel:                lo.ToPtr("info"),
@@ -128,7 +128,7 @@ var _ = Describe("Options", func() {
 				"--kube-client-burst", "0",
 				"--enable-profiling",
 				"--disable-leader-election=true",
-				"--leader-election-id=karpenter-controller",
+				"--leader-election-name=karpenter-controller",
 				"--leader-election-namespace=karpenter",
 				"--memory-limit", "0",
 				"--log-level", "debug",
@@ -147,7 +147,7 @@ var _ = Describe("Options", func() {
 				KubeClientBurst:         lo.ToPtr(0),
 				EnableProfiling:         lo.ToPtr(true),
 				DisableLeaderElection:   lo.ToPtr(true),
-				LeaderElectionID:        lo.ToPtr("karpenter-controller"),
+				LeaderElectionName:      lo.ToPtr("karpenter-controller"),
 				LeaderElectionNamespace: lo.ToPtr("karpenter"),
 				MemoryLimit:             lo.ToPtr[int64](0),
 				LogLevel:                lo.ToPtr("debug"),
@@ -169,7 +169,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("KUBE_CLIENT_BURST", "0")
 			os.Setenv("ENABLE_PROFILING", "true")
 			os.Setenv("DISABLE_LEADER_ELECTION", "true")
-			os.Setenv("LEADER_ELECTION_ID", "karpenter-controller")
+			os.Setenv("LEADER_ELECTION_NAME", "karpenter-controller")
 			os.Setenv("LEADER_ELECTION_NAMESPACE", "karpenter")
 			os.Setenv("MEMORY_LIMIT", "0")
 			os.Setenv("LOG_LEVEL", "debug")
@@ -192,7 +192,7 @@ var _ = Describe("Options", func() {
 				KubeClientBurst:         lo.ToPtr(0),
 				EnableProfiling:         lo.ToPtr(true),
 				DisableLeaderElection:   lo.ToPtr(true),
-				LeaderElectionID:        lo.ToPtr("karpenter-controller"),
+				LeaderElectionName:      lo.ToPtr("karpenter-controller"),
 				LeaderElectionNamespace: lo.ToPtr("karpenter"),
 				MemoryLimit:             lo.ToPtr[int64](0),
 				LogLevel:                lo.ToPtr("debug"),
@@ -237,7 +237,7 @@ var _ = Describe("Options", func() {
 				KubeClientBurst:         lo.ToPtr(0),
 				EnableProfiling:         lo.ToPtr(true),
 				DisableLeaderElection:   lo.ToPtr(true),
-				LeaderElectionID:        lo.ToPtr("karpenter-leader-election"),
+				LeaderElectionName:      lo.ToPtr("karpenter-leader-election"),
 				LeaderElectionNamespace: lo.ToPtr(""),
 				MemoryLimit:             lo.ToPtr[int64](0),
 				LogLevel:                lo.ToPtr("debug"),
