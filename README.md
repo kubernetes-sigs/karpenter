@@ -19,7 +19,7 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 Karpenter is a multi-cloud project with implementations by the following cloud providers:
 - [AWS](https://github.com/aws/karpenter-provider-aws)
 - [Azure](https://github.com/Azure/karpenter-provider-azure)
-- [AlibabaCloud](https://github.com/cloudpilot-ai/karpenter-provider-alicloud)
+- [AlibabaCloud](https://github.com/cloudpilot-ai/karpenter-provider-alibabacloud)
 
 ## Community, discussion, contribution, and support
 
