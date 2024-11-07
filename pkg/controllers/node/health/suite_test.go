@@ -26,6 +26,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -33,6 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -48,6 +52,7 @@ var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
 var recorder *test.EventRecorder
 var queue *terminator.Queue
+var nodeClaimController *lifecycle.Controller
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -57,14 +62,19 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx)))
-
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx), func(c cache.Cache) error {
+		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Node).Spec.ProviderID}
+		})
+	}))
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewTestingQueue(env.Client, recorder)
 	healthController = health.NewController(env.Client, cloudProvider, fakeClock)
 	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
+	nodeClaimController = lifecycle.NewController(fakeClock, env.Client, cloudProvider, recorder)
+
 })
 
 var _ = AfterSuite(func() {
@@ -95,7 +105,7 @@ var _ = Describe("Health", func() {
 	})
 
 	Context("Reconciliation", func() {
-		It("should delete nodes that are unhealthy by the cloud proivder", func() {
+		It("should delete nodes that are unhealthy by the cloud provider", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "HealthyNode",
 				Status:             corev1.ConditionFalse,
@@ -106,11 +116,12 @@ var _ = Describe("Health", func() {
 			// Determine to delete unhealthy nodes
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
-		It("should not reconcile when a node has delation timestamp set", func() {
+		It("should not reconcile when a node has deletion timestamp set", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "HealthyNode",
 				Status:             corev1.ConditionFalse,
@@ -122,11 +133,12 @@ var _ = Describe("Health", func() {
 			// Determine to delete unhealthy nodes
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectExists(ctx, env.Client, node)
 		})
-		It("should not delete node when unhealthy type does not match cloudprovider passed in value", func() {
+		It("should not delete node when unhealthy type does not match cloud provider passed in value", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "FakeHealthyNode",
 				Status:             corev1.ConditionFalse,
@@ -137,11 +149,12 @@ var _ = Describe("Health", func() {
 			// Determine to delete unhealthy nodes
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectExists(ctx, env.Client, node)
 		})
-		It("should not delete node when health status does not match cloudprovider passed in value", func() {
+		It("should not delete node when health status does not match cloud provider passed in value", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "HealthyNode",
 				Status:             corev1.ConditionTrue,
@@ -152,6 +165,7 @@ var _ = Describe("Health", func() {
 			// Determine to delete unhealthy nodes
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectExists(ctx, env.Client, node)
@@ -160,7 +174,7 @@ var _ = Describe("Health", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "HealthyNode",
 				Status: corev1.ConditionFalse,
-				// We expect the last transition for HealthyNode condition to wait 30 minites
+				// We expect the last transition for HealthyNode condition to wait 30 minutes
 				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(20 * time.Minute)
@@ -168,6 +182,7 @@ var _ = Describe("Health", func() {
 			// Determine to delete unhealthy nodes
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectExists(ctx, env.Client, node)
@@ -176,7 +191,7 @@ var _ = Describe("Health", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "HealthyNode",
 				Status: corev1.ConditionFalse,
-				// We expect the last transition for HealthyNode condition to wait 30 minites
+				// We expect the last transition for HealthyNode condition to wait 30 minutes
 				LastTransitionTime: metav1.Time{Time: time.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
@@ -184,6 +199,7 @@ var _ = Describe("Health", func() {
 			// Determine to delete unhealthy nodes
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -194,7 +210,7 @@ var _ = Describe("Health", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "HealthyNode",
 				Status: corev1.ConditionFalse,
-				// We expect the last transition for HealthyNode condition to wait 30 minites
+				// We expect the last transition for HealthyNode condition to wait 30 minutes
 				LastTransitionTime: metav1.Time{Time: time.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
@@ -202,6 +218,7 @@ var _ = Describe("Health", func() {
 			// Determine to delete unhealthy nodes
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -229,11 +246,12 @@ var _ = Describe("Health", func() {
 			// Determine to delete unhealthy nodes
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
-		It("should not respect do-not-disrupt on node ", func() {
+		It("should not respect do-not-disrupt on node", func() {
 			node.Annotations = map[string]string{v1.DoNotDisruptAnnotationKey: "true"}
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "HealthyNode",
@@ -245,6 +263,7 @@ var _ = Describe("Health", func() {
 			// Determine to delete unhealthy nodes
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
@@ -262,6 +281,7 @@ var _ = Describe("Health", func() {
 
 			ExpectObjectReconciled(ctx, env.Client, healthController, node)
 			// Let the termination controller terminate the node
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)

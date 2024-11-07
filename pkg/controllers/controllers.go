@@ -23,7 +23,6 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	corev1 "k8s.io/api/core/v1"
@@ -99,11 +98,9 @@ func NewControllers(
 		health.NewController(kubeClient, cloudProvider, clock),
 	}
 
-	// The cloud proivder must define status condation for the node repair controller to used for dectecting unhealthy nodes
-	if len(cloudProvider.RepairPolicy()) != 0 && !options.FromContext(ctx).FeatureGates.NodeRepair {
+	// The cloud provider must define status conation for the node repair controller to used for detecting unhealthy nodes
+	if len(cloudProvider.RepairPolicy()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
 		controllers = append(controllers, health.NewController(kubeClient, cloudProvider, clock))
-	} else {
-		log.FromContext(ctx).V(1).Info("node repair has been disabled")
 	}
 
 	return controllers

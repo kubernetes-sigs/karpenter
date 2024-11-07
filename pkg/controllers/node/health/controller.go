@@ -23,13 +23,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
-	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -51,69 +49,75 @@ type Controller struct {
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clock clock.Clock) *Controller {
 	return &Controller{
+		clock:         clock,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
-		clock:         clock,
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "node.health")
-	nodeHealthCondation := corev1.NodeCondition{}
-	cloudProivderPolicy := cloudprovider.RepairPolicy{}
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named("node.health").
+		For(&corev1.Node{}).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
+}
 
-	if !node.GetDeletionTimestamp().IsZero() {
+func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcile.Result, error) {
+	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("getting nodeclaim, %w", err)
+	}
+
+	ctx = injection.WithControllerName(ctx, "node.health")
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("nodeclaim", nodeClaim.Name))
+	nodeHealthCondition := corev1.NodeCondition{}
+	foundCloudProviderPolicy := cloudprovider.RepairStatement{}
+
+	// Validate that the node is owned by us and is not being deleted
+	if !node.GetDeletionTimestamp().IsZero() || !controllerutil.ContainsFinalizer(node, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
 
 	for _, policy := range c.cloudProvider.RepairPolicy() {
-		nodeHealthCondation = nodeutils.GetCondition(node, policy.Type)
-		if nodeHealthCondation.Status == policy.Status {
-			cloudProivderPolicy = policy
+		nodeHealthCondition = nodeutils.GetCondition(node, policy.Type)
+		if nodeHealthCondition.Status == policy.Status {
+			// found unhealthy condition on the node
+			foundCloudProviderPolicy = policy
 			break
 		}
 	}
 
 	// From here there are three scenarios to handle:
-	// 1. If node is healthy, exit node healhty loop
-	if cloudProivderPolicy.Type == "" {
+	// 1. If node is healthy, exit node repair loop
+	if foundCloudProviderPolicy.Type == "" {
 		return reconcile.Result{}, nil
 	}
 
 	// 2. If the Node is unhealthy, but has not reached it's full toleration disruption, exit the loop
-	dusruptionTime := nodeHealthCondation.LastTransitionTime.Add(cloudProivderPolicy.TolerationDuration)
-	if c.clock.Now().Before(dusruptionTime) {
-		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
-		return reconcile.Result{RequeueAfter: dusruptionTime.Sub(c.clock.Now())}, nil
+	disruptionTime := nodeHealthCondition.LastTransitionTime.Add(foundCloudProviderPolicy.TolerationDuration)
+	if c.clock.Now().Before(disruptionTime) {
+		return reconcile.Result{RequeueAfter: disruptionTime.Sub(c.clock.Now())}, nil
 	}
 
-	nodeClaims, err := nodeutils.GetNodeClaims(ctx, node, c.kubeClient)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("listing nodeclaims, %w", err)
-	}
-	if err := c.annotateTerminationGracePeriodByDefualt(ctx, nodeClaims[0]); err != nil {
-		return reconcile.Result{}, fmt.Errorf("annotated termination grace peirod on nodeclaim, %w", err)
+	if err := c.annotateTerminationGracePeriod(ctx, nodeClaim); err != nil {
+		return reconcile.Result{}, fmt.Errorf("annotated termination grace period on nodeclaim, %w", err)
 	}
 
-	// 3. Otherwise, if the Node is unhealthy we can forcefully remove the node (by deleting it)
-	if err := c.kubeClient.Delete(ctx, node); err != nil {
-		return reconcile.Result{}, err
+	// 3. Otherwise, if the Node is unhealthy and past it's tolerationDisruption window we can forcefully terminate the node
+	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	// 4. The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting unhealthy node")
 	metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
 		metrics.ReasonLabel:       metrics.UnhealthyReason,
-		metrics.NodePoolLabel:     nodeClaims[0].Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: nodeClaims[0].Labels[v1.CapacityTypeLabelKey],
+		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	}).Inc()
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) annotateTerminationGracePeriodByDefualt(ctx context.Context, nodeClaim *v1.NodeClaim) error {
-	if _, ok := nodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; ok {
-		return nil
-	}
-
+func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	stored := nodeClaim.DeepCopy()
 	terminationTime := c.clock.Now().Format(time.RFC3339)
 	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
@@ -123,21 +127,4 @@ func (c *Controller) annotateTerminationGracePeriodByDefualt(ctx context.Context
 	}
 
 	return nil
-}
-
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	return controllerruntime.NewControllerManagedBy(m).
-		Named("node.health").
-		For(&corev1.Node{}).
-		WithOptions(
-			controller.Options{
-				RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
-					workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](100*time.Millisecond, 10*time.Second),
-					// 10 qps, 100 bucket size
-					&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
-				),
-				MaxConcurrentReconciles: 100,
-			},
-		).
-		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

@@ -42,13 +42,13 @@ var (
 
 type DriftReason string
 
-type RepairPolicy struct {
+type RepairStatement struct {
 	// Type of unhealthy state that is found on the node
 	Type corev1.NodeConditionType
-	// Status condition of when a node is unhealthy
+	// Status condition when a node is unhealthy
 	Status corev1.ConditionStatus
 	// TolerationDuration is the duration the controller will wait
-	// before attempting to terminate nodes that are underutilized.
+	// before force terminating nodes that are unhealthy.
 	TolerationDuration time.Duration
 }
 
@@ -76,7 +76,7 @@ type CloudProvider interface {
 	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
 	// RepairPolicy is for CloudProviders to define a set Unhealthy condition for Karpenter
 	// to monitor on the node.
-	RepairPolicy() []RepairPolicy
+	RepairPolicy() []RepairStatement
 	// Name returns the CloudProvider implementation name.
 	Name() string
 	// GetSupportedNodeClasses returns CloudProvider NodeClass that implements status.Object

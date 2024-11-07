@@ -263,8 +263,8 @@ func (c *CloudProvider) IsDrifted(context.Context, *v1.NodeClaim) (cloudprovider
 	return c.Drifted, nil
 }
 
-func (c *CloudProvider) RepairPolicy() []cloudprovider.RepairPolicy {
-	return []cloudprovider.RepairPolicy{
+func (c *CloudProvider) RepairPolicy() []cloudprovider.RepairStatement {
+	return []cloudprovider.RepairStatement{
 		{
 			Type:               "HealthyNode",
 			Status:             corev1.ConditionFalse,
