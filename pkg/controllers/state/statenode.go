@@ -193,13 +193,9 @@ func (in *StateNode) ValidateNodeDisruptable(ctx context.Context, kubeClient cli
 	if in.Annotations()[v1.DoNotDisruptAnnotationKey] == "true" {
 		return fmt.Errorf("disruption is blocked through the %q annotation", v1.DoNotDisruptAnnotationKey)
 	}
-	// check whether the node has all the labels we need
-	for _, label := range []string{
-		v1.NodePoolLabelKey,
-	} {
-		if _, ok := in.Labels()[label]; !ok {
-			return fmt.Errorf("state node doesn't have required label %q", label)
-		}
+	// check whether the node has the NodePool label
+	if _, ok := in.Labels()[v1.NodePoolLabelKey]; !ok {
+		return fmt.Errorf("state node doesn't have required label %q", v1.NodePoolLabelKey)
 	}
 	return nil
 }
