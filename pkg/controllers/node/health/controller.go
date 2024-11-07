@@ -21,13 +21,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -63,67 +62,62 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcile.Result, error) {
-	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting nodeclaim, %w", err)
-	}
-
 	ctx = injection.WithControllerName(ctx, "node.health")
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("nodeclaim", nodeClaim.Name))
-	nodeHealthCondition := corev1.NodeCondition{}
-	foundCloudProviderPolicy := cloudprovider.RepairStatement{}
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef(node.Namespace, node.Name)))
 
 	// Validate that the node is owned by us and is not being deleted
-	if !node.GetDeletionTimestamp().IsZero() || !controllerutil.ContainsFinalizer(node, v1.TerminationFinalizer) {
-		return reconcile.Result{}, nil
+	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
+	if err != nil {
+		return reconcile.Result{}, nodeutils.IgnoreNodeClaimNotFoundError(err)
 	}
 
-	for _, policy := range c.cloudProvider.RepairPolicy() {
-		nodeHealthCondition = nodeutils.GetCondition(node, policy.Type)
-		if nodeHealthCondition.Status == policy.Status {
-			// found unhealthy condition on the node
-			foundCloudProviderPolicy = policy
-			break
+	log.FromContext(ctx).V(1).Info("found nodeclaim")
+	// If find if a node is unhealthy
+	healthCondition, foundHealthCondition := lo.Find(c.cloudProvider.RepairPolicies(), func(policy cloudprovider.RepairPolicy) bool {
+		nodeCondition := nodeutils.GetCondition(node, policy.ConditionType)
+		for _, condition := range node.Status.Conditions {
+			if condition.Type == policy.ConditionType && nodeCondition.Status == policy.ConditionStatus {
+				terminationTime := condition.LastTransitionTime.Add(policy.TolerationDuration)
+				return !c.clock.Now().Before(terminationTime)
+			}
 		}
+		return false
+	})
+
+	log.FromContext(ctx).V(1).Info(fmt.Sprintf("found status: %v", foundHealthCondition))
+	// If the Node is unhealthy, but has not reached it's full toleration disruption
+	// requeue at the termination time of the unhealthy node
+	terminationTime := nodeutils.GetCondition(node, healthCondition.ConditionType).LastTransitionTime.Add(healthCondition.TolerationDuration)
+	log.FromContext(ctx).V(1).Info(fmt.Sprintf("time now: %s, terminate: %s", c.clock.Now().String(), terminationTime.String()))
+	if !foundHealthCondition {
+		log.FromContext(ctx).V(1).Info("termination time")
+		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
 	}
 
-	// From here there are three scenarios to handle:
-	// 1. If node is healthy, exit node repair loop
-	if foundCloudProviderPolicy.Type == "" {
-		return reconcile.Result{}, nil
-	}
-
-	// 2. If the Node is unhealthy, but has not reached it's full toleration disruption, exit the loop
-	disruptionTime := nodeHealthCondition.LastTransitionTime.Add(foundCloudProviderPolicy.TolerationDuration)
-	if c.clock.Now().Before(disruptionTime) {
-		return reconcile.Result{RequeueAfter: disruptionTime.Sub(c.clock.Now())}, nil
-	}
-
+	// For unhealthy past the tolerationDisruption window we can forcefully terminate the node
 	if err := c.annotateTerminationGracePeriod(ctx, nodeClaim); err != nil {
-		return reconcile.Result{}, fmt.Errorf("annotated termination grace period on nodeclaim, %w", err)
-	}
-
-	// 3. Otherwise, if the Node is unhealthy and past it's tolerationDisruption window we can forcefully terminate the node
-	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	// 4. The deletion timestamp has successfully been set for the Node, update relevant metrics.
+	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting unhealthy node")
-	metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
-		metrics.ReasonLabel:       metrics.UnhealthyReason,
-		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-	}).Inc()
+	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+		metrics.ReasonLabel:       string(healthCondition.ConditionType),
+		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
+	})
 	return reconcile.Result{}, nil
 }
 
 func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	stored := nodeClaim.DeepCopy()
-	terminationTime := c.clock.Now().Format(time.RFC3339)
-	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
+	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: c.clock.Now().Format(time.RFC3339)})
 
 	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
-		return client.IgnoreNotFound(err)
+		return err
 	}
 
 	return nil

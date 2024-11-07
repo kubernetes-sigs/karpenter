@@ -263,11 +263,11 @@ func (c *CloudProvider) IsDrifted(context.Context, *v1.NodeClaim) (cloudprovider
 	return c.Drifted, nil
 }
 
-func (c *CloudProvider) RepairPolicy() []cloudprovider.RepairStatement {
-	return []cloudprovider.RepairStatement{
+func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
+	return []cloudprovider.RepairPolicy{
 		{
-			Type:               "HealthyNode",
-			Status:             corev1.ConditionFalse,
+			ConditionType:      "BadNode",
+			ConditionStatus:    corev1.ConditionFalse,
 			TolerationDuration: 30 * time.Minute,
 		},
 	}
