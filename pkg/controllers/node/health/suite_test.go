@@ -26,7 +26,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 
@@ -34,12 +33,10 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
-	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
-	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -49,8 +46,6 @@ import (
 
 var ctx context.Context
 var healthController *health.Controller
-var terminationController *termination.Controller
-var nodeClaimController *nodeclaimlifecycle.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
@@ -75,8 +70,6 @@ var _ = BeforeSuite(func() {
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewTestingQueue(env.Client, recorder)
 	healthController = health.NewController(env.Client, cloudProvider, fakeClock)
-	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
-	nodeClaimController = nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}))
 })
 
 var _ = AfterSuite(func() {
@@ -195,6 +188,38 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, fakeClock.Now().Format(time.RFC3339)))
 		})
+		It("should return the requeue interval for the condition closest to its terminationDuration", func() {
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+				{
+					ConditionType:      "BadNode",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 60 * time.Minute,
+				},
+				{
+					ConditionType:      "ValidUnhealthyCondition",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 30 * time.Minute,
+				},
+			}
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:   "ValidUnhealthyCondition",
+				Status: corev1.ConditionFalse,
+				// We expect the last transition for HealthyNode condition to wait 30 minutes
+				LastTransitionTime: metav1.Time{Time: time.Now()},
+			}, corev1.NodeCondition{
+				Type:   "BadNode",
+				Status: corev1.ConditionFalse,
+				// We expect the last transition for HealthyNode condition to wait 30 minutes
+				LastTransitionTime: metav1.Time{Time: time.Now()},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			fakeClock.Step(27 * time.Minute)
+
+			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
+			fmt.Println(result.RequeueAfter.String())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
+		})
 		It("should return the requeue interval for the time between now and when the nodeClaim termination time", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "BadNode",
@@ -207,7 +232,6 @@ var _ = Describe("Node Health", func() {
 			fakeClock.Step(27 * time.Minute)
 
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
-			fmt.Println(result.RequeueAfter.String())
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
 		})
 	})

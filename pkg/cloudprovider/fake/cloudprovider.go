@@ -60,6 +60,7 @@ type CloudProvider struct {
 	CreatedNodeClaims         map[string]*v1.NodeClaim
 	Drifted                   cloudprovider.DriftReason
 	NodeClassGroupVersionKind []schema.GroupVersionKind
+	RepairPolicy              []cloudprovider.RepairPolicy
 }
 
 func NewCloudProvider() *CloudProvider {
@@ -92,6 +93,13 @@ func (c *CloudProvider) Reset() {
 			Group:   "",
 			Version: "",
 			Kind:    "",
+		},
+	}
+	c.RepairPolicy = []cloudprovider.RepairPolicy{
+		{
+			ConditionType:      "BadNode",
+			ConditionStatus:    corev1.ConditionFalse,
+			TolerationDuration: 30 * time.Minute,
 		},
 	}
 }
@@ -264,13 +272,7 @@ func (c *CloudProvider) IsDrifted(context.Context, *v1.NodeClaim) (cloudprovider
 }
 
 func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
-	return []cloudprovider.RepairPolicy{
-		{
-			ConditionType:      "BadNode",
-			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 30 * time.Minute,
-		},
-	}
+	return c.RepairPolicy
 }
 
 // Name returns the CloudProvider implementation name.

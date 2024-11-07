@@ -18,7 +18,6 @@ package health
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/samber/lo"
@@ -65,32 +64,21 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	ctx = injection.WithControllerName(ctx, "node.health")
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef(node.Namespace, node.Name)))
 
-	// Validate that the node is owned by us and is not being deleted
+	// Validate that the node is owned by us
 	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
 		return reconcile.Result{}, nodeutils.IgnoreNodeClaimNotFoundError(err)
 	}
 
-	log.FromContext(ctx).V(1).Info("found nodeclaim")
-	// If find if a node is unhealthy
-	healthCondition, foundHealthCondition := lo.Find(c.cloudProvider.RepairPolicies(), func(policy cloudprovider.RepairPolicy) bool {
-		nodeCondition := nodeutils.GetCondition(node, policy.ConditionType)
-		for _, condition := range node.Status.Conditions {
-			if condition.Type == policy.ConditionType && nodeCondition.Status == policy.ConditionStatus {
-				terminationTime := condition.LastTransitionTime.Add(policy.TolerationDuration)
-				return !c.clock.Now().Before(terminationTime)
-			}
-		}
-		return false
-	})
+	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node)
+	if unhealthyNodeCondition == nil {
+		return reconcile.Result{}, nil
+	}
 
-	log.FromContext(ctx).V(1).Info(fmt.Sprintf("found status: %v", foundHealthCondition))
 	// If the Node is unhealthy, but has not reached it's full toleration disruption
 	// requeue at the termination time of the unhealthy node
-	terminationTime := nodeutils.GetCondition(node, healthCondition.ConditionType).LastTransitionTime.Add(healthCondition.TolerationDuration)
-	log.FromContext(ctx).V(1).Info(fmt.Sprintf("time now: %s, terminate: %s", c.clock.Now().String(), terminationTime.String()))
-	if !foundHealthCondition {
-		log.FromContext(ctx).V(1).Info("termination time")
+	terminationTime := unhealthyNodeCondition.LastTransitionTime.Add(policyTerminationDuration)
+	if c.clock.Now().Before(terminationTime) {
 		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
 	}
 
@@ -99,17 +87,37 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
-		return reconcile.Result{}, err
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting unhealthy node")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       string(healthCondition.ConditionType),
+		metrics.ReasonLabel:       string(unhealthyNodeCondition.Type),
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
 	})
 	return reconcile.Result{}, nil
+}
+
+// Find a node with a condition that matches one of the unhealthy conditions defined by the cloud provider
+// If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration
+func (c *Controller) findUnhealthyConditions(node *corev1.Node) (nc *corev1.NodeCondition, cpTerminationDuration time.Duration) {
+	requeueTime := time.Time{}
+	for _, policy := range c.cloudProvider.RepairPolicies() {
+		// check the status and the type on the condition
+		nodeCondition := nodeutils.GetCondition(node, policy.ConditionType)
+		if nodeCondition.Status == policy.ConditionStatus {
+			terminationTime := nodeCondition.LastTransitionTime.Add(policy.TolerationDuration)
+			// Determine requeue time
+			if requeueTime.IsZero() || requeueTime.After(terminationTime) {
+				nc = lo.ToPtr(nodeCondition)
+				cpTerminationDuration = policy.TolerationDuration
+				requeueTime = terminationTime
+			}
+		}
+	}
+	return nc, cpTerminationDuration
 }
 
 func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeClaim *v1.NodeClaim) error {

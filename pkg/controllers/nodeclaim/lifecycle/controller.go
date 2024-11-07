@@ -170,6 +170,9 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		return reconcile.Result{}, nil
 	}
 	if err := c.ensureTerminationGracePeriodTerminationTimeAnnotation(ctx, nodeClaim); err != nil {
+		if errors.IsConflict(err) {
+			return reconcile.Result{Requeue: true}, nil
+		}
 		return reconcile.Result{}, fmt.Errorf("adding nodeclaim terminationGracePeriod annotation, %w", err)
 	}
 
@@ -265,7 +268,10 @@ func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.C
 	stored := nodeClaim.DeepCopy()
 	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 
-	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+	// We use client.MergeFromWithOptimisticLock because patching a terminationGracePeriod annotation
+	// can cause races with the health controller, as that controller sets the current time as the terminationGracePeriod annotation
+	// Here, We want to resolve any conflict and not overwrite the terminationGracePeriod annotation
+	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 	log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated nodeclaim")
