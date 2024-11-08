@@ -145,8 +145,8 @@ func (c Command) String() string {
 			fmt.Fprint(&buf, ", ")
 		}
 		fmt.Fprintf(&buf, "%s", old.Name())
-		fmt.Fprintf(&buf, "/%s", old.instanceType.Name)
-		fmt.Fprintf(&buf, "/%s", old.capacityType)
+		fmt.Fprintf(&buf, "/%s", old.Labels()[corev1.LabelInstanceTypeStable])
+		fmt.Fprintf(&buf, "/%s", old.Labels()[v1.CapacityTypeLabelKey])
 	}
 	if len(c.replacements) == 0 {
 		return buf.String()
