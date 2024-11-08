@@ -24,16 +24,20 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -45,6 +49,7 @@ var nodeClaimDisruptionController *nodeclaimdisruption.Controller
 var env *test.Environment
 var fakeClock *clock.FakeClock
 var cp *fake.CloudProvider
+var it *cloudprovider.InstanceType
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -69,6 +74,35 @@ var _ = AfterSuite(func() {
 })
 
 var _ = BeforeEach(func() {
+	resources := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("100"),
+		corev1.ResourceMemory: resource.MustParse("100Gi"),
+	}
+	it = fake.NewInstanceType(fake.InstanceTypeOptions{
+		Name:             test.RandomName(),
+		Architecture:     "arch",
+		Resources:        resources,
+		OperatingSystems: sets.New(string(corev1.Linux)),
+		Offerings: []cloudprovider.Offering{
+			{
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
+					corev1.LabelTopologyZone: "test-zone-1a",
+				}),
+				Price:     fake.PriceFromResources(resources),
+				Available: true,
+			},
+			{
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+					corev1.LabelTopologyZone: "test-zone-1a",
+				}),
+				Price:     fake.PriceFromResources(resources),
+				Available: true,
+			},
+		},
+	})
+	cp.InstanceTypes = append(cp.InstanceTypes, it)
 	ctx = options.ToContext(ctx, test.Options())
 	fakeClock.SetTime(time.Now())
 })
@@ -87,7 +121,10 @@ var _ = Describe("Disruption", func() {
 		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: it.Name,
+				},
 			},
 		})
 		// set the lastPodEvent to 5 minutes in the past

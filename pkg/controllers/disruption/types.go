@@ -90,12 +90,8 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("NodePool %q not found", nodePoolName))...)
 		return nil, fmt.Errorf("nodepool %q can't be resolved for state node", nodePoolName)
 	}
+	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
-	// skip any candidates that we can't determine the instance of
-	if instanceType == nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("Instance Type %q not found", node.Labels()[corev1.LabelInstanceTypeStable]))...)
-		return nil, fmt.Errorf("instance type %q can't be resolved", node.Labels()[corev1.LabelInstanceTypeStable])
-	}
 	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
 		// if the disruption class is not eventual or the nodepool has no TerminationGracePeriod, block disruption of pods
 		// if the error is anything but a PodBlockEvictionError, also block disruption of pods
@@ -149,8 +145,8 @@ func (c Command) String() string {
 			fmt.Fprint(&buf, ", ")
 		}
 		fmt.Fprintf(&buf, "%s", old.Name())
-		fmt.Fprintf(&buf, "/%s", old.instanceType.Name)
-		fmt.Fprintf(&buf, "/%s", old.capacityType)
+		fmt.Fprintf(&buf, "/%s", old.Labels()[corev1.LabelInstanceTypeStable])
+		fmt.Fprintf(&buf, "/%s", old.Labels()[v1.CapacityTypeLabelKey])
 	}
 	if len(c.replacements) == 0 {
 		return buf.String()

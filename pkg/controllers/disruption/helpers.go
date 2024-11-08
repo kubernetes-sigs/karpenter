@@ -141,7 +141,7 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 
 // GetCandidates returns nodes that appear to be currently deprovisionable based off of their nodePool
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
-	cloudProvider cloudprovider.CloudProvider, shouldDeprovision CandidateFilter, disruptionClass string, queue *orchestration.Queue,
+	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, disruptionClass string, queue *orchestration.Queue,
 ) ([]*Candidate, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
@@ -156,7 +156,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 		return cn, e == nil
 	})
 	// Filter only the valid candidates that we should disrupt
-	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDeprovision(ctx, c) }), nil
+	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) }), nil
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
