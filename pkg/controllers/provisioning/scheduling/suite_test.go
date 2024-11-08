@@ -3643,7 +3643,7 @@ var _ = Context("Scheduling", func() {
 
 	Describe("Metrics", func() {
 		It("should surface the queueDepth metric while executing the scheduling loop", func() {
-			nodePool := test.NodePool()
+			nodePool = test.NodePool()
 			ExpectApplied(ctx, env.Client, nodePool)
 			// all of these pods have anti-affinity to each other
 			labels := map[string]string{
@@ -3678,7 +3678,7 @@ var _ = Context("Scheduling", func() {
 			wg.Wait()
 		})
 		It("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
-			nodePool := test.NodePool(v1.NodePool{
+			nodePool = test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
 						Spec: v1.NodeClaimTemplateSpec{
@@ -3715,7 +3715,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).To(BeNil())
 		})
 		It("should surface the schedulingDuration metric after executing a scheduling loop", func() {
-			nodePool := test.NodePool()
+			nodePool = test.NodePool()
 			ExpectApplied(ctx, env.Client, nodePool)
 			// all of these pods have anti-affinity to each other
 			labels := map[string]string{
@@ -3741,6 +3741,36 @@ var _ = Context("Scheduling", func() {
 			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", 1))
 			_, ok = lo.Find(m.Histogram.Bucket, func(b *io_prometheus_client.Bucket) bool { return lo.FromPtr(b.CumulativeCount) > 0 })
 			Expect(ok).To(BeTrue())
+		})
+		It("shouldn't emit the PodAcknowledgedTimeSeconds metric after a scheduling loop if there's no NodePools", func() {
+			podsUnschedulable := test.UnschedulablePods(test.PodOptions{}, 3)
+			for _, p := range podsUnschedulable {
+				ExpectApplied(ctx, env.Client, p)
+			}
+			_, err := prov.Schedule(ctx)
+			Expect(err).To(BeNil())
+			for _, pod := range podsUnschedulable {
+				_, ok := FindMetricWithLabelValues("karpenter_scheduler_pod_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
+				Expect(ok).To(BeFalse())
+			}
+		})
+		It("should emit the PodAcknowledgedTimeSeconds metric after a scheduling loop", func() {
+			nodePool = test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool)
+			podsUnschedulable := test.UnschedulablePods(test.PodOptions{}, 3)
+			for _, p := range podsUnschedulable {
+				ExpectApplied(ctx, env.Client, p)
+			}
+			// step the clock so the metric isn't 0
+			fakeClock.Step(1 * time.Minute)
+			_, err := prov.Schedule(ctx)
+			Expect(err).To(BeNil())
+
+			for _, pod := range podsUnschedulable {
+				m, ok := FindMetricWithLabelValues("karpenter_scheduler_pod_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
+				Expect(ok).To(BeTrue())
+				Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
+			}
 		})
 	})
 })

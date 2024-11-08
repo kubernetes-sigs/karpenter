@@ -58,7 +58,7 @@ var (
 	PodState = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
-			Namespace: "karpenter",
+			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "state",
 			Help:      "Pod state is the current state of pods. This metric can be used several ways as it is labeled by the pod name, namespace, owner, node, nodepool name, zone, architecture, capacity type, instance type and pod phase.",
@@ -68,7 +68,7 @@ var (
 	PodStartupDurationSeconds = opmetrics.NewPrometheusSummary(
 		crmetrics.Registry,
 		prometheus.SummaryOpts{
-			Namespace:  "karpenter",
+			Namespace:  metrics.Namespace,
 			Subsystem:  metrics.PodSubsystem,
 			Name:       "startup_duration_seconds",
 			Help:       "The time from pod creation until the pod is running.",
@@ -79,7 +79,7 @@ var (
 	PodBoundDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{
-			Namespace: "karpenter",
+			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "bound_duration_seconds",
 			Help:      "The time from pod creation until the pod is bound.",
@@ -90,7 +90,7 @@ var (
 	PodCurrentUnboundTimeSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
-			Namespace: "karpenter",
+			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "current_unbound_time_seconds",
 			Help:      "The time from pod creation until the pod is bound.",
@@ -100,7 +100,7 @@ var (
 	PodUnstartedTimeSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
-			Namespace: "karpenter",
+			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "unstarted_time_seconds",
 			Help:      "The time from pod creation until the pod is running.",
