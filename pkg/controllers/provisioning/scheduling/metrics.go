@@ -26,8 +26,6 @@ import (
 
 const (
 	ControllerLabel    = "controller"
-	PodName            = "name"
-	PodNamespace       = "namespace"
 	schedulingIDLabel  = "scheduling_id"
 	schedulerSubsystem = "scheduler"
 )
@@ -79,14 +77,5 @@ var (
 		[]string{
 			ControllerLabel,
 		},
-	)
-	PodAcknowledgedTimeSeconds = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: schedulerSubsystem,
-			Name:      "pod_acknowledged_time_seconds",
-			Help:      "The time from pod creation until the Karpenter first considered it for scheduling",
-		},
-		[]string{PodName, PodNamespace},
 	)
 )

@@ -31,6 +31,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
@@ -97,6 +98,33 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cluster.Reset()
 	cloudProvider.Reset()
+})
+
+var _ = Describe("Pod Metrics", func() {
+	It("should emit pod ack metrics only when the mapping doesn't exist", func() {
+		pod := test.Pod()
+		ExpectApplied(ctx, env.Client, pod)
+		cluster.ObservePodAcknowledgedForScheduling(pod)
+
+		m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
+		Expect(ok).To(BeTrue())
+		Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
+		val := lo.FromPtr(m.Gauge.Value)
+
+		// Check again to make sure the values are the same
+		fakeClock.Step(1 * time.Minute)
+		cluster.ObservePodAcknowledgedForScheduling(pod)
+		m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
+		Expect(ok).To(BeTrue())
+		Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", val))
+
+		cluster.DeletePod(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
+
+		cluster.ObservePodAcknowledgedForScheduling(pod)
+		m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
+		Expect(ok).To(BeTrue())
+		Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("!=", val))
+	})
 })
 
 var _ = Describe("Volume Usage/Limits", func() {

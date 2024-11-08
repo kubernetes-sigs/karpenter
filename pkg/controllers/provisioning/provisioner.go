@@ -345,9 +345,8 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
-	lo.ForEach(pendingPods, func(pod *corev1.Pod, _ int) {
-		scheduler.PodAcknowledgedTimeSeconds.With(prometheus.Labels{scheduler.PodName: pod.Name, scheduler.PodNamespace: pod.Namespace}).Set(float64(p.clock.Since(pod.CreationTimestamp.Time).Seconds()))
-	})
+	// Emit a metric for when we first acknowledged the pod for scheduling
+	p.cluster.ObservePodAcknowledgedForScheduling(pendingPods...)
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	scheduler.UnschedulablePodsCount.Set(float64(len(results.PodErrors)), map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
 	if len(results.NewNodeClaims) > 0 {

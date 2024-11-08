@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -53,7 +54,11 @@ type Cluster struct {
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
-	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
+	// podAcknowledgedMetricMap is used to deduplicate metrics on scheduling loops for when pods are first
+	// considered for scheduling. Without this, it's impossible to know how long Karpenter takes before
+	// actually acknowledging the pod and starting to schedule.
+	podAcknowledgedMetricMap map[types.NamespacedName]bool // pod namespaced name -> when it was first considered for scheduling
+	clusterStateMu           sync.RWMutex                  // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
 	// cluster with respect to consolidation. This increases when something has
 	// changed about the cluster that might make consolidation possible. By recording
@@ -73,6 +78,7 @@ func NewCluster(clk clock.Clock, client client.Client) *Cluster {
 		daemonSetPods:             sync.Map{},
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
+		podAcknowledgedMetricMap:  map[types.NamespacedName]bool{},
 	}
 }
 
@@ -307,12 +313,31 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	return err
 }
 
+func (c *Cluster) ObservePodAcknowledgedForScheduling(pods ...*corev1.Pod) {
+	for _, pod := range pods {
+		// Check the pod to see if we've already emitted a metric for it, and just continue
+		nn := types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
+		c.mu.RLock()
+		if c.podAcknowledgedMetricMap[nn] {
+			c.mu.RUnlock()
+			continue
+		}
+		c.mu.RUnlock()
+
+		c.mu.Lock()
+		c.podAcknowledgedMetricMap[nn] = true
+		c.mu.Unlock()
+		PodAcknowledgedTimeSeconds.With(prometheus.Labels{PodName: pod.Name, PodNamespace: pod.Namespace}).Set(float64(c.clock.Since(pod.CreationTimestamp.Time).Seconds()))
+	}
+}
+
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
+	delete(c.podAcknowledgedMetricMap, podKey)
 	c.MarkUnconsolidated()
 }
 
