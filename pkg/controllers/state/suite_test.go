@@ -104,6 +104,7 @@ var _ = Describe("Pod Metrics", func() {
 	It("should emit pod ack metrics only when the mapping doesn't exist", func() {
 		pod := test.Pod()
 		ExpectApplied(ctx, env.Client, pod)
+		fakeClock.Step(1 * time.Hour)
 		cluster.ObservePodAcknowledgedForScheduling(pod)
 
 		m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
@@ -112,7 +113,7 @@ var _ = Describe("Pod Metrics", func() {
 		val := lo.FromPtr(m.Gauge.Value)
 
 		// Check again to make sure the values are the same
-		fakeClock.Step(1 * time.Minute)
+		fakeClock.Step(1 * time.Hour)
 		cluster.ObservePodAcknowledgedForScheduling(pod)
 		m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
 		Expect(ok).To(BeTrue())
@@ -120,10 +121,11 @@ var _ = Describe("Pod Metrics", func() {
 
 		cluster.DeletePod(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
 
+		fakeClock.Step(1 * time.Hour)
 		cluster.ObservePodAcknowledgedForScheduling(pod)
 		m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
 		Expect(ok).To(BeTrue())
-		Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("!=", val))
+		Expect(lo.FromPtr(m.Gauge.Value)).ToNot(BeNumerically("==", val))
 	})
 })
 
