@@ -19,6 +19,7 @@ package metrics
 import (
 	"sync"
 
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -38,9 +39,9 @@ func NewStore() *Store {
 	return &Store{store: map[string][]*StoreMetric{}}
 }
 
-// StoreMetric is a single state metric associated with a prometheus.GaugeVec
+// StoreMetric is a single state metric associated with a metrics.Gauge
 type StoreMetric struct {
-	*prometheus.GaugeVec
+	opmetrics.GaugeMetric
 	Value  float64
 	Labels prometheus.Labels
 }
@@ -48,13 +49,13 @@ type StoreMetric struct {
 // update is an internal non-thread-safe method for updating metrics given a key in the Store
 func (s *Store) update(key string, metrics []*StoreMetric) {
 	for _, metric := range metrics {
-		metric.With(metric.Labels).Set(metric.Value)
+		metric.Set(metric.Value, metric.Labels)
 	}
 	// Cleanup old metrics if the old metric family has metrics that weren't updated by this round of metrics
 	if oldMetrics, ok := s.store[key]; ok {
 		for _, oldMetric := range oldMetrics {
 			if _, ok = lo.Find(metrics, func(m *StoreMetric) bool {
-				return oldMetric.GaugeVec == m.GaugeVec && equality.Semantic.DeepEqual(oldMetric.Labels, m.Labels)
+				return oldMetric.GaugeMetric == m.GaugeMetric && equality.Semantic.DeepEqual(oldMetric.Labels, m.Labels)
 			}); !ok {
 				oldMetric.Delete(oldMetric.Labels)
 			}

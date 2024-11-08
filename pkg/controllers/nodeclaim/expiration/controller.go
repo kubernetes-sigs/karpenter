@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,11 +66,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
-	metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
+	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 		metrics.ReasonLabel:       metrics.ExpiredReason,
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-	}).Inc()
+	})
 	// We sleep here after the delete operation since we want to ensure that we are able to read our own writes so that
 	// we avoid duplicating metrics and log lines due to quick re-queues.
 	// USE CAUTION when determining whether to increase this timeout or remove this line

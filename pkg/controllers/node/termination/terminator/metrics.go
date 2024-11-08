@@ -17,6 +17,7 @@ limitations under the License.
 package terminator
 
 import (
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -28,7 +29,8 @@ const (
 	CodeLabel = "code"
 )
 
-var NodesEvictionRequestsTotal = prometheus.NewCounterVec(
+var NodesEvictionRequestsTotal = opmetrics.NewPrometheusCounter(
+	crmetrics.Registry,
 	prometheus.CounterOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: metrics.NodeSubsystem,
@@ -37,7 +39,3 @@ var NodesEvictionRequestsTotal = prometheus.NewCounterVec(
 	},
 	[]string{CodeLabel},
 )
-
-func init() {
-	crmetrics.Registry.MustRegister(NodesEvictionRequestsTotal)
-}

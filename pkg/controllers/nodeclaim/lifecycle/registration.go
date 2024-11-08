@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -78,9 +77,9 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
 	nodeClaim.Status.NodeName = node.Name
 
-	metrics.NodesCreatedTotal.With(prometheus.Labels{
+	metrics.NodesCreatedTotal.Inc(map[string]string{
 		metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-	}).Inc()
+	})
 	return reconcile.Result{}, nil
 }
 

@@ -17,6 +17,7 @@ limitations under the License.
 package state
 
 import (
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -28,24 +29,29 @@ const (
 )
 
 var (
-	ClusterStateNodesCount = prometheus.NewGauge(
+	ClusterStateNodesCount = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
 			Name:      "node_count",
 			Help:      "Current count of nodes in cluster state",
 		},
+		[]string{},
 	)
 
-	ClusterStateSynced = prometheus.NewGauge(
+	ClusterStateSynced = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
 			Name:      "synced",
 			Help:      "Returns 1 if cluster state is synced and 0 otherwise. Synced checks that nodeclaims and nodes that are stored in the APIServer have the same representation as Karpenter's cluster state",
 		},
+		[]string{},
 	)
-	ClusterStateUnsyncedTimeSeconds = prometheus.NewGaugeVec(
+	ClusterStateUnsyncedTimeSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: stateSubsystem,
@@ -55,7 +61,3 @@ var (
 		[]string{},
 	)
 )
-
-func init() {
-	crmetrics.Registry.MustRegister(ClusterStateNodesCount, ClusterStateSynced, ClusterStateUnsyncedTimeSeconds)
-}

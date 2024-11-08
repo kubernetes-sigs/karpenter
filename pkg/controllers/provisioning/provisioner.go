@@ -26,7 +26,6 @@ import (
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -170,7 +169,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 		}
 		return false
 	})
-	scheduler.IgnoredPodCount.Set(float64(len(rejectedPods)))
+	scheduler.IgnoredPodCount.Set(float64(len(rejectedPods)), nil)
 	p.consolidationWarnings(ctx, pods)
 	return pods, nil
 }
@@ -306,9 +305,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
-	defer metrics.Measure(scheduler.SchedulingDurationSeconds.With(
-		prometheus.Labels{scheduler.ControllerLabel: injection.GetControllerName(ctx)},
-	))()
+	defer metrics.Measure(scheduler.DurationSeconds, map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})()
 	start := time.Now()
 
 	// We collect the nodes with their used capacities before we get the list of pending pods. This ensures that
@@ -349,9 +346,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
-	scheduler.UnschedulablePodsCount.With(
-		prometheus.Labels{scheduler.ControllerLabel: injection.GetControllerName(ctx)},
-	).Set(float64(len(results.PodErrors)))
+	scheduler.UnschedulablePodsCount.Set(float64(len(results.PodErrors)), map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
 	if len(results.NewNodeClaims) > 0 {
 		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
 	}
@@ -380,11 +375,11 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 
 	log.FromContext(ctx).WithValues("NodeClaim", klog.KRef("", nodeClaim.Name), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
 		Info("created nodeclaim")
-	metrics.NodeClaimsCreatedTotal.With(prometheus.Labels{
+	metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
 		metrics.ReasonLabel:       options.Reason,
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-	}).Inc()
+	})
 	// Update the nodeclaim manually in state to avoid evenutal consistency delay races with our watcher.
 	// This is essential to avoiding races where disruption can create a replacement node, then immediately
 	// requeue. This can race with controller-runtime's internal cache as it watches events on the cluster
