@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -57,11 +56,11 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("terminating due to registration ttl")
-	metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
+	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 		metrics.ReasonLabel:       "liveness",
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-	}).Inc()
+	})
 
 	return reconcile.Result{}, nil
 }

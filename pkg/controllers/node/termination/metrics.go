@@ -19,23 +19,18 @@ package termination
 import (
 	"time"
 
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
-func init() {
-	crmetrics.Registry.MustRegister(
-		TerminationDurationSeconds,
-		NodeLifetimeDurationSeconds,
-		NodesDrainedTotal)
-}
-
 const dayDuration = time.Hour * 24
 
 var (
-	TerminationDurationSeconds = prometheus.NewSummaryVec(
+	DurationSeconds = opmetrics.NewPrometheusSummary(
+		crmetrics.Registry,
 		prometheus.SummaryOpts{
 			Namespace:  metrics.Namespace,
 			Subsystem:  metrics.NodeSubsystem,
@@ -45,7 +40,8 @@ var (
 		},
 		[]string{metrics.NodePoolLabel},
 	)
-	NodesDrainedTotal = prometheus.NewCounterVec(
+	NodesDrainedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
@@ -54,7 +50,8 @@ var (
 		},
 		[]string{metrics.NodePoolLabel},
 	)
-	NodeLifetimeDurationSeconds = prometheus.NewHistogramVec(
+	NodeLifetimeDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,

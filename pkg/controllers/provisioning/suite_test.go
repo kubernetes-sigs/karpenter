@@ -100,7 +100,7 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
 	cluster.Reset()
-	pscheduling.IgnoredPodCount.Set(0)
+	pscheduling.IgnoredPodCount.Set(0, nil)
 })
 
 var _ = Describe("Provisioning", func() {

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
@@ -129,9 +128,9 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
-	NodesDrainedTotal.With(prometheus.Labels{
+	NodesDrainedTotal.Inc(map[string]string{
 		metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey],
-	}).Inc()
+	})
 	// In order for Pods associated with PersistentVolumes to smoothly migrate from the terminating Node, we wait
 	// for VolumeAttachments of drain-able Pods to be cleaned up before terminating Node and removing its finalizer.
 	// However, if TerminationGracePeriod is configured for Node, and we are past that period, we will skip waiting.
@@ -247,18 +246,18 @@ func (c *Controller) removeFinalizer(ctx context.Context, n *corev1.Node) error 
 			return client.IgnoreNotFound(fmt.Errorf("removing finalizer, %w", err))
 		}
 
-		metrics.NodesTerminatedTotal.With(prometheus.Labels{
+		metrics.NodesTerminatedTotal.Inc(map[string]string{
 			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
-		}).Inc()
+		})
 
 		// We use stored.DeletionTimestamp since the api-server may give back a node after the patch without a deletionTimestamp
-		TerminationDurationSeconds.With(prometheus.Labels{
+		DurationSeconds.Observe(time.Since(stored.DeletionTimestamp.Time).Seconds(), map[string]string{
 			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
-		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
+		})
 
-		NodeLifetimeDurationSeconds.With(map[string]string{
+		NodeLifetimeDurationSeconds.Observe(time.Since(n.CreationTimestamp.Time).Seconds(), map[string]string{
 			metrics.NodePoolLabel: n.Labels[v1.NodePoolLabelKey],
-		}).Observe(time.Since(n.CreationTimestamp.Time).Seconds())
+		})
 
 		log.FromContext(ctx).Info("deleted node")
 	}

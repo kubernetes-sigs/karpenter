@@ -234,9 +234,9 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 		allowedDisruptions := nodePool.MustGetAllowedDisruptions(clk, numNodes[nodePool.Name], reason)
 		disruptionBudgetMapping[nodePool.Name] = lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
 
-		NodePoolAllowedDisruptions.With(map[string]string{
+		NodePoolAllowedDisruptions.Set(float64(allowedDisruptions), map[string]string{
 			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
-		}).Set(float64(allowedDisruptions))
+		})
 		if allowedDisruptions == 0 {
 			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(lo.ToPtr(nodePool), reason))
 		}

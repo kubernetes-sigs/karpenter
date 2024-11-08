@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -46,7 +47,8 @@ const (
 )
 
 var (
-	allocatable = prometheus.NewGaugeVec(
+	Allocatable = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
@@ -55,7 +57,8 @@ var (
 		},
 		nodeLabelNamesWithResourceType(),
 	)
-	totalPodRequests = prometheus.NewGaugeVec(
+	TotalPodRequests = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
@@ -64,7 +67,8 @@ var (
 		},
 		nodeLabelNamesWithResourceType(),
 	)
-	totalPodLimits = prometheus.NewGaugeVec(
+	TotalPodLimits = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
@@ -73,7 +77,8 @@ var (
 		},
 		nodeLabelNamesWithResourceType(),
 	)
-	totalDaemonRequests = prometheus.NewGaugeVec(
+	TotalDaemonRequests = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
@@ -82,7 +87,8 @@ var (
 		},
 		nodeLabelNamesWithResourceType(),
 	)
-	totalDaemonLimits = prometheus.NewGaugeVec(
+	TotalDaemonLimits = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
@@ -91,7 +97,8 @@ var (
 		},
 		nodeLabelNamesWithResourceType(),
 	)
-	systemOverhead = prometheus.NewGaugeVec(
+	SystemOverhead = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
@@ -100,7 +107,8 @@ var (
 		},
 		nodeLabelNamesWithResourceType(),
 	)
-	lifetimeGaugeVec = prometheus.NewGaugeVec(
+	Lifetime = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodeSubsystem,
@@ -109,7 +117,8 @@ var (
 		},
 		nodeLabelNames(),
 	)
-	clusterUtilizationGaugeVec = prometheus.NewGaugeVec(
+	ClusterUtilization = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: "cluster",
@@ -135,19 +144,6 @@ func nodeLabelNames() []string {
 		sets.New(lo.Values(wellKnownLabels)...).UnsortedList(),
 		nodeName,
 		nodePhase,
-	)
-}
-
-func init() {
-	crmetrics.Registry.MustRegister(
-		allocatable,
-		totalPodRequests,
-		totalPodLimits,
-		totalDaemonRequests,
-		totalDaemonLimits,
-		systemOverhead,
-		lifetimeGaugeVec,
-		clusterUtilizationGaugeVec,
 	)
 }
 
@@ -218,9 +214,9 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 			float64(utilizedResource.Value())/float64(allocatableResource.Value()))
 
 		res = append(res, &metrics.StoreMetric{
-			GaugeVec: clusterUtilizationGaugeVec,
-			Value:    utilizationPercentage,
-			Labels:   prometheus.Labels{resourceType: resourceNameToString(resourceName)},
+			GaugeMetric: ClusterUtilization,
+			Value:       utilizationPercentage,
+			Labels:      map[string]string{resourceType: resourceNameToString(resourceName)},
 		})
 	}
 
@@ -228,27 +224,27 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 }
 
 func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
-	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]corev1.ResourceList{
-		systemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
-		totalPodRequests:    n.PodRequests(),
-		totalPodLimits:      n.PodLimits(),
-		totalDaemonRequests: n.DaemonSetRequests(),
-		totalDaemonLimits:   n.DaemonSetLimits(),
-		allocatable:         n.Node.Status.Allocatable,
+	for gaugeMetric, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
+		SystemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
+		TotalPodRequests:    n.PodRequests(),
+		TotalPodLimits:      n.PodLimits(),
+		TotalDaemonRequests: n.DaemonSetRequests(),
+		TotalDaemonLimits:   n.DaemonSetLimits(),
+		Allocatable:         n.Node.Status.Allocatable,
 	} {
 		for resourceName, quantity := range resourceList {
 			res = append(res, &metrics.StoreMetric{
-				GaugeVec: gaugeVec,
-				Value:    lo.Ternary(resourceName == corev1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
-				Labels:   getNodeLabelsWithResourceType(n.Node, resourceNameToString(resourceName)),
+				GaugeMetric: gaugeMetric,
+				Value:       lo.Ternary(resourceName == corev1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
+				Labels:      getNodeLabelsWithResourceType(n.Node, resourceNameToString(resourceName)),
 			})
 		}
 	}
 	return append(res,
 		&metrics.StoreMetric{
-			GaugeVec: lifetimeGaugeVec,
-			Value:    time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
-			Labels:   getNodeLabels(n.Node),
+			GaugeMetric: Lifetime,
+			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
+			Labels:      getNodeLabels(n.Node),
 		})
 }
 
@@ -259,7 +255,7 @@ func getNodeLabelsWithResourceType(node *corev1.Node, resourceTypeName string) p
 }
 
 func getNodeLabels(node *corev1.Node) prometheus.Labels {
-	metricLabels := prometheus.Labels{}
+	metricLabels := map[string]string{}
 	metricLabels[nodeName] = node.Name
 	metricLabels[nodePhase] = string(node.Status.Phase)
 
