@@ -33,9 +33,9 @@ import (
 )
 
 const (
-	NodePoolDrifted           cloudprovider.DriftReason = "NodePoolDrifted"
-	RequirementsDrifted       cloudprovider.DriftReason = "RequirementsDrifted"
-	InstanceTypeNotFoundDrift cloudprovider.DriftReason = "InstanceTypeNotFound"
+	NodePoolDrifted      cloudprovider.DriftReason = "NodePoolDrifted"
+	RequirementsDrifted  cloudprovider.DriftReason = "RequirementsDrifted"
+	InstanceTypeNotFound cloudprovider.DriftReason = "InstanceTypeNotFound"
 )
 
 // Drift is a nodeclaim sub-controller that adds or removes status conditions on drifted nodeclaims
@@ -115,8 +115,10 @@ func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeC
 	it, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool {
 		return it.Name == nodeClaim.Labels[corev1.LabelInstanceTypeStable]
 	})
+	// Offerings should in most cases only have zone and capacity type. This likely shouldn't differ
+	// across cloud providers.
 	if !ok || !it.Offerings.HasCompatible(scheduling.NewLabelRequirements(nodeClaim.Labels)) {
-		return InstanceTypeNotFoundDrift
+		return InstanceTypeNotFound
 	}
 	return ""
 }

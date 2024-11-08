@@ -95,11 +95,11 @@ func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
 		return false
 	}
 	if _, ok := cn.Labels()[v1.CapacityTypeLabelKey]; !ok {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("node does not have label %q", v1.CapacityTypeLabelKey))...)
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("Node does not have label %q", v1.CapacityTypeLabelKey))...)
 		return false
 	}
 	if _, ok := cn.Labels()[corev1.LabelTopologyZone]; !ok {
-		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("node does not have label %q", corev1.LabelTopologyZone))...)
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("Node does not have label %q", corev1.LabelTopologyZone))...)
 		return false
 	}
 	if cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
