@@ -62,13 +62,4 @@ var (
 		},
 		[]string{},
 	)
-	PodAcknowledgedTimeSeconds = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.PodSubsystem,
-			Name:      "acknowledged_time_seconds",
-			Help:      "The time from pod creation until the Karpenter first considered it for scheduling",
-		},
-		[]string{PodName, PodNamespace},
-	)
 )

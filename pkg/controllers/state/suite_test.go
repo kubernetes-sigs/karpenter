@@ -100,32 +100,24 @@ var _ = AfterEach(func() {
 	cloudProvider.Reset()
 })
 
-var _ = Describe("Pod Metrics", func() {
-	It("should emit pod ack metrics only when the mapping doesn't exist", func() {
+var _ = Describe("Pod Ack", func() {
+	It("should only upate the pod ack mapping when the entry doesn't exist", func() {
 		pod := test.Pod()
 		ExpectApplied(ctx, env.Client, pod)
 		fakeClock.Step(1 * time.Hour)
-		cluster.ObservePodAcknowledgedForScheduling(pod)
-
-		m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
-		Expect(ok).To(BeTrue())
-		Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
-		val := lo.FromPtr(m.Gauge.Value)
-
-		// Check again to make sure the values are the same
+		cluster.SetPodAckTime(pod)
+		nn := types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
+		setTime := cluster.GetPodAckTime(nn)
 		fakeClock.Step(1 * time.Hour)
-		cluster.ObservePodAcknowledgedForScheduling(pod)
-		m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
-		Expect(ok).To(BeTrue())
-		Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", val))
+		cluster.SetPodAckTime(pod)
+		Expect(cluster.GetPodAckTime(nn)).To(Equal(setTime))
 
 		cluster.DeletePod(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
+		Expect(cluster.GetPodAckTime(nn).IsZero()).To(BeTrue())
 
 		fakeClock.Step(1 * time.Hour)
-		cluster.ObservePodAcknowledgedForScheduling(pod)
-		m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
-		Expect(ok).To(BeTrue())
-		Expect(lo.FromPtr(m.Gauge.Value)).ToNot(BeNumerically("==", val))
+		cluster.SetPodAckTime(pod)
+		Expect(cluster.GetPodAckTime(nn)).ToNot(Equal(setTime))
 	})
 })
 

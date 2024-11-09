@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
@@ -107,12 +108,30 @@ var (
 		},
 		[]string{podName, podNamespace},
 	)
+	PodScheduledDurationSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.PodSubsystem,
+			Name:      "scheduled_seconds",
+			Help:      "The time for a given pod that Karpenter first considered to it being scheduled and bound",
+		},
+		[]string{podName, podNamespace},
+	)
+	PodHistogramScheduledDurationSeconds = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.PodSubsystem,
+			Name:      "scheduled_duration_seconds",
+			Help:      "Histogram metric for how long it takes for pods to be scheduled and bound from when it's first considered",
+		},
+	)
 )
 
 // Controller for the resource
 type Controller struct {
 	kubeClient  client.Client
 	metricStore *metrics.Store
+	cluster     *state.Cluster
 
 	pendingPods     sets.Set[string]
 	unscheduledPods sets.Set[string]
@@ -134,12 +153,13 @@ func labelNames() []string {
 }
 
 // NewController constructs a podController instance
-func NewController(kubeClient client.Client) *Controller {
+func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
 	return &Controller{
 		kubeClient:      kubeClient,
 		metricStore:     metrics.NewStore(),
 		pendingPods:     sets.New[string](),
 		unscheduledPods: sets.New[string](),
+		cluster:         cluster,
 	}
 }
 
@@ -224,6 +244,13 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
+			if podAckTime := c.cluster.GetPodAckTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); !podAckTime.IsZero() {
+				PodScheduledDurationSeconds.With(map[string]string{
+					podName:      pod.Name,
+					podNamespace: pod.Namespace,
+				}).Set(time.Since(podAckTime).Seconds())
+				PodHistogramScheduledDurationSeconds.Observe(time.Since(podAckTime).Seconds())
+			}
 		}
 		c.unscheduledPods.Insert(key)
 		return

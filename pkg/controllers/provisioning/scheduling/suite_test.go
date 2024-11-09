@@ -3755,7 +3755,7 @@ var _ = Context("Scheduling", func() {
 				Expect(ok).To(BeFalse())
 			}
 		})
-		It("should emit the PodAcknowledgedTimeSeconds metric after a scheduling loop", func() {
+		It("should set the PodAcknowledgedTimeSeconds metric after a scheduling loop", func() {
 			nodePool = test.NodePool()
 			ExpectApplied(ctx, env.Client, nodePool)
 			podsUnschedulable := test.UnschedulablePods(test.PodOptions{}, 3)
@@ -3768,57 +3768,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).To(BeNil())
 
 			for _, pod := range podsUnschedulable {
-				m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
-				Expect(ok).To(BeTrue())
-				Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
-			}
-		})
-		It("should emit the PodAcknowledgedTimeSeconds metric after a scheduling loop", func() {
-			nodePool = test.NodePool()
-			ExpectApplied(ctx, env.Client, nodePool)
-			podsUnschedulable := test.UnschedulablePods(test.PodOptions{}, 3)
-			for _, p := range podsUnschedulable {
-				ExpectApplied(ctx, env.Client, p)
-			}
-			// step the clock so the metric isn't 0
-			fakeClock.Step(1 * time.Hour)
-			_, err := prov.Schedule(ctx)
-			Expect(err).To(BeNil())
-
-			for _, pod := range podsUnschedulable {
-				m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
-				Expect(ok).To(BeTrue())
-				Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
-			}
-		})
-		It("should only emit the PodAcknowledgedTimeSeconds metric once after a scheduling loop", func() {
-			nodePool = test.NodePool()
-			ExpectApplied(ctx, env.Client, nodePool)
-			podsUnschedulable := test.UnschedulablePods(test.PodOptions{}, 3)
-			for _, p := range podsUnschedulable {
-				ExpectApplied(ctx, env.Client, p)
-			}
-			// step the clock so the metric isn't 0
-			fakeClock.Step(1 * time.Hour)
-			_, err := prov.Schedule(ctx)
-			Expect(err).To(BeNil())
-
-			previousPodValues := map[types.NamespacedName]float64{}
-			for _, pod := range podsUnschedulable {
-				m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
-				Expect(ok).To(BeTrue())
-				Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
-				previousPodValues[types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}] = lo.FromPtr(m.Gauge.Value)
-			}
-			// Check again to make sure the values are the same
-			fakeClock.Step(1 * time.Hour)
-			_, err = prov.Schedule(ctx)
-			Expect(err).To(BeNil())
-
-			for _, pod := range podsUnschedulable {
-				m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
-				Expect(ok).To(BeTrue())
-				Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", previousPodValues[types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}]))
+				Expect(cluster.GetPodAckTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}).IsZero()).To(BeFalse())
 			}
 		})
 	})

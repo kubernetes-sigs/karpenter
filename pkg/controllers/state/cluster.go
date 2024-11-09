@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -54,11 +53,12 @@ type Cluster struct {
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
-	// podAcknowledgedMetricMap is used to deduplicate metrics on scheduling loops for when pods are first
-	// considered for scheduling. Without this, it's impossible to know how long Karpenter takes before
-	// actually acknowledging the pod and starting to schedule.
-	podAcknowledgedMetricMap map[types.NamespacedName]bool // pod namespaced name -> when it was first considered for scheduling
-	clusterStateMu           sync.RWMutex                  // Separate mutex as this is called in some places that mu is held
+	// podAckTimes keeps track of when Karpenter first tries to schedule the pod.
+	// This is orchestrated internally as opposed to writing to state in the cluster to reduce overall
+	// writes to the APIServer, but also since it only needs to be orchestrated cross-controller internally.
+	podAckTimes map[types.NamespacedName]time.Time // pod namespaced name -> when it was first considered for scheduling
+
+	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
 	// cluster with respect to consolidation. This increases when something has
 	// changed about the cluster that might make consolidation possible. By recording
@@ -78,7 +78,7 @@ func NewCluster(clk clock.Clock, client client.Client) *Cluster {
 		daemonSetPods:             sync.Map{},
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
-		podAcknowledgedMetricMap:  map[types.NamespacedName]bool{},
+		podAckTimes:               map[types.NamespacedName]time.Time{},
 	}
 }
 
@@ -313,22 +313,31 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	return err
 }
 
-func (c *Cluster) ObservePodAcknowledgedForScheduling(pods ...*corev1.Pod) {
+// SetPodAckTime marks the pod as validating for scheduling. This is used to construct metrics
+// when the pod actually schedules to when Karpenter actually thought it could schedule.
+// This allows users to understand how long it took for Karpenter to actually start scheduling
+// for this pod.
+func (c *Cluster) SetPodAckTime(pods ...*corev1.Pod) {
 	for _, pod := range pods {
 		// Check the pod to see if we've already emitted a metric for it, and just continue
 		nn := types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 		c.mu.RLock()
-		if c.podAcknowledgedMetricMap[nn] {
+		if _, ok := c.podAckTimes[nn]; ok {
 			c.mu.RUnlock()
 			continue
 		}
 		c.mu.RUnlock()
 
 		c.mu.Lock()
-		c.podAcknowledgedMetricMap[nn] = true
+		c.podAckTimes[nn] = c.clock.Now()
 		c.mu.Unlock()
-		PodAcknowledgedTimeSeconds.With(prometheus.Labels{PodName: pod.Name, PodNamespace: pod.Namespace}).Set(float64(c.clock.Since(pod.CreationTimestamp.Time).Seconds()))
 	}
+}
+
+func (c *Cluster) GetPodAckTime(podKey types.NamespacedName) time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.podAckTimes[podKey]
 }
 
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
@@ -337,7 +346,7 @@ func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
-	delete(c.podAcknowledgedMetricMap, podKey)
+	delete(c.podAckTimes, podKey)
 	c.MarkUnconsolidated()
 }
 

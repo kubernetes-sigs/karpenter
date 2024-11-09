@@ -25,9 +25,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -36,6 +38,8 @@ import (
 var podController *pod.Controller
 var ctx context.Context
 var env *test.Environment
+var cluster *state.Cluster
+var fakeClock *clock.FakeClock
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -45,7 +49,12 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment()
-	podController = pod.NewController(env.Client)
+	cluster = state.NewCluster(fakeClock, env.Client)
+	podController = pod.NewController(env.Client, cluster)
+})
+
+var _ = AfterEach(func() {
+	cluster.Reset()
 })
 
 var _ = AfterSuite(func() {
