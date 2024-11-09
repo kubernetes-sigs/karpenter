@@ -211,7 +211,7 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 		return pod.IsDrainable(p, clk)
 	})
 	// Filter out VolumeAttachments associated with non-drain-able Pods
-	// Match on Pod -> PersistentVolumeClaim -> PersistentVolume Name <- VolumeAttachment
+	// Match on Pod -> PersistentVolumeClaim -> PersistentVolume name <- VolumeAttachment
 	shouldFilterOutVolume := sets.New[string]()
 	for _, p := range unDrainablePods {
 		for _, v := range p.Spec.Volumes {

@@ -549,7 +549,7 @@ var _ = Describe("Requirements", func() {
 		},
 			Entry("Zone Label", "zone", `label "zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
 			Entry("Region Label", "region", `label "region" does not have known values (typo of "topology.kubernetes.io/region"?)`),
-			Entry("NodePool Name Label", "nodepool", `label "nodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
+			Entry("NodePool name Label", "nodepool", `label "nodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
 			Entry("Instance Type Label", "instance-type", `label "instance-type" does not have known values (typo of "node.kubernetes.io/instance-type"?)`),
 			Entry("Architecture Label", "arch", `label "arch" does not have known values (typo of "kubernetes.io/arch"?)`),
 			Entry("Capacity Type Label", "capacity-type", `label "capacity-type" does not have known values (typo of "karpenter.sh/capacity-type"?)`),

@@ -85,7 +85,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named(c.Name()).
+		Named(c.name()).
 		For(&v1.NodeClaim{}).
 		Watches(
 			&corev1.Node{},
@@ -103,12 +103,12 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
-func (c *Controller) Name() string {
+func (c *Controller) name() string {
 	return "nodeclaim.lifecycle"
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, c.Name())
+	ctx = injection.WithControllerName(ctx, c.name())
 
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return c.finalize(ctx, nodeClaim)
