@@ -108,7 +108,8 @@ var (
 		},
 		[]string{podName, podNamespace},
 	)
-	PodScheduledDurationSeconds = prometheus.NewGaugeVec(
+	PodScheduledDurationSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
@@ -117,13 +118,15 @@ var (
 		},
 		[]string{podName, podNamespace},
 	)
-	PodHistogramScheduledDurationSeconds = prometheus.NewHistogram(
+	PodHistogramScheduledDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "scheduled_duration_seconds",
 			Help:      "Histogram metric for how long it takes for pods to be scheduled and bound from when it's first considered",
 		},
+		nil,
 	)
 )
 
@@ -245,11 +248,11 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
 				podNamespace: pod.Namespace,
 			})
 			if podAckTime := c.cluster.GetPodAckTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); !podAckTime.IsZero() {
-				PodScheduledDurationSeconds.With(map[string]string{
+				PodScheduledDurationSeconds.Set(time.Since(podAckTime).Seconds(), map[string]string{
 					podName:      pod.Name,
 					podNamespace: pod.Namespace,
-				}).Set(time.Since(podAckTime).Seconds())
-				PodHistogramScheduledDurationSeconds.Observe(time.Since(podAckTime).Seconds())
+				})
+				PodHistogramScheduledDurationSeconds.Observe(time.Since(podAckTime).Seconds(), nil)
 			}
 		}
 		c.unscheduledPods.Insert(key)
