@@ -315,7 +315,7 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 }
 
 // MarkPodsSchedulable is called when Karpenter finds that the pod can schedule to a node (theoretical or not)
-// in the scheduling loop.
+// in the scheduling loop, keeping track of the time so it can be used for metrics later.
 func (c *Cluster) MarkPodsSchedulable(pods ...*corev1.Pod) {
 	now := c.clock.Now()
 	for _, pod := range pods {
