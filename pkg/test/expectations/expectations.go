@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
@@ -543,17 +544,17 @@ func FindMetricWithLabelValues(name string, labelValues map[string]string) (*pro
 	return nil, false
 }
 
-func ExpectMetricGaugeValue(collector prometheus.Collector, expectedValue float64, labels map[string]string) {
+func ExpectMetricGaugeValue(collector opmetrics.GaugeMetric, expectedValue float64, labels map[string]string) {
 	GinkgoHelper()
-	metricName := ExpectMetricName(collector)
+	metricName := ExpectMetricName(collector.(*opmetrics.PrometheusGauge))
 	metric, ok := FindMetricWithLabelValues(metricName, labels)
 	Expect(ok).To(BeTrue(), "Metric "+metricName+" should be available")
 	Expect(lo.FromPtr(metric.Gauge.Value)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")
 }
 
-func ExpectMetricCounterValue(collector prometheus.Collector, expectedValue float64, labels map[string]string) {
+func ExpectMetricCounterValue(collector opmetrics.CounterMetric, expectedValue float64, labels map[string]string) {
 	GinkgoHelper()
-	metricName := ExpectMetricName(collector)
+	metricName := ExpectMetricName(collector.(*opmetrics.PrometheusCounter))
 	metric, ok := FindMetricWithLabelValues(metricName, labels)
 	Expect(ok).To(BeTrue(), "Metric "+metricName+" should be available")
 	Expect(lo.FromPtr(metric.Counter.Value)).To(Equal(expectedValue), "Metric "+metricName+" should have the expected value")

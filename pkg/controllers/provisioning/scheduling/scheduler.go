@@ -23,7 +23,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -198,9 +197,7 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 }
 
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
-	defer metrics.Measure(SchedulingDurationSeconds.With(
-		prometheus.Labels{ControllerLabel: injection.GetControllerName(ctx)},
-	))()
+	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
@@ -208,17 +205,15 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
 	errors := map[*corev1.Pod]error{}
 	// Reset the metric for the controller, so we don't keep old ids around
-	UnschedulablePodsCount.DeletePartialMatch(prometheus.Labels{ControllerLabel: injection.GetControllerName(ctx)})
-	QueueDepth.DeletePartialMatch(prometheus.Labels{ControllerLabel: injection.GetControllerName(ctx)})
+	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
+	QueueDepth.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	q := NewQueue(pods...)
 
 	startTime := s.clock.Now()
 	lastLogTime := s.clock.Now()
 	batchSize := len(q.pods)
 	for {
-		QueueDepth.With(
-			prometheus.Labels{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)},
-		).Set(float64(len(q.pods)))
+		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
 
 		if s.clock.Since(lastLogTime) > time.Minute {
 			log.FromContext(ctx).WithValues("pods-scheduled", batchSize-len(q.pods), "pods-remaining", len(q.pods), "duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.id)).Info("computing pod scheduling...")

@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/singleton"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -195,11 +194,11 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		failedLaunches := lo.Filter(cmd.Replacements, func(r Replacement, _ int) bool {
 			return !r.Initialized
 		})
-		disruptionQueueFailuresTotal.With(map[string]string{
+		DisruptionQueueFailuresTotal.Add(float64(len(failedLaunches)), map[string]string{
 			decisionLabel:          cmd.Decision(),
 			metrics.ReasonLabel:    string(cmd.reason),
 			consolidationTypeLabel: cmd.consolidationType,
-		}).Add(float64(len(failedLaunches)))
+		})
 		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		// Log the error
 		log.FromContext(ctx).WithValues("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
@@ -265,11 +264,11 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		if err := q.kubeClient.Delete(ctx, candidate.NodeClaim); err != nil {
 			multiErr = multierr.Append(multiErr, client.IgnoreNotFound(err))
 		} else {
-			metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
+			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 				metrics.ReasonLabel:       string(cmd.reason),
 				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
 				metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
-			}).Inc()
+			})
 		}
 	}
 	// If there were any deletion failures, we should requeue.

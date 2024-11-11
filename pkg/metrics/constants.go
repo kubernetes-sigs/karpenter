@@ -19,7 +19,7 @@ package metrics
 import (
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 )
 
 const (
@@ -58,7 +58,7 @@ func SummaryObjectives() map[float64]float64 {
 
 // Measure returns a deferrable function that observes the duration between the
 // defer statement and the end of the function.
-func Measure(observer prometheus.Observer) func() {
+func Measure(observer opmetrics.ObservationMetric, labels map[string]string) func() {
 	start := time.Now()
-	return func() { observer.Observe(time.Since(start).Seconds()) }
+	return func() { observer.Observe(time.Since(start).Seconds(), labels) }
 }

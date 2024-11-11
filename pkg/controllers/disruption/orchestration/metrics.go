@@ -17,15 +17,12 @@ limitations under the License.
 package orchestration
 
 import (
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
-
-func init() {
-	crmetrics.Registry.MustRegister(disruptionQueueFailuresTotal)
-}
 
 const (
 	voluntaryDisruptionSubsystem = "voluntary_disruption"
@@ -34,7 +31,8 @@ const (
 )
 
 var (
-	disruptionQueueFailuresTotal = prometheus.NewCounterVec(
+	DisruptionQueueFailuresTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,

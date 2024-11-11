@@ -17,17 +17,15 @@ limitations under the License.
 package lifecycle
 
 import (
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
-func init() {
-	crmetrics.Registry.MustRegister(InstanceTerminationDurationSeconds, NodeClaimTerminationDurationSeconds)
-}
-
-var InstanceTerminationDurationSeconds = prometheus.NewHistogramVec(
+var InstanceTerminationDurationSeconds = opmetrics.NewPrometheusHistogram(
+	crmetrics.Registry,
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: metrics.NodeClaimSubsystem,
@@ -38,7 +36,8 @@ var InstanceTerminationDurationSeconds = prometheus.NewHistogramVec(
 	[]string{metrics.NodePoolLabel},
 )
 
-var NodeClaimTerminationDurationSeconds = prometheus.NewHistogramVec(
+var NodeClaimTerminationDurationSeconds = opmetrics.NewPrometheusHistogram(
+	crmetrics.Registry,
 	prometheus.HistogramOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: metrics.NodeClaimSubsystem,

@@ -85,6 +85,23 @@ func (c *consolidation) markConsolidated() {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
+	// We need the following to know what the price of the instance for price comparison. If one of these doesn't exist, we can't
+	// compute consolidation decisions for this candidate.
+	// 1. Instance Type
+	// 2. Capacity Type
+	// 3. Zone
+	if cn.instanceType == nil {
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("Instance Type %q not found", cn.Labels()[corev1.LabelInstanceTypeStable]))...)
+		return false
+	}
+	if _, ok := cn.Labels()[v1.CapacityTypeLabelKey]; !ok {
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("Node does not have label %q", v1.CapacityTypeLabelKey))...)
+		return false
+	}
+	if _, ok := cn.Labels()[corev1.LabelTopologyZone]; !ok {
+		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("Node does not have label %q", corev1.LabelTopologyZone))...)
+		return false
+	}
 	if cn.nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
 		c.recorder.Publish(disruptionevents.Unconsolidatable(cn.Node, cn.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", cn.nodePool.Name))...)
 		return false

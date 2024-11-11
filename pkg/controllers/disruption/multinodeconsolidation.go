@@ -123,7 +123,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for min <= max {
 		if m.clock.Now().After(timeout) {
-			ConsolidationTimeoutsTotal.WithLabelValues(m.ConsolidationType()).Inc()
+			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
 			if lastSavedCommand.candidates == nil {
 				log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
 			} else {

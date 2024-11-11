@@ -111,7 +111,7 @@ var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
 	cluster.Reset()
 	scheduling.QueueDepth.Reset()
-	scheduling.SchedulingDurationSeconds.Reset()
+	scheduling.DurationSeconds.Reset()
 	scheduling.UnschedulablePodsCount.Reset()
 })
 

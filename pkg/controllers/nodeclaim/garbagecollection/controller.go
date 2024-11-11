@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/singleton"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -105,11 +104,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			"provider-id", nodeClaims[i].Status.ProviderID,
 			"nodepool", nodeClaims[i].Labels[v1.NodePoolLabelKey],
 		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
-		metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
+		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 			metrics.ReasonLabel:       "garbage_collected",
 			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: nodeClaims[i].Labels[v1.CapacityTypeLabelKey],
-		}).Inc()
+		})
 	})
 	if err = multierr.Combine(errs...); err != nil {
 		return reconcile.Result{}, err

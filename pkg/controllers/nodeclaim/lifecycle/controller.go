@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/patrickmn/go-cache"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	"golang.org/x/time/rate"
@@ -210,9 +209,9 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		if !isInstanceTerminated {
 			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 		}
-		InstanceTerminationDurationSeconds.With(map[string]string{
+		InstanceTerminationDurationSeconds.Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).LastTransitionTime.Time).Seconds(), map[string]string{
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-		}).Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).LastTransitionTime.Time).Seconds())
+		})
 	}
 	stored := nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
 	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
@@ -228,13 +227,13 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}
 		log.FromContext(ctx).Info("deleted nodeclaim")
-		NodeClaimTerminationDurationSeconds.With(map[string]string{
+		NodeClaimTerminationDurationSeconds.Observe(time.Since(stored.DeletionTimestamp.Time).Seconds(), map[string]string{
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
-		}).Observe(time.Since(stored.DeletionTimestamp.Time).Seconds())
-		metrics.NodeClaimsTerminatedTotal.With(prometheus.Labels{
+		})
+		metrics.NodeClaimsTerminatedTotal.Inc(map[string]string{
 			metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-		}).Inc()
+		})
 	}
 	return reconcile.Result{}, nil
 

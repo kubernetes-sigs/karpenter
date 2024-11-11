@@ -87,17 +87,17 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	defer func() {
 		if synced {
 			c.unsyncedStartTime = time.Time{}
-			ClusterStateUnsyncedTimeSeconds.With(map[string]string{}).Set(0)
+			ClusterStateUnsyncedTimeSeconds.Set(0, nil)
 		} else {
 			if c.unsyncedStartTime.IsZero() {
 				c.unsyncedStartTime = c.clock.Now()
 			}
-			ClusterStateUnsyncedTimeSeconds.With(map[string]string{}).Set(c.clock.Since(c.unsyncedStartTime).Seconds())
+			ClusterStateUnsyncedTimeSeconds.Set(c.clock.Since(c.unsyncedStartTime).Seconds(), nil)
 		}
 	}()
 	// Set the metric to whatever the result of the Synced() call is
 	defer func() {
-		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0))
+		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0), nil)
 	}()
 	nodeClaimList := &v1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
@@ -247,7 +247,7 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1.NodeClaim) {
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
 	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
-	ClusterStateNodesCount.Set(float64(len(c.nodes)))
+	ClusterStateNodesCount.Set(float64(len(c.nodes)), nil)
 }
 
 func (c *Cluster) DeleteNodeClaim(name string) {
@@ -255,7 +255,7 @@ func (c *Cluster) DeleteNodeClaim(name string) {
 	defer c.mu.Unlock()
 
 	c.cleanupNodeClaim(name)
-	ClusterStateNodesCount.Set(float64(len(c.nodes)))
+	ClusterStateNodesCount.Set(float64(len(c.nodes)), nil)
 }
 
 func (c *Cluster) UpdateNode(ctx context.Context, node *corev1.Node) error {
@@ -282,7 +282,7 @@ func (c *Cluster) UpdateNode(ctx context.Context, node *corev1.Node) error {
 	}
 	c.nodes[node.Spec.ProviderID] = n
 	c.nodeNameToProviderID[node.Name] = node.Spec.ProviderID
-	ClusterStateNodesCount.Set(float64(len(c.nodes)))
+	ClusterStateNodesCount.Set(float64(len(c.nodes)), nil)
 	return nil
 }
 
@@ -290,7 +290,7 @@ func (c *Cluster) DeleteNode(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cleanupNode(name)
-	ClusterStateNodesCount.Set(float64(len(c.nodes)))
+	ClusterStateNodesCount.Set(float64(len(c.nodes)), nil)
 }
 
 func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
