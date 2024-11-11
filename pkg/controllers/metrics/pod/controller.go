@@ -126,7 +126,7 @@ var (
 			Name:      "scheduled_duration_seconds",
 			Help:      "The time it takes for pods to be bound from when it's first considered for scheduling in memory",
 		},
-		nil,
+		[]string{},
 	)
 )
 

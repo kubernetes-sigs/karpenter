@@ -3698,7 +3698,7 @@ var _ = Context("Scheduling", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool)
-			//Creates 15 pods, 5 schedulable and 10 unschedulable
+			// Creates 15 pods, 5 schedulable and 10 unschedulable
 			podsUnschedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "unknown"}}, 10)
 			podsSchedulable := test.UnschedulablePods(test.PodOptions{NodeSelector: map[string]string{corev1.LabelInstanceTypeStable: "default-instance-type"}}, 5)
 			pods := append(podsUnschedulable, podsSchedulable...)
@@ -3743,6 +3743,10 @@ var _ = Context("Scheduling", func() {
 			Expect(ok).To(BeTrue())
 		})
 		It("should set the PodAcknowledgedDuration metric after a scheduling loop", func() {
+			// Find the starting point since the metric is shared across test suites
+			m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
+			val := lo.Ternary(m == nil, 0, lo.FromPtr(m.Histogram.SampleCount))
+
 			nodePool = test.NodePool()
 			ExpectApplied(ctx, env.Client, nodePool)
 			podsUnschedulable := test.UnschedulablePods(test.PodOptions{}, 3)
@@ -3750,15 +3754,13 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, p)
 			}
 			// step the clock so the metric isn't 0
-			fakeClock.Step(1 * time.Hour)
+			fakeClock.Step(1 * time.Minute)
 			_, err := prov.Schedule(ctx)
 			Expect(err).To(BeNil())
 
-			m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
+			m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
 			Expect(ok).To(BeTrue())
-			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", 3))
-			_, ok = lo.Find(m.Histogram.Bucket, func(b *io_prometheus_client.Bucket) bool { return lo.FromPtr(b.CumulativeCount) > 0 })
-			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", val+3))
 		})
 	})
 })

@@ -69,6 +69,6 @@ var (
 			Name:      "acknowledged_duration_seconds",
 			Help:      "The time it takes for Karpenter to consider a pod for scheduling after it's been seen",
 		},
-		nil,
+		[]string{},
 	)
 )
