@@ -3744,7 +3744,7 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should set the PodAcknowledgedDuration metric after a scheduling loop", func() {
 			// Find the starting point since the metric is shared across test suites
-			m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
+			m, _ := FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
 			val := uint64(0)
 			if m != nil {
 				val = lo.FromPtr(m.Histogram.SampleCount)
