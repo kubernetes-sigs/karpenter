@@ -17,15 +17,12 @@ limitations under the License.
 package scheduling
 
 import (
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
-
-func init() {
-	crmetrics.Registry.MustRegister(SchedulingDurationSeconds, QueueDepth, IgnoredPodCount, UnschedulablePodsCount)
-}
 
 const (
 	ControllerLabel    = "controller"
@@ -34,7 +31,8 @@ const (
 )
 
 var (
-	SchedulingDurationSeconds = prometheus.NewHistogramVec(
+	DurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: schedulerSubsystem,
@@ -46,7 +44,8 @@ var (
 			ControllerLabel,
 		},
 	)
-	QueueDepth = prometheus.NewGaugeVec(
+	QueueDepth = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: schedulerSubsystem,
@@ -58,14 +57,17 @@ var (
 			schedulingIDLabel,
 		},
 	)
-	IgnoredPodCount = prometheus.NewGauge(
+	IgnoredPodCount = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Name:      "ignored_pod_count",
 			Help:      "Number of pods ignored during scheduling by Karpenter",
 		},
+		[]string{},
 	)
-	UnschedulablePodsCount = prometheus.NewGaugeVec(
+	UnschedulablePodsCount = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: schedulerSubsystem,

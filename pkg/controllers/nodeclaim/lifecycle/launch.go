@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/patrickmn/go-cache"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -81,22 +80,22 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
 			}
-			metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
+			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 				metrics.ReasonLabel:       "insufficient_capacity",
 				metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-			}).Inc()
+			})
 			return nil, nil
 		case cloudprovider.IsNodeClassNotReadyError(err):
 			log.FromContext(ctx).Error(err, "failed launching nodeclaim")
 			if err = l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 				return nil, client.IgnoreNotFound(err)
 			}
-			metrics.NodeClaimsDisruptedTotal.With(prometheus.Labels{
+			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 				metrics.ReasonLabel:       "nodeclass_not_ready",
 				metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-			}).Inc()
+			})
 			return nil, nil
 		default:
 			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))

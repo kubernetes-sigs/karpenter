@@ -93,7 +93,7 @@ var _ = Describe("Termination", func() {
 
 		// Reset the metrics collectors
 		metrics.NodesTerminatedTotal.Reset()
-		termination.TerminationDurationSeconds.Reset()
+		termination.DurationSeconds.Reset()
 		termination.NodeLifetimeDurationSeconds.Reset()
 		termination.NodesDrainedTotal.Reset()
 	})

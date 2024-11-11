@@ -1676,7 +1676,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(err.Error()).To(Equal(fmt.Sprintf("nodepool %q can't be resolved for state node", nodePool.Name)))
 		Expect(recorder.DetectedEvent(fmt.Sprintf("Cannot disrupt Node: NodePool %q not found", nodePool.Name))).To(BeTrue())
 	})
-	It("should not consider candidates that do not have the karpenter.sh/capacity-type label", func() {
+	It("should consider candidates that do not have the karpenter.sh/capacity-type label", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -1691,11 +1691,9 @@ var _ = Describe("Candidate Filtering", func() {
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal(`state node doesn't have required label "karpenter.sh/capacity-type"`))
-		Expect(recorder.DetectedEvent(`Cannot disrupt Node: state node doesn't have required label "karpenter.sh/capacity-type"`)).To(BeTrue())
+		Expect(err).ToNot(HaveOccurred())
 	})
-	It("should not consider candidates that do not have the topology.kubernetes.io/zone label", func() {
+	It("should consider candidates that do not have the topology.kubernetes.io/zone label", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -1710,11 +1708,9 @@ var _ = Describe("Candidate Filtering", func() {
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal(`state node doesn't have required label "topology.kubernetes.io/zone"`))
-		Expect(recorder.DetectedEvent(`Cannot disrupt Node: state node doesn't have required label "topology.kubernetes.io/zone"`)).To(BeTrue())
+		Expect(err).ToNot(HaveOccurred())
 	})
-	It("should not consider candidates that do not have the node.kubernetes.io/instance-type label", func() {
+	It("should consider candidates that do not have the node.kubernetes.io/instance-type label", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -1729,11 +1725,9 @@ var _ = Describe("Candidate Filtering", func() {
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal(`state node doesn't have required label "node.kubernetes.io/instance-type"`))
-		Expect(recorder.DetectedEvent(`Cannot disrupt Node: state node doesn't have required label "node.kubernetes.io/instance-type"`)).To(BeTrue())
+		Expect(err).ToNot((HaveOccurred()))
 	})
-	It("should not consider candidates that have an instance type that cannot be resolved", func() {
+	It("should consider candidates that have an instance type that cannot be resolved", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -1752,9 +1746,7 @@ var _ = Describe("Candidate Filtering", func() {
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(Equal(fmt.Sprintf("instance type %q can't be resolved", mostExpensiveInstance.Name)))
-		Expect(recorder.DetectedEvent(fmt.Sprintf("Cannot disrupt Node: Instance Type %q not found", mostExpensiveInstance.Name))).To(BeTrue())
+		Expect(err).ToNot(HaveOccurred())
 	})
 	It("should not consider candidates that are actively being processed in the queue", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{

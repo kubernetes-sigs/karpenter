@@ -19,6 +19,7 @@ package metrics_test
 import (
 	"testing"
 
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,7 +31,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-var testGauge1, testGauge2 *prometheus.GaugeVec
+var testGauge1, testGauge2 opmetrics.GaugeMetric
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -38,9 +39,8 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	testGauge1 = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "test_gauge_1"}, []string{"label_1", "label_2"})
-	testGauge2 = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "test_gauge_2"}, []string{"label_1", "label_2"})
-	crmetrics.Registry.MustRegister(testGauge1, testGauge2)
+	testGauge1 = opmetrics.NewPrometheusGauge(crmetrics.Registry, prometheus.GaugeOpts{Name: "test_gauge_1"}, []string{"label_1", "label_2"})
+	testGauge2 = opmetrics.NewPrometheusGauge(crmetrics.Registry, prometheus.GaugeOpts{Name: "test_gauge_2"}, []string{"label_1", "label_2"})
 })
 
 var _ = Describe("Store", func() {
@@ -55,17 +55,17 @@ var _ = Describe("Store", func() {
 		It("should create metrics when calling update", func() {
 			storeMetrics := []*metrics.StoreMetric{
 				{
-					GaugeVec: testGauge1,
-					Value:    3.65,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge1,
+					Value:       3.65,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
 				},
 				{
-					GaugeVec: testGauge2,
-					Value:    5.3,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge2,
+					Value:       5.3,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
@@ -86,17 +86,17 @@ var _ = Describe("Store", func() {
 		It("should delete metrics when calling update", func() {
 			storeMetrics := []*metrics.StoreMetric{
 				{
-					GaugeVec: testGauge1,
-					Value:    3.65,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge1,
+					Value:       3.65,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
 				},
 				{
-					GaugeVec: testGauge2,
-					Value:    5.3,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge2,
+					Value:       5.3,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
@@ -106,17 +106,17 @@ var _ = Describe("Store", func() {
 
 			newStoreMetrics := []*metrics.StoreMetric{
 				{
-					GaugeVec: testGauge1,
-					Value:    3.65,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge1,
+					Value:       3.65,
+					Labels: map[string]string{
 						"label_1": "test_2",
 						"label_2": "test_2",
 					},
 				},
 				{
-					GaugeVec: testGauge2,
-					Value:    5.3,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge2,
+					Value:       5.3,
+					Labels: map[string]string{
 						"label_1": "test_2",
 						"label_2": "test_2",
 					},
@@ -141,17 +141,17 @@ var _ = Describe("Store", func() {
 		It("should consider metrics equal with the same labels", func() {
 			storeMetrics := []*metrics.StoreMetric{
 				{
-					GaugeVec: testGauge1,
-					Value:    3.65,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge1,
+					Value:       3.65,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
 				},
 				{
-					GaugeVec: testGauge2,
-					Value:    5.3,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge2,
+					Value:       5.3,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
@@ -171,17 +171,17 @@ var _ = Describe("Store", func() {
 			// Flip around the labels in the map
 			newStoreMetrics := []*metrics.StoreMetric{
 				{
-					GaugeVec: testGauge1,
-					Value:    4.5,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge1,
+					Value:       4.5,
+					Labels: map[string]string{
 						"label_2": "test",
 						"label_1": "test",
 					},
 				},
 				{
-					GaugeVec: testGauge2,
-					Value:    6.9,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge2,
+					Value:       6.9,
+					Labels: map[string]string{
 						"label_2": "test",
 						"label_1": "test",
 					},
@@ -203,17 +203,17 @@ var _ = Describe("Store", func() {
 		It("should delete metrics by key", func() {
 			storeMetrics := []*metrics.StoreMetric{
 				{
-					GaugeVec: testGauge1,
-					Value:    3.65,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge1,
+					Value:       3.65,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
 				},
 				{
-					GaugeVec: testGauge2,
-					Value:    5.3,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge2,
+					Value:       5.3,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
@@ -243,17 +243,17 @@ var _ = Describe("Store", func() {
 		It("should replace all metrics", func() {
 			storeMetrics := []*metrics.StoreMetric{
 				{
-					GaugeVec: testGauge1,
-					Value:    3.65,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge1,
+					Value:       3.65,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
 				},
 				{
-					GaugeVec: testGauge2,
-					Value:    5.3,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge2,
+					Value:       5.3,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
@@ -273,17 +273,17 @@ var _ = Describe("Store", func() {
 			newStore := map[string][]*metrics.StoreMetric{
 				key2.String(): {
 					{
-						GaugeVec: testGauge1,
-						Value:    3.65,
-						Labels: prometheus.Labels{
+						GaugeMetric: testGauge1,
+						Value:       3.65,
+						Labels: map[string]string{
 							"label_1": "test2",
 							"label_2": "test2",
 						},
 					},
 					{
-						GaugeVec: testGauge2,
-						Value:    4.3,
-						Labels: prometheus.Labels{
+						GaugeMetric: testGauge2,
+						Value:       4.3,
+						Labels: map[string]string{
 							"label_1": "test2",
 							"label_2": "test2",
 						},
@@ -291,17 +291,17 @@ var _ = Describe("Store", func() {
 				},
 				key3.String(): {
 					{
-						GaugeVec: testGauge1,
-						Value:    2.1,
-						Labels: prometheus.Labels{
+						GaugeMetric: testGauge1,
+						Value:       2.1,
+						Labels: map[string]string{
 							"label_1": "test3",
 							"label_2": "test3",
 						},
 					},
 					{
-						GaugeVec: testGauge2,
-						Value:    8.9,
-						Labels: prometheus.Labels{
+						GaugeMetric: testGauge2,
+						Value:       8.9,
+						Labels: map[string]string{
 							"label_1": "test3",
 							"label_2": "test3",
 						},
@@ -331,17 +331,17 @@ var _ = Describe("Store", func() {
 		It("should replace with an empty store", func() {
 			storeMetrics := []*metrics.StoreMetric{
 				{
-					GaugeVec: testGauge1,
-					Value:    3.65,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge1,
+					Value:       3.65,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},
 				},
 				{
-					GaugeVec: testGauge2,
-					Value:    5.3,
-					Labels: prometheus.Labels{
+					GaugeMetric: testGauge2,
+					Value:       5.3,
+					Labels: map[string]string{
 						"label_1": "test",
 						"label_2": "test",
 					},

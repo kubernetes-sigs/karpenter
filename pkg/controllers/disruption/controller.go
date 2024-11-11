@@ -160,17 +160,17 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
-	defer metrics.Measure(EvaluationDurationSeconds.With(map[string]string{
+	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
 		consolidationTypeLabel: disruption.ConsolidationType(),
-	}))()
+	})()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
 	if err != nil {
 		return false, fmt.Errorf("determining candidates, %w", err)
 	}
-	EligibleNodes.With(map[string]string{
+	EligibleNodes.Set(float64(len(candidates)), map[string]string{
 		metrics.ReasonLabel: strings.ToLower(string(disruption.Reason())),
-	}).Set(float64(len(candidates)))
+	})
 
 	// If there are no candidates, move to the next disruption
 	if len(candidates) == 0 {
@@ -244,11 +244,11 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	}
 
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
-	DecisionsPerformedTotal.With(map[string]string{
+	DecisionsPerformedTotal.Inc(map[string]string{
 		decisionLabel:          string(cmd.Decision()),
 		metrics.ReasonLabel:    strings.ToLower(string(m.Reason())),
 		consolidationTypeLabel: m.ConsolidationType(),
-	}).Inc()
+	})
 	return nil
 }
 

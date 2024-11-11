@@ -67,7 +67,8 @@ const (
 )
 
 var (
-	BuildInfo = prometheus.NewGaugeVec(
+	BuildInfo = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Name:      "build_info",
@@ -82,10 +83,14 @@ var (
 var Version = "unspecified"
 
 func init() {
-	crmetrics.Registry.MustRegister(BuildInfo)
 	opmetrics.RegisterClientMetrics(crmetrics.Registry)
 
-	BuildInfo.WithLabelValues(Version, runtime.Version(), runtime.GOARCH, env.GetRevision()).Set(1)
+	BuildInfo.Set(1, map[string]string{
+		"version":   Version,
+		"goversion": runtime.Version(),
+		"goarch":    runtime.GOARCH,
+		"commit":    env.GetRevision(),
+	})
 }
 
 type Operator struct {
@@ -130,7 +135,7 @@ func NewOperator() (context.Context, *Operator) {
 	mgrOpts := ctrl.Options{
 		Logger:                        logging.IgnoreDebugEvents(logger),
 		LeaderElection:                !options.FromContext(ctx).DisableLeaderElection,
-		LeaderElectionID:              "karpenter-leader-election",
+		LeaderElectionID:              options.FromContext(ctx).LeaderElectionName,
 		LeaderElectionNamespace:       options.FromContext(ctx).LeaderElectionNamespace,
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionReleaseOnCancel: true,

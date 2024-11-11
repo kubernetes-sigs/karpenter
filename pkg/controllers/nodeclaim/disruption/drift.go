@@ -25,14 +25,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	corev1 "k8s.io/api/core/v1"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 const (
-	NodePoolDrifted     cloudprovider.DriftReason = "NodePoolDrifted"
-	RequirementsDrifted cloudprovider.DriftReason = "RequirementsDrifted"
+	NodePoolDrifted      cloudprovider.DriftReason = "NodePoolDrifted"
+	RequirementsDrifted  cloudprovider.DriftReason = "RequirementsDrifted"
+	InstanceTypeNotFound cloudprovider.DriftReason = "InstanceTypeNotFound"
 )
 
 // Drift is a nodeclaim sub-controller that adds or removes status conditions on drifted nodeclaims
@@ -81,11 +84,43 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	}); reason != "" {
 		return reason, nil
 	}
+	// Include instance type checking separate from the other two to reduce the amount of times we grab the instance types.
+	its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
+	if err != nil {
+		return "", err
+	}
+	if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
+		return reason, nil
+	}
+	// Then check if it's drifted from the cloud provider side.
 	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
 	if err != nil {
 		return "", err
 	}
 	return driftedReason, nil
+}
+
+// InstanceType Offerings should return the full list of allowed instance types, even if they're temporarily
+// unavailable. If we can't find the instance type that the NodeClaim is running with, or if we don't find
+// a compatible offering for that given instance type (zone and capacity type being the only added in requirements),
+// then we consider it drifted, since we don't have the data for this instance type anymore.
+// Note this is different than RequirementDrift, where we only compare if the NodePool is compatible with the NodeClaim
+// based on the requirements constructed from the NodeClaim Labels.
+// InstanceTypeNotFoundDrift is computed by looking directly at the list of instance types and comparing the NodeClaim
+// to the instance types and its offerings.
+// 1. The NodeClaim doesn't have the instance type label
+// 2. The NodeClaim has an instance type that doesn't exist in the cloudprovider instance types
+// 3. There are no offerings that match the requirements
+func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeClaim) cloudprovider.DriftReason {
+	it, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool {
+		return it.Name == nodeClaim.Labels[corev1.LabelInstanceTypeStable]
+	})
+	// Offerings should in most cases only have zone and capacity type. This likely shouldn't differ
+	// across cloud providers.
+	if !ok || !it.Offerings.HasCompatible(scheduling.NewLabelRequirements(nodeClaim.Labels)) {
+		return InstanceTypeNotFound
+	}
+	return ""
 }
 
 // Eligible fields for drift are described in the docs

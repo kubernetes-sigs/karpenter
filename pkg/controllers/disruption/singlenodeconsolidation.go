@@ -68,7 +68,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			continue
 		}
 		if s.clock.Now().After(timeout) {
-			ConsolidationTimeoutsTotal.WithLabelValues(s.ConsolidationType()).Inc()
+			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: s.ConsolidationType()})
 			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
 			return Command{}, scheduling.Results{}, nil
 		}

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -42,7 +43,8 @@ const (
 )
 
 var (
-	limit = prometheus.NewGaugeVec(
+	Limit = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodePoolSubsystem,
@@ -54,7 +56,8 @@ var (
 			nodePoolNameLabel,
 		},
 	)
-	usage = prometheus.NewGaugeVec(
+	Usage = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.NodePoolSubsystem,
@@ -67,10 +70,6 @@ var (
 		},
 	)
 )
-
-func init() {
-	crmetrics.Registry.MustRegister(limit, usage)
-}
 
 type Controller struct {
 	kubeClient  client.Client
@@ -102,15 +101,15 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 }
 
 func buildMetrics(nodePool *v1.NodePool) (res []*metrics.StoreMetric) {
-	for gaugeVec, resourceList := range map[*prometheus.GaugeVec]corev1.ResourceList{
-		usage: nodePool.Status.Resources,
-		limit: getLimits(nodePool),
+	for gaugeVec, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
+		Usage: nodePool.Status.Resources,
+		Limit: getLimits(nodePool),
 	} {
 		for k, v := range resourceList {
 			res = append(res, &metrics.StoreMetric{
-				GaugeVec: gaugeVec,
-				Labels:   makeLabels(nodePool, strings.ReplaceAll(strings.ToLower(string(k)), "-", "_")),
-				Value:    lo.Ternary(k == corev1.ResourceCPU, float64(v.MilliValue())/float64(1000), float64(v.Value())),
+				GaugeMetric: gaugeVec,
+				Labels:      makeLabels(nodePool, strings.ReplaceAll(strings.ToLower(string(k)), "-", "_")),
+				Value:       lo.Ternary(k == corev1.ResourceCPU, float64(v.MilliValue())/float64(1000), float64(v.Value())),
 			})
 		}
 	}
@@ -125,7 +124,7 @@ func getLimits(nodePool *v1.NodePool) corev1.ResourceList {
 }
 
 func makeLabels(nodePool *v1.NodePool, resourceTypeName string) prometheus.Labels {
-	return prometheus.Labels{
+	return map[string]string{
 		resourceTypeLabel: resourceTypeName,
 		nodePoolNameLabel: nodePool.Name,
 	}
