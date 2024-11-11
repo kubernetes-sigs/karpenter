@@ -187,8 +187,8 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			})
 			// Delete the unscheduled metric since the pod is deleted
 			PodUnscheduledDurationSeconds.Delete(map[string]string{
-				podName:      pod.Name,
-				podNamespace: pod.Namespace,
+				podName:      req.Name,
+				podNamespace: req.Namespace,
 			})
 			c.metricStore.Delete(req.NamespacedName.String())
 		}

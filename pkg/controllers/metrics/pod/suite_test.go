@@ -255,9 +255,11 @@ var _ = Describe("Pod Metrics", func() {
 		p := test.Pod()
 		p.Status.Phase = corev1.PodPending
 		ExpectApplied(ctx, env.Client, p)
-		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
 		fakeClock.Step(1 * time.Hour)
 		cluster.MarkPodsSchedulable(p)
+
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
 		_, found := FindMetricWithLabelValues("karpenter_pods_current_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
