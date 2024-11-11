@@ -3761,7 +3761,7 @@ var _ = Context("Scheduling", func() {
 			_, err := prov.Schedule(ctx)
 			Expect(err).To(BeNil())
 
-			m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
+			m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", val+3))
 		})
