@@ -26,8 +26,6 @@ import (
 
 const (
 	stateSubsystem = "cluster_state"
-	PodName        = "name"
-	PodNamespace   = "namespace"
 )
 
 var (
