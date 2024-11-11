@@ -31,7 +31,6 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
@@ -101,23 +100,42 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("Pod Ack", func() {
-	It("should only upate the pod ack mapping when the entry doesn't exist", func() {
+	It("should emit karpenter_pods_acknowledged_duration_seconds", func() {
+		fakeClock.Step(1 * time.Hour)
 		pod := test.Pod()
 		ExpectApplied(ctx, env.Client, pod)
+		cluster.AckPods(pod)
 		fakeClock.Step(1 * time.Hour)
-		cluster.SetPodAckTime(pod)
-		nn := types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-		setTime := cluster.GetPodAckTime(nn)
-		fakeClock.Step(1 * time.Hour)
-		cluster.SetPodAckTime(pod)
-		Expect(cluster.GetPodAckTime(nn)).To(Equal(setTime))
 
-		cluster.DeletePod(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
-		Expect(cluster.GetPodAckTime(nn).IsZero()).To(BeTrue())
+		m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
+		Expect(ok).To(BeTrue())
+		Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", 1))
 
+		cluster.AckPods(pod)
 		fakeClock.Step(1 * time.Hour)
-		cluster.SetPodAckTime(pod)
-		Expect(cluster.GetPodAckTime(nn)).ToNot(Equal(setTime))
+
+		// Expect it to only emit once
+		m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
+		Expect(ok).To(BeTrue())
+		Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", 1))
+	})
+	It("should only mark pods as schedulable once", func() {
+		pod := test.Pod()
+		ExpectApplied(ctx, env.Client, pod)
+		nn := client.ObjectKeyFromObject(pod)
+
+		setTime, set := cluster.PodSchedulableTime(nn)
+		Expect(set).To(BeFalse())
+		Expect(setTime.IsZero()).To(BeTrue())
+
+		cluster.MarkPodsSchedulable(pod)
+		setTime, set = cluster.PodSchedulableTime(nn)
+		Expect(set).To(BeTrue())
+		Expect(setTime.IsZero()).To(BeFalse())
+
+		newTime, set := cluster.PodSchedulableTime(nn)
+		Expect(set).To(BeTrue())
+		Expect(newTime.Compare(setTime)).To(Equal(0))
 	})
 })
 

@@ -36,7 +36,6 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	cloudproviderapi "k8s.io/cloud-provider/api"
@@ -3743,19 +3742,7 @@ var _ = Context("Scheduling", func() {
 			_, ok = lo.Find(m.Histogram.Bucket, func(b *io_prometheus_client.Bucket) bool { return lo.FromPtr(b.CumulativeCount) > 0 })
 			Expect(ok).To(BeTrue())
 		})
-		It("shouldn't emit the PodAcknowledgedTimeSeconds metric after a scheduling loop if there's no NodePools", func() {
-			podsUnschedulable := test.UnschedulablePods(test.PodOptions{}, 3)
-			for _, p := range podsUnschedulable {
-				ExpectApplied(ctx, env.Client, p)
-			}
-			_, err := prov.Schedule(ctx)
-			Expect(err).To(BeNil())
-			for _, pod := range podsUnschedulable {
-				_, ok := FindMetricWithLabelValues("karpenter_scheduler_pod_acknowledged_time_seconds", map[string]string{"name": pod.Name, "namespace": pod.Namespace})
-				Expect(ok).To(BeFalse())
-			}
-		})
-		It("should set the PodAcknowledgedTimeSeconds metric after a scheduling loop", func() {
+		It("should set the PodAcknowledgedDuration metric after a scheduling loop", func() {
 			nodePool = test.NodePool()
 			ExpectApplied(ctx, env.Client, nodePool)
 			podsUnschedulable := test.UnschedulablePods(test.PodOptions{}, 3)
@@ -3767,9 +3754,11 @@ var _ = Context("Scheduling", func() {
 			_, err := prov.Schedule(ctx)
 			Expect(err).To(BeNil())
 
-			for _, pod := range podsUnschedulable {
-				Expect(cluster.GetPodAckTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}).IsZero()).To(BeFalse())
-			}
+			m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
+			Expect(ok).To(BeTrue())
+			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", 3))
+			_, ok = lo.Find(m.Histogram.Bucket, func(b *io_prometheus_client.Bucket) bool { return lo.FromPtr(b.CumulativeCount) > 0 })
+			Expect(ok).To(BeTrue())
 		})
 	})
 })

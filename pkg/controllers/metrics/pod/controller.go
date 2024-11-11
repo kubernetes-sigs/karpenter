@@ -108,23 +108,23 @@ var (
 		},
 		[]string{podName, podNamespace},
 	)
-	PodScheduledDurationSeconds = opmetrics.NewPrometheusGauge(
+	PodUnscheduledDurationSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
-			Name:      "scheduled_seconds",
-			Help:      "The time for a given pod that Karpenter first considered to it being scheduled and bound",
+			Name:      "unscheduled_time_seconds",
+			Help:      "The time that a pod hasn't been bound since Karpenter first considered it schedulable",
 		},
 		[]string{podName, podNamespace},
 	)
-	PodHistogramScheduledDurationSeconds = opmetrics.NewPrometheusHistogram(
+	PodScheduledDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "scheduled_duration_seconds",
-			Help:      "Histogram metric for how long it takes for pods to be scheduled and bound from when it's first considered",
+			Help:      "The time it takes for pods to be bound from when it's first considered for scheduling in memory",
 		},
 		nil,
 	)
@@ -184,6 +184,11 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			PodCurrentUnboundTimeSeconds.Delete(map[string]string{
 				podName:      req.Name,
 				podNamespace: req.Namespace,
+			})
+			// Delete the unscheduled metric since the pod is deleted
+			PodUnscheduledDurationSeconds.Delete(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
 			})
 			c.metricStore.Delete(req.NamespacedName.String())
 		}
@@ -247,12 +252,11 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
-			if podAckTime := c.cluster.GetPodAckTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); !podAckTime.IsZero() {
-				PodScheduledDurationSeconds.Set(time.Since(podAckTime).Seconds(), map[string]string{
+			if schedulableTime, found := c.cluster.PodSchedulableTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); found {
+				PodUnscheduledDurationSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
 					podName:      pod.Name,
 					podNamespace: pod.Namespace,
 				})
-				PodHistogramScheduledDurationSeconds.Observe(time.Since(podAckTime).Seconds(), nil)
 			}
 		}
 		c.unscheduledPods.Insert(key)
@@ -264,8 +268,17 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
+		// Delete the unscheduled metric since the pod is now bound
+		PodUnscheduledDurationSeconds.Delete(map[string]string{
+			podName:      pod.Name,
+			podNamespace: pod.Namespace,
+		})
+		if schedulableTime, ok := c.cluster.PodSchedulableTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); ok {
+			PodScheduledDurationSeconds.Observe(time.Since(schedulableTime).Seconds(), nil)
+		}
 		PodBoundDurationSeconds.Observe(condScheduled.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
 		c.unscheduledPods.Delete(key)
+		c.cluster.ClearPodBoundMetrics(client.ObjectKeyFromObject(pod))
 	}
 }
 

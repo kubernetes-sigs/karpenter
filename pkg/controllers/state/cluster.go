@@ -53,10 +53,9 @@ type Cluster struct {
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
-	// podAckTimes keeps track of when Karpenter first tries to schedule the pod.
-	// This is orchestrated internally as opposed to writing to state in the cluster to reduce overall
-	// writes to the APIServer, but also since it only needs to be orchestrated cross-controller internally.
-	podAckTimes map[types.NamespacedName]time.Time // pod namespaced name -> when it was first considered for scheduling
+	podAcks              sync.Map  // pod namespaced name -> bool if it's alreday been ack'd by the provisioner
+	podsSchedulableTimes sync.Map  // pod namespaced name -> when it was first marked as able to fit a node.
+	initTime             time.Time // static time used to compare pods created before/after Karpenter started
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
@@ -78,7 +77,9 @@ func NewCluster(clk clock.Clock, client client.Client) *Cluster {
 		daemonSetPods:             sync.Map{},
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
-		podAckTimes:               map[types.NamespacedName]time.Time{},
+		podAcks:                   sync.Map{},
+		podsSchedulableTimes:      sync.Map{},
+		initTime:                  clk.Now(),
 	}
 }
 
@@ -313,31 +314,36 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	return err
 }
 
-// SetPodAckTime marks the pod as validating for scheduling. This is used to construct metrics
-// when the pod actually schedules to when Karpenter actually thought it could schedule.
-// This allows users to understand how long it took for Karpenter to actually start scheduling
-// for this pod.
-func (c *Cluster) SetPodAckTime(pods ...*corev1.Pod) {
+// AckPod marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
+func (c *Cluster) MarkPodsSchedulable(pods ...*corev1.Pod) {
+	now := c.clock.Now()
 	for _, pod := range pods {
-		// Check the pod to see if we've already emitted a metric for it, and just continue
-		nn := types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
-		c.mu.RLock()
-		if _, ok := c.podAckTimes[nn]; ok {
-			c.mu.RUnlock()
-			continue
-		}
-		c.mu.RUnlock()
-
-		c.mu.Lock()
-		c.podAckTimes[nn] = c.clock.Now()
-		c.mu.Unlock()
+		// store the value as now only if it doesn't exist.
+		c.podsSchedulableTimes.LoadOrStore(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, now)
 	}
 }
 
-func (c *Cluster) GetPodAckTime(podKey types.NamespacedName) time.Time {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.podAckTimes[podKey]
+// AckPod returns the time the pod was ACK'd. This will not exist if Karpenter never needed to schedule
+// the pod (i.e. kube-scheduler bound the pod to an existing node when it was created).
+func (c *Cluster) PodSchedulableTime(podKey types.NamespacedName) (time.Time, bool) {
+	val, found := c.podsSchedulableTimes.Load(podKey)
+	if !found {
+		return time.Time{}, false
+	}
+	return val.(time.Time), true
+}
+
+// AckPod marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
+// If the pod hasn't been previously ACK'd, this emits a metric for the pod.
+func (c *Cluster) AckPods(pods ...*corev1.Pod) {
+	now := c.clock.Now()
+	for _, pod := range pods {
+		// store the value as now only if it doesn't exist.
+		if _, alreadySet := c.podAcks.LoadOrStore(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, true); !alreadySet {
+			timeStart := lo.Ternary(c.initTime.Compare(pod.CreationTimestamp.Time) >= 0, c.initTime, pod.CreationTimestamp.Time)
+			PodAcknowledgedDuration.Observe(now.Sub(timeStart).Seconds(), nil)
+		}
+	}
 }
 
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
@@ -346,8 +352,13 @@ func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
-	delete(c.podAckTimes, podKey)
+	c.ClearPodBoundMetrics(podKey)
 	c.MarkUnconsolidated()
+}
+
+func (c *Cluster) ClearPodBoundMetrics(podKey types.NamespacedName) {
+	c.podAcks.Delete(podKey)
+	c.podsSchedulableTimes.Delete(podKey)
 }
 
 // MarkUnconsolidated marks the cluster state as being unconsolidated.  This should be called in any situation where
