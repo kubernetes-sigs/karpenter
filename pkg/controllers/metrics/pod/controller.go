@@ -252,6 +252,7 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
+			// Get the time that Karpenter first thought it could schedule this pod to a node
 			if schedulableTime, found := c.cluster.PodSchedulableTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); found {
 				PodUnscheduledDurationSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
 					podName:      pod.Name,
@@ -273,12 +274,14 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
+		// Get the time that Karpenter first thought it could schedule this pod to a node
 		if schedulableTime, ok := c.cluster.PodSchedulableTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); ok {
 			PodScheduledDurationSeconds.Observe(time.Since(schedulableTime).Seconds(), nil)
 		}
 		PodBoundDurationSeconds.Observe(condScheduled.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
 		c.unscheduledPods.Delete(key)
-		c.cluster.ClearPodBoundMetrics(client.ObjectKeyFromObject(pod))
+		// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
+		c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))
 	}
 }
 

@@ -314,7 +314,8 @@ func (c *Cluster) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	return err
 }
 
-// AckPod marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
+// MarkPodsSchedulable is called when Karpenter finds that the pod can schedule to a node (theoretical or not)
+// in the scheduling loop.
 func (c *Cluster) MarkPodsSchedulable(pods ...*corev1.Pod) {
 	now := c.clock.Now()
 	for _, pod := range pods {
@@ -323,8 +324,8 @@ func (c *Cluster) MarkPodsSchedulable(pods ...*corev1.Pod) {
 	}
 }
 
-// AckPod returns the time the pod was ACK'd. This will not exist if Karpenter never needed to schedule
-// the pod (i.e. kube-scheduler bound the pod to an existing node when it was created).
+// PodSchedulableTime returns when Karpenter first thought it could schedule a pod in its scheduling simulation.
+// This returns 0, false if the pod was never considered in scheduling as a pending pod.
 func (c *Cluster) PodSchedulableTime(podKey types.NamespacedName) (time.Time, bool) {
 	val, found := c.podsSchedulableTimes.Load(podKey)
 	if !found {
@@ -333,7 +334,7 @@ func (c *Cluster) PodSchedulableTime(podKey types.NamespacedName) (time.Time, bo
 	return val.(time.Time), true
 }
 
-// AckPod marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
+// AckPods marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
 // If the pod hasn't been previously ACK'd, this emits a metric for the pod.
 func (c *Cluster) AckPods(pods ...*corev1.Pod) {
 	now := c.clock.Now()
@@ -352,11 +353,11 @@ func (c *Cluster) DeletePod(podKey types.NamespacedName) {
 
 	c.antiAffinityPods.Delete(podKey)
 	c.updateNodeUsageFromPodCompletion(podKey)
-	c.ClearPodBoundMetrics(podKey)
+	c.ClearPodSchedulingMappings(podKey)
 	c.MarkUnconsolidated()
 }
 
-func (c *Cluster) ClearPodBoundMetrics(podKey types.NamespacedName) {
+func (c *Cluster) ClearPodSchedulingMappings(podKey types.NamespacedName) {
 	c.podAcks.Delete(podKey)
 	c.podsSchedulableTimes.Delete(podKey)
 }
