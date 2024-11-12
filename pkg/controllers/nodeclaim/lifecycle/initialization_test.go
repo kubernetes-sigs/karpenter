@@ -114,7 +114,7 @@ var _ = Describe("Initialization", func() {
 		})
 		ExpectApplied(ctx, env.Client, node)
 
-		ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)

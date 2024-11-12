@@ -77,6 +77,9 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		// Expect the node and the nodeClaim to both be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
@@ -166,10 +169,16 @@ var _ = Describe("Termination", func() {
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 
+		// First register a single Node to ensure the NodeClaim can successfully register, then apply the remaining nodes.
 		node1 := test.NodeClaimLinkedNode(nodeClaim)
+		ExpectApplied(ctx, env.Client, node1)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+
 		node2 := test.NodeClaimLinkedNode(nodeClaim)
 		node3 := test.NodeClaimLinkedNode(nodeClaim)
-		ExpectApplied(ctx, env.Client, node1, node2, node3)
+		ExpectApplied(ctx, env.Client, node2, node3)
 
 		// Expect the node and the nodeClaim to both be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
@@ -199,6 +208,9 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
@@ -255,6 +267,9 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
@@ -274,6 +289,9 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
@@ -297,6 +315,9 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
@@ -306,5 +327,27 @@ var _ = Describe("Termination", func() {
 		Expect(nodeClaim.ObjectMeta.Annotations).To(Equal(map[string]string{
 			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
 		}))
+	})
+	It("should not delete Nodes if the NodeClaim is not registered", func() {
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
+		Expect(err).ToNot(HaveOccurred())
+
+		node := test.NodeClaimLinkedNode(nodeClaim)
+		// Remove the unregistered taint to ensure the NodeClaim can't be marked as registered
+		node.Spec.Taints = nil
+		ExpectApplied(ctx, env.Client, node)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsFalse()).To(BeTrue())
+
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectExists(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 })
