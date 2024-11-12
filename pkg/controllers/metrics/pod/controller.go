@@ -72,7 +72,7 @@ var (
 			Namespace:  metrics.Namespace,
 			Subsystem:  metrics.PodSubsystem,
 			Name:       "startup_duration_seconds",
-			Help:       "The time from pod creation until the pod is running.",
+			Help:       "The time from when Karpenter first thought the pod could schedule until it started running.",
 			Objectives: metrics.SummaryObjectives(),
 		},
 		[]string{},
@@ -83,7 +83,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "bound_duration_seconds",
-			Help:      "The time from pod creation until the pod is bound.",
+			Help:      "The time from when Karpenter first thought the pod could schedule until it was bound.",
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]string{},
@@ -94,7 +94,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "current_unbound_time_seconds",
-			Help:      "The time from pod creation until the pod is bound.",
+			Help:      "The time from when Karpenter first thinks the pod can schedule before it binds.",
 		},
 		[]string{podName, podNamespace},
 	)
@@ -104,29 +104,9 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "unstarted_time_seconds",
-			Help:      "The time from pod creation until the pod is running.",
+			Help:      "The time from when Karpenter first thinks the pod can schedule before it starts running.",
 		},
 		[]string{podName, podNamespace},
-	)
-	PodUnscheduledDurationSeconds = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.PodSubsystem,
-			Name:      "unscheduled_time_seconds",
-			Help:      "The time that a pod hasn't been bound since Karpenter first considered it schedulable",
-		},
-		[]string{podName, podNamespace},
-	)
-	PodScheduledDurationSeconds = opmetrics.NewPrometheusHistogram(
-		crmetrics.Registry,
-		prometheus.HistogramOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.PodSubsystem,
-			Name:      "scheduled_duration_seconds",
-			Help:      "The time it takes for pods to be bound from when it's first considered for scheduling in memory",
-		},
-		[]string{},
 	)
 )
 
@@ -185,11 +165,6 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				podName:      req.Name,
 				podNamespace: req.Namespace,
 			})
-			// Delete the unscheduled metric since the pod is deleted
-			PodUnscheduledDurationSeconds.Delete(map[string]string{
-				podName:      req.Name,
-				podNamespace: req.Namespace,
-			})
 			c.metricStore.Delete(req.NamespacedName.String())
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -205,15 +180,18 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			Labels:      labels,
 		},
 	})
-	c.recordPodStartupMetric(pod)
-	c.recordPodBoundMetric(pod)
+	// Only emit the metric if we were at one point responsible for actually scheduling the pod.
+	if schedulableTime, found := c.cluster.PodSchedulableTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); found {
+		c.recordPodStartupMetric(pod, schedulableTime)
+		c.recordPodBoundMetric(pod, schedulableTime)
+	}
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) recordPodStartupMetric(pod *corev1.Pod) {
+func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime time.Time) {
 	key := client.ObjectKeyFromObject(pod).String()
 	if pod.Status.Phase == phasePending {
-		PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
+		PodUnstartedTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
@@ -225,7 +203,7 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod) {
 	})
 	if c.pendingPods.Has(key) {
 		if !ok || cond.Status != corev1.ConditionTrue {
-			PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
+			PodUnstartedTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
@@ -235,12 +213,12 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod) {
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
-			PodStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
+			PodStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
 			c.pendingPods.Delete(key)
 		}
 	}
 }
-func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
+func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.Time) {
 	key := client.ObjectKeyFromObject(pod).String()
 	condScheduled, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
 		return c.Type == corev1.PodScheduled
@@ -248,17 +226,10 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
 	if pod.Status.Phase == phasePending {
 		// If the podScheduled condition does not exist, or it exists and is not set to true, we emit pod_current_unbound_time_seconds metric.
 		if !ok || condScheduled.Status != corev1.ConditionTrue {
-			PodCurrentUnboundTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
+			PodCurrentUnboundTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
-			// Get the time that Karpenter first thought it could schedule this pod to a node
-			if schedulableTime, found := c.cluster.PodSchedulableTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); found {
-				PodUnscheduledDurationSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
-					podName:      pod.Name,
-					podNamespace: pod.Namespace,
-				})
-			}
 		}
 		c.unscheduledPods.Insert(key)
 		return
@@ -269,16 +240,7 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod) {
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
-		// Delete the unscheduled metric since the pod is now bound
-		PodUnscheduledDurationSeconds.Delete(map[string]string{
-			podName:      pod.Name,
-			podNamespace: pod.Namespace,
-		})
-		// Get the time that Karpenter first thought it could schedule this pod to a node
-		if schedulableTime, ok := c.cluster.PodSchedulableTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); ok {
-			PodScheduledDurationSeconds.Observe(time.Since(schedulableTime).Seconds(), nil)
-		}
-		PodBoundDurationSeconds.Observe(condScheduled.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
+		PodBoundDurationSeconds.Observe(condScheduled.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
 		c.unscheduledPods.Delete(key)
 		// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
 		c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))
