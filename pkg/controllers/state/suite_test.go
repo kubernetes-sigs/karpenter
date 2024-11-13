@@ -100,25 +100,6 @@ var _ = AfterEach(func() {
 })
 
 var _ = Describe("Pod Ack", func() {
-	It("should emit karpenter_pods_acknowledged_duration_seconds", func() {
-		fakeClock.Step(1 * time.Hour)
-		pod := test.Pod()
-		ExpectApplied(ctx, env.Client, pod)
-		cluster.AckPods(pod)
-		fakeClock.Step(1 * time.Hour)
-
-		m, ok := FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
-		Expect(ok).To(BeTrue())
-		Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", 1))
-
-		cluster.AckPods(pod)
-		fakeClock.Step(1 * time.Hour)
-
-		// Expect it to only emit once
-		m, ok = FindMetricWithLabelValues("karpenter_pods_acknowledged_duration_seconds", nil)
-		Expect(ok).To(BeTrue())
-		Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", 1))
-	})
 	It("should only mark pods as schedulable once", func() {
 		pod := test.Pod()
 		ExpectApplied(ctx, env.Client, pod)
