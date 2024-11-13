@@ -102,12 +102,17 @@ var _ = Describe("Pod Metrics", func() {
 		p.Status.Phase = corev1.PodPending
 
 		fakeClock.Step(1 * time.Hour)
-		cluster.MarkPodsSchedulable(p)
+		cluster.MarkPodSchedulingDecision(p, true)
 
-		// PodScheduled condition does not exist, emit pods_current_unbound_time_seconds metric
+		// PodScheduled condition does not exist, emit pods_unbound_time_seconds metric
 		ExpectApplied(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will add pod to pending pods and unscheduled pods set
-		_, found := FindMetricWithLabelValues("karpenter_pods_current_unbound_time_seconds", map[string]string{
+		_, found := FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -116,35 +121,57 @@ var _ = Describe("Pod Metrics", func() {
 		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionUnknown, LastTransitionTime: metav1.Now()}}
 		ExpectApplied(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will add pod to pending pods and unscheduled pods set
-		metric, found := FindMetricWithLabelValues("karpenter_pods_current_unbound_time_seconds", map[string]string{
+		metric, found := FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		unboundTime := metric.GetGauge().Value
+		Expect(found).To(BeTrue())
+		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeTrue())
-		unboundTime := metric.GetGauge().Value
+		provisioningUnboundTime := metric.GetGauge().Value
 
 		// Pod is still pending but has bound. At this step pods_unbound_duration should not change.
 		p.Status.Phase = corev1.PodPending
 		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: metav1.Now()}}
 		ExpectApplied(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will check if the pod was scheduled or not
-		metric, found = FindMetricWithLabelValues("karpenter_pods_current_unbound_time_seconds", map[string]string{
+		metric, found = FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeTrue())
 		Expect(metric.GetGauge().Value).To(Equal(unboundTime))
 
-		// Pod is still running and has bound. At this step pods_bound_duration should be fired and pods_current_unbound_time_seconds should be deleted
+		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+		Expect(metric.GetGauge().Value).To(Equal(provisioningUnboundTime))
+
+		// Pod is still running and has bound. At this step pods_bound_duration should be fired and pods_unbound_time_seconds should be deleted
 		p.Status.Phase = corev1.PodRunning
 		ExpectApplied(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will check if the pod was scheduled or not
-		_, found = FindMetricWithLabelValues("karpenter_pods_current_unbound_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeFalse())
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+
 		_, found = FindMetricWithLabelValues("karpenter_pods_bound_duration_seconds", map[string]string{})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_bound_duration_seconds", map[string]string{})
 		Expect(found).To(BeTrue())
 	})
 	It("should update the pod startup and unstarted time metrics", func() {
@@ -152,10 +179,15 @@ var _ = Describe("Pod Metrics", func() {
 		p.Status.Phase = corev1.PodPending
 
 		fakeClock.Step(1 * time.Hour)
-		cluster.MarkPodsSchedulable(p)
+		cluster.MarkPodSchedulingDecision(p, true)
 		ExpectApplied(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will add pod to pending pods and unscheduled pods set
 		_, found := FindMetricWithLabelValues("karpenter_pods_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -170,12 +202,22 @@ var _ = Describe("Pod Metrics", func() {
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
 
 		// Pod is now running but readiness is unknown
 		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionUnknown, LastTransitionTime: metav1.Now()}}
 		ExpectApplied(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will check if the pod was scheduled or not
 		_, found = FindMetricWithLabelValues("karpenter_pods_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -191,7 +233,15 @@ var _ = Describe("Pod Metrics", func() {
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeFalse())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+
 		_, found = FindMetricWithLabelValues("karpenter_pods_startup_duration_seconds", nil)
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_startup_duration_seconds", nil)
 		Expect(found).To(BeTrue())
 	})
 	It("should delete pod unbound and unstarted time metrics on pod delete", func() {
@@ -200,16 +250,26 @@ var _ = Describe("Pod Metrics", func() {
 		ExpectApplied(ctx, env.Client, p)
 
 		fakeClock.Step(1 * time.Hour)
-		cluster.MarkPodsSchedulable(p)
+		cluster.MarkPodSchedulingDecision(p, true)
 
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
-		_, found := FindMetricWithLabelValues("karpenter_pods_current_unbound_time_seconds", map[string]string{
+		_, found := FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeTrue())
 		_, found = FindMetricWithLabelValues("karpenter_pods_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_provisioning_pods_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -217,12 +277,22 @@ var _ = Describe("Pod Metrics", func() {
 
 		ExpectDeleted(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
-		_, found = FindMetricWithLabelValues("karpenter_pods_current_unbound_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeFalse())
 		_, found = FindMetricWithLabelValues("karpenter_pods_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})

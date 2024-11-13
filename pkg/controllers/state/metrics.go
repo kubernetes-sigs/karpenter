@@ -59,13 +59,13 @@ var (
 		},
 		[]string{},
 	)
-	PodAcknowledgedDuration = opmetrics.NewPrometheusHistogram(
+	PodSchedulingDecisionSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
-			Name:      "acknowledged_duration_seconds",
-			Help:      "The time it takes for Karpenter to consider a pod for scheduling after it's been seen",
+			Name:      "scheduling_decision_duration_seconds",
+			Help:      "The time it takes for Karpenter to first try to schedule a pod after it's been seen.",
 		},
 		[]string{},
 	)

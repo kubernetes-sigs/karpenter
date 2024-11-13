@@ -124,16 +124,16 @@ var _ = Describe("Pod Ack", func() {
 		ExpectApplied(ctx, env.Client, pod)
 		nn := client.ObjectKeyFromObject(pod)
 
-		setTime, set := cluster.PodSchedulableTime(nn)
+		setTime, set := cluster.PodSchedulingSuccess(nn)
 		Expect(set).To(BeFalse())
 		Expect(setTime.IsZero()).To(BeTrue())
 
-		cluster.MarkPodsSchedulable(pod)
-		setTime, set = cluster.PodSchedulableTime(nn)
+		cluster.MarkPodSchedulingDecision(pod, true)
+		setTime, set = cluster.PodSchedulingSuccess(nn)
 		Expect(set).To(BeTrue())
 		Expect(setTime.IsZero()).To(BeFalse())
 
-		newTime, set := cluster.PodSchedulableTime(nn)
+		newTime, set := cluster.PodSchedulingSuccess(nn)
 		Expect(set).To(BeTrue())
 		Expect(newTime.Compare(setTime)).To(Equal(0))
 	})
