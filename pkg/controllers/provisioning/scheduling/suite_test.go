@@ -3744,7 +3744,7 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should set the PodSchedulerDecisionSeconds metric after a scheduling loop", func() {
 			// Find the starting point since the metric is shared across test suites
-			m, _ := FindMetricWithLabelValues("karpenter_pods_scheduler_decision_duration_seconds", nil)
+			m, _ := FindMetricWithLabelValues("karpenter_pods_scheduling_decision_duration_seconds", nil)
 			val := uint64(0)
 			if m != nil {
 				val = lo.FromPtr(m.Histogram.SampleCount)
@@ -3763,7 +3763,7 @@ var _ = Context("Scheduling", func() {
 			_, err := prov.Schedule(ctx)
 			Expect(err).To(BeNil())
 
-			m, ok := FindMetricWithLabelValues("karpenter_pods_scheduler_decision_duration_seconds", nil)
+			m, ok := FindMetricWithLabelValues("karpenter_pods_scheduling_decision_duration_seconds", nil)
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", val+3))
 		})
