@@ -102,7 +102,7 @@ var _ = Describe("Pod Metrics", func() {
 		p.Status.Phase = corev1.PodPending
 
 		fakeClock.Step(1 * time.Hour)
-		cluster.MarkPodSchedulingDecision(p, true)
+		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{}, p)
 
 		// PodScheduled condition does not exist, emit pods_unbound_time_seconds metric
 		ExpectApplied(ctx, env.Client, p)
@@ -112,7 +112,7 @@ var _ = Describe("Pod Metrics", func() {
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeTrue())
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -127,7 +127,7 @@ var _ = Describe("Pod Metrics", func() {
 		})
 		unboundTime := metric.GetGauge().Value
 		Expect(found).To(BeTrue())
-		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -146,7 +146,7 @@ var _ = Describe("Pod Metrics", func() {
 		Expect(found).To(BeTrue())
 		Expect(metric.GetGauge().Value).To(Equal(unboundTime))
 
-		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -163,7 +163,7 @@ var _ = Describe("Pod Metrics", func() {
 		})
 		Expect(found).To(BeFalse())
 
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -179,7 +179,7 @@ var _ = Describe("Pod Metrics", func() {
 		p.Status.Phase = corev1.PodPending
 
 		fakeClock.Step(1 * time.Hour)
-		cluster.MarkPodSchedulingDecision(p, true)
+		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{}, p)
 		ExpectApplied(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will add pod to pending pods and unscheduled pods set
 		_, found := FindMetricWithLabelValues("karpenter_pods_unstarted_time_seconds", map[string]string{
@@ -250,7 +250,7 @@ var _ = Describe("Pod Metrics", func() {
 		ExpectApplied(ctx, env.Client, p)
 
 		fakeClock.Step(1 * time.Hour)
-		cluster.MarkPodSchedulingDecision(p, true)
+		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{}, p)
 
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
@@ -287,7 +287,7 @@ var _ = Describe("Pod Metrics", func() {
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeFalse())
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})

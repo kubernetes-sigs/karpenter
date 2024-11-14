@@ -353,6 +353,8 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(results.NewNodeClaims) > 0 {
 		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
 	}
+	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
+	p.cluster.MarkPodSchedulingDecisions(results.PodErrors, pendingPods...)
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }

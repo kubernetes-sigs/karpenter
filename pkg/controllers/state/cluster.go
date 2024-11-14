@@ -323,33 +323,36 @@ func (c *Cluster) AckPods(pods ...*corev1.Pod) {
 	}
 }
 
-// MarkPodsSchedulable keeps track of when we first tried to schedule a pod to a node.
-// If this is the first time we tried to schedule this pod, we'll emit a metric, but otherwise
-// this is only used after the pod has been bound in the pod metrics controller.
-func (c *Cluster) MarkPodSchedulingDecision(pod *corev1.Pod, schedulable bool) {
-	nn := client.ObjectKeyFromObject(pod)
-	if schedulable {
-		c.podsSchedulableTimes.LoadOrStore(nn, c.clock.Now())
-	}
-	_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, true)
-
-	// If we already attempted this, we don't need to emit another metric.
-	if !alreadyExists {
-		// We should have ACK'd the pod.
-		if ackTime, ok := c.podAcks.Load(client.ObjectKeyFromObject(pod)); ok {
-			PodSchedulingDecisionSeconds.Observe(c.clock.Since(ackTime.(time.Time)).Seconds(), nil)
+// MarkPodSchedulingDecisions keeps track of when we first tried to schedule a pod to a node.
+// This also marks when the pod is first seen as schedulable for pod metrics.
+// We'll only emit a metric for a pod if we haven't done it before.
+func (c *Cluster) MarkPodSchedulingDecisions(podErrors map[*corev1.Pod]error, pods ...*corev1.Pod) {
+	now := c.clock.Now()
+	for _, p := range pods {
+		nn := client.ObjectKeyFromObject(p)
+		// If there's no error for the pod, then we mark it as schedulable
+		if err, ok := podErrors[p]; !ok || err == nil {
+			c.podsSchedulableTimes.LoadOrStore(nn, now)
+		}
+		_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, true)
+		// If we already attempted this, we don't need to emit another metric.
+		if !alreadyExists {
+			// We should have ACK'd the pod.
+			if ackTime, ok := c.podAcks.Load(client.ObjectKeyFromObject(p)); ok {
+				PodSchedulingDecisionSeconds.Observe(c.clock.Since(ackTime.(time.Time)).Seconds(), nil)
+			}
 		}
 	}
 }
 
 // PodSchedulingSuccess returns when Karpenter first thought it could schedule a pod in its scheduling simulation.
 // This returns 0, false if the pod was never considered in scheduling as a pending pod.
-func (c *Cluster) PodSchedulingSuccess(podKey types.NamespacedName) (time.Time, bool) {
+func (c *Cluster) PodSchedulingSuccess(podKey types.NamespacedName) time.Time {
 	val, found := c.podsSchedulableTimes.Load(podKey)
 	if !found {
-		return time.Time{}, false
+		return time.Time{}
 	}
-	return val.(time.Time), true
+	return val.(time.Time)
 }
 
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {

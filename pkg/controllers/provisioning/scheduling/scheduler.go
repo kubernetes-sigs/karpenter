@@ -226,10 +226,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		}
 
 		// Schedule to existing nodes or create a new node
-		errors[pod] = s.add(ctx, pod)
-		s.cluster.MarkPodSchedulingDecision(pod, errors[pod] == nil)
-
-		if errors[pod] == nil {
+		if errors[pod] = s.add(ctx, pod); errors[pod] == nil {
 			delete(errors, pod)
 			continue
 		}

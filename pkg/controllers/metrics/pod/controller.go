@@ -87,7 +87,7 @@ var (
 		},
 		[]string{podName, podNamespace},
 	)
-	PodBindDurationSeconds = opmetrics.NewPrometheusHistogram(
+	PodBoundDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
@@ -109,7 +109,7 @@ var (
 		[]string{podName, podNamespace},
 	)
 	// Stage: alpha
-	PodProvisioningBindTimeSeconds = opmetrics.NewPrometheusHistogram(
+	PodProvisioningBoundDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
@@ -125,13 +125,13 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
-			Name:      "provisioning_unbound_time_seconds",
+			Name:      "provisioning_unbound_duration_seconds",
 			Help:      "The time from when Karpenter first thinks the pod can schedule until it binds. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
 		[]string{podName, podNamespace},
 	)
 	// Stage: alpha
-	PodProvisioningStartupTimeSeconds = opmetrics.NewPrometheusHistogram(
+	PodProvisioningStartupDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
@@ -233,10 +233,10 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		},
 	})
 	// Only emit the metric if we were at one point responsible for actually scheduling the pod.
-	if schedulableTime, found := c.cluster.PodSchedulingSuccess(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}); found {
-		c.recordPodStartupMetric(pod, schedulableTime)
-		c.recordPodBoundMetric(pod, schedulableTime)
-	}
+	// This time is the zero value if it wasn't scheduled by Karpenter.
+	schedulableTime := c.cluster.PodSchedulingSuccess(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
+	c.recordPodStartupMetric(pod, schedulableTime)
+	c.recordPodBoundMetric(pod, schedulableTime)
 	// Requeue every 30s for pods that are stuck starting up or binding
 	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 }
@@ -285,7 +285,7 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 		})
 		PodStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
 		if !schedulableTime.IsZero() {
-			PodProvisioningStartupTimeSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+			PodProvisioningStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
 		}
 		c.pendingPods.Delete(key)
 	}
@@ -321,9 +321,9 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 			podNamespace: pod.Namespace,
 		})
 
-		PodBindDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
+		PodBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
 		if !schedulableTime.IsZero() {
-			PodProvisioningBindTimeSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+			PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
 		}
 		c.unscheduledPods.Delete(key)
 		// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
