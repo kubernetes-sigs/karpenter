@@ -54,7 +54,7 @@ type Cluster struct {
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
 	podAcks                 sync.Map // pod namespaced name -> time when Karpenter first saw the pod as pending
-	podsSchedulingAttempted sync.Map // pod namespaced name -> bool if Karpenter tried to schedule a pod
+	podsSchedulingAttempted sync.Map // pod namespaced name -> time when Karpenter tried to schedule a pod
 	podsSchedulableTimes    sync.Map // pod namespaced name -> time when it was first marked as able to fit to a node
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
@@ -323,6 +323,14 @@ func (c *Cluster) AckPods(pods ...*corev1.Pod) {
 	}
 }
 
+// PodAckTime will return the time the pod was first seen in our cache.
+func (c *Cluster) PodAckTime(podKey types.NamespacedName) time.Time {
+	if ackTime, ok := c.podAcks.Load(podKey); ok {
+		return ackTime.(time.Time)
+	}
+	return time.Time{}
+}
+
 // MarkPodSchedulingDecisions keeps track of when we first tried to schedule a pod to a node.
 // This also marks when the pod is first seen as schedulable for pod metrics.
 // We'll only emit a metric for a pod if we haven't done it before.
@@ -334,15 +342,25 @@ func (c *Cluster) MarkPodSchedulingDecisions(podErrors map[*corev1.Pod]error, po
 		if err, ok := podErrors[p]; !ok || err == nil {
 			c.podsSchedulableTimes.LoadOrStore(nn, now)
 		}
-		_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, true)
+		_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, now)
 		// If we already attempted this, we don't need to emit another metric.
 		if !alreadyExists {
 			// We should have ACK'd the pod.
-			if ackTime, ok := c.podAcks.Load(client.ObjectKeyFromObject(p)); ok {
-				PodSchedulingDecisionSeconds.Observe(c.clock.Since(ackTime.(time.Time)).Seconds(), nil)
+			if ackTime := c.PodAckTime(nn); !ackTime.IsZero() {
+				PodSchedulingDecisionSeconds.Observe(c.clock.Since(ackTime).Seconds(), nil)
 			}
 		}
 	}
+}
+
+// PodSchedulingDecision returns when Karpenter first decided if a pod could schedule a pod in scheduling simulations.
+// This returns 0, false if Karpenter never made a decision on the pod.
+func (c *Cluster) PodSchedulingDecision(podKey types.NamespacedName) time.Time {
+	val, found := c.podsSchedulingAttempted.Load(podKey)
+	if !found {
+		return time.Time{}
+	}
+	return val.(time.Time)
 }
 
 // PodSchedulingSuccess returns when Karpenter first thought it could schedule a pod in its scheduling simulation.

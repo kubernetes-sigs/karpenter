@@ -112,7 +112,7 @@ var _ = Describe("Pod Metrics", func() {
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeTrue())
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -127,7 +127,7 @@ var _ = Describe("Pod Metrics", func() {
 		})
 		unboundTime := metric.GetGauge().Value
 		Expect(found).To(BeTrue())
-		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
+		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -146,7 +146,7 @@ var _ = Describe("Pod Metrics", func() {
 		Expect(found).To(BeTrue())
 		Expect(metric.GetGauge().Value).To(Equal(unboundTime))
 
-		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
+		metric, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -163,7 +163,7 @@ var _ = Describe("Pod Metrics", func() {
 		})
 		Expect(found).To(BeFalse())
 
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -244,14 +244,78 @@ var _ = Describe("Pod Metrics", func() {
 		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_startup_duration_seconds", nil)
 		Expect(found).To(BeTrue())
 	})
+	It("should create and delete provisioning undecided metrics based on scheduling simulatinos", func() {
+		p := test.Pod()
+		p.Status.Phase = corev1.PodPending
+		ExpectApplied(ctx, env.Client, p)
+
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+		fakeClock.Step(1 * time.Hour)
+		_, found := FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+
+		// Expect the metric to exist now that we've ack'd the pod
+		cluster.AckPods(p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+		fakeClock.Step(1 * time.Hour)
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{}, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+	})
+	It("should delete provisioning undecided metrics based on pod deletes", func() {
+		p := test.Pod()
+		p.Status.Phase = corev1.PodPending
+		ExpectApplied(ctx, env.Client, p)
+
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+		fakeClock.Step(1 * time.Hour)
+		_, found := FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+
+		// Expect the metric to exist now that we've ack'd the pod
+		cluster.AckPods(p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+		fakeClock.Step(1 * time.Hour)
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		ExpectDeleted(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+	})
 	It("should delete pod unbound and unstarted time metrics on pod delete", func() {
 		p := test.Pod()
 		p.Status.Phase = corev1.PodPending
 		ExpectApplied(ctx, env.Client, p)
 
-		fakeClock.Step(1 * time.Hour)
 		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{}, p)
-
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
 		_, found := FindMetricWithLabelValues("karpenter_pods_unbound_time_seconds", map[string]string{
@@ -264,7 +328,7 @@ var _ = Describe("Pod Metrics", func() {
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeTrue())
-		_, found = FindMetricWithLabelValues("karpenter_provisioning_pods_unbound_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -287,7 +351,7 @@ var _ = Describe("Pod Metrics", func() {
 			"namespace": p.GetNamespace(),
 		})
 		Expect(found).To(BeFalse())
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_duration_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unbound_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
