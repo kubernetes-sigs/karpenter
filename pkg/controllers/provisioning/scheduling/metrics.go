@@ -57,6 +57,19 @@ var (
 			schedulingIDLabel,
 		},
 	)
+	UnfinishedWorkSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: schedulerSubsystem,
+			Name:      "unfinished_work_seconds",
+			Help:      "How many seconds of work has been done that is in progress and hasn't been observed by scheduling_duration_seconds.",
+		},
+		[]string{
+			ControllerLabel,
+			schedulingIDLabel,
+		},
+	)
 	IgnoredPodCount = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
