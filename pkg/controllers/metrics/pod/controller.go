@@ -320,6 +320,8 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 				PodProvisioningStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
 			}
 			c.pendingPods.Delete(key)
+			// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
+			c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))
 		}
 	}
 }
@@ -361,8 +363,6 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 			PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
 		}
 		c.unscheduledPods.Delete(key)
-		// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
-		c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))
 	}
 }
 
