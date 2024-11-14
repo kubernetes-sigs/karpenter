@@ -52,7 +52,6 @@ const (
 	podHostCapacityType = "capacity_type"
 	podHostInstanceType = "instance_type"
 	podPhase            = "phase"
-	phasePending        = "Pending"
 )
 
 var (
@@ -277,7 +276,7 @@ func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 
 func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime time.Time) {
 	key := client.ObjectKeyFromObject(pod).String()
-	if pod.Status.Phase == phasePending {
+	if pod.Status.Phase == corev1.PodPending {
 		PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
@@ -294,34 +293,34 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 	cond, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
 		return c.Type == corev1.PodReady
 	})
-	if !ok || cond.Status != corev1.ConditionTrue {
-		PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
-			podName:      pod.Name,
-			podNamespace: pod.Namespace,
-		})
-		if !schedulableTime.IsZero() {
-			PodProvisioningUnstartedTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
+	if c.pendingPods.Has(key) {
+		if !ok || cond.Status != corev1.ConditionTrue {
+			PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
+			if !schedulableTime.IsZero() {
+				PodProvisioningUnstartedTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
+					podName:      pod.Name,
+					podNamespace: pod.Namespace,
+				})
+			}
+		} else {
+			// Delete the unstarted metric since the pod is now started
+			PodUnstartedTimeSeconds.Delete(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			})
+			PodProvisioningUnstartedTimeSeconds.Delete(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			})
+			PodStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
+			if !schedulableTime.IsZero() {
+				PodProvisioningStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+			}
+			c.pendingPods.Delete(key)
 		}
-		return
-	}
-	if c.pendingPods.Has(key) && ok && cond.Status == corev1.ConditionTrue {
-		// Delete the unstarted metric since the pod is now started
-		PodUnstartedTimeSeconds.Delete(map[string]string{
-			podName:      pod.Name,
-			podNamespace: pod.Namespace,
-		})
-		PodProvisioningUnstartedTimeSeconds.Delete(map[string]string{
-			podName:      pod.Name,
-			podNamespace: pod.Namespace,
-		})
-		PodStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
-		if !schedulableTime.IsZero() {
-			PodProvisioningStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
-		}
-		c.pendingPods.Delete(key)
 	}
 }
 func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.Time) {
