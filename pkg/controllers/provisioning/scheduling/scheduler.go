@@ -213,6 +213,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	lastLogTime := s.clock.Now()
 	batchSize := len(q.pods)
 	for {
+		UnfinishedWorkSeconds.Set(float64(s.clock.Since(startTime)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
 		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
 
 		if s.clock.Since(lastLogTime) > time.Minute {
@@ -240,7 +241,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			}
 		}
 	}
-
+	UnfinishedWorkSeconds.Set(0, map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
 	for _, m := range s.newNodeClaims {
 		m.FinalizeScheduling()
 	}
