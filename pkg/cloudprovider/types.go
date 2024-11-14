@@ -373,3 +373,16 @@ func IsNodeClassNotReadyError(err error) bool {
 	var nrError *NodeClassNotReadyError
 	return errors.As(err, &nrError)
 }
+
+// CreateError is an error type returned by CloudProviders when instance creation fails
+type CreateError struct {
+	error
+	ConditionMessage string
+}
+
+func NewCreateError(err error, message string) *CreateError {
+	return &CreateError{
+		error:            err,
+		ConditionMessage: message,
+	}
+}

@@ -82,4 +82,15 @@ var _ = Describe("Launch", func() {
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
+	It("should set nodeClaim status condition from the condition message received if error returned is CreateError", func() {
+		conditionMessage := "instance creation failed"
+		cloudProvider.NextCreateErr = cloudprovider.NewCreateError(fmt.Errorf("error launching instance"), conditionMessage)
+		nodeClaim := test.NodeClaim()
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		condition := ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeLaunched)
+		Expect(condition.Status).To(Equal(metav1.ConditionUnknown))
+		Expect(condition.Message).To(Equal(conditionMessage))
+	})
 })
