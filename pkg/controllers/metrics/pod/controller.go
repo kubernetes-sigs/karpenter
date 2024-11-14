@@ -158,7 +158,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "provisioning_scheduling_undecided_time_seconds",
-			Help:      "The time from when Karpenter first thinks the pod can schedule until the pod is running. Note: this calculated from a point in memory, not by the pod creation timestamp.",
+			Help:      "The time from when Karpenter has seen a pod without making a scheduling decision for the pod. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
 		[]string{podName, podNamespace},
 	)
@@ -246,18 +246,18 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			Labels:      labels,
 		},
 	})
-	// Only emit the metric if we were at one point responsible for actually scheduling the pod.
-	// This time is the zero value if it wasn't scheduled by Karpenter.
-	schedulableTime := c.cluster.PodSchedulingSuccess(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
 	c.recordPodSchedulingUndecidedMetric(pod)
+	// Get the time for when we Karpenter first thought the pod was schedulable. This should be zero if we didn't simulate for this pod.
+	schedulableTime := c.cluster.PodSchedulingSuccess(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
 	c.recordPodStartupMetric(pod, schedulableTime)
 	c.recordPodBoundMetric(pod, schedulableTime)
-	// Requeue every 30s for pods that are stuck starting up or binding
+	// Requeue every 30s for pods that are stuck without a state change
 	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 	nn := client.ObjectKeyFromObject(pod)
+	// If we've made a decision on this pod, delete the metric idempotently and return
 	if decisionTime := c.cluster.PodSchedulingDecision(nn); !decisionTime.IsZero() {
 		PodProvisioningSchedulingUndecidedTimeSeconds.Delete(map[string]string{
 			podName:      pod.Name,
@@ -265,6 +265,7 @@ func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 		})
 		return
 	}
+	// If we haven't made a decision, get the time that we ACK'd the pod and emit the metric based on that
 	if podAckTime := c.cluster.PodAckTime(nn); !podAckTime.IsZero() {
 		PodProvisioningSchedulingUndecidedTimeSeconds.Set(time.Since(podAckTime).Seconds(), map[string]string{
 			podName:      pod.Name,
