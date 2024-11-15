@@ -20,6 +20,7 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [AWS](https://github.com/aws/karpenter-provider-aws)
 - [Azure](https://github.com/Azure/karpenter-provider-azure)
 - [AlibabaCloud](https://github.com/cloudpilot-ai/karpenter-provider-alibabacloud)
+- [Cluster API](https://github.com/kubernetes-sigs/karpenter-provider-cluster-api)
 
 ## Community, discussion, contribution, and support
 
