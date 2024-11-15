@@ -115,6 +115,7 @@ var (
 			Subsystem: metrics.PodSubsystem,
 			Name:      "provisioning_bound_duration_seconds",
 			Help:      "The time from when Karpenter first thinks the pod can schedule until it binds. Note: this calculated from a point in memory, not by the pod creation timestamp.",
+			Buckets:   metrics.DurationBuckets(),
 		},
 		[]string{},
 	)
@@ -137,6 +138,7 @@ var (
 			Subsystem: metrics.PodSubsystem,
 			Name:      "provisioning_startup_duration_seconds",
 			Help:      "The time from when Karpenter first thinks the pod can schedule until the pod is running. Note: this calculated from a point in memory, not by the pod creation timestamp.",
+			Buckets:   metrics.DurationBuckets(),
 		},
 		[]string{},
 	)
