@@ -18,6 +18,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/patrickmn/go-cache"
@@ -98,7 +99,12 @@ func (l *Launch) launchNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (
 			})
 			return nil, nil
 		default:
-			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
+			var createError *cloudprovider.CreateError
+			if errors.As(err, &createError) {
+				nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeLaunched, "LaunchFailed", createError.ConditionMessage)
+			} else {
+				nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeLaunched, "LaunchFailed", truncateMessage(err.Error()))
+			}
 			return nil, fmt.Errorf("launching nodeclaim, %w", err)
 		}
 	}
