@@ -99,6 +99,24 @@ var _ = AfterEach(func() {
 	cloudProvider.Reset()
 })
 
+var _ = Describe("Pod Ack", func() {
+	It("should only mark pods as schedulable once", func() {
+		pod := test.Pod()
+		ExpectApplied(ctx, env.Client, pod)
+		nn := client.ObjectKeyFromObject(pod)
+
+		setTime := cluster.PodSchedulingSuccessTime(nn)
+		Expect(setTime.IsZero()).To(BeTrue())
+
+		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{}, pod)
+		setTime = cluster.PodSchedulingSuccessTime(nn)
+		Expect(setTime.IsZero()).To(BeFalse())
+
+		newTime := cluster.PodSchedulingSuccessTime(nn)
+		Expect(newTime.Compare(setTime)).To(Equal(0))
+	})
+})
+
 var _ = Describe("Volume Usage/Limits", func() {
 	var nodeClaim *v1.NodeClaim
 	var node *corev1.Node
