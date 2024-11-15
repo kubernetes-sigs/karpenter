@@ -353,24 +353,22 @@ func (c *Cluster) MarkPodSchedulingDecisions(podErrors map[*corev1.Pod]error, po
 	}
 }
 
-// PodSchedulingDecision returns when Karpenter first decided if a pod could schedule a pod in scheduling simulations.
+// PodSchedulingDecisionTime returns when Karpenter first decided if a pod could schedule a pod in scheduling simulations.
 // This returns 0, false if Karpenter never made a decision on the pod.
-func (c *Cluster) PodSchedulingDecision(podKey types.NamespacedName) time.Time {
-	val, found := c.podsSchedulingAttempted.Load(podKey)
-	if !found {
-		return time.Time{}
+func (c *Cluster) PodSchedulingDecisionTime(podKey types.NamespacedName) time.Time {
+	if val, found := c.podsSchedulingAttempted.Load(podKey); found {
+		return val.(time.Time)
 	}
-	return val.(time.Time)
+	return time.Time{}
 }
 
-// PodSchedulingSuccess returns when Karpenter first thought it could schedule a pod in its scheduling simulation.
+// PodSchedulingSuccessTime returns when Karpenter first thought it could schedule a pod in its scheduling simulation.
 // This returns 0, false if the pod was never considered in scheduling as a pending pod.
-func (c *Cluster) PodSchedulingSuccess(podKey types.NamespacedName) time.Time {
-	val, found := c.podsSchedulableTimes.Load(podKey)
-	if !found {
-		return time.Time{}
+func (c *Cluster) PodSchedulingSuccessTime(podKey types.NamespacedName) time.Time {
+	if val, found := c.podsSchedulableTimes.Load(podKey); found {
+		return val.(time.Time)
 	}
-	return val.(time.Time)
+	return time.Time{}
 }
 
 func (c *Cluster) DeletePod(podKey types.NamespacedName) {
