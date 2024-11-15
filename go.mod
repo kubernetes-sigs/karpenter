@@ -5,7 +5,7 @@ go 1.23.2
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
-	github.com/awslabs/operatorpkg v0.0.0-20241108183842-a2ebef231d52
+	github.com/awslabs/operatorpkg v0.0.0-20241115011931-885371bcf05d
 	github.com/docker/docker v27.3.1+incompatible
 	github.com/go-logr/logr v1.4.2
 	github.com/imdario/mergo v0.3.16
@@ -19,8 +19,8 @@ require (
 	github.com/samber/lo v1.47.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/text v0.19.0
-	golang.org/x/time v0.7.0
+	golang.org/x/text v0.20.0
+	golang.org/x/time v0.8.0
 	k8s.io/api v0.31.2
 	k8s.io/apiextensions-apiserver v0.31.2
 	k8s.io/apimachinery v0.31.2

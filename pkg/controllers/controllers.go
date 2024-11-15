@@ -23,6 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	corev1 "k8s.io/api/core/v1"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -74,7 +76,7 @@ func NewControllers(
 		informer.NewNodePoolController(kubeClient, cluster),
 		informer.NewNodeClaimController(kubeClient, cluster),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
-		metricspod.NewController(kubeClient),
+		metricspod.NewController(kubeClient, cluster),
 		metricsnodepool.NewController(kubeClient),
 		metricsnode.NewController(cluster),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
@@ -85,7 +87,8 @@ func NewControllers(
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
-		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter")),
-		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter")),
+		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter"), status.EmitDeprecatedMetrics),
+		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter"), status.EmitDeprecatedMetrics),
+		status.NewGenericObjectController[*corev1.Node](kubeClient, mgr.GetEventRecorderFor("karpenter")),
 	}
 }

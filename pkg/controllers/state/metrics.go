@@ -39,7 +39,6 @@ var (
 		},
 		[]string{},
 	)
-
 	ClusterStateSynced = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
@@ -57,6 +56,16 @@ var (
 			Subsystem: stateSubsystem,
 			Name:      "unsynced_time_seconds",
 			Help:      "The time for which cluster state is not synced",
+		},
+		[]string{},
+	)
+	PodSchedulingDecisionSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.PodSubsystem,
+			Name:      "scheduling_decision_duration_seconds",
+			Help:      "The time it takes for Karpenter to first try to schedule a pod after it's been seen.",
 		},
 		[]string{},
 	)

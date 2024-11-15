@@ -56,6 +56,7 @@ var _ = Describe("Drift", func() {
 		})
 		// NodeClaims are required to be launched before they can be evaluated for drift
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+		Expect(nodeClaim.StatusConditions().Clear(v1.ConditionTypeDrifted)).To(Succeed())
 	})
 	It("should detect drift", func() {
 		cp.Drifted = "drifted"

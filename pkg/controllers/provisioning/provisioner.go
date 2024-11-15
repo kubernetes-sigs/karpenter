@@ -324,6 +324,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if err != nil {
 		return scheduler.Results{}, err
 	}
+
 	// Get pods from nodes that are preparing for deletion
 	// We do this after getting the pending pods so that we undershoot if pods are
 	// actively migrating from a node that is being deleted
@@ -345,11 +346,15 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
+	// ACK the pending pods at the start of the scheduling loop so that we can emit metrics on when we actually first try to schedule it.
+	p.cluster.AckPods(pendingPods...)
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	scheduler.UnschedulablePodsCount.Set(float64(len(results.PodErrors)), map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
 	if len(results.NewNodeClaims) > 0 {
 		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
 	}
+	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
+	p.cluster.MarkPodSchedulingDecisions(results.PodErrors, pendingPods...)
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }
