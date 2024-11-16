@@ -38,13 +38,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
 	kubeClient                client.Client
+	cloudProvider             cloudprovider.CloudProvider
 	clock                     clock.Clock
 	mu                        sync.RWMutex
 	nodes                     map[string]*StateNode           // provider id -> cached node
@@ -68,10 +71,11 @@ type Cluster struct {
 	antiAffinityPods  sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
 }
 
-func NewCluster(clk clock.Clock, client client.Client) *Cluster {
+func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
 	return &Cluster{
 		clock:                     clk,
 		kubeClient:                client,
+		cloudProvider:             cloudProvider,
 		nodes:                     map[string]*StateNode{},
 		bindings:                  map[types.NamespacedName]string{},
 		daemonSetPods:             sync.Map{},
@@ -106,8 +110,8 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	defer func() {
 		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0), nil)
 	}()
-	nodeClaimList := &v1.NodeClaimList{}
-	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
+	nodeClaims, err := nodeclaim.List(ctx, c.kubeClient, nodeclaim.WithManagedFilter(c.cloudProvider))
+	if err != nil {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
@@ -131,7 +135,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	c.mu.RUnlock()
 
 	nodeClaimNames := sets.New[string]()
-	for _, nodeClaim := range nodeClaimList.Items {
+	for _, nodeClaim := range nodeClaims {
 		nodeClaimNames.Insert(nodeClaim.Name)
 	}
 	nodeNames := sets.New[string]()

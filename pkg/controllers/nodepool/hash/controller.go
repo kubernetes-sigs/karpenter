@@ -23,30 +23,39 @@ import (
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
 // The hash is placed in the metadata for increased observability and should be found on each object.
 type Controller struct {
-	kubeClient client.Client
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
 }
 
-func NewController(kubeClient client.Client) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
-		kubeClient: kubeClient,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
 	}
 }
 
 // Reconcile the resource
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepool.hash")
+	if !nodepoolutils.IsManaged(np, c.cloudProvider) {
+		return reconcile.Result{}, nil
+	}
 
 	stored := np.DeepCopy()
 
@@ -71,7 +80,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.hash").
-		For(&v1.NodePool{}).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsMangedPredicates(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
@@ -81,14 +90,13 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 // NodePool. Since, we cannot rely on the `nodepool-hash` on the NodeClaims, due to the breaking change, we will need to re-calculate the hash and update the annotation.
 // For more information on the Drift Hash Versioning: https://github.com/kubernetes-sigs/karpenter/blob/main/designs/drift-hash-versioning.md
 func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1.NodePool) error {
-	ncList := &v1.NodeClaimList{}
-	if err := c.kubeClient.List(ctx, ncList, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: np.Name})); err != nil {
+	nodeClaims, err := nodeclaimutils.List(ctx, c.kubeClient, nodeclaimutils.WithManagedFilter(c.cloudProvider), nodeclaimutils.WithNodePoolFilter(np.Name))
+	if err != nil {
 		return err
 	}
 
-	errs := make([]error, len(ncList.Items))
-	for i := range ncList.Items {
-		nc := ncList.Items[i]
+	errs := make([]error, len(nodeClaims))
+	for i, nc := range nodeClaims {
 		stored := nc.DeepCopy()
 
 		if nc.Annotations[v1.NodePoolHashVersionAnnotationKey] != v1.NodePoolHashVersion {
@@ -105,7 +113,7 @@ func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1.NodePool) e
 			}
 
 			if !equality.Semantic.DeepEqual(stored, nc) {
-				if err := c.kubeClient.Patch(ctx, &nc, client.MergeFrom(stored)); err != nil {
+				if err := c.kubeClient.Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
 					errs[i] = client.IgnoreNotFound(err)
 				}
 			}

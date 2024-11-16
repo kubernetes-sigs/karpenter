@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
 
@@ -162,13 +163,13 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
 func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
 	nodePoolMap := map[string]*v1.NodePool{}
-	nodePoolList := &v1.NodePoolList{}
-	if err := kubeClient.List(ctx, nodePoolList); err != nil {
+	nodePools, err := nodepoolutils.List(ctx, kubeClient, nodepoolutils.WithManagedFilter(cloudProvider))
+	if err != nil {
 		return nil, nil, fmt.Errorf("listing node pools, %w", err)
 	}
+
 	nodePoolToInstanceTypesMap := map[string]map[string]*cloudprovider.InstanceType{}
-	for i := range nodePoolList.Items {
-		np := &nodePoolList.Items[i]
+	for _, np := range nodePools {
 		nodePoolMap[np.Name] = np
 
 		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
@@ -193,7 +194,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 // We calculate allowed disruptions by taking the max disruptions allowed by disruption reason and subtracting the number of nodes that are NotReady and already being deleted by that disruption reason.
 //
 //nolint:gocyclo
-func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, recorder events.Recorder, reason v1.DisruptionReason) (map[string]int, error) {
+func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, reason v1.DisruptionReason) (map[string]int, error) {
 	disruptionBudgetMapping := map[string]int{}
 	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
 	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
@@ -226,19 +227,18 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 			disrupting[nodePool]++
 		}
 	}
-	nodePoolList := &v1.NodePoolList{}
-	if err := kubeClient.List(ctx, nodePoolList); err != nil {
+	nodePools, err := nodepoolutils.List(ctx, kubeClient, nodepoolutils.WithManagedFilter(cloudProvider))
+	if err != nil {
 		return disruptionBudgetMapping, fmt.Errorf("listing node pools, %w", err)
 	}
-	for _, nodePool := range nodePoolList.Items {
+	for _, nodePool := range nodePools {
 		allowedDisruptions := nodePool.MustGetAllowedDisruptions(clk, numNodes[nodePool.Name], reason)
 		disruptionBudgetMapping[nodePool.Name] = lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
-
 		NodePoolAllowedDisruptions.Set(float64(allowedDisruptions), map[string]string{
 			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
 		})
 		if allowedDisruptions == 0 {
-			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(lo.ToPtr(nodePool), reason))
+			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(nodePool, reason))
 		}
 	}
 	return disruptionBudgetMapping, nil

@@ -29,6 +29,7 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -40,6 +41,7 @@ var podController *pod.Controller
 var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
+var cloudProvider *fake.CloudProvider
 var fakeClock *clock.FakeClock
 
 func TestAPIs(t *testing.T) {
@@ -51,7 +53,8 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client)
+	cloudProvider = fake.NewCloudProvider()
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	podController = pod.NewController(env.Client, cluster)
 })
 

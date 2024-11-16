@@ -59,13 +59,30 @@ func WithCRDs(crds ...*apiextensionsv1.CustomResourceDefinition) option.Function
 	}
 }
 
-// WithFieldIndexers expects a function that indexes fields against the cache such as cache.IndexField(...)
+// WithFieldIndexers expects a function that indexes fields against the cache such as cache.IndexField(...).
+//
+// Note: Only use when necessary, the use of field indexers in functional tests requires the use of the cache syncing
+// client, which can have significant drawbacks for test performance.
 func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) option.Function[EnvironmentOptions] {
 	return func(o *EnvironmentOptions) {
 		o.fieldIndexers = append(o.fieldIndexers, fieldIndexers...)
 	}
 }
 
+// NodeFieldIndexer provides indexes on the following fields:
+//
+// - spec.providerID
+func NodeFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Node).Spec.ProviderID}
+		})
+	}
+}
+
+// NodeClaimFieldIndexer provides indexes on the following fields:
+//
+// - status.providerID
 func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
@@ -74,6 +91,9 @@ func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	}
 }
 
+// VolumeAttachmentFieldIndexer provides indexes on the following fields:
+//
+// - status.nodeName
 func VolumeAttachmentFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &storagev1.VolumeAttachment{}, "spec.nodeName", func(obj client.Object) []string {

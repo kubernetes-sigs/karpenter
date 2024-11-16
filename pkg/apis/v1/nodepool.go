@@ -19,7 +19,6 @@ package v1
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 
 	"github.com/mitchellh/hashstructure/v2"
@@ -287,23 +286,6 @@ type NodePoolList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []NodePool `json:"items"`
-}
-
-// OrderByWeight orders the NodePools in the NodePoolList by their priority weight in-place.
-// This priority evaluates the following things in precedence order:
-//  1. NodePools that have a larger weight are ordered first
-//  2. If two NodePools have the same weight, then the NodePool with the name later in the alphabet will come first
-func (nl *NodePoolList) OrderByWeight() {
-	sort.Slice(nl.Items, func(a, b int) bool {
-		weightA := lo.FromPtr(nl.Items[a].Spec.Weight)
-		weightB := lo.FromPtr(nl.Items[b].Spec.Weight)
-
-		if weightA == weightB {
-			// Order NodePools by name for a consistent ordering when sorting equal weight
-			return nl.Items[a].Name > nl.Items[b].Name
-		}
-		return weightA > weightB
-	})
 }
 
 // MustGetAllowedDisruptions calls GetAllowedDisruptionsByReason if the error is not nil. This reduces the

@@ -42,7 +42,8 @@ var _ = Describe("CEL/Default", func() {
 				Template: NodeClaimTemplate{
 					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
-							Kind: "NodeClaim",
+							Group: "karpenter.test.sh",
+							Kind: "TestNodeClaim",
 							Name: "default",
 						},
 						Requirements: []NodeSelectorRequirementWithMinValues{

@@ -20,71 +20,134 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/option"
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
+
+func IsManaged(nodeClaim *v1.NodeClaim, cp cloudprovider.CloudProvider) bool {
+	return lo.ContainsBy(cp.GetSupportedNodeClasses(), func(nodeClass status.Object) bool {
+		return object.GVK(nodeClass).GroupKind() == nodeClaim.Spec.NodeClassRef.GroupKind()
+	})
+}
+
+// IsMangedPredicates is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
+func IsMangedPredicates(cp cloudprovider.CloudProvider) predicate.Funcs {
+	return predicate.NewPredicateFuncs(func(o client.Object) bool {
+		return IsManaged(o.(*v1.NodeClaim), cp)
+	})
+}
+
+type ListOptions struct {
+	filterPredicates []func(*v1.NodeClaim) bool
+	listOptions      []client.ListOption
+}
+
+func resolveListOptions(opts ...option.Function[ListOptions]) *ListOptions {
+	resolved := option.Resolve(opts...)
+	if len(resolved.filterPredicates) == 0 {
+		resolved.filterPredicates = []func(*v1.NodeClaim) bool{func(nc *v1.NodeClaim) bool { return true }}
+	}
+	return resolved
+}
+
+func withClientListOptions(listOpts ...client.ListOption) option.Function[ListOptions] {
+	return func(opts *ListOptions) {
+		opts.listOptions = append(opts.listOptions, listOpts...)
+	}
+}
+
+func WithProviderIDFilter(providerID string) option.Function[ListOptions] {
+	return withClientListOptions(client.MatchingFields{"status.providerID": providerID})
+}
+
+func WithNodePoolFilter(nodePoolName string) option.Function[ListOptions] {
+	return withClientListOptions(client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName}))
+}
+
+func WithManagedFilter(cp cloudprovider.CloudProvider) option.Function[ListOptions] {
+	return func(opts *ListOptions) {
+		opts.filterPredicates = append(opts.filterPredicates, func(nc *v1.NodeClaim) bool { return IsManaged(nc, cp) })
+	}
+}
+
+func List(ctx context.Context, c client.Client, opts ...option.Function[ListOptions]) ([]*v1.NodeClaim, error) {
+	resolvedOpts := resolveListOptions(opts...)
+	nodeClaimList := &v1.NodeClaimList{}
+	if err := c.List(ctx, nodeClaimList, resolvedOpts.listOptions...); err != nil {
+		return nil, err
+	}
+	return lo.FilterMap(nodeClaimList.Items, func(nc v1.NodeClaim, _ int) (*v1.NodeClaim, bool) {
+		for _, pred := range resolvedOpts.filterPredicates {
+			if !pred(&nc) {
+				return nil, false
+			}
+		}
+		return lo.ToPtr(nc), true
+	}), nil
+}
 
 // PodEventHandler is a watcher on corev1.Pods that maps Pods to NodeClaim based on the node names
 // and enqueues reconcile.Requests for the NodeClaims
-func PodEventHandler(c client.Client) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		if name := o.(*corev1.Pod).Spec.NodeName; name != "" {
-			node := &corev1.Node{}
-			if err := c.Get(ctx, types.NamespacedName{Name: name}, node); err != nil {
-				return []reconcile.Request{}
-			}
-			nodeClaimList := &v1.NodeClaimList{}
-			if err := c.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
-				return []reconcile.Request{}
-			}
-			return lo.Map(nodeClaimList.Items, func(n v1.NodeClaim, _ int) reconcile.Request {
-				return reconcile.Request{
-					NamespacedName: client.ObjectKeyFromObject(&n),
-				}
-			})
+func PodEventHandler(c client.Client, opts ...option.Function[ListOptions]) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		nodeName := o.(*corev1.Pod).Spec.NodeName
+		if nodeName == "" {
+			return nil
 		}
-		return requests
+		node := &corev1.Node{}
+		if err := c.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+			return nil
+		}
+		ncs, err := List(ctx, c, append(opts, WithProviderIDFilter(node.Spec.ProviderID))...)
+		if err != nil {
+			return nil
+		}
+		return lo.Map(ncs, func(nc *v1.NodeClaim, _ int) reconcile.Request {
+			return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(nc)}
+		})
 	})
 }
 
 // NodeEventHandler is a watcher on corev1.Node that maps Nodes to NodeClaims based on provider ids
 // and enqueues reconcile.Requests for the NodeClaims
-func NodeEventHandler(c client.Client) handler.EventHandler {
+func NodeEventHandler(c client.Client, opts ...option.Function[ListOptions]) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-		node := o.(*corev1.Node)
-		nodeClaimList := &v1.NodeClaimList{}
-		if err := c.List(ctx, nodeClaimList, client.MatchingFields{"status.providerID": node.Spec.ProviderID}); err != nil {
-			return []reconcile.Request{}
+		ncs, err := List(ctx, c, append(opts, WithProviderIDFilter(o.(*corev1.Node).Spec.ProviderID))...)
+		if err != nil {
+			return nil
 		}
-		return lo.Map(nodeClaimList.Items, func(n v1.NodeClaim, _ int) reconcile.Request {
-			return reconcile.Request{
-				NamespacedName: client.ObjectKeyFromObject(&n),
-			}
+		return lo.Map(ncs, func(nc *v1.NodeClaim, _ int) reconcile.Request {
+			return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(nc)}
 		})
 	})
 }
 
 // NodePoolEventHandler is a watcher on v1.NodeClaim that maps NodePool to NodeClaims based
 // on the v1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
-func NodePoolEventHandler(c client.Client) handler.EventHandler {
+func NodePoolEventHandler(c client.Client, opts ...option.Function[ListOptions]) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		nodeClaimList := &v1.NodeClaimList{}
-		if err := c.List(ctx, nodeClaimList, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: o.GetName()})); err != nil {
-			return requests
+		ncs, err := List(ctx, c, append(opts, withClientListOptions(client.MatchingLabels(map[string]string{
+			v1.NodePoolLabelKey: o.GetName(),
+		})))...)
+		if err != nil {
+			return nil
 		}
-		return lo.Map(nodeClaimList.Items, func(n v1.NodeClaim, _ int) reconcile.Request {
-			return reconcile.Request{
-				NamespacedName: client.ObjectKeyFromObject(&n),
-			}
+		return lo.Map(ncs, func(nc *v1.NodeClaim, _ int) reconcile.Request {
+			return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(nc)}
 		})
 	})
 }
@@ -199,4 +262,8 @@ func UpdateNodeOwnerReferences(nodeClaim *v1.NodeClaim, node *corev1.Node) *core
 		BlockOwnerDeletion: lo.ToPtr(true),
 	})
 	return node
+}
+
+func NodeClassLabelKey(ncr *v1.NodeClassReference) string {
+	return fmt.Sprintf("%s/%s", ncr.Group, strings.ToLower(ncr.Kind))
 }

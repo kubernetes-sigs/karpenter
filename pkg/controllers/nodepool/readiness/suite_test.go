@@ -74,13 +74,16 @@ var _ = Describe("Readiness", func() {
 		nodePool.Spec.Template.Spec.NodeClassRef.Group = object.GVK(nodeClass).Group
 		nodePool.Spec.Template.Spec.NodeClassRef.Kind = object.GVK(nodeClass).Kind
 	})
-	It("should have status condition on nodePool as not ready if nodeClass referenced in nodePool is not in supported nodeClasses", func() {
-		nodePool.Spec.Template.Spec.NodeClassRef.Group = "group"
-		nodePool.Spec.Template.Spec.NodeClassRef.Kind = "kind"
+	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
+		nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
+			Group: "karpenter.k8s.aws",
+			Kind:  "EC2NodeClass",
+			Name:  "default",
+		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
-		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
+		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsUnknown()).To(BeFalse())
 	})
 	It("should have status condition on nodePool as not ready when nodeClass does not exist", func() {
 		ExpectApplied(ctx, env.Client, nodePool)

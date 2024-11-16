@@ -36,6 +36,55 @@ var _ = Describe("Liveness", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
+	DescribeTable(
+		"Liveness",
+		func(isManagedNodeClaim bool) {
+			nodeClaimOpts := []v1.NodeClaim{{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+				Spec: v1.NodeClaimSpec{
+					Resources: v1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:      resource.MustParse("2"),
+							corev1.ResourceMemory:   resource.MustParse("50Mi"),
+							corev1.ResourcePods:     resource.MustParse("5"),
+							fake.ResourceGPUVendorA: resource.MustParse("1"),
+						},
+					},
+				},
+			}}
+			if !isManagedNodeClaim {
+				nodeClaimOpts = append(nodeClaimOpts, v1.NodeClaim{
+					Spec: v1.NodeClaimSpec{
+						NodeClassRef: &v1.NodeClassReference{
+							Group: "karpenter.k8s.aws",
+							Kind: "EC2NodeClass",
+							Name: "default",
+						},
+					},
+				})
+			}
+			nodeClaim := test.NodeClaim(nodeClaimOpts...)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			// If the node hasn't registered in the registration timeframe, then we deprovision the NodeClaim
+			fakeClock.Step(time.Minute * 20)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+			if isManagedNodeClaim {
+				ExpectNotFound(ctx, env.Client, nodeClaim)
+			} else {
+				ExpectExists(ctx, env.Client, nodeClaim)
+			}
+		},
+		Entry("should delete the nodeClaim when the Node hasn't registered past the registration ttl", true),
+		Entry("should ignore NodeClaims not managed by this Karpenter instance", false),
+	)
 	It("shouldn't delete the nodeClaim when the node has registered past the registration ttl", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -65,34 +114,6 @@ var _ = Describe("Liveness", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
-	})
-	It("should delete the nodeClaim when the Node hasn't registered past the registration ttl", func() {
-		nodeClaim := test.NodeClaim(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-			Spec: v1.NodeClaimSpec{
-				Resources: v1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceCPU:      resource.MustParse("2"),
-						corev1.ResourceMemory:   resource.MustParse("50Mi"),
-						corev1.ResourcePods:     resource.MustParse("5"),
-						fake.ResourceGPUVendorA: resource.MustParse("1"),
-					},
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-
-		// If the node hasn't registered in the registration timeframe, then we deprovision the NodeClaim
-		fakeClock.Step(time.Minute * 20)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should delete the NodeClaim when the NodeClaim hasn't launched past the registration ttl", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{

@@ -45,7 +45,9 @@ func NodePool(overrides ...v1.NodePool) *v1.NodePool {
 	}
 	if override.Spec.Template.Spec.NodeClassRef == nil {
 		override.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
-			Name: "default",
+			Name:  "default",
+			Group: "karpenter.test.sh",
+			Kind:  "TestNodeClass",
 		}
 	}
 	if override.Spec.Template.Spec.Requirements == nil {

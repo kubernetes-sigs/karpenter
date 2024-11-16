@@ -21,27 +21,32 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 // NodeClaimController reconciles nodeclaim for the purpose of maintaining state.
 type NodeClaimController struct {
-	kubeClient client.Client
-	cluster    *state.Cluster
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
+	cluster       *state.Cluster
 }
 
 // NewNodeClaimController constructs a controller instance
-func NewNodeClaimController(kubeClient client.Client, cluster *state.Cluster) *NodeClaimController {
+func NewNodeClaimController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *NodeClaimController {
 	return &NodeClaimController{
-		kubeClient: kubeClient,
-		cluster:    cluster,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
+		cluster:       cluster,
 	}
 }
 
@@ -56,6 +61,9 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
+		return reconcile.Result{}, nil
+	}
 	c.cluster.UpdateNodeClaim(nodeClaim)
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
@@ -64,7 +72,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 func (c *NodeClaimController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.nodeclaim").
-		For(&v1.NodeClaim{}).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsMangedPredicates(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(c)
 }

@@ -22,30 +22,38 @@ import (
 
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 // Expiration is a nodeclaim controller that deletes expired nodeclaims based on expireAfter
 type Controller struct {
-	clock      clock.Clock
-	kubeClient client.Client
+	clock         clock.Clock
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
 }
 
 // NewController constructs a nodeclaim disruption controller
-func NewController(clk clock.Clock, kubeClient client.Client) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
-		kubeClient: kubeClient,
-		clock:      clk,
+		clock:         clk,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
 	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
+		return reconcile.Result{}, nil
+	}
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
@@ -81,6 +89,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.expiration").
-		For(&v1.NodeClaim{}).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsMangedPredicates(c.cloudProvider))).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

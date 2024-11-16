@@ -28,6 +28,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 // MaxInstanceTypes is a constant that restricts the number of instance types to be sent for launch. Note that this
@@ -57,7 +58,10 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 		v1.NodePoolHashAnnotationKey:        nodePool.Hash(),
 		v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 	})
-	nct.Labels = lo.Assign(nct.Labels, map[string]string{v1.NodePoolLabelKey: nodePool.Name})
+	nct.Labels = lo.Assign(nct.Labels, map[string]string{
+		v1.NodePoolLabelKey: nodePool.Name,
+		nodeclaimutils.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef): nodePool.Spec.Template.Spec.NodeClassRef.Name,
+	})
 	nct.Requirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(nct.Spec.Requirements...).Values()...)
 	nct.Requirements.Add(scheduling.NewLabelRequirements(nct.Labels).Values()...)
 	return nct

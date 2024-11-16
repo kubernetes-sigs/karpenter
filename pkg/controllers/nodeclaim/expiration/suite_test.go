@@ -26,11 +26,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/expiration"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -43,6 +42,7 @@ import (
 var ctx context.Context
 var expirationController *expiration.Controller
 var env *test.Environment
+var cp *fake.CloudProvider
 var fakeClock *clock.FakeClock
 
 func TestAPIs(t *testing.T) {
@@ -53,13 +53,10 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
-			return []string{obj.(*corev1.Node).Spec.ProviderID}
-		})
-	}))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeFieldIndexer(ctx)))
 	ctx = options.ToContext(ctx, test.Options())
-	expirationController = expiration.NewController(fakeClock, env.Client)
+	cp = fake.NewCloudProvider()
+	expirationController = expiration.NewController(fakeClock, env.Client, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -121,22 +118,39 @@ var _ = Describe("Expiration", func() {
 			})
 		})
 	})
+	DescribeTable(
+		"Expiration",
+		func(isNodeClaimManaged bool) {
+			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
+			if !isNodeClaimManaged {
+				nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{
+					Group: "karpenter.k8s.aws",
+					Kind:  "EC2NodeClass",
+					Name:  "default",
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodeClaim)
+
+			// step forward to make the node expired
+			fakeClock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+			if isNodeClaimManaged {
+				// with forceful termination, when we see a nodeclaim meets the conditions for expiration
+				// we should remove it
+				ExpectNotFound(ctx, env.Client, nodeClaim)
+			} else {
+				ExpectExists(ctx, env.Client, nodeClaim)
+			}
+		},
+		Entry("should remove nodeclaims that are expired", true),
+		Entry("should ignore expired NodeClaims that are not managed by this Karpenter instance", false),
+	)
+
 	It("should not remove the NodeClaims when expiration is disabled", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-	})
-	It("should remove nodeclaims that are expired", func() {
-		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
-		ExpectApplied(ctx, env.Client, nodeClaim)
-
-		// step forward to make the node expired
-		fakeClock.Step(60 * time.Second)
-		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
-		// with forceful termination, when we see a nodeclaim meets the conditions for expiration
-		// we should remove it
-		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should not remove non-expired NodeClaims", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")

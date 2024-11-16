@@ -42,7 +42,9 @@ func NodeClaim(overrides ...v1.NodeClaim) *v1.NodeClaim {
 	}
 	if override.Spec.NodeClassRef == nil {
 		override.Spec.NodeClassRef = &v1.NodeClassReference{
-			Name: "default",
+			Name:  "default",
+			Group: "karpenter.test.sh",
+			Kind:  "TestNodeClass",
 		}
 	}
 	if override.Spec.Requirements == nil {

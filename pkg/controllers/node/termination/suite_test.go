@@ -60,7 +60,11 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx)))
+	env = test.NewEnvironment(
+		test.WithCRDs(apis.CRDs...),
+		test.WithCRDs(v1alpha1.CRDs...),
+		test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx)),
+	)
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
@@ -108,6 +112,18 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
+		It("should ignore nodes not managed by this Karpenter instance", func() {
+			delete(node.Labels, "karpenter.test.sh/testnodeclass")
+			node.Labels = lo.Assign(node.Labels, map[string]string{"karpenter.k8s.aws/ec2nodeclass": "default"})
+			ExpectApplied(ctx, env.Client, node)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
+			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			ExpectExists(ctx, env.Client, node)
+		})
 		It("should delete nodeclaims associated with nodes", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
@@ -126,25 +142,20 @@ var _ = Describe("Termination", func() {
 			ExpectNotFound(ctx, env.Client, node, nodeClaim)
 		})
 		It("should not race if deleting nodes in parallel", func() {
-			const numNodes = 10
-			var nodes []*corev1.Node
-			for i := 0; i < numNodes; i++ {
-				node = test.Node(test.NodeOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Finalizers: []string{v1.TerminationFinalizer},
-					},
-				})
+			nodes := lo.Times(10, func(_ int) *corev1.Node {
+				return test.NodeClaimLinkedNode(nodeClaim)
+			})
+			for _, node := range nodes {
 				ExpectApplied(ctx, env.Client, node, nodeClaim)
 				Expect(env.Client.Delete(ctx, node)).To(Succeed())
-				node = ExpectNodeExists(ctx, env.Client, node.Name)
-				nodes = append(nodes, node)
+				*node = *ExpectNodeExists(ctx, env.Client, node.Name)
 			}
 
 			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
 			for range 2 {
 				var wg sync.WaitGroup
 				// this is enough to trip the race detector
-				for i := 0; i < numNodes; i++ {
+				for i := range nodes {
 					wg.Add(1)
 					go func(node *corev1.Node) {
 						defer GinkgoRecover()
@@ -154,7 +165,9 @@ var _ = Describe("Termination", func() {
 				}
 				wg.Wait()
 			}
-			ExpectNotFound(ctx, env.Client, lo.Map(nodes, func(n *corev1.Node, _ int) client.Object { return n })...)
+			for _, node := range nodes {
+				ExpectNotFound(ctx, env.Client, node)
+			}
 		})
 		It("should exclude nodes from load balancers when terminating", func() {
 			labels := map[string]string{"foo": "bar"}

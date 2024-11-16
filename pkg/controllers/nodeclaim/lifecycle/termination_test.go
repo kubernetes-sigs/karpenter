@@ -67,41 +67,65 @@ var _ = Describe("Termination", func() {
 		})
 		lifecycle.InstanceTerminationDurationSeconds.Reset()
 	})
-	It("should delete the node and the CloudProvider NodeClaim when NodeClaim deletion is triggered", func() {
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+	DescribeTable(
+		"Termination",
+		func(isNodeClaimManaged bool) {
+			if !isNodeClaimManaged {
+				nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{
+					Group: "karpenter.k8s.aws",
+					Kind:  "EC2NodeClass",
+					Name:  "default",
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
-		Expect(err).ToNot(HaveOccurred())
+			if isNodeClaimManaged {
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
+				Expect(err).ToNot(HaveOccurred())
+			}
 
-		node := test.NodeClaimLinkedNode(nodeClaim)
-		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+			node := test.NodeClaimLinkedNode(nodeClaim)
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(Equal(isNodeClaimManaged))
 
-		// Expect the node and the nodeClaim to both be gone
-		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
-		ExpectFinalizersRemoved(ctx, env.Client, node)
-		ExpectNotFound(ctx, env.Client, node)
+			if !isNodeClaimManaged {
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+				ExpectApplied(ctx, env.Client, nodeClaim)
+			}
 
-		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now all the nodes are gone so nodeClaim deletion continues
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
+			// Expect the node and the nodeClaim to both be gone
+			Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+			ExpectFinalizersRemoved(ctx, env.Client, node)
+			if isNodeClaimManaged {
+				ExpectNotFound(ctx, env.Client, node)
+				result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now all the nodes are gone so nodeClaim deletion continues
+				Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+				ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
-		ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_instance_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
-		ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
-		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+				ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_instance_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
+				ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
+				ExpectNotFound(ctx, env.Client, nodeClaim, node)
 
-		// Expect the nodeClaim to be gone from the cloudprovider
-		_, err = cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
-		Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
-	})
+				// Expect the nodeClaim to be gone from the cloudprovider
+				_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
+				Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
+			} else {
+
+				ExpectExists(ctx, env.Client, node)
+				ExpectExists(ctx, env.Client, nodeClaim)
+			}
+		},
+		Entry("should delete the node and the CloudProvider NodeClaim when NodeClaim deletion is triggered", true),
+		Entry("should ignore NodeClaims which aren't managed by this Karpenter instance", false),
+	)
 	It("should delete the NodeClaim when the spec resource.Quantity values will change during deserialization", func() {
 		nodeClaim.SetGroupVersionKind(object.GVK(nodeClaim)) // This is needed so that the GVK is set on the unstructured object
 		u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(nodeClaim)

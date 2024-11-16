@@ -32,26 +32,48 @@ var _ = Describe("Registration", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
-	It("should match the nodeClaim to the Node when the Node comes online", func() {
-		nodeClaim := test.NodeClaim(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey: nodePool.Name,
+	DescribeTable(
+		"Registration",
+		func(isManagedNodeClaim bool) {
+			nodeClaimOpts := []v1.NodeClaim{{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
 				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			}}
+			if !isManagedNodeClaim {
+				nodeClaimOpts = append(nodeClaimOpts, v1.NodeClaim{
+					Spec: v1.NodeClaimSpec{
+						NodeClassRef: &v1.NodeClassReference{
+							Group: "karpenter.k8s.aws",
+							Kind:  "EC2NodeClass",
+							Name:  "default",
+						},
+					},
+				})
+			}
+			nodeClaim := test.NodeClaim(nodeClaimOpts...)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
-		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
-	})
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			if isManagedNodeClaim {
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+				Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+			} else {
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsUnknown()).To(BeTrue())
+				Expect(nodeClaim.Status.NodeName).To(Equal(""))
+			}
+		},
+		Entry("should match the nodeClaim to the Node when the Node comes online", true),
+		Entry("should ignore NodeClaims not managed by this Karpenter instance", false),
+	)
 	It("should add the owner reference to the Node when the Node comes online", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{

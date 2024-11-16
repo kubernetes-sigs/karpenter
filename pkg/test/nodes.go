@@ -20,10 +20,12 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type NodeOptions struct {
@@ -71,7 +73,9 @@ func NodeClaimLinkedNode(nodeClaim *v1.NodeClaim) *corev1.Node {
 	n := Node(
 		NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels:      nodeClaim.Labels,
+				Labels: lo.Assign(map[string]string{
+					nodeclaimutils.NodeClassLabelKey(nodeClaim.Spec.NodeClassRef): nodeClaim.Spec.NodeClassRef.Name,
+				}, nodeClaim.Labels),
 				Annotations: nodeClaim.Annotations,
 				Finalizers:  nodeClaim.Finalizers,
 			},

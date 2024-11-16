@@ -27,14 +27,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 const (
@@ -72,15 +75,17 @@ var (
 )
 
 type Controller struct {
-	kubeClient  client.Client
-	metricStore *metrics.Store
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
+	metricStore   *metrics.Store
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
-		kubeClient:  kubeClient,
-		metricStore: metrics.NewStore(),
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
+		metricStore:   metrics.NewStore(),
 	}
 }
 
@@ -94,6 +99,9 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			c.metricStore.Delete(req.NamespacedName.String())
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	if !nodepoolutils.IsManaged(nodePool, c.cloudProvider) {
+		return reconcile.Result{}, nil
 	}
 	c.metricStore.Update(req.NamespacedName.String(), buildMetrics(nodePool))
 	// periodically update our metrics per nodepool even if nothing has changed
@@ -133,6 +141,6 @@ func makeLabels(nodePool *v1.NodePool, resourceTypeName string) prometheus.Label
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("metrics.nodepool").
-		For(&v1.NodePool{}).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsMangedPredicates(c.cloudProvider))).
 		Complete(c)
 }

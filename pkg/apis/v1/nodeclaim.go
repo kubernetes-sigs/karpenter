@@ -20,6 +20,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // NodeClaimSpec describes the desired state of the NodeClaim
@@ -106,6 +107,13 @@ type NodeClassReference struct {
 	// +kubebuilder:validation:Pattern=`^[^/]*$`
 	// +required
 	Group string `json:"group"`
+}
+
+func (ncr *NodeClassReference) GroupKind() schema.GroupKind {
+	return schema.GroupKind{
+		Group: ncr.Group,
+		Kind:  ncr.Kind,
+	}
 }
 
 // +kubebuilder:object:generate=false

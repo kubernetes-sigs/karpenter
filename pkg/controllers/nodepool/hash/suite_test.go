@@ -30,6 +30,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -40,6 +41,7 @@ import (
 var nodePoolController *hash.Controller
 var ctx context.Context
 var env *test.Environment
+var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -49,7 +51,8 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
-	nodePoolController = hash.NewController(env.Client)
+	cp = fake.NewCloudProvider()
+	nodePoolController = hash.NewController(env.Client, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -90,6 +93,18 @@ var _ = Describe("Static Drift Hash", func() {
 				},
 			},
 		})
+	})
+	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
+		nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
+			Group: "karpenter.k8s.aws",
+			Kind:  "EC2NodeClass",
+			Name:  "default",
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		_, ok := nodePool.Annotations[v1.NodePoolHashAnnotationKey]
+		Expect(ok).To(BeFalse())
 	})
 	// TODO we should split this out into a DescribeTable
 	It("should update the drift hash when NodePool static field is updated", func() {

@@ -37,9 +37,9 @@ type NodeClaimController struct {
 	kubeClient client.Client
 }
 
-func NewNodeClaimController(kubeClient client.Client) *NodeClaimController {
+func NewNodeClaimController(kc client.Client) *NodeClaimController {
 	return &NodeClaimController{
-		kubeClient: kubeClient,
+		kubeClient: kc,
 	}
 }
 

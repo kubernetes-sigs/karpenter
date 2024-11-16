@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -35,17 +36,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Controller struct {
-	clock       clock.Clock
-	kubeClient  client.Client
-	checks      []Check
-	recorder    events.Recorder
-	lastScanned *cache.Cache
+	clock         clock.Clock
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
+	checks        []Check
+	recorder      events.Recorder
+	lastScanned   *cache.Cache
 }
 
 type Issue string
@@ -59,12 +62,13 @@ type Check interface {
 // scanPeriod is how often we inspect and report issues that are found.
 const scanPeriod = 10 * time.Minute
 
-func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Recorder) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
 	return &Controller{
-		clock:       clk,
-		kubeClient:  kubeClient,
-		recorder:    recorder,
-		lastScanned: cache.New(scanPeriod, 1*time.Minute),
+		clock:         clk,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
+		recorder:      recorder,
+		lastScanned:   cache.New(scanPeriod, 1*time.Minute),
 		checks: []Check{
 			NewTermination(clk, kubeClient),
 			NewNodeShape(),
@@ -74,10 +78,13 @@ func NewController(clk clock.Clock, kubeClient client.Client, recorder events.Re
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.consistency")
-
+	if !nodeclaimutil.IsManaged(nodeClaim, c.cloudProvider) {
+		return reconcile.Result{}, nil
+	}
 	if nodeClaim.Status.ProviderID == "" {
 		return reconcile.Result{}, nil
 	}
+
 	stored := nodeClaim.DeepCopy()
 	// If we get an event before we should check for consistency checks, we ignore and wait
 	if lastTime, ok := c.lastScanned.Get(string(nodeClaim.UID)); ok {
@@ -140,10 +147,10 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.consistency").
-		For(&v1.NodeClaim{}).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutil.IsMangedPredicates(c.cloudProvider))).
 		Watches(
 			&corev1.Node{},
-			nodeclaimutil.NodeEventHandler(c.kubeClient),
+			nodeclaimutil.NodeEventHandler(c.kubeClient, nodeclaimutil.WithManagedFilter(c.cloudProvider)),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

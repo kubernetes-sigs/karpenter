@@ -18,6 +18,7 @@ package nodeclaim_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -31,6 +32,8 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -39,8 +42,9 @@ import (
 )
 
 var (
-	ctx context.Context
-	env *test.Environment
+	ctx           context.Context
+	env           *test.Environment
+	cloudProvider cloudprovider.CloudProvider
 )
 
 func TestAPIs(t *testing.T) {
@@ -50,7 +54,8 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
+	cloudProvider = fake.NewCloudProvider()
 })
 
 var _ = AfterSuite(func() {
@@ -130,5 +135,91 @@ var _ = Describe("NodeClaimUtils", func() {
 			UID:                nodeClaim.UID,
 			BlockOwnerDeletion: lo.ToPtr(true),
 		}))
+	})
+	Context("List", func() {
+		It("should filter by provider ID", func() {
+			ncs := lo.Times(2, func(_ int) *v1.NodeClaim {
+				return test.NodeClaim(v1.NodeClaim{
+					Spec: v1.NodeClaimSpec{
+						NodeClassRef: &v1.NodeClassReference{
+							Group: "karpenter.test.sh",
+							Kind:  "TestNodeClass",
+							Name:  "default",
+						},
+					},
+				})
+			})
+			ExpectApplied(ctx, env.Client, ncs[0], ncs[1])
+			res, err := nodeclaimutil.List(ctx, env.Client, nodeclaimutil.WithProviderIDFilter(ncs[0].Status.ProviderID))
+			Expect(err).To(BeNil())
+			Expect(len(res)).To(Equal(1))
+			Expect(res[0].Name).To(Equal(ncs[0].Name))
+		})
+		It("should filter by NodePool", func() {
+			ncs := lo.Times(2, func(i int) *v1.NodeClaim {
+				return test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: fmt.Sprintf("nodepool-%d", i),
+						},
+					},
+					Spec: v1.NodeClaimSpec{
+						NodeClassRef: &v1.NodeClassReference{
+							Group: "karpenter.test.sh",
+							Kind:  "TestNodeClass",
+							Name:  "default",
+						},
+					},
+				})
+			})
+			ExpectApplied(ctx, env.Client, ncs[0], ncs[1])
+			res, err := nodeclaimutil.List(ctx, env.Client, nodeclaimutil.WithNodePoolFilter(ncs[0].Labels[v1.NodePoolLabelKey]))
+			Expect(err).To(BeNil())
+			Expect(len(res)).To(Equal(1))
+			Expect(res[0].Name).To(Equal(ncs[0].Name))
+		})
+		It("should filter managed NodeClaims", func() {
+			managed := test.NodeClaim(v1.NodeClaim{
+				Spec: v1.NodeClaimSpec{
+					NodeClassRef: &v1.NodeClassReference{
+						Group: "karpenter.test.sh",
+						Kind:  "TestNodeClass",
+						Name:  "default",
+					},
+				},
+			})
+			unmanagedByGroup := test.NodeClaim(v1.NodeClaim{
+				Spec: v1.NodeClaimSpec{
+					NodeClassRef: &v1.NodeClassReference{
+						Group: "karpenter.k8s.aws",
+						Kind:  "TestNodeClass",
+						Name:  "default",
+					},
+				},
+			})
+			unmanagedByKind := test.NodeClaim(v1.NodeClaim{
+				Spec: v1.NodeClaimSpec{
+					NodeClassRef: &v1.NodeClassReference{
+						Group: "karpenter.test.sh",
+						Kind:  "EC2NodeClass",
+						Name:  "default",
+					},
+				},
+			})
+			unmanaged := test.NodeClaim(v1.NodeClaim{
+				Spec: v1.NodeClaimSpec{
+					NodeClassRef: &v1.NodeClassReference{
+						Group: "karpenter.k8s.aws",
+						Kind:  "EC2NodeClass",
+						Name:  "default",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, managed, unmanagedByGroup, unmanagedByKind, unmanaged)
+			res, err := nodeclaimutil.List(ctx, env.Client, nodeclaimutil.WithManagedFilter(cloudProvider))
+			Expect(err).To(BeNil())
+			Expect(len(res)).To(Equal(1))
+			Expect(res[0].Name).To(Equal(managed.Name))
+		})
 	})
 })

@@ -24,24 +24,25 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/types"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // Controller for the resource
 type Controller struct {
-	kubeClient client.Client
-	cluster    *state.Cluster
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
+	cluster       *state.Cluster
 }
 
 var ResourceNode = corev1.ResourceName("nodes")
@@ -55,16 +56,20 @@ var BaseResources = corev1.ResourceList{
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
 	return &Controller{
-		kubeClient: kubeClient,
-		cluster:    cluster,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
+		cluster:       cluster,
 	}
 }
 
 // Reconcile a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepool.counter")
+	if !nodepoolutils.IsManaged(nodePool, c.cloudProvider) {
+		return reconcile.Result{}, nil
+	}
 
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// Otherwise, we have the potential to patch over the status with a lower value for the nodepool resource
@@ -109,24 +114,9 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.counter").
 		For(&v1.NodePool{}).
-		Watches(
-			&v1.NodeClaim{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
-				if name, ok := o.GetLabels()[v1.NodePoolLabelKey]; ok {
-					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
-				}
-				return nil
-			}),
-		).
-		Watches(
-			&corev1.Node{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
-				if name, ok := o.GetLabels()[v1.NodePoolLabelKey]; ok {
-					return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
-				}
-				return nil
-			}),
-		).
+		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler()).
+		Watches(&corev1.Node{}, nodepoolutils.NodeEventHandler()).
+		WithEventFilter(nodepoolutils.IsMangedPredicates(c.cloudProvider)).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 

@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Controller struct {
@@ -59,8 +59,8 @@ func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudp
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.garbagecollection")
 
-	nodeClaimList := &v1.NodeClaimList{}
-	if err := c.kubeClient.List(ctx, nodeClaimList); err != nil {
+	nodeClaims, err := nodeclaimutils.List(ctx, c.kubeClient, nodeclaimutils.WithManagedFilter(c.cloudProvider))
+	if err != nil {
 		return reconcile.Result{}, err
 	}
 	cloudProviderNodeClaims, err := c.cloudProvider.List(ctx)
@@ -75,7 +75,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	})...)
 	// Only consider NodeClaims that are Registered since we don't want to fully rely on the CloudProvider
 	// API to trigger deletion of the Node. Instead, we'll wait for our registration timeout to trigger
-	nodeClaims := lo.Filter(lo.ToSlicePtr(nodeClaimList.Items), func(n *v1.NodeClaim, _ int) bool {
+	nodeClaims = lo.Filter(nodeClaims, func(n *v1.NodeClaim, _ int) bool {
 		return n.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() &&
 			n.DeletionTimestamp.IsZero() &&
 			!cloudProviderProviderIDs.Has(n.Status.ProviderID)
@@ -83,10 +83,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 	errs := make([]error, len(nodeClaims))
 	workqueue.ParallelizeUntil(ctx, 20, len(nodeClaims), func(i int) {
-		node, err := nodeclaimutil.NodeForNodeClaim(ctx, c.kubeClient, nodeClaims[i])
+		node, err := nodeclaimutils.NodeForNodeClaim(ctx, c.kubeClient, nodeClaims[i])
 		// Ignore these errors since a registered NodeClaim should only have a NotFound node when
 		// the Node was deleted out from under us and a Duplicate Node is an invalid state
-		if nodeclaimutil.IgnoreDuplicateNodeError(nodeclaimutil.IgnoreNodeNotFoundError(err)) != nil {
+		if nodeclaimutils.IgnoreDuplicateNodeError(nodeclaimutils.IgnoreNodeNotFoundError(err)) != nil {
 			errs[i] = err
 		}
 		// We do a check on the Ready condition of the node since, even though the CloudProvider says the instance
