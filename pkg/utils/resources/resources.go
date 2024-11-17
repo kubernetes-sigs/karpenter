@@ -183,19 +183,18 @@ func MaxResources(resources ...v1.ResourceList) v1.ResourceList {
 
 // MergeResourceLimitsIntoRequests merges resource limits into requests if no request exists for the given resource
 func MergeResourceLimitsIntoRequests(container v1.Container) v1.ResourceList {
-	resources := container.Resources.DeepCopy()
-	if resources.Requests == nil {
-		resources.Requests = v1.ResourceList{}
+	ret := v1.ResourceList{}
+	for resourceName, quantity := range container.Resources.Requests {
+		ret[resourceName] = quantity
 	}
-
-	if resources.Limits != nil {
-		for resourceName, quantity := range resources.Limits {
-			if _, ok := resources.Requests[resourceName]; !ok {
-				resources.Requests[resourceName] = quantity
+	if container.Resources.Limits != nil {
+		for resourceName, quantity := range container.Resources.Limits {
+			if _, ok := container.Resources.Requests[resourceName]; !ok {
+				ret[resourceName] = quantity
 			}
 		}
 	}
-	return resources.Requests
+	return ret
 }
 
 // Quantity parses the string value into a *Quantity
