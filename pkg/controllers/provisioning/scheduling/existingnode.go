@@ -30,6 +30,7 @@ import (
 
 type ExistingNode struct {
 	*state.StateNode
+	cachedAvailable v1.ResourceList // Cache so we don't have to re-subtract resources on the StateNode every time
 
 	Pods         []*v1.Pod
 	topology     *Topology
@@ -51,10 +52,11 @@ func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.
 		}
 	}
 	node := &ExistingNode{
-		StateNode:    n,
-		topology:     topology,
-		requests:     remainingDaemonResources,
-		requirements: scheduling.NewLabelRequirements(n.Labels()),
+		StateNode:       n,
+		cachedAvailable: n.Available(),
+		topology:        topology,
+		requests:        remainingDaemonResources,
+		requirements:    scheduling.NewLabelRequirements(n.Labels()),
 	}
 	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
 	topology.Register(v1.LabelHostname, n.HostName())
@@ -84,7 +86,7 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 	// node, which at this point can't be increased in size
 	requests := resources.Merge(n.requests, resources.RequestsForPods(pod))
 
-	if !resources.Fits(requests, n.Available()) {
+	if !resources.Fits(requests, n.cachedAvailable) {
 		return fmt.Errorf("exceeds node resources")
 	}
 
