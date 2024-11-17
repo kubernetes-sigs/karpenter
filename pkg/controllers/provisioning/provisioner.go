@@ -247,10 +247,10 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 		}
 		if len(instanceTypeOptions) == 0 {
 			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", nodePool.Name)).Info("skipping, no resolved instance types found")
-
 			continue
 		}
-		instanceTypes[nodePool.Name] = append(instanceTypes[nodePool.Name], instanceTypeOptions...)
+
+		instanceTypes[nodePool.Name] = instanceTypeOptions
 
 		// Construct Topology Domains
 		for _, instanceType := range instanceTypeOptions {
@@ -301,7 +301,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
