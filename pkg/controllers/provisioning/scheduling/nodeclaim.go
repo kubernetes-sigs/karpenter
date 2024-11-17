@@ -39,6 +39,7 @@ type NodeClaim struct {
 	topology        *Topology
 	hostPortUsage   *scheduling.HostPortUsage
 	daemonResources v1.ResourceList
+	hostname        string
 }
 
 var nodeID int64
@@ -59,6 +60,7 @@ func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daem
 		hostPortUsage:     scheduling.NewHostPortUsage(),
 		topology:          topology,
 		daemonResources:   daemonResources,
+		hostname:          hostname,
 	}
 }
 
@@ -117,6 +119,10 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	n.topology.Record(pod, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, hostPorts)
 	return nil
+}
+
+func (n *NodeClaim) Destroy() {
+	n.topology.Unregister(v1.LabelHostname, n.hostname)
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup

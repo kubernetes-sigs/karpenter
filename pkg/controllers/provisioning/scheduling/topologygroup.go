@@ -128,6 +128,14 @@ func (t *TopologyGroup) Register(domains ...string) {
 	}
 }
 
+// Unregister removes the topology group from being aware of the domain
+func (t *TopologyGroup) Unregister(domains ...string) {
+	for _, domain := range domains {
+		delete(t.domains, domain)
+		t.emptyDomains.Delete(domain)
+	}
+}
+
 func (t *TopologyGroup) AddOwner(key types.UID) {
 	t.owners[key] = struct{}{}
 }

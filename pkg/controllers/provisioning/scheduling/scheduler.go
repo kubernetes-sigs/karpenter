@@ -289,6 +289,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 		}
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
 		if err := nodeClaim.Add(pod); err != nil {
+			nodeClaim.Destroy() // Ensure we cleanup any changes that we made while mocking out a NodeClaim
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, daemonset overhead=%s, %w",
 				nodeClaimTemplate.NodePoolName,
 				resources.String(s.daemonOverhead[nodeClaimTemplate]),
