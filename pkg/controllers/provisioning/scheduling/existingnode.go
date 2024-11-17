@@ -63,7 +63,7 @@ func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.
 	return node
 }
 
-func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
+func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod, podRequests v1.ResourceList) error {
 	// Check Taints
 	if err := scheduling.Taints(n.Taints()).Tolerates(pod); err != nil {
 		return err
@@ -84,7 +84,7 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 
 	// check resource requests first since that's a pretty likely reason the pod won't schedule on an in-flight
 	// node, which at this point can't be increased in size
-	requests := resources.Merge(n.requests, resources.RequestsForPods(pod))
+	requests := resources.Merge(n.requests, podRequests)
 
 	if !resources.Fits(requests, n.cachedAvailable) {
 		return fmt.Errorf("exceeds node resources")
