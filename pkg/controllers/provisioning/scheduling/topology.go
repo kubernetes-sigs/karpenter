@@ -201,6 +201,20 @@ func (t *Topology) Register(topologyKey string, domain string) {
 	}
 }
 
+// Unregister is used to unregister a domain as available across topologies for the given topology key.
+func (t *Topology) Unregister(topologyKey string, domain string) {
+	for _, topology := range t.topologies {
+		if topology.Key == topologyKey {
+			topology.Unregister(domain)
+		}
+	}
+	for _, topology := range t.inverseTopologies {
+		if topology.Key == topologyKey {
+			topology.Unregister(domain)
+		}
+	}
+}
+
 // updateInverseAffinities is used to identify pods with anti-affinity terms so we can track those topologies.  We
 // have to look at every pod in the cluster as there is no way to query for a pod with anti-affinity terms.
 func (t *Topology) updateInverseAffinities(ctx context.Context) error {
