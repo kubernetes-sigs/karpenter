@@ -55,13 +55,14 @@ func (t TopologyType) String() string {
 // TopologyGroup is used to track pod counts that match a selector by the topology domain (e.g. SELECT COUNT(*) FROM pods GROUP BY(topology_ke
 type TopologyGroup struct {
 	// Hashed Fields
-	Key        string
-	Type       TopologyType
-	maxSkew    int32
-	minDomains *int32
-	namespaces sets.Set[string]
-	selector   *metav1.LabelSelector
-	nodeFilter TopologyNodeFilter
+	Key         string
+	Type        TopologyType
+	maxSkew     int32
+	minDomains  *int32
+	namespaces  sets.Set[string]
+	selector    labels.Selector
+	rawSelector *metav1.LabelSelector
+	nodeFilter  TopologyNodeFilter
 	// Index
 	owners       map[types.UID]struct{} // Pods that have this topology as a scheduling rule
 	domains      map[string]int32       // TODO(ellistarn) explore replacing with a minheap
@@ -78,11 +79,16 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 	if topologyType == TopologyTypeSpread {
 		nodeSelector = MakeTopologyNodeFilter(pod)
 	}
+	selector, err := metav1.LabelSelectorAsSelector(labelSelector)
+	if err != nil {
+		selector = labels.Nothing()
+	}
 	return &TopologyGroup{
 		Type:         topologyType,
 		Key:          topologyKey,
 		namespaces:   namespaces,
-		selector:     labelSelector,
+		selector:     selector,
+		rawSelector:  labelSelector,
 		nodeFilter:   nodeSelector,
 		maxSkew:      maxSkew,
 		domains:      domainCounts,
@@ -153,19 +159,19 @@ func (t *TopologyGroup) IsOwnedBy(key types.UID) bool {
 // with self anti-affinity, we track that as a single topology with 100 owners instead of 100x topologies.
 func (t *TopologyGroup) Hash() uint64 {
 	return lo.Must(hashstructure.Hash(struct {
-		TopologyKey   string
-		Type          TopologyType
-		Namespaces    sets.Set[string]
-		LabelSelector *metav1.LabelSelector
-		MaxSkew       int32
-		NodeFilter    TopologyNodeFilter
+		TopologyKey string
+		Type        TopologyType
+		Namespaces  sets.Set[string]
+		RawSelector *metav1.LabelSelector
+		MaxSkew     int32
+		NodeFilter  TopologyNodeFilter
 	}{
-		TopologyKey:   t.Key,
-		Type:          t.Type,
-		Namespaces:    t.namespaces,
-		LabelSelector: t.selector,
-		MaxSkew:       t.maxSkew,
-		NodeFilter:    t.nodeFilter,
+		TopologyKey: t.Key,
+		Type:        t.Type,
+		Namespaces:  t.namespaces,
+		RawSelector: t.rawSelector,
+		MaxSkew:     t.maxSkew,
+		NodeFilter:  t.nodeFilter,
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
 }
 
@@ -274,9 +280,5 @@ func (t *TopologyGroup) nextDomainAntiAffinity(domains *scheduling.Requirement) 
 
 // selects returns true if the given pod is selected by this topology
 func (t *TopologyGroup) selects(pod *v1.Pod) bool {
-	selector, err := metav1.LabelSelectorAsSelector(t.selector)
-	if err != nil {
-		selector = labels.Nothing()
-	}
-	return t.namespaces.Has(pod.Namespace) && selector.Matches(labels.Set(pod.Labels))
+	return t.namespaces.Has(pod.Namespace) && t.selector.Matches(labels.Set(pod.Labels))
 }
