@@ -31,6 +31,7 @@ import (
 type ExistingNode struct {
 	*state.StateNode
 	cachedAvailable v1.ResourceList // Cache so we don't have to re-subtract resources on the StateNode every time
+	cachedTaints    []v1.Taint      // Cache so we don't hae to re-construct the taints each time we attempt to schedule a pod
 
 	Pods         []*v1.Pod
 	topology     *Topology
@@ -38,7 +39,7 @@ type ExistingNode struct {
 	requirements scheduling.Requirements
 }
 
-func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.ResourceList) *ExistingNode {
+func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, daemonResources v1.ResourceList) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	remainingDaemonResources := resources.Subtract(daemonResources, n.DaemonSetRequests())
@@ -54,6 +55,7 @@ func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.
 	node := &ExistingNode{
 		StateNode:       n,
 		cachedAvailable: n.Available(),
+		cachedTaints:    taints,
 		topology:        topology,
 		requests:        remainingDaemonResources,
 		requirements:    scheduling.NewLabelRequirements(n.Labels()),
@@ -65,7 +67,7 @@ func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.
 
 func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod, podRequests v1.ResourceList) error {
 	// Check Taints
-	if err := scheduling.Taints(n.Taints()).Tolerates(pod); err != nil {
+	if err := scheduling.Taints(n.cachedTaints).Tolerates(pod); err != nil {
 		return err
 	}
 	// determine the volumes that will be mounted if the pod schedules
