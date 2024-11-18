@@ -98,12 +98,15 @@ type ResourceRequirements struct {
 
 type NodeClassReference struct {
 	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"
+	// +kubebuilder:validation:XValidation:rule="self != ''",message="kind may not be empty"
 	// +required
 	Kind string `json:"kind"`
 	// Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names
+	// +kubebuilder:validation:XValidation:rule="self != ''",message="name may not be empty"
 	// +required
 	Name string `json:"name"`
 	// API version of the referent
+	// +kubebuilder:validation:XValidation:rule="self != ''",message="group may not be empty"
 	// +kubebuilder:validation:Pattern=`^[^/]*$`
 	// +required
 	Group string `json:"group"`

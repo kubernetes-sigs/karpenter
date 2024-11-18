@@ -180,6 +180,8 @@ type NodeClaimTemplateSpec struct {
 	// +required
 	Requirements []NodeSelectorRequirementWithMinValues `json:"requirements" hash:"ignore"`
 	// NodeClassRef is a reference to an object that defines provider specific configuration
+	// +kubebuilder:validation:XValidation:rule="self.group == oldSelf.group",message="nodeClassRef.group is immutable"
+	// +kubebuilder:validation:XValidation:rule="self.kind == oldSelf.kind",message="nodeClassRef.kind is immutable"
 	// +required
 	NodeClassRef *NodeClassReference `json:"nodeClassRef"`
 	// TerminationGracePeriod is the maximum duration the controller will wait before forcefully deleting the pods on a node, measured from when deletion is first initiated.
