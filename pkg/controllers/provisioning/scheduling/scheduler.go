@@ -44,7 +44,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-func NewScheduler(kubeClient client.Client, nodePools []*v1.NodePool,
+func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1.NodePool,
 	cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
 	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*corev1.Pod,
 	recorder events.Recorder, clock clock.Clock) *Scheduler {
@@ -59,16 +59,24 @@ func NewScheduler(kubeClient client.Client, nodePools []*v1.NodePool,
 			}
 		}
 	}
-
-	templates := lo.Map(nodePools, func(np *v1.NodePool, _ int) *NodeClaimTemplate { return NewNodeClaimTemplate(np) })
+	// Pre-filter instance types eligible for NodePools to reduce work done during scheduling loops for pods
+	templates := lo.FilterMap(nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
+		nct := NewNodeClaimTemplate(np)
+		nct.InstanceTypeOptions = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}).remaining
+		if len(nct.InstanceTypeOptions) == 0 {
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Info("skipping, nodepool requirements filtered out all instance types")
+			return nil, false
+		}
+		return nct, true
+	})
 	s := &Scheduler{
 		id:                 uuid.NewUUID(),
 		kubeClient:         kubeClient,
 		nodeClaimTemplates: templates,
 		topology:           topology,
 		cluster:            cluster,
-		instanceTypes:      instanceTypes,
 		daemonOverhead:     getDaemonOverhead(templates, daemonSetPods),
+		cachedPodRequests:  map[types.UID]corev1.ResourceList{}, // cache pod requests to avoid having to continually recompute this total
 		recorder:           recorder,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
@@ -85,9 +93,9 @@ type Scheduler struct {
 	newNodeClaims      []*NodeClaim
 	existingNodes      []*ExistingNode
 	nodeClaimTemplates []*NodeClaimTemplate
-	remainingResources map[string]corev1.ResourceList           // (NodePool name) -> remaining resources for that NodePool
-	instanceTypes      map[string][]*cloudprovider.InstanceType // (NodePool name) -> instance types for NodePool
+	remainingResources map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead     map[*NodeClaimTemplate]corev1.ResourceList
+	cachedPodRequests  map[types.UID]corev1.ResourceList // (Pod Namespace/Name) -> calculated resource requests for the pod
 	preferences        *Preferences
 	topology           *Topology
 	cluster            *state.Cluster
@@ -207,7 +215,10 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	// Reset the metric for the controller, so we don't keep old ids around
 	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	QueueDepth.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
-	q := NewQueue(pods...)
+	for _, p := range pods {
+		s.cachedPodRequests[p.UID] = resources.RequestsForPods(p)
+	}
+	q := NewQueue(pods, s.cachedPodRequests)
 
 	startTime := s.clock.Now()
 	lastLogTime := s.clock.Now()
@@ -256,7 +267,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
-		if err := node.Add(ctx, s.kubeClient, pod); err == nil {
+		if err := node.Add(ctx, s.kubeClient, pod, s.cachedPodRequests[pod.UID]); err == nil {
 			return nil
 		}
 	}
@@ -266,7 +277,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// Pick existing node that we are about to create
 	for _, nodeClaim := range s.newNodeClaims {
-		if err := nodeClaim.Add(pod); err == nil {
+		if err := nodeClaim.Add(pod, s.cachedPodRequests[pod.UID]); err == nil {
 			return nil
 		}
 	}
@@ -274,21 +285,21 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// Create new node
 	var errs error
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
-		instanceTypes := s.instanceTypes[nodeClaimTemplate.NodePoolName]
+		instanceTypes := nodeClaimTemplate.InstanceTypeOptions
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[nodeClaimTemplate.NodePoolName]; ok {
-			instanceTypes = filterByRemainingResources(s.instanceTypes[nodeClaimTemplate.NodePoolName], remaining)
+			instanceTypes = filterByRemainingResources(instanceTypes, remaining)
 			if len(instanceTypes) == 0 {
 				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool: %q", nodeClaimTemplate.NodePoolName))
 				continue
-			} else if len(s.instanceTypes[nodeClaimTemplate.NodePoolName]) != len(instanceTypes) {
-
+			} else if len(nodeClaimTemplate.InstanceTypeOptions) != len(instanceTypes) {
 				log.FromContext(ctx).V(1).WithValues("NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName)).Info(fmt.Sprintf("%d out of %d instance types were excluded because they would breach limits",
-					len(s.instanceTypes[nodeClaimTemplate.NodePoolName])-len(instanceTypes), len(s.instanceTypes[nodeClaimTemplate.NodePoolName])))
+					len(nodeClaimTemplate.InstanceTypeOptions)-len(instanceTypes), len(nodeClaimTemplate.InstanceTypeOptions)))
 			}
 		}
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
-		if err := nodeClaim.Add(pod); err != nil {
+		if err := nodeClaim.Add(pod, s.cachedPodRequests[pod.UID]); err != nil {
+			nodeClaim.Destroy() // Ensure we cleanup any changes that we made while mocking out a NodeClaim
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, daemonset overhead=%s, %w",
 				nodeClaimTemplate.NodePoolName,
 				resources.String(s.daemonOverhead[nodeClaimTemplate]),
