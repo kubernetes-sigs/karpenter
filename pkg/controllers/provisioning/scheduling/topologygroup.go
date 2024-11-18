@@ -105,7 +105,7 @@ func (t *TopologyGroup) Get(pod *v1.Pod, podDomains, nodeDomains *scheduling.Req
 	case TopologyTypePodAffinity:
 		return t.nextDomainAffinity(pod, podDomains, nodeDomains)
 	case TopologyTypePodAntiAffinity:
-		return t.nextDomainAntiAffinity(podDomains)
+		return t.nextDomainAntiAffinity(podDomains, nodeDomains)
 	default:
 		panic(fmt.Sprintf("Unrecognized topology group type: %s", t.Type))
 	}
@@ -134,7 +134,6 @@ func (t *TopologyGroup) Register(domains ...string) {
 	}
 }
 
-// Unregister removes the topology group from being aware of the domain
 func (t *TopologyGroup) Unregister(domains ...string) {
 	for _, domain := range domains {
 		delete(t.domains, domain)
@@ -178,6 +177,7 @@ func (t *TopologyGroup) Hash() uint64 {
 // nextDomainTopologySpread returns a scheduling.Requirement that includes a node domain that a pod should be scheduled to.
 // If there are multiple eligible domains, we return any random domain that satisfies the `maxSkew` configuration.
 // If there are no eligible domains, we return a `DoesNotExist` requirement, implying that we could not satisfy the topologySpread requirement.
+// nolint:gocyclo
 func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	// min count is calculated across all domains
 	min := t.domainMinCount(podDomains)
@@ -185,18 +185,37 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDo
 
 	minDomain := ""
 	minCount := int32(math.MaxInt32)
-	for domain := range t.domains {
-		// but we can only choose from the node domains
-		if nodeDomains.Has(domain) {
-			// comment from kube-scheduler regarding the viable choices to schedule to based on skew is:
-			// 'existing matching num' + 'if self-match (1 or 0)' - 'global min matching num' <= 'maxSkew'
-			count := t.domains[domain]
-			if selfSelecting {
-				count++
+
+	// If we are explicitly selecting on specific node domains ("In" requirement),
+	// this is going to be more efficient to iterate through
+	// This is particularly useful when considering the hostname topology key that can have a
+	// lot of t.domains but only a single nodeDomain
+	if nodeDomains.Operator() == v1.NodeSelectorOpIn {
+		for _, domain := range nodeDomains.Values() {
+			if count, ok := t.domains[domain]; ok {
+				if selfSelecting {
+					count++
+				}
+				if count-min <= t.maxSkew && count < minCount {
+					minDomain = domain
+					minCount = count
+				}
 			}
-			if count-min <= t.maxSkew && count < minCount {
-				minDomain = domain
-				minCount = count
+		}
+	} else {
+		for domain := range t.domains {
+			// but we can only choose from the node domains
+			if nodeDomains.Has(domain) {
+				// comment from kube-scheduler regarding the viable choices to schedule to based on skew is:
+				// 'existing matching num' + 'if self-match (1 or 0)' - 'global min matching num' <= 'maxSkew'
+				count := t.domains[domain]
+				if selfSelecting {
+					count++
+				}
+				if count-min <= t.maxSkew && count < minCount {
+					minDomain = domain
+					minCount = count
+				}
 			}
 		}
 	}
@@ -230,17 +249,34 @@ func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
 	return min
 }
 
+// nolint:gocyclo
 func (t *TopologyGroup) nextDomainAffinity(pod *v1.Pod, podDomains *scheduling.Requirement, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	options := scheduling.NewRequirement(podDomains.Key, v1.NodeSelectorOpDoesNotExist)
-	for domain := range t.domains {
-		if podDomains.Has(domain) && t.domains[domain] > 0 {
-			options.Insert(domain)
+
+	// If we are explicitly selecting on specific node domains ("In" requirement),
+	// this is going to be more efficient to iterate through
+	// This is particularly useful when considering the hostname topology key that can have a
+	// lot of t.domains but only a single nodeDomain
+	if nodeDomains.Operator() == v1.NodeSelectorOpIn {
+		for _, domain := range nodeDomains.Values() {
+			if count, ok := t.domains[domain]; podDomains.Has(domain) && ok && count > 0 {
+				options.Insert(domain)
+			}
+		}
+	} else {
+		for domain := range t.domains {
+			if podDomains.Has(domain) && t.domains[domain] > 0 && nodeDomains.Has(domain) {
+				options.Insert(domain)
+			}
 		}
 	}
+	if options.Len() != 0 {
+		return options
+	}
 
-	// If pod is self selecting and no pod has been scheduled yet, we can pick a domain at random to bootstrap scheduling
-
-	if options.Len() == 0 && t.selects(pod) {
+	// If pod is self-selecting and no pod has been scheduled yet OR the pods that have scheduled are
+	// incompatible with our podDomains, we can pick a domain at random to bootstrap scheduling.
+	if t.selects(pod) && (len(t.domains) == len(t.emptyDomains) || !t.anyCompatiblePodDomain(podDomains)) {
 		// First try to find a domain that is within the intersection of pod/node domains. In the case of an in-flight node
 		// this causes us to pick the domain that the existing in-flight node is already in if possible instead of picking
 		// a random viable domain.
@@ -263,16 +299,43 @@ func (t *TopologyGroup) nextDomainAffinity(pod *v1.Pod, podDomains *scheduling.R
 	return options
 }
 
-func (t *TopologyGroup) nextDomainAntiAffinity(domains *scheduling.Requirement) *scheduling.Requirement {
-	options := scheduling.NewRequirement(domains.Key, v1.NodeSelectorOpDoesNotExist)
+// anyCompatiblePodDomain validates whether any t.domain is compatible with our podDomains
+// This is only useful in affinity checking because it tells us whether we can schedule the pod
+// to the current node since it is the first pod that exists in the TopologyGroup OR all other domains
+// in the TopologyGroup are incompatible with the podDomains
+func (t *TopologyGroup) anyCompatiblePodDomain(podDomains *scheduling.Requirement) bool {
+	for domain := range t.domains {
+		if podDomains.Has(domain) && t.domains[domain] > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// nolint:gocyclo
+func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
+	options := scheduling.NewRequirement(podDomains.Key, v1.NodeSelectorOpDoesNotExist)
 	// pods with anti-affinity must schedule to a domain where there are currently none of those pods (an empty
 	// domain). If there are none of those domains, then the pod can't schedule and we don't need to walk this
 	// list of domains.  The use case where this optimization is really great is when we are launching nodes for
 	// a deployment of pods with self anti-affinity.  The domains map here continues to grow, and we continue to
 	// fully scan it each iteration.
-	for domain := range t.emptyDomains {
-		if domains.Has(domain) && t.domains[domain] == 0 {
-			options.Insert(domain)
+
+	// If we are explicitly selecting on specific node domains ("In" requirement) and the number of node domains
+	// is less than our empty domains, this is going to be more efficient to iterate through
+	// This is particularly useful when considering the hostname topology key that can have a
+	// lot of t.domains but only a single nodeDomain
+	if nodeDomains.Operator() == v1.NodeSelectorOpIn && nodeDomains.Len() < len(t.emptyDomains) {
+		for _, domain := range nodeDomains.Values() {
+			if t.emptyDomains.Has(domain) && podDomains.Has(domain) {
+				options.Insert(domain)
+			}
+		}
+	} else {
+		for domain := range t.emptyDomains {
+			if nodeDomains.Has(domain) && podDomains.Has(domain) {
+				options.Insert(domain)
+			}
 		}
 	}
 	return options

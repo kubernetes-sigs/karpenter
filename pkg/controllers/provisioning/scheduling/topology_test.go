@@ -1642,6 +1642,59 @@ var _ = Describe("Topology", func() {
 			}
 			Expect(len(nodeNames)).To(Equal(1))
 		})
+		It("should allow two nodes to be created when two pods with matching affinities have incompatible selectors", func() {
+			affLabels := map[string]string{"security": "s1"}
+			// the pod needs to provide it's own zonal affinity, but we further limit it to only being on test-zone-2
+			pod1 := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: affLabels,
+				},
+				PodRequirements: []corev1.PodAffinityTerm{{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: affLabels,
+					},
+					TopologyKey: corev1.LabelTopologyZone,
+				}},
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-2"},
+					},
+				},
+			})
+			// the pod needs to provide it's own zonal affinity, but we further limit it to only being on test-zone-3
+			pod2 := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: affLabels,
+				},
+				PodRequirements: []corev1.PodAffinityTerm{{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: affLabels,
+					},
+					TopologyKey: corev1.LabelTopologyZone,
+				}},
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-3"},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, pod2)
+			nodeNames := map[string]struct{}{}
+
+			n1 := ExpectScheduled(ctx, env.Client, pod1)
+			nodeNames[n1.Name] = struct{}{}
+			Expect(n1.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-2"))
+
+			n2 := ExpectScheduled(ctx, env.Client, pod2)
+			nodeNames[n2.Name] = struct{}{}
+			Expect(n2.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-3"))
+			Expect(len(nodeNames)).To(Equal(2))
+		})
 		It("should allow violation of preferred pod affinity", func() {
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelHostname,
@@ -1940,7 +1993,6 @@ var _ = Describe("Topology", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, affPod)
 			node2 := ExpectScheduled(ctx, env.Client, affPod)
 			Expect(node1.Labels[corev1.LabelTopologyZone]).ToNot(Equal(node2.Labels[corev1.LabelTopologyZone]))
-
 		})
 		It("should not violate pod anti-affinity on zone (inverse w/existing nodes)", func() {
 			affLabels := map[string]string{"security": "s2"}
