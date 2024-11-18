@@ -42,6 +42,7 @@ type FeatureGates struct {
 	inputStr string
 
 	SpotToSpotConsolidation bool
+	NodeRepair              bool
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -97,7 +98,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.LogErrorOutputPaths, "log-error-output-paths", env.WithDefaultString("LOG_ERROR_OUTPUT_PATHS", "stderr"), "Optional comma separated paths for logging error output")
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: SpotToSpotConsolidation")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: SpotToSpotConsolidation")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -131,6 +132,9 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	// simple merging with environment vars.
 	if err := cliflag.NewMapStringBool(&gateMap).Set(gateStr); err != nil {
 		return gates, err
+	}
+	if val, ok := gateMap["NodeRepair"]; ok {
+		gates.NodeRepair = val
 	}
 	if val, ok := gateMap["SpotToSpotConsolidation"]; ok {
 		gates.SpotToSpotConsolidation = val
