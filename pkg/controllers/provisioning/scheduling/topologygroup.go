@@ -268,9 +268,8 @@ func (t *TopologyGroup) nextDomainAffinity(pod *v1.Pod, podDomains *scheduling.R
 		return options
 	}
 
-	// If pod is self-selecting and no pod has been scheduled yet OR there is another pod that has scheduled but it's
-	// incompatible with our podDomains, we can pick a domain at random to bootstrap scheduling
-	// This also requires that there not already be some other domain where this a pod in this topology has scheduled
+	// If pod is self-selecting and no pod has been scheduled yet OR the pods that have scheduled are
+	// incompatible with our podDomains, we can pick a domain at random to bootstrap scheduling.
 	if t.selects(pod) && (len(t.domains) == len(t.emptyDomains) || !t.anyCompatiblePodDomain(podDomains)) {
 		// First try to find a domain that is within the intersection of pod/node domains. In the case of an in-flight node
 		// this causes us to pick the domain that the existing in-flight node is already in if possible instead of picking
