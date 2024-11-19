@@ -95,7 +95,6 @@ func NewControllers(
 		status.NewController[*v1.NodeClaim](kubeClient, mgr.GetEventRecorderFor("karpenter"), status.EmitDeprecatedMetrics),
 		status.NewController[*v1.NodePool](kubeClient, mgr.GetEventRecorderFor("karpenter"), status.EmitDeprecatedMetrics),
 		status.NewGenericObjectController[*corev1.Node](kubeClient, mgr.GetEventRecorderFor("karpenter")),
-		health.NewController(kubeClient, cloudProvider, clock),
 	}
 
 	// The cloud provider must define status conditions for the node repair controller to use to detect unhealthy nodes
