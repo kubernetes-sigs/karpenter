@@ -30,6 +30,8 @@ import (
 
 type ExistingNode struct {
 	*state.StateNode
+	cachedAvailable v1.ResourceList // Cache so we don't have to re-subtract resources on the StateNode every time
+	cachedTaints    []v1.Taint      // Cache so we don't hae to re-construct the taints each time we attempt to schedule a pod
 
 	Pods         []*v1.Pod
 	topology     *Topology
@@ -37,7 +39,7 @@ type ExistingNode struct {
 	requirements scheduling.Requirements
 }
 
-func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.ResourceList) *ExistingNode {
+func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, daemonResources v1.ResourceList) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	remainingDaemonResources := resources.Subtract(daemonResources, n.DaemonSetRequests())
@@ -51,19 +53,21 @@ func NewExistingNode(n *state.StateNode, topology *Topology, daemonResources v1.
 		}
 	}
 	node := &ExistingNode{
-		StateNode:    n,
-		topology:     topology,
-		requests:     remainingDaemonResources,
-		requirements: scheduling.NewLabelRequirements(n.Labels()),
+		StateNode:       n,
+		cachedAvailable: n.Available(),
+		cachedTaints:    taints,
+		topology:        topology,
+		requests:        remainingDaemonResources,
+		requirements:    scheduling.NewLabelRequirements(n.Labels()),
 	}
 	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
 	topology.Register(v1.LabelHostname, n.HostName())
 	return node
 }
 
-func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod) error {
+func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod, podRequests v1.ResourceList) error {
 	// Check Taints
-	if err := scheduling.Taints(n.Taints()).Tolerates(pod); err != nil {
+	if err := scheduling.Taints(n.cachedTaints).Tolerates(pod); err != nil {
 		return err
 	}
 	// determine the volumes that will be mounted if the pod schedules
@@ -82,9 +86,9 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 
 	// check resource requests first since that's a pretty likely reason the pod won't schedule on an in-flight
 	// node, which at this point can't be increased in size
-	requests := resources.Merge(n.requests, resources.RequestsForPods(pod))
+	requests := resources.Merge(n.requests, podRequests)
 
-	if !resources.Fits(requests, n.Available()) {
+	if !resources.Fits(requests, n.cachedAvailable) {
 		return fmt.Errorf("exceeds node resources")
 	}
 

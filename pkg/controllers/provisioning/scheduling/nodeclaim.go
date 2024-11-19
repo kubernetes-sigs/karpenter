@@ -39,6 +39,7 @@ type NodeClaim struct {
 	topology        *Topology
 	hostPortUsage   *scheduling.HostPortUsage
 	daemonResources v1.ResourceList
+	hostname        string
 }
 
 var nodeID int64
@@ -59,10 +60,11 @@ func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daem
 		hostPortUsage:     scheduling.NewHostPortUsage(),
 		topology:          topology,
 		daemonResources:   daemonResources,
+		hostname:          hostname,
 	}
 }
 
-func (n *NodeClaim) Add(pod *v1.Pod) error {
+func (n *NodeClaim) Add(pod *v1.Pod, podRequests v1.ResourceList) error {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).Tolerates(pod); err != nil {
 		return err
@@ -99,13 +101,13 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
 
 	// Check instance type combinations
-	requests := resources.Merge(n.Spec.Resources.Requests, resources.RequestsForPods(pod))
+	requests := resources.Merge(n.Spec.Resources.Requests, podRequests)
 
 	filtered := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, requests)
 
 	if len(filtered.remaining) == 0 {
 		// log the total resources being requested (daemonset + the pod)
-		cumulativeResources := resources.Merge(n.daemonResources, resources.RequestsForPods(pod))
+		cumulativeResources := resources.Merge(n.daemonResources, podRequests)
 		return fmt.Errorf("no instance type satisfied resources %s and requirements %s (%s)", resources.String(cumulativeResources), nodeClaimRequirements, filtered.FailureReason())
 	}
 
@@ -117,6 +119,10 @@ func (n *NodeClaim) Add(pod *v1.Pod) error {
 	n.topology.Record(pod, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, hostPorts)
 	return nil
+}
+
+func (n *NodeClaim) Destroy() {
+	n.topology.Unregister(v1.LabelHostname, n.hostname)
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup

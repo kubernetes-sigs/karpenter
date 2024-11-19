@@ -861,8 +861,7 @@ var _ = Describe("Instance Type Selection", func() {
 				{
 					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 						Key:      instanceGeneration,
-						Operator: corev1.NodeSelectorOpGt,
-						Values:   []string{"2"},
+						Operator: corev1.NodeSelectorOpExists,
 					},
 					MinValues: lo.ToPtr(2),
 				},
@@ -875,11 +874,25 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceCPU:    resource.MustParse("0.9"),
 					corev1.ResourceMemory: resource.MustParse("0.9Gi")},
 				},
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      instanceGeneration,
+						Operator: corev1.NodeSelectorOpGt,
+						Values:   []string{"2"},
+					},
+				},
 			})
 			pod2 := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("0.9"),
 					corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      instanceGeneration,
+						Operator: corev1.NodeSelectorOpGt,
+						Values:   []string{"2"},
+					},
 				},
 			})
 

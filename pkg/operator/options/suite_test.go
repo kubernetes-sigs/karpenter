@@ -111,6 +111,7 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:        lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(time.Second),
 				FeatureGates: test.FeatureGates{
+					NodeRepair:              lo.ToPtr(false),
 					SpotToSpotConsolidation: lo.ToPtr(false),
 				},
 			}))
@@ -136,7 +137,7 @@ var _ = Describe("Options", func() {
 				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
-				"--feature-gates", "SpotToSpotConsolidation=true",
+				"--feature-gates", "SpotToSpotConsolidation=true,NodeRepair=true",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -156,6 +157,7 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
+					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
 			}))
@@ -177,7 +179,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "SpotToSpotConsolidation=true")
+			os.Setenv("FEATURE_GATES", "SpotToSpotConsolidation=true,NodeRepair=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -201,6 +203,7 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
+					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
 			}))
@@ -217,7 +220,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "SpotToSpotConsolidation=true")
+			os.Setenv("FEATURE_GATES", "SpotToSpotConsolidation=true,NodeRepair=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -246,6 +249,7 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
+					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
 			}))
