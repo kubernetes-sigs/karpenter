@@ -274,6 +274,61 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
+		It("should ignore unhealthy nodes if more then 20% of the nodes are unhealthy", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			nodeClaims := []*v1.NodeClaim{}
+			nodes := []*corev1.Node{}
+			for i := range 10 {
+				nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+				if i < 3 {
+					node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+						Type:               "BadNode",
+						Status:             corev1.ConditionFalse,
+						LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+					})
+				}
+				node.Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaims = append(nodeClaims, nodeClaim)
+				nodes = append(nodes, node)
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			}
+
+			fakeClock.Step(60 * time.Minute)
+
+			// Determine to delete unhealthy nodes
+			for i := range 4 {
+				res := ExpectObjectReconciled(ctx, env.Client, healthController, nodes[i])
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[i])
+				Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+				Expect(res.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
+			}
+		})
+		It("should consider round up when there is a low number of nodes for a nodepool", func() {
+			nodeClaims := []*v1.NodeClaim{}
+			nodes := []*corev1.Node{}
+			for i := range 3 {
+				nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+				if i == 0 {
+					node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+						Type:               "BadNode",
+						Status:             corev1.ConditionFalse,
+						LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+					})
+				}
+				node.Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaims = append(nodeClaims, nodeClaim)
+				nodes = append(nodes, node)
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			}
+
+			fakeClock.Step(60 * time.Minute)
+			// Determine to delete unhealthy nodes
+			ExpectObjectReconciled(ctx, env.Client, healthController, nodes[0])
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[0])
+			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
+		})
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when unhealthy", func() {

@@ -18,10 +18,15 @@ package health
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -36,6 +41,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 )
+
+var allowedUnhealthyPercent = intstr.FromString("20%")
 
 // Controller for the resource
 type Controller struct {
@@ -68,6 +75,26 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
 		return reconcile.Result{}, nodeutils.IgnoreNodeClaimNotFoundError(err)
+	}
+
+	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if found {
+		nodePoolHealthy, err := c.isNodePoolHealthy(ctx, nodePoolName)
+		if err != nil {
+			return reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+		if !nodePoolHealthy {
+			return reconcile.Result{RequeueAfter: time.Minute}, nil
+		}
+	} else {
+		clusterHealthy, err := c.isClusterHealthy(ctx)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		if !clusterHealthy {
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("more then %s nodes are unhealthy", allowedUnhealthyPercent.String()))
+			return reconcile.Result{RequeueAfter: time.Minute}, nil
+		}
 	}
 
 	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node)
@@ -129,4 +156,60 @@ func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeCla
 	}
 
 	return nil
+}
+
+// isNodePoolHealthy checks if the number of unhealthy nodes managed by the given NodePool exceeds the health threshold.
+// defined by the cloud provider
+// Up to 20% of Nodes may be unhealthy before the NodePool becomes unhealthy (or the nearest whole number, rounding up).
+// For example, given a NodePool with three nodes, one may be unhealthy without rendering the NodePool unhealthy, even though that's 33% of the total nodes.
+// This is analogous to how minAvailable and maxUnavailable work for PodDisruptionBudgets: https://kubernetes.io/docs/tasks/run-application/configure-pdb/#rounding-logic-when-specifying-percentages.
+func (c *Controller) isNodePoolHealthy(ctx context.Context, nodePoolName string) (bool, error) {
+	nodeList := &corev1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodeList, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName})); err != nil {
+		return false, err
+	}
+	nodePool := &v1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+		return false, err
+	}
+	stored := nodePool.DeepCopy()
+
+	healthy := c.validateHealthyCloudProviderHealthCondition(nodeList.Items)
+	if !healthy {
+		nodePool.StatusConditions().SetTrueWithReason(v1.ConditionTypeUnhealthy, "Unhealthy", fmt.Sprintf("more then %s nodes are unhealthy", allowedUnhealthyPercent.String()))
+	} else {
+		nodePool.StatusConditions().Clear(v1.ConditionTypeUnhealthy)
+	}
+
+	if !equality.Semantic.DeepEqual(stored, nodePool) {
+		if err := c.kubeClient.Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
+			return false, err
+		}
+	}
+
+	return true, nil
+}
+
+func (c *Controller) isClusterHealthy(ctx context.Context) (bool, error) {
+	nodeList := &corev1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodeList); err != nil {
+		return false, err
+	}
+
+	return c.validateHealthyCloudProviderHealthCondition(nodeList.Items), nil
+}
+
+func (c *Controller) validateHealthyCloudProviderHealthCondition(nodes []corev1.Node) bool {
+	for _, policy := range c.cloudProvider.RepairPolicies() {
+		unhealthyNodeCount := lo.CountBy(nodes, func(node corev1.Node) bool {
+			nodeCondition := nodeutils.GetCondition(lo.ToPtr(node), policy.ConditionType)
+			return nodeCondition.Status == policy.ConditionStatus
+		})
+
+		threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(allowedUnhealthyPercent), len(nodes), true))
+		if unhealthyNodeCount > threshold {
+			return false
+		}
+	}
+	return true
 }

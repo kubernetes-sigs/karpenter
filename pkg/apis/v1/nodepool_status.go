@@ -27,6 +27,8 @@ const (
 	ConditionTypeValidationSucceeded = "ValidationSucceeded"
 	// ConditionTypeNodeClassReady = "NodeClassReady" condition indicates that underlying nodeClass was resolved and is reporting as Ready
 	ConditionTypeNodeClassReady = "NodeClassReady"
+	// ConditionTypeUnhealthy = "Unhealthy" condition indicates when the nodepool has more 20% of nodes in an unhealthy state
+	ConditionTypeUnhealthy = "Unhealthy"
 )
 
 // NodePoolStatus defines the observed state of NodePool
