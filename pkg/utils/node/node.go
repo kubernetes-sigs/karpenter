@@ -177,8 +177,8 @@ func IsManaged(node *corev1.Node, cp cloudprovider.CloudProvider) bool {
 	})
 }
 
-// IsMangedPredicates is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
-func IsMangedPredicates(cp cloudprovider.CloudProvider) predicate.Funcs {
+// IsManagedPredicates is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
+func IsManagedPredicates(cp cloudprovider.CloudProvider) predicate.Funcs {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
 		return IsManaged(o.(*corev1.Node), cp)
 	})

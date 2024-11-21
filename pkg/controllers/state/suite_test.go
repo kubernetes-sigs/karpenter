@@ -848,7 +848,6 @@ var _ = Describe("Node Resource Level", func() {
 					v1.NodePoolLabelKey:            nodePool.Name,
 					corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
 				},
-
 			},
 			Spec: v1.NodeClaimSpec{
 				Requirements: []v1.NodeSelectorRequirementWithMinValues{

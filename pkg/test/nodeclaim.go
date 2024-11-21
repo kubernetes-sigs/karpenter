@@ -19,10 +19,13 @@ package test
 import (
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 // NodeClaim creates a test NodeClaim with defaults that can be overridden by overrides.
@@ -42,11 +45,14 @@ func NodeClaim(overrides ...v1.NodeClaim) *v1.NodeClaim {
 	}
 	if override.Spec.NodeClassRef == nil {
 		override.Spec.NodeClassRef = &v1.NodeClassReference{
+			Group: object.GVK(defaultNodeClass).Group,
+			Kind:  object.GVK(defaultNodeClass).Kind,
 			Name:  "default",
-			Group: "karpenter.test.sh",
-			Kind:  "TestNodeClass",
 		}
 	}
+	override.Labels = lo.Assign(map[string]string{
+		nodeclaim.NodeClassLabelKey(override.Spec.NodeClassRef): override.Spec.NodeClassRef.Name,
+	}, override.Labels)
 	if override.Spec.Requirements == nil {
 		override.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{}
 	}
@@ -59,7 +65,9 @@ func NodeClaim(overrides ...v1.NodeClaim) *v1.NodeClaim {
 
 func NodeClaimAndNode(overrides ...v1.NodeClaim) (*v1.NodeClaim, *corev1.Node) {
 	nc := NodeClaim(overrides...)
-	return nc, NodeClaimLinkedNode(nc)
+	node := NodeClaimLinkedNode(nc)
+	nc.Status.NodeName = node.Name
+	return nc, node
 }
 
 // NodeClaimsAndNodes creates homogeneous groups of NodeClaims and Nodes based on the passed in options, evenly divided by the total nodeclaims requested

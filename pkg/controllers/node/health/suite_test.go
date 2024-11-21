@@ -60,7 +60,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(
 		test.WithCRDs(apis.CRDs...),
 		test.WithCRDs(v1alpha1.CRDs...),
-		test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx), test.NodeFieldIndexer(ctx)),
+		test.WithFieldIndexers(test.NodeClaimProviderIDFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx), test.NodeProviderIDFieldIndexer(ctx)),
 	)
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider = fake.NewCloudProvider()

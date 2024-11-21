@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -113,10 +114,9 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) core
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.counter").
-		For(&v1.NodePool{}).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicates(c.cloudProvider))).
 		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler()).
 		Watches(&corev1.Node{}, nodepoolutils.NodeEventHandler()).
-		WithEventFilter(nodepoolutils.IsMangedPredicates(c.cloudProvider)).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 

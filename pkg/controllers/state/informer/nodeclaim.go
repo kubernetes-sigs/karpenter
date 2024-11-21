@@ -72,7 +72,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 func (c *NodeClaimController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.nodeclaim").
-		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsMangedPredicates(c.cloudProvider))).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicates(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(c)
 }

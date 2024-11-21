@@ -60,7 +60,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(
 		test.WithCRDs(apis.CRDs...),
 		test.WithCRDs(v1alpha1.CRDs...),
-		test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.NodeFieldIndexer(ctx)),
+		test.WithFieldIndexers(test.NodeClaimProviderIDFieldIndexer(ctx), test.NodeProviderIDFieldIndexer(ctx)),
 	)
 	ctx = options.ToContext(ctx, test.Options())
 	cp = &fake.CloudProvider{}
@@ -179,8 +179,8 @@ var _ = Describe("NodeClaimController", func() {
 						Spec: v1.NodeClaimSpec{
 							NodeClassRef: &v1.NodeClassReference{
 								Group: "karpenter.k8s.aws",
-								Kind: "EC2NodeClass",
-								Name: "default",
+								Kind:  "EC2NodeClass",
+								Name:  "default",
 							},
 						},
 					})

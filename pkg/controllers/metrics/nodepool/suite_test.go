@@ -84,7 +84,7 @@ var _ = Describe("Metrics", func() {
 				corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 			}
 			nodePool.Spec.Limits = limits
-			if isNodePoolManaged {
+			if !isNodePoolManaged {
 				nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
 					Group: "karpenter.k8s.aws",
 					Kind:  "EC2NodeClass",

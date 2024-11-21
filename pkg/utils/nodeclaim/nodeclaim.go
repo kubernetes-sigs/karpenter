@@ -44,8 +44,8 @@ func IsManaged(nodeClaim *v1.NodeClaim, cp cloudprovider.CloudProvider) bool {
 	})
 }
 
-// IsMangedPredicates is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
-func IsMangedPredicates(cp cloudprovider.CloudProvider) predicate.Funcs {
+// IsManagedPredicates is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
+func IsManagedPredicates(cp cloudprovider.CloudProvider) predicate.Funcs {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
 		return IsManaged(o.(*v1.NodeClaim), cp)
 	})
@@ -76,6 +76,14 @@ func WithProviderIDFilter(providerID string) option.Function[ListOptions] {
 
 func WithNodePoolFilter(nodePoolName string) option.Function[ListOptions] {
 	return withClientListOptions(client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName}))
+}
+
+func WithNodeClassFilter(nodeClass status.Object) option.Function[ListOptions] {
+	return withClientListOptions(client.MatchingFields{
+		"spec.nodeClassRef.group": object.GVK(nodeClass).Group,
+		"spec.nodeClassRef.kind":  object.GVK(nodeClass).Kind,
+		"spec.nodeClassRef.name":  nodeClass.GetName(),
+	})
 }
 
 func WithManagedFilter(cp cloudprovider.CloudProvider) option.Function[ListOptions] {

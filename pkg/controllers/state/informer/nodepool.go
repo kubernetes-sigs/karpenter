@@ -64,7 +64,7 @@ func (c *NodePoolController) Reconcile(ctx context.Context, np *v1.NodePool) (re
 func (c *NodePoolController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.nodepool").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepool.IsMangedPredicates(c.cloudProvider))).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepool.IsManagedPredicates(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}).

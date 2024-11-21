@@ -107,7 +107,7 @@ func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.O
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.readiness").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsMangedPredicates(c.cloudProvider))).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicates(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
 	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
 		b.Watches(nodeClass, nodepoolutils.NodeClassEventHandler(c.kubeClient))

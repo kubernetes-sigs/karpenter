@@ -147,7 +147,7 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.consistency").
-		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutil.IsMangedPredicates(c.cloudProvider))).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutil.IsManagedPredicates(c.cloudProvider))).
 		Watches(
 			&corev1.Node{},
 			nodeclaimutil.NodeEventHandler(c.kubeClient, nodeclaimutil.WithManagedFilter(c.cloudProvider)),

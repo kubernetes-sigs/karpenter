@@ -89,6 +89,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.expiration").
-		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsMangedPredicates(c.cloudProvider))).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicates(c.cloudProvider))).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

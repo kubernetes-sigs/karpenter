@@ -289,7 +289,7 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaims ...*v1.No
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
-		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsMangedPredicates(c.cloudProvider))).
+		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicates(c.cloudProvider))).
 		WithOptions(
 			controller.Options{
 				RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](

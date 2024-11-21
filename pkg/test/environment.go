@@ -23,6 +23,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -69,10 +70,7 @@ func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) option.Function
 	}
 }
 
-// NodeFieldIndexer provides indexes on the following fields:
-//
-// - spec.providerID
-func NodeFieldIndexer(ctx context.Context) func(cache.Cache) error {
+func NodeProviderIDFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
 			return []string{obj.(*corev1.Node).Spec.ProviderID}
@@ -80,10 +78,7 @@ func NodeFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	}
 }
 
-// NodeClaimFieldIndexer provides indexes on the following fields:
-//
-// - status.providerID
-func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
+func NodeClaimProviderIDFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
 			return []string{obj.(*v1.NodeClaim).Status.ProviderID}
@@ -91,9 +86,22 @@ func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	}
 }
 
-// VolumeAttachmentFieldIndexer provides indexes on the following fields:
-//
-// - status.nodeName
+func NodeClaimNodeClassRefFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		var err error
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.group", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Spec.NodeClassRef.Group}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.kind", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Spec.NodeClassRef.Kind}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.name", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Spec.NodeClassRef.Name}
+		}))
+		return err
+	}
+}
+
 func VolumeAttachmentFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &storagev1.VolumeAttachment{}, "spec.nodeName", func(obj client.Object) []string {

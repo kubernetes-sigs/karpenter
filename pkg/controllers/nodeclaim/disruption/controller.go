@@ -115,7 +115,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.disruption").
-		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutil.IsMangedPredicates(c.cloudProvider))).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutil.IsManagedPredicates(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		// Note: We don't use the ManagedFilter (NodeClaim) for NodePool updates because drift should be captured when
 		// updating a NodePool's NodeClassRef to an unsupported NodeClass. However, this is currently unsupported

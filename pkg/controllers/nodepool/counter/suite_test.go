@@ -121,13 +121,13 @@ var _ = Describe("Counter", func() {
 		nodePool = test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
 			NodeClassRef: &v1.NodeClassReference{
 				Group: "karpenter.k8s.aws",
-				Kind: "EC2NodeClass",
-				Name: "default",
+				Kind:  "EC2NodeClass",
+				Name:  "default",
 			},
 		}}}})
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				v1.NodePoolLabelKey:            nodePool.Name,
+				v1.NodePoolLabelKey: nodePool.Name,
 			}},
 			Status: v1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),

@@ -60,8 +60,8 @@ var _ = Describe("Initialization", func() {
 					Spec: v1.NodeClaimSpec{
 						NodeClassRef: &v1.NodeClassReference{
 							Group: "karpenter.k8s.aws",
-							Kind: "EC2NodeClass",
-							Name: "default",
+							Kind:  "EC2NodeClass",
+							Name:  "default",
 						},
 					},
 				})
