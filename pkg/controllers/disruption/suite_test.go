@@ -151,10 +151,11 @@ var _ = BeforeEach(func() {
 	})
 	leastExpensiveSpotInstance, mostExpensiveSpotInstance = spotInstances[0], spotInstances[len(spotInstances)-1]
 	leastExpensiveSpotOffering, mostExpensiveSpotOffering = leastExpensiveSpotInstance.Offerings[0], mostExpensiveSpotInstance.Offerings[0]
-	allKnownDisruptionReasons = append([]v1.DisruptionReason{
+	allKnownDisruptionReasons = []v1.DisruptionReason{
 		v1.DisruptionReasonEmpty,
 		v1.DisruptionReasonUnderutilized,
-		v1.DisruptionReasonDrifted}, cloudProvider.DisruptionReasons()...)
+		v1.DisruptionReasonDrifted,
+	}
 })
 
 var _ = AfterEach(func() {
