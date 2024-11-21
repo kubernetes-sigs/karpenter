@@ -1,7 +1,5 @@
 name: kind-e2e
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 jobs:
   kind-e2e:
