@@ -71,6 +71,9 @@ func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1.NodeCl
 }
 
 func updateStatusConditionsForDeleting(nc *v1.NodeClaim) {
+	// perform a no-op for whatever the status condition is currently set to
+	// so that we bump the observed generation to the latest and prevent the nodeclaim
+	// root status from entering an `Unknown` state
 	for _, condition := range nc.Status.Conditions {
 		nc.StatusConditions().Set(condition)
 	}
