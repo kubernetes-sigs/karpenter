@@ -37,7 +37,7 @@ func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1.NodeCl
 		if err = cloudProvider.Delete(ctx, nodeClaim); err != nil {
 			if cloudprovider.IsNodeClaimNotFoundError(err) {
 				stored := nodeClaim.DeepCopy()
-				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
+				updateStatusConditionsForDeleting(nodeClaim)
 				// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 				// can cause races due to the fact that it fully replaces the list on a change
 				// Here, we are updating the status condition list
@@ -51,7 +51,7 @@ func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1.NodeCl
 		}
 
 		stored := nodeClaim.DeepCopy()
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
+		updateStatusConditionsForDeleting(nodeClaim)
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
 		// Here, we are updating the status condition list
@@ -68,4 +68,14 @@ func EnsureTerminated(ctx context.Context, c client.Client, nodeClaim *v1.NodeCl
 		return false, fmt.Errorf("getting cloudprovider instance, %w", err)
 	}
 	return false, nil
+}
+
+func updateStatusConditionsForDeleting(nc *v1.NodeClaim) {
+	// perform a no-op for whatever the status condition is currently set to
+	// so that we bump the observed generation to the latest and prevent the nodeclaim
+	// root status from entering an `Unknown` state
+	for _, condition := range nc.Status.Conditions {
+		nc.StatusConditions().Set(condition)
+	}
+	nc.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
 }
