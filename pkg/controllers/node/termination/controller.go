@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -93,7 +92,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, nil
 	}
 
-	nodeClaims, err := nodeutils.GetNodeClaims(ctx, node, c.kubeClient, nodeclaimutils.WithManagedFilter(c.cloudProvider))
+	nodeClaims, err := nodeutils.GetNodeClaims(ctx, c.kubeClient, node)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing nodeclaims, %w", err)
 	}
@@ -149,7 +148,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
 	}
-	nodeClaims, err = nodeutils.GetNodeClaims(ctx, node, c.kubeClient, nodeclaimutils.WithManagedFilter(c.cloudProvider))
+	nodeClaims, err = nodeutils.GetNodeClaims(ctx, c.kubeClient, node)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
 	}
@@ -289,7 +288,7 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaims ...*v1.No
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
-		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicates(c.cloudProvider))).
+		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(
 			controller.Options{
 				RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](

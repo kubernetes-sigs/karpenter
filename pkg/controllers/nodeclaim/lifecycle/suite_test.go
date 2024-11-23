@@ -104,8 +104,8 @@ var _ = Describe("Finalizer", func() {
 				},
 				Spec: v1.NodeClaimSpec{
 					NodeClassRef: &v1.NodeClassReference{
-						Group: "karpenter.k8s.aws",
-						Kind:  "EC2NodeClass",
+						Group: "karpenter.test.sh",
+						Kind:  "UnmanagedNodeClass",
 						Name:  "default",
 					},
 				},

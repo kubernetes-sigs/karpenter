@@ -40,7 +40,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -110,7 +110,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	defer func() {
 		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0), nil)
 	}()
-	nodeClaims, err := nodeclaim.List(ctx, c.kubeClient, nodeclaim.WithManagedFilter(c.cloudProvider))
+	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false

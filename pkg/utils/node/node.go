@@ -22,7 +22,6 @@ import (
 	"fmt"
 
 	"github.com/awslabs/operatorpkg/object"
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -100,20 +99,20 @@ func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Nod
 }
 
 // GetNodeClaims grabs all NodeClaims with a providerID that matches the provided Node
-func GetNodeClaims(ctx context.Context, node *corev1.Node, kubeClient client.Client, opts ...option.Function[nodeclaimutils.ListOptions]) ([]*v1.NodeClaim, error) {
-	ncs, err := nodeclaimutils.List(ctx, kubeClient, append(opts, nodeclaimutils.WithProviderIDFilter(node.Spec.ProviderID))...)
-	if err != nil {
+func GetNodeClaims(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*v1.NodeClaim, error) {
+	ncs := &v1.NodeClaimList{}
+	if err := kubeClient.List(ctx, ncs, nodeclaimutils.ForProviderID(node.Spec.ProviderID)); err != nil {
 		return nil, fmt.Errorf("listing nodeclaims, %w", err)
 	}
-	return ncs, nil
+	return lo.ToSlicePtr(ncs.Items), nil
 }
 
 // NodeClaimForNode is a helper function that takes a corev1.Node and attempts to find the matching v1.NodeClaim by its providerID
 // This function will return errors if:
 //  1. No v1.NodeClaims match the corev1.Node's providerID
 //  2. Multiple v1.NodeClaims match the corev1.Node's providerID
-func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node, opts ...option.Function[nodeclaimutils.ListOptions]) (*v1.NodeClaim, error) {
-	nodeClaims, err := GetNodeClaims(ctx, node, c, opts...)
+func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (*v1.NodeClaim, error) {
+	nodeClaims, err := GetNodeClaims(ctx, c, node)
 	if err != nil {
 		return nil, err
 	}
@@ -168,17 +167,13 @@ func GetCondition(n *corev1.Node, match corev1.NodeConditionType) corev1.NodeCon
 
 func IsManaged(node *corev1.Node, cp cloudprovider.CloudProvider) bool {
 	return lo.ContainsBy(cp.GetSupportedNodeClasses(), func(nodeClass status.Object) bool {
-		gvk := object.GVK(nodeClass)
-		_, ok := node.Labels[nodeclaimutils.NodeClassLabelKey(&v1.NodeClassReference{
-			Group: gvk.Group,
-			Kind:  gvk.Kind,
-		})]
+		_, ok := node.Labels[v1.NodeClassLabelKey(object.GVK(nodeClass).GroupKind())]
 		return ok
 	})
 }
 
-// IsManagedPredicates is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
-func IsManagedPredicates(cp cloudprovider.CloudProvider) predicate.Funcs {
+// IsManagedPredicateFuncs is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
+func IsManagedPredicateFuncs(cp cloudprovider.CloudProvider) predicate.Funcs {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
 		return IsManaged(o.(*corev1.Node), cp)
 	})

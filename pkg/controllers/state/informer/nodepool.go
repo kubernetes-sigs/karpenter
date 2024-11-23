@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/utils/nodepool"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 // NodePoolController reconciles NodePools to re-trigger consolidation on change.
@@ -52,7 +52,7 @@ func NewNodePoolController(kubeClient client.Client, cloudProvider cloudprovider
 
 func (c *NodePoolController) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "state.nodepool") //nolint:ineffassign,staticcheck
-	if !nodepool.IsManaged(np, c.cloudProvider) {
+	if !nodepoolutils.IsManaged(np, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
 
@@ -64,7 +64,7 @@ func (c *NodePoolController) Reconcile(ctx context.Context, np *v1.NodePool) (re
 func (c *NodePoolController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.nodepool").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepool.IsManagedPredicates(c.cloudProvider))).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}).

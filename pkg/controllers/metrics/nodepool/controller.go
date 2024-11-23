@@ -141,6 +141,6 @@ func makeLabels(nodePool *v1.NodePool, resourceTypeName string) prometheus.Label
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("metrics.nodepool").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicates(c.cloudProvider))).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Complete(c)
 }

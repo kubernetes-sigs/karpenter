@@ -124,8 +124,8 @@ var _ = Describe("Expiration", func() {
 			nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
 			if !isNodeClaimManaged {
 				nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{
-					Group: "karpenter.k8s.aws",
-					Kind:  "EC2NodeClass",
+					Group: "karpenter.test.sh",
+					Kind:  "UnmanagedNodeClass",
 					Name:  "default",
 				}
 			}

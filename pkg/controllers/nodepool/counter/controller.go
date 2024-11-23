@@ -114,7 +114,7 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) core
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.counter").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicates(c.cloudProvider))).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler()).
 		Watches(&corev1.Node{}, nodepoolutils.NodeEventHandler()).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).

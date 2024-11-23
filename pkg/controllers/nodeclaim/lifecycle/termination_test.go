@@ -72,8 +72,8 @@ var _ = Describe("Termination", func() {
 		func(isNodeClaimManaged bool) {
 			if !isNodeClaimManaged {
 				nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{
-					Group: "karpenter.k8s.aws",
-					Kind:  "EC2NodeClass",
+					Group: "karpenter.test.sh",
+					Kind:  "UnmanagedNodeClass",
 					Name:  "default",
 				}
 			}

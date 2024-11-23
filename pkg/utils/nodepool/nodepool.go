@@ -21,7 +21,6 @@ import (
 	"sort"
 
 	"github.com/awslabs/operatorpkg/object"
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/types"
@@ -40,51 +39,28 @@ func IsManaged(nodePool *v1.NodePool, cp cloudprovider.CloudProvider) bool {
 	})
 }
 
-// IsManagedPredicates is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
-func IsManagedPredicates(cp cloudprovider.CloudProvider) predicate.Funcs {
+// IsManagedPredicateFuncs is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
+func IsManagedPredicateFuncs(cp cloudprovider.CloudProvider) predicate.Funcs {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
 		return IsManaged(o.(*v1.NodePool), cp)
 	})
 }
 
-type ListOptions struct {
-	filterPredicates []func(*v1.NodePool) bool
-	listOptions      []client.ListOption
-}
-
-func resolveListOptions(opts ...option.Function[ListOptions]) *ListOptions {
-	resolved := option.Resolve(opts...)
-	if len(resolved.filterPredicates) == 0 {
-		resolved.filterPredicates = []func(*v1.NodePool) bool{func(_ *v1.NodePool) bool { return true }}
-	}
-	return resolved
-}
-
-func withClientListOptions(listOpts ...client.ListOption) option.Function[ListOptions] {
-	return func(opts *ListOptions) {
-		opts.listOptions = append(opts.listOptions, listOpts...)
+func ForNodeClass(nc status.Object) client.ListOption {
+	return client.MatchingFields{
+		"spec.template.spec.nodeClassRef.group": object.GVK(nc).Group,
+		"spec.template.spec.nodeClassRef.kind":  object.GVK(nc).Kind,
+		"spec.template.spec.nodeClassRef.name":  nc.GetName(),
 	}
 }
 
-func WithManagedFilter(cp cloudprovider.CloudProvider) option.Function[ListOptions] {
-	return func(opts *ListOptions) {
-		opts.filterPredicates = append(opts.filterPredicates, func(np *v1.NodePool) bool { return IsManaged(np, cp) })
-	}
-}
-
-func List(ctx context.Context, c client.Client, opts ...option.Function[ListOptions]) ([]*v1.NodePool, error) {
-	resolvedOpts := resolveListOptions(opts...)
+func ListManaged(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, opts ...client.ListOption) ([]*v1.NodePool, error) {
 	nodePoolList := &v1.NodePoolList{}
-	if err := c.List(ctx, nodePoolList, resolvedOpts.listOptions...); err != nil {
+	if err := c.List(ctx, nodePoolList, opts...); err != nil {
 		return nil, err
 	}
 	return lo.FilterMap(nodePoolList.Items, func(np v1.NodePool, _ int) (*v1.NodePool, bool) {
-		for _, pred := range resolvedOpts.filterPredicates {
-			if !pred(&np) {
-				return nil, false
-			}
-		}
-		return lo.ToPtr(np), true
+		return &np, IsManaged(&np, cloudProvider)
 	}), nil
 }
 
@@ -114,17 +90,13 @@ func NodeEventHandler() handler.EventHandler {
 // on the nodeClassRef and enqueues reconcile.Requests for the NodePool
 func NodeClassEventHandler(c client.Client) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		nps, err := List(ctx, c, withClientListOptions(client.MatchingFields{
-			"spec.template.spec.nodeClassRef.group": object.GVK(o).Group,
-			"spec.template.spec.nodeClassRef.kind":  object.GVK(o).Kind,
-			"spec.template.spec.nodeClassRef.name":  o.GetName(),
-		}))
-		if err != nil {
+		nps := &v1.NodePoolList{}
+		if err := c.List(ctx, nps, ForNodeClass(o.(status.Object))); err != nil {
 			return nil
 		}
-		return lo.Map(nps, func(np *v1.NodePool, _ int) reconcile.Request {
+		return lo.Map(nps.Items, func(np v1.NodePool, _ int) reconcile.Request {
 			return reconcile.Request{
-				NamespacedName: client.ObjectKeyFromObject(np),
+				NamespacedName: client.ObjectKeyFromObject(&np),
 			}
 		})
 	})

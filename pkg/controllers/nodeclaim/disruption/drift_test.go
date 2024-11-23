@@ -64,8 +64,8 @@ var _ = Describe("Drift", func() {
 			cp.Drifted = "drifted"
 			if !isNodeClaimManaged {
 				nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{
-					Group: "karpenter.k8s.aws",
-					Kind:  "EC2NodeClass",
+					Group: "karpenter.test.sh",
+					Kind:  "UnmanagedNodeClass",
 					Name:  "default",
 				}
 			}

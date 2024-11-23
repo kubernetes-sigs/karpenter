@@ -50,9 +50,6 @@ var _ = Describe("Underutilized", func() {
 		ExpectApplied(ctx, env.Client, nodeClaim, nodePool)
 	})
 	It("should ignore NodeClaims not managed by this instance of Karpenter", func() {
-		// nodePool := test.NodePool()
-		// nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
-		// nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("1m")
 		unmanagedNodeClaim, _ := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -62,8 +59,8 @@ var _ = Describe("Underutilized", func() {
 			},
 			Spec: v1.NodeClaimSpec{
 				NodeClassRef: &v1.NodeClassReference{
-					Group: "karpenter.k8s.aws",
-					Kind:  "EC2NodeClass",
+					Group: "karpenter.test.sh",
+					Kind:  "UnmanagedNodeClass",
 					Name:  "default",
 				},
 			},

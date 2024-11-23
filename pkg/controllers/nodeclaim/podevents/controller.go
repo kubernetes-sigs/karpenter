@@ -34,7 +34,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
-	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -71,12 +71,14 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
 	}
-
 	// If there's no associated node claim, it's not a karpenter owned node.
-	nc, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node, nodeclaim.WithManagedFilter(c.cloudProvider))
+	nc, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
 		// if the nodeclaim doesn't exist, or has duplicates, ignore.
 		return reconcile.Result{}, nodeutils.IgnoreDuplicateNodeClaimError(nodeutils.IgnoreNodeClaimNotFoundError(fmt.Errorf("getting nodeclaims for node, %w", err)))
+	}
+	if !nodeclaimutils.IsManaged(nc, c.cloudProvider) {
+		return reconcile.Result{}, nil
 	}
 
 	stored := nc.DeepCopy()

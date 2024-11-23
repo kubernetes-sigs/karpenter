@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/utils/nodepool"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -277,7 +277,7 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 
 // logInvalidBudgets will log if there are any invalid schedules detected
 func (c *Controller) logInvalidBudgets(ctx context.Context) {
-	nps, err := nodepool.List(ctx, c.kubeClient, nodepool.WithManagedFilter(c.cloudProvider))
+	nps, err := nodepoolutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed listing nodepools")
 		return

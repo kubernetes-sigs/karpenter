@@ -96,8 +96,8 @@ var _ = Describe("Static Drift Hash", func() {
 	})
 	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
 		nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
-			Group: "karpenter.k8s.aws",
-			Kind:  "EC2NodeClass",
+			Group: "karpenter.test.sh",
+			Kind:  "UnmanagedNodeClass",
 			Name:  "default",
 		}
 		ExpectApplied(ctx, env.Client, nodePool)

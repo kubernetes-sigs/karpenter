@@ -60,17 +60,13 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	})
 	if !ok {
 		// Ignore NodePools which aren't using a supported NodeClass.
-		// Note: should be unreachable due to predicate in controller reconciliation
 		return reconcile.Result{}, nil
 	}
+
 	err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name}, nodeClass)
-	if err != nil && !errors.IsNotFound(err) {
-		if errors.IsNotFound(err) {
-			return reconcile.Result{}, nil
-		}
+	if client.IgnoreNotFound(err) != nil {
 		return reconcile.Result{}, err
 	}
-
 	switch {
 	case errors.IsNotFound(err):
 		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassNotFound", "NodeClass not found on cluster")
@@ -79,6 +75,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	default:
 		c.setReadyCondition(nodePool, nodeClass)
 	}
+
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
@@ -107,7 +104,7 @@ func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.O
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.readiness").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicates(c.cloudProvider))).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
 	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
 		b.Watches(nodeClass, nodepoolutils.NodeClassEventHandler(c.kubeClient))

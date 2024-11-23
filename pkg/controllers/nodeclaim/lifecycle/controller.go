@@ -87,10 +87,10 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
-		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicates(c.cloudProvider))).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Watches(
 			&corev1.Node{},
-			nodeclaimutils.NodeEventHandler(c.kubeClient, nodeclaimutils.WithManagedFilter(c.cloudProvider)),
+			nodeclaimutils.NodeEventHandler(c.kubeClient, c.cloudProvider),
 		).
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](

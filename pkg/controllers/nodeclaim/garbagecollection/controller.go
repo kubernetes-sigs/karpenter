@@ -59,7 +59,7 @@ func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudp
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.garbagecollection")
 
-	nodeClaims, err := nodeclaimutils.List(ctx, c.kubeClient, nodeclaimutils.WithManagedFilter(c.cloudProvider))
+	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
 		return reconcile.Result{}, err
 	}

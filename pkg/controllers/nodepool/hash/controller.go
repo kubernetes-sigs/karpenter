@@ -80,7 +80,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.hash").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicates(c.cloudProvider))).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
@@ -90,7 +90,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 // NodePool. Since, we cannot rely on the `nodepool-hash` on the NodeClaims, due to the breaking change, we will need to re-calculate the hash and update the annotation.
 // For more information on the Drift Hash Versioning: https://github.com/kubernetes-sigs/karpenter/blob/main/designs/drift-hash-versioning.md
 func (c *Controller) updateNodeClaimHash(ctx context.Context, np *v1.NodePool) error {
-	nodeClaims, err := nodeclaimutils.List(ctx, c.kubeClient, nodeclaimutils.WithManagedFilter(c.cloudProvider), nodeclaimutils.WithNodePoolFilter(np.Name))
+	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider, nodeclaimutils.ForNodePool(np.Name))
 	if err != nil {
 		return err
 	}

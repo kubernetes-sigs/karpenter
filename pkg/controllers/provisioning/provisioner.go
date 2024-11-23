@@ -49,7 +49,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
@@ -159,7 +159,7 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error) {
 	// filter for provisionable pods first, so we don't check for validity/PVCs on pods we won't provision anyway
 	// (e.g. those owned by daemonsets)
-	pods, err := nodeutil.GetProvisionablePods(ctx, p.kubeClient)
+	pods, err := nodeutils.GetProvisionablePods(ctx, p.kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}
@@ -213,7 +213,7 @@ var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stateNodes []*state.StateNode) (*scheduler.Scheduler, error) {
-	nodePools, err := nodepoolutils.List(ctx, p.kubeClient, nodepoolutils.WithManagedFilter(p.cloudProvider))
+	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
 	if err != nil {
 		return nil, fmt.Errorf("listing nodepools, %w", err)
 	}

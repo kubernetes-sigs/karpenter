@@ -86,8 +86,8 @@ var _ = Describe("Metrics", func() {
 			nodePool.Spec.Limits = limits
 			if !isNodePoolManaged {
 				nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
-					Group: "karpenter.k8s.aws",
-					Kind:  "EC2NodeClass",
+					Group: "karpenter.test.sh",
+					Kind:  "UnmanagedNodeClass",
 					Name:  "default",
 				}
 			}

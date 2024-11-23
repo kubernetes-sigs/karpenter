@@ -25,7 +25,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type NodeOptions struct {
@@ -74,7 +73,7 @@ func NodeClaimLinkedNode(nodeClaim *v1.NodeClaim) *corev1.Node {
 		NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: lo.Assign(map[string]string{
-					nodeclaimutils.NodeClassLabelKey(nodeClaim.Spec.NodeClassRef): nodeClaim.Spec.NodeClassRef.Name,
+					v1.NodeClassLabelKey(nodeClaim.Spec.NodeClassRef.GroupKind()): nodeClaim.Spec.NodeClassRef.Name,
 				}, nodeClaim.Labels),
 				Annotations: nodeClaim.Annotations,
 				Finalizers:  nodeClaim.Finalizers,

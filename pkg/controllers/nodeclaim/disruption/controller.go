@@ -35,7 +35,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
 
@@ -68,7 +68,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.disruption")
 
-	if !nodeclaimutil.IsManaged(nodeClaim, c.cloudProvider) {
+	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
 	if !nodeClaim.DeletionTimestamp.IsZero() {
@@ -115,21 +115,13 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.disruption").
-		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutil.IsManagedPredicates(c.cloudProvider))).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		// Note: We don't use the ManagedFilter (NodeClaim) for NodePool updates because drift should be captured when
-		// updating a NodePool's NodeClassRef to an unsupported NodeClass. However, this is currently unsupported
-		// (enforced via CEL validation on the NodeClassRef).
-		Watches(
-			&v1.NodePool{},
-			nodeclaimutil.NodePoolEventHandler(c.kubeClient),
-		).
-		Watches(
-			&corev1.Pod{},
-			nodeclaimutil.PodEventHandler(c.kubeClient, nodeclaimutil.WithManagedFilter(c.cloudProvider)),
-		)
+		Watches(&v1.NodePool{}, nodeclaimutils.NodePoolEventHandler(c.kubeClient, c.cloudProvider)).
+		Watches(&corev1.Pod{}, nodeclaimutils.PodEventHandler(c.kubeClient, c.cloudProvider))
+
 	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
-		b.Watches(nodeClass, nodeclaimutil.NodeClassEventHandler(c.kubeClient))
+		b.Watches(nodeClass, nodeclaimutils.NodeClassEventHandler(c.kubeClient))
 	}
 	return b.Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

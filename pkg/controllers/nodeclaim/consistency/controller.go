@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Controller struct {
@@ -78,7 +78,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.consistency")
-	if !nodeclaimutil.IsManaged(nodeClaim, c.cloudProvider) {
+	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
 	if nodeClaim.Status.ProviderID == "" {
@@ -99,9 +99,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 	// We assume the invariant that there is a single node for a single nodeClaim. If this invariant is violated,
 	// then we assume this is bubbled up through the nodeClaim lifecycle controller and don't perform consistency checks
-	node, err := nodeclaimutil.NodeForNodeClaim(ctx, c.kubeClient, nodeClaim)
+	node, err := nodeclaimutils.NodeForNodeClaim(ctx, c.kubeClient, nodeClaim)
 	if err != nil {
-		return reconcile.Result{}, nodeclaimutil.IgnoreDuplicateNodeError(nodeclaimutil.IgnoreNodeNotFoundError(err))
+		return reconcile.Result{}, nodeclaimutils.IgnoreDuplicateNodeError(nodeclaimutils.IgnoreNodeNotFoundError(err))
 	}
 	if err = c.checkConsistency(ctx, nodeClaim, node); err != nil {
 		return reconcile.Result{}, err
@@ -147,10 +147,10 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.consistency").
-		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutil.IsManagedPredicates(c.cloudProvider))).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Watches(
 			&corev1.Node{},
-			nodeclaimutil.NodeEventHandler(c.kubeClient, nodeclaimutil.WithManagedFilter(c.cloudProvider)),
+			nodeclaimutils.NodeEventHandler(c.kubeClient, c.cloudProvider),
 		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

@@ -25,7 +25,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 // NodeClaim creates a test NodeClaim with defaults that can be overridden by overrides.
@@ -51,7 +50,7 @@ func NodeClaim(overrides ...v1.NodeClaim) *v1.NodeClaim {
 		}
 	}
 	override.Labels = lo.Assign(map[string]string{
-		nodeclaim.NodeClassLabelKey(override.Spec.NodeClassRef): override.Spec.NodeClassRef.Name,
+		v1.NodeClassLabelKey(override.Spec.NodeClassRef.GroupKind()): override.Spec.NodeClassRef.Name,
 	}, override.Labels)
 	if override.Spec.Requirements == nil {
 		override.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{}

@@ -623,12 +623,12 @@ var _ = Describe("CEL/Validation", func() {
 	Context("NodeClassRef", func() {
 		It("should fail to mutate group", func() {
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-			nodePool.Spec.Template.Spec.NodeClassRef.Group = "karpenter.k8s.aws"
+			nodePool.Spec.Template.Spec.NodeClassRef.Group = "karpenter.test.mutated.sh"
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should fail to mutate kind", func() {
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-			nodePool.Spec.Template.Spec.NodeClassRef.Group = "EC2NodeClass"
+			nodePool.Spec.Template.Spec.NodeClassRef.Group = "TestNodeClass2"
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 		It("should fail if group is unset", func() {

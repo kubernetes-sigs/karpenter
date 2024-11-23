@@ -59,8 +59,8 @@ var _ = Describe("Initialization", func() {
 				nodeClaimOpts = append(nodeClaimOpts, v1.NodeClaim{
 					Spec: v1.NodeClaimSpec{
 						NodeClassRef: &v1.NodeClassReference{
-							Group: "karpenter.k8s.aws",
-							Kind:  "EC2NodeClass",
+							Group: "karpenter.test.sh",
+							Kind:  "UnmanagedNodeClass",
 							Name:  "default",
 						},
 					},

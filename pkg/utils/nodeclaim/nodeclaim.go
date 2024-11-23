@@ -20,10 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/awslabs/operatorpkg/object"
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -44,73 +42,42 @@ func IsManaged(nodeClaim *v1.NodeClaim, cp cloudprovider.CloudProvider) bool {
 	})
 }
 
-// IsManagedPredicates is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
-func IsManagedPredicates(cp cloudprovider.CloudProvider) predicate.Funcs {
+// IsManagedPredicateFuncs is used to filter controller-runtime NodeClaim watches to NodeClaims managed by the given cloudprovider.
+func IsManagedPredicateFuncs(cp cloudprovider.CloudProvider) predicate.Funcs {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
 		return IsManaged(o.(*v1.NodeClaim), cp)
 	})
 }
 
-type ListOptions struct {
-	filterPredicates []func(*v1.NodeClaim) bool
-	listOptions      []client.ListOption
+func ForProviderID(providerID string) client.ListOption {
+	return client.MatchingFields{"status.providerID": providerID}
 }
 
-func resolveListOptions(opts ...option.Function[ListOptions]) *ListOptions {
-	resolved := option.Resolve(opts...)
-	if len(resolved.filterPredicates) == 0 {
-		resolved.filterPredicates = []func(*v1.NodeClaim) bool{func(nc *v1.NodeClaim) bool { return true }}
-	}
-	return resolved
+func ForNodePool(nodePoolName string) client.ListOption {
+	return client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName})
 }
 
-func withClientListOptions(listOpts ...client.ListOption) option.Function[ListOptions] {
-	return func(opts *ListOptions) {
-		opts.listOptions = append(opts.listOptions, listOpts...)
-	}
-}
-
-func WithProviderIDFilter(providerID string) option.Function[ListOptions] {
-	return withClientListOptions(client.MatchingFields{"status.providerID": providerID})
-}
-
-func WithNodePoolFilter(nodePoolName string) option.Function[ListOptions] {
-	return withClientListOptions(client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName}))
-}
-
-func WithNodeClassFilter(nodeClass status.Object) option.Function[ListOptions] {
-	return withClientListOptions(client.MatchingFields{
+func ForNodeClass(nodeClass status.Object) client.ListOption {
+	return client.MatchingFields{
 		"spec.nodeClassRef.group": object.GVK(nodeClass).Group,
 		"spec.nodeClassRef.kind":  object.GVK(nodeClass).Kind,
 		"spec.nodeClassRef.name":  nodeClass.GetName(),
-	})
-}
-
-func WithManagedFilter(cp cloudprovider.CloudProvider) option.Function[ListOptions] {
-	return func(opts *ListOptions) {
-		opts.filterPredicates = append(opts.filterPredicates, func(nc *v1.NodeClaim) bool { return IsManaged(nc, cp) })
 	}
 }
 
-func List(ctx context.Context, c client.Client, opts ...option.Function[ListOptions]) ([]*v1.NodeClaim, error) {
-	resolvedOpts := resolveListOptions(opts...)
+func ListManaged(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, opts ...client.ListOption) ([]*v1.NodeClaim, error) {
 	nodeClaimList := &v1.NodeClaimList{}
-	if err := c.List(ctx, nodeClaimList, resolvedOpts.listOptions...); err != nil {
+	if err := c.List(ctx, nodeClaimList, opts...); err != nil {
 		return nil, err
 	}
 	return lo.FilterMap(nodeClaimList.Items, func(nc v1.NodeClaim, _ int) (*v1.NodeClaim, bool) {
-		for _, pred := range resolvedOpts.filterPredicates {
-			if !pred(&nc) {
-				return nil, false
-			}
-		}
-		return lo.ToPtr(nc), true
+		return &nc, IsManaged(&nc, cloudProvider)
 	}), nil
 }
 
 // PodEventHandler is a watcher on corev1.Pods that maps Pods to NodeClaim based on the node names
 // and enqueues reconcile.Requests for the NodeClaims
-func PodEventHandler(c client.Client, opts ...option.Function[ListOptions]) handler.EventHandler {
+func PodEventHandler(c client.Client, cloudProvider cloudprovider.CloudProvider) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 		nodeName := o.(*corev1.Pod).Spec.NodeName
 		if nodeName == "" {
@@ -120,7 +87,7 @@ func PodEventHandler(c client.Client, opts ...option.Function[ListOptions]) hand
 		if err := c.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 			return nil
 		}
-		ncs, err := List(ctx, c, append(opts, WithProviderIDFilter(node.Spec.ProviderID))...)
+		ncs, err := ListManaged(ctx, c, cloudProvider, ForProviderID(node.Spec.ProviderID))
 		if err != nil {
 			return nil
 		}
@@ -132,9 +99,9 @@ func PodEventHandler(c client.Client, opts ...option.Function[ListOptions]) hand
 
 // NodeEventHandler is a watcher on corev1.Node that maps Nodes to NodeClaims based on provider ids
 // and enqueues reconcile.Requests for the NodeClaims
-func NodeEventHandler(c client.Client, opts ...option.Function[ListOptions]) handler.EventHandler {
+func NodeEventHandler(c client.Client, cloudProvider cloudprovider.CloudProvider) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-		ncs, err := List(ctx, c, append(opts, WithProviderIDFilter(o.(*corev1.Node).Spec.ProviderID))...)
+		ncs, err := ListManaged(ctx, c, cloudProvider, ForProviderID(o.(*corev1.Node).Spec.ProviderID))
 		if err != nil {
 			return nil
 		}
@@ -146,11 +113,9 @@ func NodeEventHandler(c client.Client, opts ...option.Function[ListOptions]) han
 
 // NodePoolEventHandler is a watcher on v1.NodeClaim that maps NodePool to NodeClaims based
 // on the v1.NodePoolLabelKey and enqueues reconcile.Requests for the NodeClaim
-func NodePoolEventHandler(c client.Client, opts ...option.Function[ListOptions]) handler.EventHandler {
+func NodePoolEventHandler(c client.Client, cloudProvider cloudprovider.CloudProvider) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
-		ncs, err := List(ctx, c, append(opts, withClientListOptions(client.MatchingLabels(map[string]string{
-			v1.NodePoolLabelKey: o.GetName(),
-		})))...)
+		ncs, err := ListManaged(ctx, c, cloudProvider, ForNodePool(o.GetName()))
 		if err != nil {
 			return nil
 		}
@@ -270,8 +235,4 @@ func UpdateNodeOwnerReferences(nodeClaim *v1.NodeClaim, node *corev1.Node) *core
 		BlockOwnerDeletion: lo.ToPtr(true),
 	})
 	return node
-}
-
-func NodeClassLabelKey(ncr *v1.NodeClassReference) string {
-	return fmt.Sprintf("%s/%s", ncr.Group, strings.ToLower(ncr.Kind))
 }

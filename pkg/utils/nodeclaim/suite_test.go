@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
@@ -126,7 +126,7 @@ var _ = Describe("NodeClaimUtils", func() {
 			},
 		})
 		node = test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
-		node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
+		node = nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
 
 		Expect(lo.Contains(node.OwnerReferences, metav1.OwnerReference{
 			APIVersion:         lo.Must(apiutil.GVKForObject(nodeClaim, scheme.Scheme)).GroupVersion().String(),
@@ -150,7 +150,7 @@ var _ = Describe("NodeClaimUtils", func() {
 				})
 			})
 			ExpectApplied(ctx, env.Client, ncs[0], ncs[1])
-			res, err := nodeclaimutil.List(ctx, env.Client, nodeclaimutil.WithProviderIDFilter(ncs[0].Status.ProviderID))
+			res, err := nodeclaimutils.ListManaged(ctx, env.Client, cloudProvider, nodeclaimutils.ForProviderID(ncs[0].Status.ProviderID))
 			Expect(err).To(BeNil())
 			Expect(len(res)).To(Equal(1))
 			Expect(res[0].Name).To(Equal(ncs[0].Name))
@@ -173,7 +173,7 @@ var _ = Describe("NodeClaimUtils", func() {
 				})
 			})
 			ExpectApplied(ctx, env.Client, ncs[0], ncs[1])
-			res, err := nodeclaimutil.List(ctx, env.Client, nodeclaimutil.WithNodePoolFilter(ncs[0].Labels[v1.NodePoolLabelKey]))
+			res, err := nodeclaimutils.ListManaged(ctx, env.Client, cloudProvider, nodeclaimutils.ForNodePool(ncs[0].Labels[v1.NodePoolLabelKey]))
 			Expect(err).To(BeNil())
 			Expect(len(res)).To(Equal(1))
 			Expect(res[0].Name).To(Equal(ncs[0].Name))
@@ -191,7 +191,7 @@ var _ = Describe("NodeClaimUtils", func() {
 			unmanagedByGroup := test.NodeClaim(v1.NodeClaim{
 				Spec: v1.NodeClaimSpec{
 					NodeClassRef: &v1.NodeClassReference{
-						Group: "karpenter.k8s.aws",
+						Group: "karpenter.unmanaged.sh",
 						Kind:  "TestNodeClass",
 						Name:  "default",
 					},
@@ -201,7 +201,7 @@ var _ = Describe("NodeClaimUtils", func() {
 				Spec: v1.NodeClaimSpec{
 					NodeClassRef: &v1.NodeClassReference{
 						Group: "karpenter.test.sh",
-						Kind:  "EC2NodeClass",
+						Kind:  "UnmanagedNodeClass",
 						Name:  "default",
 					},
 				},
@@ -209,14 +209,14 @@ var _ = Describe("NodeClaimUtils", func() {
 			unmanaged := test.NodeClaim(v1.NodeClaim{
 				Spec: v1.NodeClaimSpec{
 					NodeClassRef: &v1.NodeClassReference{
-						Group: "karpenter.k8s.aws",
-						Kind:  "EC2NodeClass",
+						Group: "karpenter.test.sh",
+						Kind:  "UnmanagedNodeClass",
 						Name:  "default",
 					},
 				},
 			})
 			ExpectApplied(ctx, env.Client, managed, unmanagedByGroup, unmanagedByKind, unmanaged)
-			res, err := nodeclaimutil.List(ctx, env.Client, nodeclaimutil.WithManagedFilter(cloudProvider))
+			res, err := nodeclaimutils.ListManaged(ctx, env.Client, cloudProvider)
 			Expect(err).To(BeNil())
 			Expect(len(res)).To(Equal(1))
 			Expect(res[0].Name).To(Equal(managed.Name))

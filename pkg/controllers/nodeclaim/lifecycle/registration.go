@@ -33,7 +33,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Registration struct {
@@ -45,13 +45,13 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 		return reconcile.Result{}, nil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
-	node, err := nodeclaimutil.NodeForNodeClaim(ctx, r.kubeClient, nodeClaim)
+	node, err := nodeclaimutils.NodeForNodeClaim(ctx, r.kubeClient, nodeClaim)
 	if err != nil {
-		if nodeclaimutil.IsNodeNotFoundError(err) {
+		if nodeclaimutils.IsNodeNotFoundError(err) {
 			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeRegistered, "NodeNotFound", "Node not registered with cluster")
 			return reconcile.Result{}, nil
 		}
-		if nodeclaimutil.IsDuplicateNodeError(err) {
+		if nodeclaimutils.IsDuplicateNodeError(err) {
 			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRegistered, "MultipleNodesFound", "Invariant violated, matched multiple nodes")
 			return reconcile.Result{}, nil
 		}
@@ -87,7 +87,7 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 	stored := node.DeepCopy()
 	controllerutil.AddFinalizer(node, v1.TerminationFinalizer)
 
-	node = nodeclaimutil.UpdateNodeOwnerReferences(nodeClaim, node)
+	node = nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
 	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels)
 	node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
 	// Sync all taints inside NodeClaim into the Node taints

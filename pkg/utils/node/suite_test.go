@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-	"sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
@@ -66,7 +66,7 @@ var _ = Describe("NodeUtils", func() {
 		testNode = test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
 
-		nodeClaims, err := node.GetNodeClaims(ctx, testNode, env.Client)
+		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(1))
 		for _, nc := range nodeClaims {
@@ -79,7 +79,7 @@ var _ = Describe("NodeUtils", func() {
 		})
 		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
 
-		nodeClaims, err := node.GetNodeClaims(ctx, testNode, env.Client)
+		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(0))
 	})

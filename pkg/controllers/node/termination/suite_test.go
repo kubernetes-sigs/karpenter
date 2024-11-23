@@ -114,7 +114,7 @@ var _ = Describe("Termination", func() {
 		})
 		It("should ignore nodes not managed by this Karpenter instance", func() {
 			delete(node.Labels, "karpenter.test.sh/testnodeclass")
-			node.Labels = lo.Assign(node.Labels, map[string]string{"karpenter.k8s.aws/ec2nodeclass": "default"})
+			node.Labels = lo.Assign(node.Labels, map[string]string{"karpenter.test.sh/unmanagednodeclass": "default"})
 			ExpectApplied(ctx, env.Client, node)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)

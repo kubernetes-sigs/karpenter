@@ -120,8 +120,8 @@ var _ = Describe("Counter", func() {
 	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
 		nodePool = test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
 			NodeClassRef: &v1.NodeClassReference{
-				Group: "karpenter.k8s.aws",
-				Kind:  "EC2NodeClass",
+				Group: "karpenter.test.sh",
+				Kind:  "UnmanagedNodeClass",
 				Name:  "default",
 			},
 		}}}})
