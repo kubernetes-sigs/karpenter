@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -34,7 +35,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
 
@@ -67,6 +68,9 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.disruption")
 
+	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
+		return reconcile.Result{}, nil
+	}
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
@@ -109,24 +113,15 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	builder := controllerruntime.NewControllerManagedBy(m)
-	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
-		builder = builder.Watches(
-			nodeClass,
-			nodeclaimutil.NodeClassEventHandler(c.kubeClient),
-		)
-	}
-	return builder.
+	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.disruption").
-		For(&v1.NodeClaim{}).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Watches(
-			&v1.NodePool{},
-			nodeclaimutil.NodePoolEventHandler(c.kubeClient),
-		).
-		Watches(
-			&corev1.Pod{},
-			nodeclaimutil.PodEventHandler(c.kubeClient),
-		).
-		Complete(reconcile.AsReconciler(m.GetClient(), c))
+		Watches(&v1.NodePool{}, nodeclaimutils.NodePoolEventHandler(c.kubeClient, c.cloudProvider)).
+		Watches(&corev1.Pod{}, nodeclaimutils.PodEventHandler(c.kubeClient, c.cloudProvider))
+
+	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
+		b.Watches(nodeClass, nodeclaimutils.NodeClassEventHandler(c.kubeClient))
+	}
+	return b.Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

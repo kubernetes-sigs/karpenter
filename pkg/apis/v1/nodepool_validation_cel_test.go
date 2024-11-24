@@ -46,8 +46,9 @@ var _ = Describe("CEL/Validation", func() {
 				Template: NodeClaimTemplate{
 					Spec: NodeClaimTemplateSpec{
 						NodeClassRef: &NodeClassReference{
-							Kind: "NodeClaim",
-							Name: "default",
+							Group: "karpenter.test.sh",
+							Kind:  "TestNodeClass",
+							Name:  "default",
 						},
 						Requirements: []NodeSelectorRequirementWithMinValues{
 							{
@@ -616,6 +617,30 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail on a negative terminationGracePeriod duration", func() {
 			nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * -30}
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+	})
+	Context("NodeClassRef", func() {
+		It("should fail to mutate group", func() {
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			nodePool.Spec.Template.Spec.NodeClassRef.Group = "karpenter.test.mutated.sh"
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should fail to mutate kind", func() {
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			nodePool.Spec.Template.Spec.NodeClassRef.Group = "TestNodeClass2"
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should fail if group is unset", func() {
+			nodePool.Spec.Template.Spec.NodeClassRef.Group = ""
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should fail if kind is unset", func() {
+			nodePool.Spec.Template.Spec.NodeClassRef.Kind = ""
+			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
+		})
+		It("should fail if name is unset", func() {
+			nodePool.Spec.Template.Spec.NodeClassRef.Name = ""
 			Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 		})
 	})

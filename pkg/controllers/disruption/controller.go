@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -168,7 +169,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(candidates) == 0 {
 		return false, nil
 	}
-	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.recorder, disruption.Reason())
+	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason())
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
@@ -276,13 +277,13 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 
 // logInvalidBudgets will log if there are any invalid schedules detected
 func (c *Controller) logInvalidBudgets(ctx context.Context) {
-	nodePoolList := &v1.NodePoolList{}
-	if err := c.kubeClient.List(ctx, nodePoolList); err != nil {
+	nps, err := nodepoolutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
+	if err != nil {
 		log.FromContext(ctx).Error(err, "failed listing nodepools")
 		return
 	}
 	var buf bytes.Buffer
-	for _, np := range nodePoolList.Items {
+	for _, np := range nps {
 		// Use a dummy value of 100 since we only care if this errors.
 		for _, method := range c.methods {
 			if _, err := np.GetAllowedDisruptionsByReason(c.clock, 100, method.Reason()); err != nil {

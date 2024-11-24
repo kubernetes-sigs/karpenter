@@ -74,11 +74,11 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client)
-	nodeClaimController = informer.NewNodeClaimController(env.Client, cluster)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
-	nodePoolController = informer.NewNodePoolController(env.Client, cluster)
+	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 })
 
@@ -844,6 +844,10 @@ var _ = Describe("Node Resource Level", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Finalizers: []string{v1.TerminationFinalizer},
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+				},
 			},
 			Spec: v1.NodeClaimSpec{
 				Requirements: []v1.NodeSelectorRequirementWithMinValues{
@@ -863,7 +867,9 @@ var _ = Describe("Node Resource Level", func() {
 					},
 				},
 				NodeClassRef: &v1.NodeClassReference{
-					Name: "default",
+					Group: "karpenter.test.sh",
+					Kind:  "TestNodeClass",
+					Name:  "default",
 				},
 			},
 			Status: v1.NodeClaimStatus{
@@ -880,16 +886,7 @@ var _ = Describe("Node Resource Level", func() {
 				},
 			},
 		})
-		node := test.Node(test.NodeOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey:            nodePool.Name,
-					corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
-				},
-				Finalizers: []string{v1.TerminationFinalizer},
-			},
-			ProviderID: nodeClaim.Status.ProviderID,
-		})
+		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))

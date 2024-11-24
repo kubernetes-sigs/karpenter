@@ -29,7 +29,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	clock "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -58,15 +57,15 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
-			return []string{obj.(*corev1.Node).Spec.ProviderID}
-		})
-	}))
+	env = test.NewEnvironment(
+		test.WithCRDs(apis.CRDs...),
+		test.WithCRDs(v1alpha1.CRDs...),
+		test.WithFieldIndexers(test.NodeClaimProviderIDFieldIndexer(ctx), test.NodeProviderIDFieldIndexer(ctx)),
+	)
 	ctx = options.ToContext(ctx, test.Options())
 	cp = &fake.CloudProvider{}
 	recorder = test.NewEventRecorder()
-	nodeClaimConsistencyController = consistency.NewController(fakeClock, env.Client, recorder)
+	nodeClaimConsistencyController = consistency.NewController(fakeClock, env.Client, cp, recorder)
 })
 
 var _ = AfterSuite(func() {
@@ -89,42 +88,118 @@ var _ = Describe("NodeClaimController", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
-	Context("Termination failure", func() {
-		It("should detect issues with a node that is stuck deleting due to a PDB", func() {
-			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: "default-instance-type",
+	Context("Termination", func() {
+		DescribeTable(
+			"Termination",
+			func(isNodeClaimManaged bool) {
+				nodeClaimOpts := []v1.NodeClaim{{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "default-instance-type",
+						},
 					},
-				},
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-					Capacity: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("1"),
-						corev1.ResourceMemory: resource.MustParse("1Gi"),
-						corev1.ResourcePods:   resource.MustParse("10"),
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+						Capacity: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("1Gi"),
+							corev1.ResourcePods:   resource.MustParse("10"),
+						},
 					},
-				},
-			})
-			podsLabels := map[string]string{"myapp": "deleteme"}
-			pdb := test.PodDisruptionBudget(test.PDBOptions{
-				Labels:         podsLabels,
-				MaxUnavailable: &intstr.IntOrString{IntVal: 0, Type: intstr.Int},
-			})
-			nodeClaim.Finalizers = []string{"prevent.deletion/now"}
-			p := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: podsLabels}})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, p, pdb)
-			ExpectManualBinding(ctx, env.Client, p, node)
-			_ = env.Client.Delete(ctx, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
-			Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %q is blocking evictions", client.ObjectKeyFromObject(pdb)))).To(BeTrue())
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsistentStateFound).IsFalse()).To(BeTrue())
-		})
+				}}
+				if !isNodeClaimManaged {
+					nodeClaimOpts = append(nodeClaimOpts, v1.NodeClaim{
+						Spec: v1.NodeClaimSpec{
+							NodeClassRef: &v1.NodeClassReference{
+								Group: "karpenter.test.sh",
+								Kind:  "UnmanagedNodeClass",
+								Name:  "default",
+							},
+						},
+					})
+				}
+				nodeClaim, node := test.NodeClaimAndNode(nodeClaimOpts...)
+				podsLabels := map[string]string{"myapp": "deleteme"}
+				pdb := test.PodDisruptionBudget(test.PDBOptions{
+					Labels:         podsLabels,
+					MaxUnavailable: &intstr.IntOrString{IntVal: 0, Type: intstr.Int},
+				})
+				nodeClaim.Finalizers = []string{"prevent.deletion/now"}
+				p := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: podsLabels}})
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, p, pdb)
+				ExpectManualBinding(ctx, env.Client, p, node)
+				_ = env.Client.Delete(ctx, nodeClaim)
+				ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
+				Expect(recorder.DetectedEvent(fmt.Sprintf("can't drain node, PDB %q is blocking evictions", client.ObjectKeyFromObject(pdb)))).To(Equal(isNodeClaimManaged))
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				if isNodeClaimManaged {
+					Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsistentStateFound).IsFalse()).To(BeTrue())
+				} else {
+					Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsistentStateFound).IsUnknown()).To(BeTrue())
+				}
+			},
+			Entry("should detect issues with a node that is stuck deleting due to a PDB", true),
+			Entry("should ignore NodeClaims which aren't managed by this instance of Karpenter", false),
+		)
 	})
 
 	Context("Node Shape", func() {
+		DescribeTable(
+			"Node Shape",
+			func(isNodeClaimManaged bool) {
+				nodeClaimOpts := []v1.NodeClaim{{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "arm-instance-type",
+							v1.NodeInitializedLabelKey:     "true",
+						},
+					},
+					Spec: v1.NodeClaimSpec{
+						Resources: v1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("8"),
+								corev1.ResourceMemory: resource.MustParse("64Gi"),
+								corev1.ResourcePods:   resource.MustParse("5"),
+							},
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+						Capacity: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("16"),
+							corev1.ResourceMemory: resource.MustParse("128Gi"),
+							corev1.ResourcePods:   resource.MustParse("10"),
+						},
+					},
+				}}
+				if !isNodeClaimManaged {
+					nodeClaimOpts = append(nodeClaimOpts, v1.NodeClaim{
+						Spec: v1.NodeClaimSpec{
+							NodeClassRef: &v1.NodeClassReference{
+								Group: "karpenter.test.sh",
+								Kind:  "UnmanagedNodeClass",
+								Name:  "default",
+							},
+						},
+					})
+				}
+				nodeClaim, node := test.NodeClaimAndNode(nodeClaimOpts...)
+				nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeConsistentStateFound)
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+				ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				if isNodeClaimManaged {
+					Expect(nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeConsistentStateFound)).To(BeTrue())
+				} else {
+					Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsistentStateFound).IsUnknown()).To(BeTrue())
+				}
+			},
+			Entry("should set consistent state found condition to true if there are no consistency issues", true),
+			Entry("should ignore NodeClaims which aren't managed by this instance of Karpenter", false),
+		)
 		It("should detect issues that launch with much fewer resources than expected", func() {
 			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -163,40 +238,6 @@ var _ = Describe("NodeClaimController", func() {
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsistentStateFound).IsFalse()).To(BeTrue())
-		})
-		It("should set consistent state found condition to true if there are no consistency issues", func() {
-			nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: "arm-instance-type",
-						v1.NodeInitializedLabelKey:     "true",
-					},
-				},
-				Spec: v1.NodeClaimSpec{
-					Resources: v1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("8"),
-							corev1.ResourceMemory: resource.MustParse("64Gi"),
-							corev1.ResourcePods:   resource.MustParse("5"),
-						},
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-					Capacity: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("16"),
-						corev1.ResourceMemory: resource.MustParse("128Gi"),
-						corev1.ResourcePods:   resource.MustParse("10"),
-					},
-				},
-			})
-			nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeConsistentStateFound)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeConsistentStateFound)).To(BeTrue())
 		})
 	})
 })

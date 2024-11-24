@@ -165,8 +165,8 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 }
 
 func (c *CloudProvider) Get(_ context.Context, id string) (*v1.NodeClaim, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	if c.NextGetErr != nil {
 		tempError := c.NextGetErr

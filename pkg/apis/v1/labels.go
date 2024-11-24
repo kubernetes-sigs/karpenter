@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -140,4 +141,8 @@ func GetLabelDomain(key string) string {
 		return parts[0]
 	}
 	return ""
+}
+
+func NodeClassLabelKey(gk schema.GroupKind) string {
+	return fmt.Sprintf("%s/%s", gk.Group, strings.ToLower(gk.Kind))
 }

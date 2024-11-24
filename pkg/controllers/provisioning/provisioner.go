@@ -49,7 +49,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
-	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
@@ -158,7 +159,7 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error) {
 	// filter for provisionable pods first, so we don't check for validity/PVCs on pods we won't provision anyway
 	// (e.g. those owned by daemonsets)
-	pods, err := nodeutil.GetProvisionablePods(ctx, p.kubeClient)
+	pods, err := nodeutils.GetProvisionablePods(ctx, p.kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}
@@ -212,53 +213,48 @@ var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
 func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stateNodes []*state.StateNode) (*scheduler.Scheduler, error) {
-	nodePoolList := &v1.NodePoolList{}
-	err := p.kubeClient.List(ctx, nodePoolList)
+	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
 	if err != nil {
-		return nil, fmt.Errorf("listing node pools, %w", err)
+		return nil, fmt.Errorf("listing nodepools, %w", err)
 	}
-	nodePoolList.Items = lo.Filter(nodePoolList.Items, func(n v1.NodePool, _ int) bool {
-		if !n.StatusConditions().IsTrue(status.ConditionReady) {
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", n.Name)).Error(err, "nodePool not ready")
+	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
+		if !np.StatusConditions().IsTrue(status.ConditionReady) {
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Error(err, "ignoring nodepool, not ready")
 			return false
 		}
-		return n.DeletionTimestamp.IsZero()
+		return np.DeletionTimestamp.IsZero()
 	})
-	if len(nodePoolList.Items) == 0 {
+	if len(nodePools) == 0 {
 		return nil, ErrNodePoolsNotFound
 	}
 
 	// nodeTemplates generated from NodePools are ordered by weight
 	// since they are stored within a slice and scheduling
 	// will always attempt to schedule on the first nodeTemplate
-	nodePoolList.OrderByWeight()
+	nodepoolutils.OrderByWeight(nodePools)
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	domains := map[string]sets.Set[string]{}
-	var notReadyNodePools []string
-	for _, nodePool := range nodePoolList.Items {
-		// Get instance type options
-		instanceTypeOptions, err := p.cloudProvider.GetInstanceTypes(ctx, lo.ToPtr(nodePool))
+	for _, np := range nodePools {
+		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
-			// we just log an error and skip the provisioner to prevent a single mis-configured provisioner from stopping
-			// all scheduling
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", nodePool.Name)).Error(err, "skipping, unable to resolve instance types")
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Error(err, "skipping, unable to resolve instance types")
 			continue
 		}
-		if len(instanceTypeOptions) == 0 {
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", nodePool.Name)).Info("skipping, no resolved instance types found")
+		if len(its) == 0 {
+			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Info("skipping, no resolved instance types found")
 			continue
 		}
 
-		instanceTypes[nodePool.Name] = instanceTypeOptions
+		instanceTypes[np.Name] = its
 
 		// Construct Topology Domains
-		for _, instanceType := range instanceTypeOptions {
+		for _, it := range its {
 			// We need to intersect the instance type requirements with the current nodePool requirements.  This
 			// ensures that something like zones from an instance type don't expand the universe of valid domains.
-			requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...)
-			requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
-			requirements.Add(instanceType.Requirements.Values()...)
+			requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
+			requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
+			requirements.Add(it.Requirements.Values()...)
 
 			for key, requirement := range requirements {
 				// This code used to execute a Union between domains[key] and requirement.Values().
@@ -273,8 +269,8 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 			}
 		}
 
-		requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodePool.Spec.Template.Spec.Requirements...)
-		requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.Labels).Values()...)
+		requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
+		requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
 		for key, requirement := range requirements {
 			if requirement.Operator() == corev1.NodeSelectorOpIn {
 				// The following is a performance optimisation, for the explanation see the comment above
@@ -286,9 +282,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 			}
 		}
 	}
-	if len(notReadyNodePools) > 0 {
-		log.FromContext(ctx).WithValues("nodePools", nodePoolList).Info("skipped nodePools, not ready")
-	}
+
 	// inject topology constraints
 	pods = p.injectVolumeTopologyRequirements(ctx, pods)
 
@@ -301,7 +295,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, lo.ToSlicePtr(nodePoolList.Items), p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {

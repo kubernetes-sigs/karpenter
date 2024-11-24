@@ -30,6 +30,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -41,6 +42,7 @@ var (
 	ctx                          context.Context
 	env                          *test.Environment
 	nodePool                     *v1.NodePool
+	cp                           *fake.CloudProvider
 )
 
 func TestAPIs(t *testing.T) {
@@ -51,7 +53,8 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
-	nodePoolValidationController = NewController(env.Client)
+	cp = fake.NewCloudProvider()
+	nodePoolValidationController = NewController(env.Client, cp)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
@@ -64,6 +67,17 @@ var _ = Describe("Counter", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 		nodePool.StatusConditions().SetUnknown(v1.ConditionTypeValidationSucceeded)
+	})
+	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
+		nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
+			Group: "karpenter.test.sh",
+			Kind:  "UnmanagedNodeClass",
+			Name:  "default",
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsUnknown()).To(BeTrue())
 	})
 	It("should set the NodePoolValidationSucceeded status condition to true if nodePool healthy checks succeed", func() {
 		ExpectApplied(ctx, env.Client, nodePool)

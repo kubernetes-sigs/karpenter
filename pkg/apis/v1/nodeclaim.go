@@ -20,6 +20,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // NodeClaimSpec describes the desired state of the NodeClaim
@@ -97,15 +98,25 @@ type ResourceRequirements struct {
 
 type NodeClassReference struct {
 	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"
+	// +kubebuilder:validation:XValidation:rule="self != ''",message="kind may not be empty"
 	// +required
 	Kind string `json:"kind"`
 	// Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names
+	// +kubebuilder:validation:XValidation:rule="self != ''",message="name may not be empty"
 	// +required
 	Name string `json:"name"`
 	// API version of the referent
+	// +kubebuilder:validation:XValidation:rule="self != ''",message="group may not be empty"
 	// +kubebuilder:validation:Pattern=`^[^/]*$`
 	// +required
 	Group string `json:"group"`
+}
+
+func (ncr *NodeClassReference) GroupKind() schema.GroupKind {
+	return schema.GroupKind{
+		Group: ncr.Group,
+		Kind:  ncr.Kind,
+	}
 }
 
 // +kubebuilder:object:generate=false
