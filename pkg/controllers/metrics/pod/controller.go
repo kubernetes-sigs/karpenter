@@ -52,6 +52,7 @@ const (
 	podHostCapacityType = "capacity_type"
 	podHostInstanceType = "instance_type"
 	podPhase            = "phase"
+	podScheduled        = "scheduled"
 )
 
 var (
@@ -182,6 +183,7 @@ func labelNames() []string {
 		podNamespace,
 		ownerSelfLink,
 		podHostName,
+		podScheduled,
 		podNodePool,
 		podHostZone,
 		podHostArchitecture,
@@ -383,6 +385,7 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	}
 	metricLabels[ownerSelfLink] = selflink
 	metricLabels[podHostName] = pod.Spec.NodeName
+	metricLabels[podScheduled] = lo.Ternary(pod.Spec.NodeName != "", "true", "false")
 	metricLabels[podPhase] = string(pod.Status.Phase)
 
 	node := &corev1.Node{}
