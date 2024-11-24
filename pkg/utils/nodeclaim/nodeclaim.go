@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
@@ -27,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -235,4 +237,27 @@ func UpdateNodeOwnerReferences(nodeClaim *v1.NodeClaim, node *corev1.Node) *core
 		BlockOwnerDeletion: lo.ToPtr(true),
 	})
 	return node
+}
+
+func TerminationGracePeriodExpirationTime(nc *v1.NodeClaim) (*time.Time, error) {
+	expirationTimeString, exists := nc.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]
+	if !exists {
+		return nil, nil
+	}
+	expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s annotation, %w", v1.NodeClaimTerminationTimestampAnnotationKey, err)
+	}
+	return &expirationTime, nil
+}
+
+func HasTerminationGracePeriodElapsed(clk clock.Clock, nc *v1.NodeClaim) (bool, error) {
+	expirationTime, err := TerminationGracePeriodExpirationTime(nc)
+	if err != nil {
+		return false, err
+	}
+	if expirationTime == nil {
+		return false, nil
+	}
+	return clk.Now().After(*expirationTime), nil
 }

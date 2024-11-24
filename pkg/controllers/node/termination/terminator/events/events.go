@@ -22,6 +22,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	storagev1 "k8s.io/api/storage/v1"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
@@ -56,12 +58,22 @@ func NodeFailedToDrain(node *corev1.Node, err error) events.Event {
 	}
 }
 
-func NodeTerminationGracePeriodExpiring(node *corev1.Node, terminationTime string) events.Event {
+func NodeAwaitingVolumeDetachment(node *corev1.Node, volumeAttachments ...*storagev1.VolumeAttachment) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           corev1.EventTypeWarning,
+		Reason:         "AwaitingVolumeDetachment",
+		Message:        fmt.Sprintf("Awaiting deletion of %d VolumeAttachments bound to node", len(volumeAttachments)),
+		DedupeValues:   []string{node.Name},
+	}
+}
+
+func NodeTerminationGracePeriodExpiring(node *corev1.Node, t time.Time) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           corev1.EventTypeWarning,
 		Reason:         "TerminationGracePeriodExpiring",
-		Message:        fmt.Sprintf("All pods will be deleted by %s", terminationTime),
+		Message:        fmt.Sprintf("All pods will be deleted by %s", t.Format(time.RFC3339)),
 		DedupeValues:   []string{node.Name},
 	}
 }
