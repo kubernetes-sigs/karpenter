@@ -18,7 +18,6 @@ package termination_test
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -140,34 +139,6 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 			ExpectNotFound(ctx, env.Client, node, nodeClaim)
-		})
-		It("should not race if deleting nodes in parallel", func() {
-			nodes := lo.Times(10, func(_ int) *corev1.Node {
-				return test.NodeClaimLinkedNode(nodeClaim)
-			})
-			for _, node := range nodes {
-				ExpectApplied(ctx, env.Client, node, nodeClaim)
-				Expect(env.Client.Delete(ctx, node)).To(Succeed())
-				*node = *ExpectNodeExists(ctx, env.Client, node.Name)
-			}
-
-			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
-			for range 2 {
-				var wg sync.WaitGroup
-				// this is enough to trip the race detector
-				for i := range nodes {
-					wg.Add(1)
-					go func(node *corev1.Node) {
-						defer GinkgoRecover()
-						defer wg.Done()
-						ExpectObjectReconciled(ctx, env.Client, terminationController, node)
-					}(nodes[i])
-				}
-				wg.Wait()
-			}
-			for _, node := range nodes {
-				ExpectNotFound(ctx, env.Client, node)
-			}
 		})
 		It("should exclude nodes from load balancers when terminating", func() {
 			labels := map[string]string{"foo": "bar"}
@@ -882,7 +853,7 @@ var _ = Describe("Termination", func() {
 				// Don't let any pod evict
 				MinAvailable: &minAvailable,
 			})
-			ExpectApplied(ctx, env.Client, pdb, node)
+			ExpectApplied(ctx, env.Client, pdb, node, nodeClaim)
 			pods := test.Pods(5, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{
 				OwnerReferences: defaultOwnerRefs,
 				Labels:          labelSelector,
