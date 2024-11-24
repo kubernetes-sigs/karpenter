@@ -69,6 +69,7 @@ type Controller struct {
 	registration   *Registration
 	initialization *Initialization
 	liveness       *Liveness
+	hydration      *Hydration
 }
 
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
@@ -81,6 +82,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
+		hydration:      &Hydration{kubeClient: kubeClient},
 	}
 }
 
@@ -142,6 +144,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		c.registration,
 		c.initialization,
 		c.liveness,
+		c.hydration,
 	} {
 		res, err := reconciler.Reconcile(ctx, nodeClaim)
 		errs = multierr.Append(errs, err)

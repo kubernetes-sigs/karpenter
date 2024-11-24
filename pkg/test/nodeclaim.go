@@ -64,9 +64,7 @@ func NodeClaim(overrides ...v1.NodeClaim) *v1.NodeClaim {
 
 func NodeClaimAndNode(overrides ...v1.NodeClaim) (*v1.NodeClaim, *corev1.Node) {
 	nc := NodeClaim(overrides...)
-	node := NodeClaimLinkedNode(nc)
-	nc.Status.NodeName = node.Name
-	return nc, node
+	return nc, NodeClaimLinkedNode(nc)
 }
 
 // NodeClaimsAndNodes creates homogeneous groups of NodeClaims and Nodes based on the passed in options, evenly divided by the total nodeclaims requested
