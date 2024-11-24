@@ -106,25 +106,45 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsUnknown()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsUnknown()).To(BeTrue())
+
 			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
+
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should ignore nodes not managed by this Karpenter instance", func() {
 			delete(node.Labels, "karpenter.test.sh/testnodeclass")
 			node.Labels = lo.Assign(node.Labels, map[string]string{"karpenter.test.sh/unmanagednodeclass": "default"})
-			ExpectApplied(ctx, env.Client, node)
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsUnknown()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsUnknown()).To(BeTrue())
 
 			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectExists(ctx, env.Client, node)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsUnknown()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsUnknown()).To(BeTrue())
 		})
 		It("should delete nodeclaims associated with nodes", func() {
-			ExpectApplied(ctx, env.Client, node, nodeClaim, nodeClaim)
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 
@@ -169,6 +189,8 @@ var _ = Describe("Termination", func() {
 				ObjectMeta:  metav1.ObjectMeta{OwnerReferences: defaultOwnerRefs},
 			})
 			ExpectApplied(ctx, env.Client, node, nodeClaim, podEvict, podSkip)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsUnknown()).To(BeTrue())
 
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
@@ -176,6 +198,8 @@ var _ = Describe("Termination", func() {
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			Expect(queue.Has(podSkip)).To(BeFalse())
 			ExpectSingletonReconciled(ctx, queue)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsFalse()).To(BeTrue())
 
 			// Expect node to exist and be draining
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
@@ -188,6 +212,9 @@ var _ = Describe("Termination", func() {
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsTrue()).To(BeTrue())
+
 			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 			ExpectNotFound(ctx, env.Client, node)
 		})
@@ -740,13 +767,20 @@ var _ = Describe("Termination", func() {
 				})
 				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va)
 				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
 
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectExists(ctx, env.Client, node)
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsFalse()).To(BeTrue())
 
 				ExpectDeleted(ctx, env.Client, va)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsTrue()).To(BeTrue())
+
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectNotFound(ctx, env.Client, node)
 			})
@@ -775,13 +809,20 @@ var _ = Describe("Termination", func() {
 				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, vaDrainable, vaNonDrainable, pod, pvc)
 				ExpectManualBinding(ctx, env.Client, pod, node)
 				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
 
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectExists(ctx, env.Client, node)
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsFalse()).To(BeTrue())
 
 				ExpectDeleted(ctx, env.Client, vaDrainable)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsTrue()).To(BeTrue())
+
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectNotFound(ctx, env.Client, node)
 			})
@@ -795,13 +836,21 @@ var _ = Describe("Termination", func() {
 				}
 				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va)
 				Expect(env.Client.Delete(ctx, node)).To(Succeed())
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
 
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectExists(ctx, env.Client, node)
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsFalse()).To(BeTrue())
 
 				fakeClock.Step(5 * time.Minute)
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				// Since TGP expired before the VolumeAttachments were deleted, this status condition should have never transitioned
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsFalse()).To(BeTrue())
+
 				ExpectObjectReconciled(ctx, env.Client, terminationController, node)
 				ExpectNotFound(ctx, env.Client, node)
 			})
