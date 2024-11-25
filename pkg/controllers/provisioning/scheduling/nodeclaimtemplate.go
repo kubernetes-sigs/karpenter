@@ -57,7 +57,10 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 		v1.NodePoolHashAnnotationKey:        nodePool.Hash(),
 		v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 	})
-	nct.Labels = lo.Assign(nct.Labels, map[string]string{v1.NodePoolLabelKey: nodePool.Name})
+	nct.Labels = lo.Assign(nct.Labels, map[string]string{
+		v1.NodePoolLabelKey: nodePool.Name,
+		v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind()): nodePool.Spec.Template.Spec.NodeClassRef.Name,
+	})
 	nct.Requirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(nct.Spec.Requirements...).Values()...)
 	nct.Requirements.Add(scheduling.NewLabelRequirements(nct.Labels).Values()...)
 	return nct

@@ -24,12 +24,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -57,11 +54,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
-			return []string{obj.(*corev1.Node).Spec.ProviderID}
-		})
-	}))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeProviderIDFieldIndexer(ctx)))
 	ctx = options.ToContext(ctx, test.Options())
 
 	cloudProvider = fake.NewCloudProvider()
@@ -84,21 +77,47 @@ var _ = Describe("Finalizer", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
-	It("should add the finalizer if it doesn't exist", func() {
-		nodeClaim := test.NodeClaim(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey: nodePool.Name,
+	Context("TerminationFinalizer", func() {
+		It("should add the finalizer if it doesn't exist", func() {
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
 				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		_, ok := lo.Find(nodeClaim.Finalizers, func(f string) bool {
-			return f == v1.TerminationFinalizer
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			_, ok := lo.Find(nodeClaim.Finalizers, func(f string) bool {
+				return f == v1.TerminationFinalizer
+			})
+			Expect(ok).To(BeTrue())
 		})
-		Expect(ok).To(BeTrue())
+		It("shouldn't add the finalizer to NodeClaims not managed by this instance of Karpenter", func() {
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+				Spec: v1.NodeClaimSpec{
+					NodeClassRef: &v1.NodeClassReference{
+						Group: "karpenter.test.sh",
+						Kind:  "UnmanagedNodeClass",
+						Name:  "default",
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			_, ok := lo.Find(nodeClaim.Finalizers, func(f string) bool {
+				return f == v1.TerminationFinalizer
+			})
+			Expect(ok).To(BeFalse())
+		})
 	})
 })

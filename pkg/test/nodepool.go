@@ -19,6 +19,7 @@ package test
 import (
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/imdario/mergo"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -45,7 +46,9 @@ func NodePool(overrides ...v1.NodePool) *v1.NodePool {
 	}
 	if override.Spec.Template.Spec.NodeClassRef == nil {
 		override.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
-			Name: "default",
+			Group: object.GVK(defaultNodeClass).Group,
+			Kind:  object.GVK(defaultNodeClass).Kind,
+			Name:  "default",
 		}
 	}
 	if override.Spec.Template.Spec.Requirements == nil {

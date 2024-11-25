@@ -58,14 +58,30 @@ var _ = Describe("Drift", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 		Expect(nodeClaim.StatusConditions().Clear(v1.ConditionTypeDrifted)).To(Succeed())
 	})
-	It("should detect drift", func() {
-		cp.Drifted = "drifted"
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+	DescribeTable(
+		"Drift",
+		func(isNodeClaimManaged bool) {
+			cp.Drifted = "drifted"
+			if !isNodeClaimManaged {
+				nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{
+					Group: "karpenter.test.sh",
+					Kind:  "UnmanagedNodeClass",
+					Name:  "default",
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
-	})
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			if isNodeClaimManaged {
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+			} else {
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsUnknown()).To(BeTrue())
+			}
+		},
+		Entry("should detect drift", true),
+		Entry("should ignore drift for NodeClaims not managed by this instance of Karpenter", false),
+	)
 	It("should detect stale instance type drift if the instance type label doesn't exist", func() {
 		delete(nodeClaim.Labels, corev1.LabelInstanceTypeStable)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -393,7 +409,7 @@ var _ = Describe("Drift", func() {
 		var nodePoolController *hash.Controller
 		BeforeEach(func() {
 			cp.Drifted = ""
-			nodePoolController = hash.NewController(env.Client)
+			nodePoolController = hash.NewController(env.Client, cp)
 			nodePool = &v1.NodePool{
 				ObjectMeta: nodePool.ObjectMeta,
 				Spec: v1.NodePoolSpec{
@@ -411,9 +427,9 @@ var _ = Describe("Drift", func() {
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: nodePool.Spec.Template.Spec.Requirements,
 							NodeClassRef: &v1.NodeClassReference{
-								Kind:  "fakeKind",
-								Name:  "fakeName",
-								Group: "fakeGroup",
+								Group: "karpenter.test.sh",
+								Kind:  "TestNodeClass",
+								Name:  "default",
 							},
 							Taints: []corev1.Taint{
 								{
@@ -458,9 +474,7 @@ var _ = Describe("Drift", func() {
 			Entry("Labels", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
 			Entry("Taints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Taints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),
 			Entry("StartupTaints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{StartupTaints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),
-			Entry("NodeClassRef APIVersion", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Group: "testVersion"}}}}}),
 			Entry("NodeClassRef Name", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Name: "testName"}}}}}),
-			Entry("NodeClassRef Kind", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Kind: "testKind"}}}}}),
 			Entry("ExpireAfter", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{ExpireAfter: v1.MustParseNillableDuration("100m")}}}}),
 			Entry("TerminationGracePeriod", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{TerminationGracePeriod: &metav1.Duration{Duration: 100 * time.Minute}}}}}),
 		)

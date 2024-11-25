@@ -76,7 +76,7 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
@@ -1293,9 +1293,9 @@ var _ = Describe("Provisioning", func() {
 					Template: v1.NodeClaimTemplate{
 						Spec: v1.NodeClaimTemplateSpec{
 							NodeClassRef: &v1.NodeClassReference{
-								Group: "cloudprovider.karpenter.sh",
-								Kind:  "CloudProvider",
-								Name:  "default",
+								Group: "karpenter.test.sh",
+								Kind:  "TestNodeClass",
+								Name:  "test",
 							},
 						},
 					},
@@ -1308,9 +1308,9 @@ var _ = Describe("Provisioning", func() {
 			Expect(cloudProvider.CreateCalls).To(HaveLen(1))
 			Expect(cloudProvider.CreateCalls[0].Spec.NodeClassRef).To(Equal(
 				&v1.NodeClassReference{
-					Group: "cloudprovider.karpenter.sh",
-					Kind:  "CloudProvider",
-					Name:  "default",
+					Group: "karpenter.test.sh",
+					Kind:  "TestNodeClass",
+					Name:  "test",
 				},
 			))
 			ExpectScheduled(ctx, env.Client, pod)

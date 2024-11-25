@@ -36,58 +36,82 @@ var _ = Describe("Initialization", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
 	})
-	It("should consider the nodeClaim initialized when all initialization conditions are met", func() {
-		nodeClaim := test.NodeClaim(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-			Spec: v1.NodeClaimSpec{
-				Resources: v1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("2"),
-						corev1.ResourceMemory: resource.MustParse("50Mi"),
-						corev1.ResourcePods:   resource.MustParse("5"),
+	DescribeTable(
+		"Initialization",
+		func(isNodeClaimManaged bool) {
+			nodeClaimOpts := []v1.NodeClaim{{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
 					},
 				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Spec: v1.NodeClaimSpec{
+					Resources: v1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("50Mi"),
+							corev1.ResourcePods:   resource.MustParse("5"),
+						},
+					},
+				},
+			}}
+			if !isNodeClaimManaged {
+				nodeClaimOpts = append(nodeClaimOpts, v1.NodeClaim{
+					Spec: v1.NodeClaimSpec{
+						NodeClassRef: &v1.NodeClassReference{
+							Group: "karpenter.test.sh",
+							Kind:  "UnmanagedNodeClass",
+							Name:  "default",
+						},
+					},
+				})
+			}
+			nodeClaim := test.NodeClaim(nodeClaimOpts...)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{
-			ProviderID: nodeClaim.Status.ProviderID,
-			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
-		})
-		ExpectApplied(ctx, env.Client, node)
+			node := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim.Status.ProviderID,
+				Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
+			})
+			ExpectApplied(ctx, env.Client, node)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
+			// If we're testing that Karpenter correctly ignores unmanaged NodeClaims, we must set the registered
+			// status condition manually since the registration sub-reconciler should also ignore it.
+			if !isNodeClaimManaged {
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+				ExpectApplied(ctx, env.Client, nodeClaim)
+			}
 
-		node = ExpectExists(ctx, env.Client, node)
-		node.Status.Capacity = corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("10"),
-			corev1.ResourceMemory: resource.MustParse("100Mi"),
-			corev1.ResourcePods:   resource.MustParse("110"),
-		}
-		node.Status.Allocatable = corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("8"),
-			corev1.ResourceMemory: resource.MustParse("80Mi"),
-			corev1.ResourcePods:   resource.MustParse("110"),
-		}
-		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsUnknown()).To(BeTrue())
 
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
-	})
+			node = ExpectExists(ctx, env.Client, node)
+			node.Status.Capacity = corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10"),
+				corev1.ResourceMemory: resource.MustParse("100Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
+			}
+			node.Status.Allocatable = corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("8"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+				corev1.ResourcePods:   resource.MustParse("110"),
+			}
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(Equal(isNodeClaimManaged))
+		},
+		Entry("should consider the NodeClaim initialized when all initialization conditions are met", true),
+		Entry("should ignore NodeClaims which aren't managed by this Karpenter instance", false),
+	)
 	It("shouldn't consider the nodeClaim initialized when it has not registered", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{

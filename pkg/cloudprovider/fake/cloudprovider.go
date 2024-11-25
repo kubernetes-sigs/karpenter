@@ -165,8 +165,8 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 }
 
 func (c *CloudProvider) Get(_ context.Context, id string) (*v1.NodeClaim, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	if c.NextGetErr != nil {
 		tempError := c.NextGetErr
@@ -240,10 +240,6 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool) ([]
 			},
 		}),
 	}, nil
-}
-
-func (c *CloudProvider) DisruptionReasons() []v1.DisruptionReason {
-	return []v1.DisruptionReason{"CloudProviderDisruptionReason"}
 }
 
 func (c *CloudProvider) Delete(_ context.Context, nc *v1.NodeClaim) error {

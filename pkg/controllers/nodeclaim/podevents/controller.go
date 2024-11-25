@@ -32,7 +32,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -43,15 +45,17 @@ const dedupeTimeout = 10 * time.Second
 
 // Podevents is a nodeclaim controller that deletes adds the lastPodEvent status onto the nodeclaim
 type Controller struct {
-	clock      clock.Clock
-	kubeClient client.Client
+	clock         clock.Clock
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
 }
 
 // NewController constructs a nodeclaim disruption controller
-func NewController(clk clock.Clock, kubeClient client.Client) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
-		kubeClient: kubeClient,
-		clock:      clk,
+		clock:         clk,
+		kubeClient:    kubeClient,
+		cloudProvider: cloudProvider,
 	}
 }
 
@@ -67,12 +71,14 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
 	}
-
 	// If there's no associated node claim, it's not a karpenter owned node.
 	nc, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
 		// if the nodeclaim doesn't exist, or has duplicates, ignore.
 		return reconcile.Result{}, nodeutils.IgnoreDuplicateNodeClaimError(nodeutils.IgnoreNodeClaimNotFoundError(fmt.Errorf("getting nodeclaims for node, %w", err)))
+	}
+	if !nodeclaimutils.IsManaged(nc, c.cloudProvider) {
+		return reconcile.Result{}, nil
 	}
 
 	stored := nc.DeepCopy()

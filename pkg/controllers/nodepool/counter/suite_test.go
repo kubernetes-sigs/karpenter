@@ -63,11 +63,11 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client)
-	nodeClaimController = informer.NewNodeClaimController(env.Client, cluster)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	nodePoolInformerController = informer.NewNodePoolController(env.Client, cluster)
-	nodePoolController = counter.NewController(env.Client, cluster)
+	nodePoolInformerController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
+	nodePoolController = counter.NewController(env.Client, cloudProvider, cluster)
 })
 
 var _ = AfterSuite(func() {
@@ -116,6 +116,36 @@ var _ = Describe("Counter", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
+	})
+	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
+		nodePool = test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
+			NodeClassRef: &v1.NodeClassReference{
+				Group: "karpenter.test.sh",
+				Kind:  "UnmanagedNodeClass",
+				Name:  "default",
+			},
+		}}}})
+		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey: nodePool.Name,
+			}},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("100m"),
+					corev1.ResourcePods:   resource.MustParse("256"),
+					corev1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			},
+			Spec: v1.NodeClaimSpec{
+				NodeClassRef: nodePool.Spec.Template.Spec.NodeClassRef,
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		Expect(nodePool.Status.Resources).To(BeNil())
 	})
 	It("should set well-known resource to zero when no nodes exist in the cluster", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)

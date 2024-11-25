@@ -78,7 +78,6 @@ var _ = Describe("Budgets", func() {
 					DisruptionReasonUnderutilized,
 					DisruptionReasonDrifted,
 					DisruptionReasonEmpty,
-					"CloudProviderDisruptionReason",
 				},
 				Nodes:    "0",
 				Schedule: lo.ToPtr("@weekly"),
@@ -93,12 +92,11 @@ var _ = Describe("Budgets", func() {
 				},
 			},
 		}
-		allKnownDisruptionReasons = append([]DisruptionReason{
+		allKnownDisruptionReasons = []DisruptionReason{
 			DisruptionReasonEmpty,
 			DisruptionReasonUnderutilized,
-			DisruptionReasonDrifted},
-			DisruptionReason("CloudProviderDisruptionReason"),
-		)
+			DisruptionReasonDrifted,
+		}
 	})
 
 	Context("GetAllowedDisruptionsByReason", func() {

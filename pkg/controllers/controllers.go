@@ -62,8 +62,7 @@ func NewControllers(
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
 ) []controller.Controller {
-
-	cluster := state.NewCluster(clock, kubeClient)
+	cluster := state.NewCluster(clock, kubeClient, cloudProvider)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
@@ -73,22 +72,22 @@ func NewControllers(
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewPodController(kubeClient, p),
 		provisioning.NewNodeController(kubeClient, p),
-		nodepoolhash.NewController(kubeClient),
-		expiration.NewController(clock, kubeClient),
+		nodepoolhash.NewController(kubeClient, cloudProvider),
+		expiration.NewController(clock, kubeClient, cloudProvider),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
-		informer.NewNodePoolController(kubeClient, cluster),
-		informer.NewNodeClaimController(kubeClient, cluster),
+		informer.NewNodePoolController(kubeClient, cloudProvider, cluster),
+		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		metricspod.NewController(kubeClient, cluster),
-		metricsnodepool.NewController(kubeClient),
+		metricsnodepool.NewController(kubeClient, cloudProvider),
 		metricsnode.NewController(cluster),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
-		nodepoolcounter.NewController(kubeClient, cluster),
-		nodepoolvalidation.NewController(kubeClient),
-		podevents.NewController(clock, kubeClient),
-		nodeclaimconsistency.NewController(clock, kubeClient, recorder),
+		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
+		nodepoolvalidation.NewController(kubeClient, cloudProvider),
+		podevents.NewController(clock, kubeClient, cloudProvider),
+		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
