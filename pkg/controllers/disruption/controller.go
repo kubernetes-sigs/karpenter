@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -71,13 +72,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 ) *Controller {
 	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
 
-	// Generate eventually disruptable reason based on a combination of drift and cloudprovider disruption reason
-	eventualDisruptionMethods := []Method{}
-
-	for _, reason := range append(cp.DisruptionReasons(), v1.DisruptionReasonDrifted) {
-		eventualDisruptionMethods = append(eventualDisruptionMethods, NewEventualDisruption(kubeClient, cluster, provisioner, recorder, reason))
-	}
-
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
@@ -87,17 +81,16 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
-		methods: append(
-			// Terminate any NodeClaims that have need to be eventually disrupted from provisioning specifications, allowing the pods to reschedule.
-			eventualDisruptionMethods,
-			[]Method{
-				// Delete any empty NodeClaims as there is zero cost in terms of disruption.
-				NewEmptiness(c),
-				// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
-				NewMultiNodeConsolidation(c),
-				// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
-				NewSingleNodeConsolidation(c),
-			}...),
+		methods: []Method{
+			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
+			NewDrift(kubeClient, cluster, provisioner, recorder),
+			// Delete any empty NodeClaims as there is zero cost in terms of disruption.
+			NewEmptiness(c),
+			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
+			NewMultiNodeConsolidation(c),
+			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
+			NewSingleNodeConsolidation(c),
+		},
 	}
 }
 
@@ -176,7 +169,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if len(candidates) == 0 {
 		return false, nil
 	}
-	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.recorder, disruption.Reason())
+	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, disruption.Reason())
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
@@ -284,13 +277,13 @@ func (c *Controller) logAbnormalRuns(ctx context.Context) {
 
 // logInvalidBudgets will log if there are any invalid schedules detected
 func (c *Controller) logInvalidBudgets(ctx context.Context) {
-	nodePoolList := &v1.NodePoolList{}
-	if err := c.kubeClient.List(ctx, nodePoolList); err != nil {
+	nps, err := nodepoolutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
+	if err != nil {
 		log.FromContext(ctx).Error(err, "failed listing nodepools")
 		return
 	}
 	var buf bytes.Buffer
-	for _, np := range nodePoolList.Items {
+	for _, np := range nps {
 		// Use a dummy value of 100 since we only care if this errors.
 		for _, method := range c.methods {
 			if _, err := np.GetAllowedDisruptionsByReason(c.clock, 100, method.Reason()); err != nil {

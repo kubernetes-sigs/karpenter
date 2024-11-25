@@ -27,9 +27,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -60,16 +57,16 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx), func(c cache.Cache) error {
-		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
-			return []string{obj.(*corev1.Node).Spec.ProviderID}
-		})
-	}))
+	env = test.NewEnvironment(
+		test.WithCRDs(apis.CRDs...),
+		test.WithCRDs(v1alpha1.CRDs...),
+		test.WithFieldIndexers(test.NodeClaimProviderIDFieldIndexer(ctx), test.VolumeAttachmentFieldIndexer(ctx), test.NodeProviderIDFieldIndexer(ctx)),
+	)
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewTestingQueue(env.Client, recorder)
-	healthController = health.NewController(env.Client, cloudProvider, fakeClock)
+	healthController = health.NewController(env.Client, cloudProvider, fakeClock, recorder)
 })
 
 var _ = AfterSuite(func() {
@@ -298,10 +295,9 @@ var _ = Describe("Node Health", func() {
 
 			// Determine to delete unhealthy nodes
 			for i := range 4 {
-				res := ExpectObjectReconciled(ctx, env.Client, healthController, nodes[i])
+				ExpectObjectReconciled(ctx, env.Client, healthController, nodes[i])
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[i])
 				Expect(nodeClaim.DeletionTimestamp).To(BeNil())
-				Expect(res.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 			}
 		})
 		It("should consider round up when there is a low number of nodes for a nodepool", func() {

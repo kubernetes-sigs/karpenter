@@ -68,9 +68,6 @@ type CloudProvider interface {
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
 	GetInstanceTypes(context.Context, *v1.NodePool) ([]*InstanceType, error)
-	// DisruptionReasons is for CloudProviders to hook into the Disruption Controller.
-	// Reasons will show up as StatusConditions on the NodeClaim.
-	DisruptionReasons() []v1.DisruptionReason
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
 	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)

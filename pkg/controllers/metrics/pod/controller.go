@@ -52,6 +52,7 @@ const (
 	podHostCapacityType = "capacity_type"
 	podHostInstanceType = "instance_type"
 	podPhase            = "phase"
+	podScheduled        = "scheduled"
 )
 
 var (
@@ -154,12 +155,12 @@ var (
 		[]string{podName, podNamespace},
 	)
 	// Stage: alpha
-	PodProvisioningSchedulingUndecidedTimeSeconds = opmetrics.NewPrometheusGauge(
+	PodSchedulingUndecidedTimeSeconds = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
-			Name:      "provisioning_scheduling_undecided_time_seconds",
+			Name:      "scheduling_undecided_time_seconds",
 			Help:      "The time from when Karpenter has seen a pod without making a scheduling decision for the pod. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
 		[]string{podName, podNamespace},
@@ -182,6 +183,7 @@ func labelNames() []string {
 		podNamespace,
 		ownerSelfLink,
 		podHostName,
+		podScheduled,
 		podNodePool,
 		podHostZone,
 		podHostArchitecture,
@@ -229,7 +231,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				podName:      req.Name,
 				podNamespace: req.Namespace,
 			})
-			PodProvisioningSchedulingUndecidedTimeSeconds.Delete(map[string]string{
+			PodSchedulingUndecidedTimeSeconds.Delete(map[string]string{
 				podName:      req.Name,
 				podNamespace: req.Namespace,
 			})
@@ -261,7 +263,7 @@ func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 	nn := client.ObjectKeyFromObject(pod)
 	// If we've made a decision on this pod, delete the metric idempotently and return
 	if decisionTime := c.cluster.PodSchedulingDecisionTime(nn); !decisionTime.IsZero() {
-		PodProvisioningSchedulingUndecidedTimeSeconds.Delete(map[string]string{
+		PodSchedulingUndecidedTimeSeconds.Delete(map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
@@ -269,7 +271,7 @@ func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 	}
 	// If we haven't made a decision, get the time that we ACK'd the pod and emit the metric based on that
 	if podAckTime := c.cluster.PodAckTime(nn); !podAckTime.IsZero() {
-		PodProvisioningSchedulingUndecidedTimeSeconds.Set(time.Since(podAckTime).Seconds(), map[string]string{
+		PodSchedulingUndecidedTimeSeconds.Set(time.Since(podAckTime).Seconds(), map[string]string{
 			podName:      pod.Name,
 			podNamespace: pod.Namespace,
 		})
@@ -383,6 +385,7 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	}
 	metricLabels[ownerSelfLink] = selflink
 	metricLabels[podHostName] = pod.Spec.NodeName
+	metricLabels[podScheduled] = lo.Ternary(pod.Spec.NodeName != "", "true", "false")
 	metricLabels[podPhase] = string(pod.Status.Phase)
 
 	node := &corev1.Node{}

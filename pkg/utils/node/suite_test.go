@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-	"sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
@@ -45,7 +45,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimFieldIndexer(ctx)))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeClaimProviderIDFieldIndexer(ctx)))
 })
 
 var _ = AfterSuite(func() {
@@ -60,21 +60,13 @@ var _ = Describe("NodeUtils", func() {
 	var testNode *corev1.Node
 	var nodeClaim *v1.NodeClaim
 	BeforeEach(func() {
-		nodeClaim = test.NodeClaim(v1.NodeClaim{
-			Spec: v1.NodeClaimSpec{
-				NodeClassRef: &v1.NodeClassReference{
-					Kind:  "NodeClassRef",
-					Group: "test.cloudprovider",
-					Name:  "default",
-				},
-			},
-		})
+		nodeClaim = test.NodeClaim()
 	})
 	It("should return nodeClaim for node which has the same provider ID", func() {
 		testNode = test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
 
-		nodeClaims, err := node.GetNodeClaims(ctx, testNode, env.Client)
+		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(1))
 		for _, nc := range nodeClaims {
@@ -87,7 +79,7 @@ var _ = Describe("NodeUtils", func() {
 		})
 		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
 
-		nodeClaims, err := node.GetNodeClaims(ctx, testNode, env.Client)
+		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(0))
 	})

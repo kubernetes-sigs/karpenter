@@ -92,9 +92,9 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
 	queue = NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
@@ -151,10 +151,11 @@ var _ = BeforeEach(func() {
 	})
 	leastExpensiveSpotInstance, mostExpensiveSpotInstance = spotInstances[0], spotInstances[len(spotInstances)-1]
 	leastExpensiveSpotOffering, mostExpensiveSpotOffering = leastExpensiveSpotInstance.Offerings[0], mostExpensiveSpotInstance.Offerings[0]
-	allKnownDisruptionReasons = append([]v1.DisruptionReason{
+	allKnownDisruptionReasons = []v1.DisruptionReason{
 		v1.DisruptionReasonEmpty,
 		v1.DisruptionReasonUnderutilized,
-		v1.DisruptionReasonDrifted}, cloudProvider.DisruptionReasons()...)
+		v1.DisruptionReasonDrifted,
+	}
 })
 
 var _ = AfterEach(func() {
@@ -638,7 +639,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		ExpectApplied(ctx, env.Client, unmanaged)
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{unmanaged}, []*v1.NodeClaim{})
 		for _, reason := range allKnownDisruptionReasons {
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
 			Expect(err).To(Succeed())
 			// This should not bring in the unmanaged node.
 			Expect(budgets[nodePool.Name]).To(Equal(10))
@@ -669,7 +670,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
 		for _, reason := range allKnownDisruptionReasons {
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
 			Expect(err).To(Succeed())
 			// This should not bring in the uninitialized node.
 			Expect(budgets[nodePool.Name]).To(Equal(10))
@@ -701,7 +702,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
 		for _, reason := range allKnownDisruptionReasons {
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
 			Expect(err).To(Succeed())
 			// This should not bring in the terminating node.
 			Expect(budgets[nodePool.Name]).To(Equal(10))
@@ -723,7 +724,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		}
 
 		for _, reason := range allKnownDisruptionReasons {
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
 			Expect(err).To(Succeed())
 			Expect(budgets[nodePool.Name]).To(Equal(0))
 		}
@@ -747,7 +748,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		}
 
 		for _, reason := range allKnownDisruptionReasons {
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
 			Expect(err).To(Succeed())
 			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}
@@ -768,7 +769,7 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		}
 
 		for _, reason := range allKnownDisruptionReasons {
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, recorder, reason)
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
 			Expect(err).To(Succeed())
 			Expect(budgets[nodePool.Name]).To(Equal(8))
 		}

@@ -26,8 +26,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -54,14 +52,14 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
-		return c.IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
-			return []string{obj.(*v1.NodeClaim).Status.ProviderID}
-		})
-	}))
+	env = test.NewEnvironment(
+		test.WithCRDs(apis.CRDs...),
+		test.WithCRDs(v1alpha1.CRDs...),
+		test.WithFieldIndexers(test.NodeClaimProviderIDFieldIndexer(ctx), test.NodeProviderIDFieldIndexer(ctx)),
+	)
 	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
-	podEventsController = podevents.NewController(fakeClock, env.Client)
+	podEventsController = podevents.NewController(fakeClock, env.Client, cp)
 })
 
 var _ = AfterSuite(func() {

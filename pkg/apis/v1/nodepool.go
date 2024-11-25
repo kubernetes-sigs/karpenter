@@ -19,7 +19,6 @@ package v1
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 
 	"github.com/mitchellh/hashstructure/v2"
@@ -89,7 +88,7 @@ type Disruption struct {
 type Budget struct {
 	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
-	// allowed reasons are Underutilized, Empty, and Drifted and additional CloudProvider-specific reasons.
+	// allowed reasons are Underutilized, Empty, and Drifted.
 	// +optional
 	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
@@ -129,7 +128,6 @@ const (
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.
-// CloudProviders will need to append to the list of enums when implementing cloud provider disruption reasons
 // +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
 type DisruptionReason string
 
@@ -182,6 +180,8 @@ type NodeClaimTemplateSpec struct {
 	// +required
 	Requirements []NodeSelectorRequirementWithMinValues `json:"requirements" hash:"ignore"`
 	// NodeClassRef is a reference to an object that defines provider specific configuration
+	// +kubebuilder:validation:XValidation:rule="self.group == oldSelf.group",message="nodeClassRef.group is immutable"
+	// +kubebuilder:validation:XValidation:rule="self.kind == oldSelf.kind",message="nodeClassRef.kind is immutable"
 	// +required
 	NodeClassRef *NodeClassReference `json:"nodeClassRef"`
 	// TerminationGracePeriod is the maximum duration the controller will wait before forcefully deleting the pods on a node, measured from when deletion is first initiated.
@@ -288,23 +288,6 @@ type NodePoolList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []NodePool `json:"items"`
-}
-
-// OrderByWeight orders the NodePools in the NodePoolList by their priority weight in-place.
-// This priority evaluates the following things in precedence order:
-//  1. NodePools that have a larger weight are ordered first
-//  2. If two NodePools have the same weight, then the NodePool with the name later in the alphabet will come first
-func (nl *NodePoolList) OrderByWeight() {
-	sort.Slice(nl.Items, func(a, b int) bool {
-		weightA := lo.FromPtr(nl.Items[a].Spec.Weight)
-		weightB := lo.FromPtr(nl.Items[b].Spec.Weight)
-
-		if weightA == weightB {
-			// Order NodePools by name for a consistent ordering when sorting equal weight
-			return nl.Items[a].Name > nl.Items[b].Name
-		}
-		return weightA > weightB
-	})
 }
 
 // MustGetAllowedDisruptions calls GetAllowedDisruptionsByReason if the error is not nil. This reduces the

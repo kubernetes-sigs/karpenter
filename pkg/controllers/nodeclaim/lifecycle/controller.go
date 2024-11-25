@@ -32,6 +32,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -46,7 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	nodeclaimutil "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 	terminationutil "sigs.k8s.io/karpenter/pkg/utils/termination"
 )
@@ -68,6 +69,7 @@ type Controller struct {
 	registration   *Registration
 	initialization *Initialization
 	liveness       *Liveness
+	hydration      *Hydration
 }
 
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
@@ -80,16 +82,17 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
+		hydration:      &Hydration{kubeClient: kubeClient},
 	}
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
-		For(&v1.NodeClaim{}).
+		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Watches(
 			&corev1.Node{},
-			nodeclaimutil.NodeEventHandler(c.kubeClient),
+			nodeclaimutils.NodeEventHandler(c.kubeClient, c.cloudProvider),
 		).
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
@@ -110,6 +113,9 @@ func (c *Controller) Name() string {
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
+	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
+		return reconcile.Result{}, nil
+	}
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return c.finalize(ctx, nodeClaim)
 	}
@@ -138,6 +144,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		c.registration,
 		c.initialization,
 		c.liveness,
+		c.hydration,
 	} {
 		res, err := reconciler.Reconcile(ctx, nodeClaim)
 		errs = multierr.Append(errs, err)
@@ -181,7 +188,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 	// instance is terminated by CCM.
 	// Upstream Kubelet Fix: https://github.com/kubernetes/kubernetes/pull/119661
 	if nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() {
-		nodes, err := nodeclaimutil.AllNodesForNodeClaim(ctx, c.kubeClient, nodeClaim)
+		nodes, err := nodeclaimutils.AllNodesForNodeClaim(ctx, c.kubeClient, nodeClaim)
 		if err != nil {
 			return reconcile.Result{}, err
 		}

@@ -23,6 +23,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -59,18 +60,45 @@ func WithCRDs(crds ...*apiextensionsv1.CustomResourceDefinition) option.Function
 	}
 }
 
-// WithFieldIndexers expects a function that indexes fields against the cache such as cache.IndexField(...)
+// WithFieldIndexers expects a function that indexes fields against the cache such as cache.IndexField(...).
+//
+// Note: Only use when necessary, the use of field indexers in functional tests requires the use of the cache syncing
+// client, which can have significant drawbacks for test performance.
 func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) option.Function[EnvironmentOptions] {
 	return func(o *EnvironmentOptions) {
 		o.fieldIndexers = append(o.fieldIndexers, fieldIndexers...)
 	}
 }
 
-func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
+func NodeProviderIDFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Node).Spec.ProviderID}
+		})
+	}
+}
+
+func NodeClaimProviderIDFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
 			return []string{obj.(*v1.NodeClaim).Status.ProviderID}
 		})
+	}
+}
+
+func NodeClaimNodeClassRefFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		var err error
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.group", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Spec.NodeClassRef.Group}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.kind", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Spec.NodeClassRef.Kind}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.name", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Spec.NodeClassRef.Name}
+		}))
+		return err
 	}
 }
 

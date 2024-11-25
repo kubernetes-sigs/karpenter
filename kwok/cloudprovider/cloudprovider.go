@@ -63,10 +63,6 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1
 	return c.toNodeClaim(node)
 }
 
-func (c CloudProvider) DisruptionReasons() []v1.DisruptionReason {
-	return []v1.DisruptionReason{v1alpha1.DisruptionReasonExampleReason}
-}
-
 func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		if errors.IsNotFound(err) {

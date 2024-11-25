@@ -23,13 +23,13 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -37,6 +37,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -47,14 +48,16 @@ var allowedUnhealthyPercent = intstr.FromString("20%")
 // Controller for the resource
 type Controller struct {
 	clock         clock.Clock
+	recorder      events.Recorder
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clock clock.Clock) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, clock clock.Clock, recorder events.Recorder) *Controller {
 	return &Controller{
 		clock:         clock,
+		recorder:      recorder,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 	}
@@ -63,7 +66,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.health").
-		For(&corev1.Node{}).
+		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
@@ -77,6 +80,9 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 		return reconcile.Result{}, nodeutils.IgnoreNodeClaimNotFoundError(err)
 	}
 
+	// If a nodeclaim does has a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
+	// In the case of standalone nodeclaim, validate the nodes inside the cluster are healthy before proceeding
+	// to repair the nodes
 	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
 	if found {
 		nodePoolHealthy, err := c.isNodePoolHealthy(ctx, nodePoolName)
@@ -84,7 +90,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 		if !nodePoolHealthy {
-			return reconcile.Result{RequeueAfter: time.Minute}, nil
+			return reconcile.Result{}, c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName)
 		}
 	} else {
 		clusterHealthy, err := c.isClusterHealthy(ctx)
@@ -92,8 +98,8 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, err
 		}
 		if !clusterHealthy {
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("more then %s nodes are unhealthy", allowedUnhealthyPercent.String()))
-			return reconcile.Result{RequeueAfter: time.Minute}, nil
+			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
+			return reconcile.Result{}, nil
 		}
 	}
 
@@ -168,26 +174,8 @@ func (c *Controller) isNodePoolHealthy(ctx context.Context, nodePoolName string)
 	if err := c.kubeClient.List(ctx, nodeList, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName})); err != nil {
 		return false, err
 	}
-	nodePool := &v1.NodePool{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-		return false, err
-	}
-	stored := nodePool.DeepCopy()
 
-	healthy := c.validateHealthyCloudProviderHealthCondition(nodeList.Items)
-	if !healthy {
-		nodePool.StatusConditions().SetTrueWithReason(v1.ConditionTypeUnhealthy, "Unhealthy", fmt.Sprintf("more then %s nodes are unhealthy", allowedUnhealthyPercent.String()))
-	} else {
-		nodePool.StatusConditions().Clear(v1.ConditionTypeUnhealthy)
-	}
-
-	if !equality.Semantic.DeepEqual(stored, nodePool) {
-		if err := c.kubeClient.Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
-			return false, err
-		}
-	}
-
-	return true, nil
+	return c.isHealthyForNodes(nodeList.Items), nil
 }
 
 func (c *Controller) isClusterHealthy(ctx context.Context) (bool, error) {
@@ -196,20 +184,27 @@ func (c *Controller) isClusterHealthy(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	return c.validateHealthyCloudProviderHealthCondition(nodeList.Items), nil
+	return c.isHealthyForNodes(nodeList.Items), nil
 }
 
-func (c *Controller) validateHealthyCloudProviderHealthCondition(nodes []corev1.Node) bool {
-	for _, policy := range c.cloudProvider.RepairPolicies() {
-		unhealthyNodeCount := lo.CountBy(nodes, func(node corev1.Node) bool {
+func (c *Controller) isHealthyForNodes(nodes []corev1.Node) bool {
+	unhealthyNodeCount := lo.CountBy(nodes, func(node corev1.Node) bool {
+		_, found := lo.Find(c.cloudProvider.RepairPolicies(), func(policy cloudprovider.RepairPolicy) bool {
 			nodeCondition := nodeutils.GetCondition(lo.ToPtr(node), policy.ConditionType)
 			return nodeCondition.Status == policy.ConditionStatus
 		})
+		return found
+	})
 
-		threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(allowedUnhealthyPercent), len(nodes), true))
-		if unhealthyNodeCount > threshold {
-			return false
-		}
+	threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(allowedUnhealthyPercent), len(nodes), true))
+	return unhealthyNodeCount <= threshold
+}
+
+func (c *Controller) publishNodePoolHealthEvent(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim, npName string) error {
+	np := &v1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: npName}, np); err != nil {
+		return client.IgnoreNotFound(err)
 	}
-	return true
+	c.recorder.Publish(NodeRepairBlocked(node, nodeClaim, np, fmt.Sprintf("more then %s nodes are unhealthy in the nodepool", allowedUnhealthyPercent.String()))...)
+	return nil
 }

@@ -29,6 +29,7 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -40,6 +41,7 @@ var podController *pod.Controller
 var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
+var cloudProvider *fake.CloudProvider
 var fakeClock *clock.FakeClock
 
 func TestAPIs(t *testing.T) {
@@ -51,7 +53,8 @@ func TestAPIs(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client)
+	cloudProvider = fake.NewCloudProvider()
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	podController = pod.NewController(env.Client, cluster)
 })
 
@@ -251,7 +254,7 @@ var _ = Describe("Pod Metrics", func() {
 
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 		fakeClock.Step(1 * time.Hour)
-		_, found := FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+		_, found := FindMetricWithLabelValues("karpenter_pods_scheduling_undecided_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -262,7 +265,7 @@ var _ = Describe("Pod Metrics", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 		fakeClock.Step(1 * time.Hour)
 
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_scheduling_undecided_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -271,7 +274,7 @@ var _ = Describe("Pod Metrics", func() {
 		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{}, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_scheduling_undecided_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -284,7 +287,7 @@ var _ = Describe("Pod Metrics", func() {
 
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 		fakeClock.Step(1 * time.Hour)
-		_, found := FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+		_, found := FindMetricWithLabelValues("karpenter_pods_scheduling_undecided_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -295,7 +298,7 @@ var _ = Describe("Pod Metrics", func() {
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 		fakeClock.Step(1 * time.Hour)
 
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_scheduling_undecided_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})
@@ -304,7 +307,7 @@ var _ = Describe("Pod Metrics", func() {
 		ExpectDeleted(ctx, env.Client, p)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p))
 
-		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_scheduling_undecided_time_seconds", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_pods_scheduling_undecided_time_seconds", map[string]string{
 			"name":      p.GetName(),
 			"namespace": p.GetNamespace(),
 		})

@@ -4,6 +4,8 @@ coverage.html
 *.test
 *.cpuprofile
 *.heapprofile
+go.work
+go.work.sum
 
 # Common in OSs and IDEs
 .idea
