@@ -121,4 +121,22 @@ var _ = Describe("TerminationUtils", func() {
 		Expect(instanceTerminated).To(BeTrue())
 		Expect(err).NotTo(HaveOccurred())
 	})
+	It("shouldn't mark the root condition of the NodeClaim as unknown when setting the Termination condition", func() {
+		for _, cond := range []string{
+			v1.ConditionTypeLaunched,
+			v1.ConditionTypeRegistered,
+			v1.ConditionTypeInitialized,
+		} {
+			nodeClaim.StatusConditions().SetTrue(cond)
+		}
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Root().IsTrue())
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		instanceTerminated, err := termination.EnsureTerminated(ctx, env.Client, nodeClaim, cloudProvider)
+		Expect(instanceTerminated).To(BeFalse())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Root().IsTrue())
+	})
 })
