@@ -52,10 +52,13 @@ func NamespacedObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
 }
 
 func ObjectMeta(overrides ...metav1.ObjectMeta) metav1.ObjectMeta {
-	return MustMerge(metav1.ObjectMeta{
+	om := MustMerge(metav1.ObjectMeta{
 		Name:   RandomName(),
 		Labels: map[string]string{DiscoveryLabel: "unspecified"}, // For cleanup discovery
 	}, overrides...)
+	om.CreationTimestamp = metav1.Now()
+	om.Generation = 1
+	return om
 }
 
 func TemplateObjectMeta(overrides ...v1.ObjectMeta) v1.ObjectMeta {
