@@ -98,7 +98,7 @@ func NewControllers(
 
 	// The cloud provider must define status conditions for the node repair controller to use to detect unhealthy nodes
 	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
-		controllers = append(controllers, health.NewController(kubeClient, cloudProvider, clock))
+		controllers = append(controllers, health.NewController(kubeClient, cloudProvider, clock, recorder))
 	}
 
 	return controllers
