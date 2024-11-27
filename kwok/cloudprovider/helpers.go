@@ -17,6 +17,7 @@ limitations under the License.
 package kwok
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/kwok/options"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -64,29 +66,19 @@ type InstanceTypeOptions struct {
 //go:embed instance_types.json
 var defaultRawInstanceTypes []byte
 
-type InstanceTypesOptions struct {
-	CustomInstanceTypesFilePath *string
-}
-
-type InstanceTypesOption func(*InstanceTypesOptions)
-
 // ConstructInstanceTypes create many instance types based on the embedded instance type data
-func ConstructInstanceTypes(opts ...InstanceTypesOption) ([]*cloudprovider.InstanceType, error) {
-	o := &InstanceTypesOptions{}
-	for _, opt := range opts {
-		opt(o)
-	}
+func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType, error) {
+	var instanceTypes []*cloudprovider.InstanceType
+	var instanceTypeOptions []InstanceTypeOptions
+
 	rawInstanceTypes := defaultRawInstanceTypes
-	if o.CustomInstanceTypesFilePath != nil {
-		customRawInstanceTypes, err := os.ReadFile(*o.CustomInstanceTypesFilePath)
+	if customInstanceTypes := options.FromContext(ctx).InstanceTypesFilePath; customInstanceTypes != "" {
+		customRawInstanceTypes, err := os.ReadFile(customInstanceTypes)
 		if err != nil {
 			return nil, fmt.Errorf("could not read custom instance types file: %w", err)
 		}
 		rawInstanceTypes = customRawInstanceTypes
 	}
-
-	var instanceTypes []*cloudprovider.InstanceType
-	var instanceTypeOptions []InstanceTypeOptions
 
 	if err := json.Unmarshal(rawInstanceTypes, &instanceTypeOptions); err != nil {
 		return nil, fmt.Errorf("could not parse JSON data: %w", err)
@@ -97,13 +89,6 @@ func ConstructInstanceTypes(opts ...InstanceTypesOption) ([]*cloudprovider.Insta
 		instanceTypes = append(instanceTypes, newInstanceType(opts))
 	}
 	return instanceTypes, nil
-}
-
-// WithInstanceTypesFromFile constructs instance types from a custom file.
-func WithInstanceTypesFromFile(path string) InstanceTypesOption {
-	return func(o *InstanceTypesOptions) {
-		o.CustomInstanceTypesFilePath = &path
-	}
 }
 
 // parseSizeFromType will attempt to discover the instance size if it matches a special AWS format.
