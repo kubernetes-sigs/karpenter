@@ -81,7 +81,8 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim)
 			return reconcile.Result{}, err
 		}
 	}
-	log.FromContext(ctx).WithValues("allocatable", node.Status.Allocatable).Info("initialized nodeclaim")
+	log.FromContext(ctx).WithValues("allocatable", node.Status.Allocatable).Info("initialized nodeclaim, kubelet version: " + node.Status.NodeInfo.KubeletVersion)
+	nodeClaim.Status.KubeletVersion = node.Status.NodeInfo.KubeletVersion
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
 	return reconcile.Result{}, nil
 }
