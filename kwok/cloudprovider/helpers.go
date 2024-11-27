@@ -20,6 +20,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 
 	"github.com/samber/lo"
@@ -61,10 +62,29 @@ type InstanceTypeOptions struct {
 }
 
 //go:embed instance_types.json
-var rawInstanceTypes []byte
+var defaultRawInstanceTypes []byte
+
+type InstanceTypesOptions struct {
+	CustomInstanceTypesFilePath *string
+}
+
+type InstanceTypesOption func(*InstanceTypesOptions)
 
 // ConstructInstanceTypes create many instance types based on the embedded instance type data
-func ConstructInstanceTypes() ([]*cloudprovider.InstanceType, error) {
+func ConstructInstanceTypes(opts ...InstanceTypesOption) ([]*cloudprovider.InstanceType, error) {
+	o := &InstanceTypesOptions{}
+	for _, opt := range opts {
+		opt(o)
+	}
+	rawInstanceTypes := defaultRawInstanceTypes
+	if o.CustomInstanceTypesFilePath != nil {
+		customRawInstanceTypes, err := os.ReadFile(*o.CustomInstanceTypesFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("could not read custom instance types file: %w", err)
+		}
+		rawInstanceTypes = customRawInstanceTypes
+	}
+
 	var instanceTypes []*cloudprovider.InstanceType
 	var instanceTypeOptions []InstanceTypeOptions
 
@@ -77,6 +97,13 @@ func ConstructInstanceTypes() ([]*cloudprovider.InstanceType, error) {
 		instanceTypes = append(instanceTypes, newInstanceType(opts))
 	}
 	return instanceTypes, nil
+}
+
+// WithInstanceTypesFromFile constructs instance types from a custom file.
+func WithInstanceTypesFromFile(path string) InstanceTypesOption {
+	return func(o *InstanceTypesOptions) {
+		o.CustomInstanceTypesFilePath = &path
+	}
 }
 
 // parseSizeFromType will attempt to discover the instance size if it matches a special AWS format.

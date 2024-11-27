@@ -26,7 +26,14 @@ import (
 
 func main() {
 	ctx, op := operator.NewOperator()
-	instanceTypes, err := kwok.ConstructInstanceTypes()
+
+	options := kwok.GetOptionsOrDie()
+
+	var instanceTypesOptions []kwok.InstanceTypesOption
+	if options.InstanceTypesFilePath != "" {
+		instanceTypesOptions = append(instanceTypesOptions, kwok.WithInstanceTypesFromFile(options.InstanceTypesFilePath))
+	}
+	instanceTypes, err := kwok.ConstructInstanceTypes(instanceTypesOptions...)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed constructing instance types")
 	}
