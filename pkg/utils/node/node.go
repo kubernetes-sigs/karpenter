@@ -27,7 +27,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -176,5 +178,21 @@ func IsManaged(node *corev1.Node, cp cloudprovider.CloudProvider) bool {
 func IsManagedPredicateFuncs(cp cloudprovider.CloudProvider) predicate.Funcs {
 	return predicate.NewPredicateFuncs(func(o client.Object) bool {
 		return IsManaged(o.(*corev1.Node), cp)
+	})
+}
+
+func NodeClaimEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		providerID := o.(*v1.NodeClaim).Status.ProviderID
+		if providerID == "" {
+			return nil
+		}
+		nodes := &corev1.NodeList{}
+		if err := c.List(ctx, nodes, client.MatchingFields{"spec.providerID": providerID}); err != nil {
+			return nil
+		}
+		return lo.Map(nodes.Items, func(n corev1.Node, _ int) reconcile.Request {
+			return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&n)}
+		})
 	})
 }
