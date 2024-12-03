@@ -120,6 +120,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	lastSavedResults := scheduling.Results{}
 	// Set a timeout
 	timeout := m.clock.Now().Add(MultiNodeConsolidationTimeoutDuration)
+	//Set ConsolidationTimeoutsTotal to zero
+	ConsolidationTimeoutsTotal.Add(0, map[string]string{consolidationTypeLabel: m.ConsolidationType()})
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for min <= max {
 		if m.clock.Now().After(timeout) {

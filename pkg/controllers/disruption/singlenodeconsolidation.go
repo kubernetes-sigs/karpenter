@@ -51,7 +51,8 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
 	constrainedByBudgets := false
-
+	//Set ConsolidationTimeoutsTotal to zero
+	ConsolidationTimeoutsTotal.Add(0, map[string]string{consolidationTypeLabel: s.ConsolidationType()})
 	// binary search to find the maximum number of NodeClaims we can terminate
 	for i, candidate := range candidates {
 		// If the disruption budget doesn't allow this candidate to be disrupted,
