@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 var allowedUnhealthyPercent = intstr.FromString("20%")
@@ -126,7 +127,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting unhealthy node")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       string(unhealthyNodeCondition.Type),
+		metrics.ReasonLabel:       pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
 	})
