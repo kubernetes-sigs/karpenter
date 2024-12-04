@@ -30,7 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 
 	storagev1 "k8s.io/api/storage/v1"
@@ -42,8 +41,8 @@ import (
 )
 
 type VolumeDetachmentReconciler struct {
-	kubeClient client.Client
 	clk        clock.Clock
+	kubeClient client.Client
 	recorder   events.Recorder
 }
 
@@ -78,7 +77,7 @@ func (v *VolumeDetachmentReconciler) Reconcile(ctx context.Context, n *corev1.No
 			}
 			return reconcile.Result{}, err
 		}
-		v.recorder.Publish(terminatorevents.NodeAwaitingVolumeDetachment(n, blockingVAs...))
+		v.recorder.Publish(NodeAwaitingVolumeDetachmentEvent(n, blockingVAs...))
 		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 

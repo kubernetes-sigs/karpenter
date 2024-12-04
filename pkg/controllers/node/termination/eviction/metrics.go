@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package terminator
+package eviction
 
 import (
 	opmetrics "github.com/awslabs/operatorpkg/metrics"

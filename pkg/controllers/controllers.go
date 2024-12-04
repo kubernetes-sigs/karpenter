@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	nodehydration "sigs.k8s.io/karpenter/pkg/controllers/node/hydration"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
-	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/eviction"
 	nodeclaimconsistency "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/expiration"
@@ -68,7 +68,7 @@ func NewControllers(
 ) []controller.Controller {
 	cluster := state.NewCluster(clock, kubeClient, cloudProvider)
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
-	evictionQueue := terminator.NewQueue(kubeClient, recorder)
+	evictionQueue := eviction.NewQueue(kubeClient, recorder)
 	disruptionQueue := orchestration.NewQueue(kubeClient, recorder, cluster, clock, p)
 
 	controllers := []controller.Controller{
@@ -83,7 +83,7 @@ func NewControllers(
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster),
-		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
+		termination.NewController(clock, kubeClient, cloudProvider, recorder, evictionQueue),
 		metricspod.NewController(kubeClient, cluster),
 		metricsnodepool.NewController(kubeClient, cloudProvider),
 		metricsnode.NewController(cluster),

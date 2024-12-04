@@ -35,9 +35,9 @@ import (
 )
 
 type InstanceTerminationReconciler struct {
+	clk           clock.Clock
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
-	clk           clock.Clock
 }
 
 func (i *InstanceTerminationReconciler) Reconcile(ctx context.Context, n *corev1.Node, nc *v1.NodeClaim) (reconcile.Result, error) {
