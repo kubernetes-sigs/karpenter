@@ -14,41 +14,30 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package events
+package termination
 
 import (
 	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-
 	storagev1 "k8s.io/api/storage/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
-func EvictPod(pod *corev1.Pod) events.Event {
-	return events.Event{
-		InvolvedObject: pod,
-		Type:           corev1.EventTypeNormal,
-		Reason:         "Evicted",
-		Message:        "Evicted pod",
-		DedupeValues:   []string{pod.Name},
-	}
-}
-
-func DisruptPodDelete(pod *corev1.Pod, gracePeriodSeconds *int64, nodeGracePeriodTerminationTime *time.Time) events.Event {
+func PodDeletedEvent(pod *corev1.Pod, gracePeriodSeconds *int64, nodeGracePeriodTerminationTime *time.Time) events.Event {
 	return events.Event{
 		InvolvedObject: pod,
 		Type:           corev1.EventTypeNormal,
 		Reason:         "Disrupted",
 		Message:        fmt.Sprintf("Deleting the pod to accommodate the terminationTime %v of the node. The pod was granted %v seconds of grace-period of its %v terminationGracePeriodSeconds. This bypasses the PDB of the pod and the do-not-disrupt annotation.", *nodeGracePeriodTerminationTime, *gracePeriodSeconds, pod.Spec.TerminationGracePeriodSeconds),
-		DedupeValues:   []string{pod.Name},
+		DedupeValues:   []string{pod.Namespace, pod.Name},
 	}
 }
 
-func NodeFailedToDrain(node *corev1.Node, err error) events.Event {
+func NodeDrainFailedEvent(node *corev1.Node, err error) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           corev1.EventTypeWarning,
@@ -58,17 +47,17 @@ func NodeFailedToDrain(node *corev1.Node, err error) events.Event {
 	}
 }
 
-func NodeAwaitingVolumeDetachment(node *corev1.Node, volumeAttachments ...*storagev1.VolumeAttachment) events.Event {
+func NodeAwaitingVolumeDetachmentEvent(node *corev1.Node, volumeAttachments ...*storagev1.VolumeAttachment) events.Event {
 	return events.Event{
 		InvolvedObject: node,
-		Type:           corev1.EventTypeWarning,
+		Type:           corev1.EventTypeNormal,
 		Reason:         "AwaitingVolumeDetachment",
 		Message:        fmt.Sprintf("Awaiting deletion of %d VolumeAttachments bound to node", len(volumeAttachments)),
 		DedupeValues:   []string{node.Name},
 	}
 }
 
-func NodeTerminationGracePeriodExpiring(node *corev1.Node, t time.Time) events.Event {
+func NodeTerminationGracePeriodExpiringEvent(node *corev1.Node, t time.Time) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           corev1.EventTypeWarning,
@@ -78,7 +67,7 @@ func NodeTerminationGracePeriodExpiring(node *corev1.Node, t time.Time) events.E
 	}
 }
 
-func NodeClaimTerminationGracePeriodExpiring(nodeClaim *v1.NodeClaim, terminationTime string) events.Event {
+func NodeClaimTerminationGracePeriodExpiringEvent(nodeClaim *v1.NodeClaim, terminationTime string) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
 		Type:           corev1.EventTypeWarning,

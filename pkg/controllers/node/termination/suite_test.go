@@ -34,7 +34,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
-	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/eviction"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -49,7 +49,7 @@ var defaultOwnerRefs = []metav1.OwnerReference{{Kind: "ReplicaSet", APIVersion: 
 var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
 var recorder *test.EventRecorder
-var queue *terminator.Queue
+var queue *eviction.Queue
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -67,8 +67,8 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewTestingQueue(env.Client, recorder)
-	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
+	queue = eviction.NewTestingQueue(env.Client, recorder)
+	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, recorder, queue)
 })
 
 var _ = AfterSuite(func() {
@@ -83,7 +83,7 @@ var _ = Describe("Termination", func() {
 	BeforeEach(func() {
 		fakeClock.SetTime(time.Now())
 		cloudProvider.Reset()
-		*queue = lo.FromPtr(terminator.NewTestingQueue(env.Client, recorder))
+		*queue = lo.FromPtr(eviction.NewTestingQueue(env.Client, recorder))
 
 		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
