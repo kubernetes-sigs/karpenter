@@ -34,25 +34,25 @@ type Batcher[T comparable] struct {
 	trigger chan struct{}
 	clk     clock.Clock
 
-	mu               sync.RWMutex
-	triggeredOnElems sets.Set[T]
+	mu    sync.RWMutex
+	elems sets.Set[T]
 }
 
 // NewBatcher is a constructor for the Batcher
 func NewBatcher[T comparable](clk clock.Clock) *Batcher[T] {
 	return &Batcher[T]{
-		trigger:          make(chan struct{}, 1),
-		clk:              clk,
-		triggeredOnElems: sets.New[T](),
+		trigger: make(chan struct{}, 1),
+		clk:     clk,
+		elems:   sets.New[T](),
 	}
 }
 
 // Trigger causes the batcher to start a batching window, or extend the current batching window if it hasn't reached the
 // maximum length.
-func (b *Batcher[T]) Trigger(triggeredOn T) {
+func (b *Batcher[T]) Trigger(elem T) {
 	// Don't trigger if we've already triggered for this element
 	b.mu.RLock()
-	if b.triggeredOnElems.Has(triggeredOn) {
+	if b.elems.Has(elem) {
 		b.mu.RUnlock()
 		return
 	}
@@ -63,7 +63,7 @@ func (b *Batcher[T]) Trigger(triggeredOn T) {
 	default:
 	}
 	b.mu.Lock()
-	b.triggeredOnElems.Insert(triggeredOn)
+	b.elems.Insert(elem)
 	b.mu.Unlock()
 }
 
@@ -73,18 +73,26 @@ func (b *Batcher[T]) Wait(ctx context.Context) bool {
 	// Ensure that we always reset our tracked elements at the end of a Wait() statement
 	defer func() {
 		b.mu.Lock()
-		b.triggeredOnElems.Clear()
+		b.elems.Clear()
 		b.mu.Unlock()
 	}()
+
+	timeout := b.clk.NewTimer(time.Second)
 	select {
 	case <-b.trigger:
 		// start the batching window after the first item is received
-	case <-b.clk.After(1 * time.Second):
+		timeout.Stop()
+	case <-timeout.C():
 		// If no pods, bail to the outer controller framework to refresh the context
 		return false
 	}
-	timeout := b.clk.NewTimer(options.FromContext(ctx).BatchMaxDuration)
+	timeout = b.clk.NewTimer(options.FromContext(ctx).BatchMaxDuration)
 	idle := b.clk.NewTimer(options.FromContext(ctx).BatchIdleDuration)
+	defer func() {
+		timeout.Stop()
+		idle.Stop()
+	}()
+
 	for {
 		select {
 		case <-b.trigger:
