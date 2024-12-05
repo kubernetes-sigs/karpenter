@@ -30,6 +30,10 @@ const (
 	consolidationTypeLabel       = "consolidation_type"
 )
 
+func init() {
+	ConsolidationTimeoutsTotal.Add(0, map[string]string{consolidationTypeLabel: consolidationTypeLabel})
+}
+
 var (
 	EvaluationDurationSeconds = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
