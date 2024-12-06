@@ -31,8 +31,8 @@ const (
 )
 
 func init() {
-	ConsolidationTimeoutsTotal.Add(0, map[string]string{consolidationTypeLabel: "multi"})
-	ConsolidationTimeoutsTotal.Add(0, map[string]string{consolidationTypeLabel: "single"})
+	ConsolidationTimeoutsTotal.Add(0, map[string]string{consolidationTypeLabel: MultiNodeConsolidationType})
+	ConsolidationTimeoutsTotal.Add(0, map[string]string{consolidationTypeLabel: SingleNodeConsolidationType})
 }
 
 var (
