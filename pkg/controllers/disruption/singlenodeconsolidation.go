@@ -28,6 +28,7 @@ import (
 )
 
 const SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
+const SingleNodeConsolidationType = "single"
 
 // SingleNodeConsolidation is the consolidation controller that performs single-node consolidation.
 type SingleNodeConsolidation struct {
@@ -108,5 +109,5 @@ func (s *SingleNodeConsolidation) Class() string {
 }
 
 func (s *SingleNodeConsolidation) ConsolidationType() string {
-	return "single"
+	return SingleNodeConsolidationType
 }
