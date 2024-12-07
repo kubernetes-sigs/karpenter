@@ -44,6 +44,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 const (
@@ -196,7 +197,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		})
 		DisruptionQueueFailuresTotal.Add(float64(len(failedLaunches)), map[string]string{
 			decisionLabel:          cmd.Decision(),
-			metrics.ReasonLabel:    string(cmd.reason),
+			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.reason)),
 			consolidationTypeLabel: cmd.consolidationType,
 		})
 		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
@@ -265,7 +266,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			multiErr = multierr.Append(multiErr, client.IgnoreNotFound(err))
 		} else {
 			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-				metrics.ReasonLabel:       string(cmd.reason),
+				metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.reason)),
 				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
 				metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
 			})

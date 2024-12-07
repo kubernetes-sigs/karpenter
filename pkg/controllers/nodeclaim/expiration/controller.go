@@ -18,6 +18,7 @@ package expiration
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"k8s.io/utils/clock"
@@ -75,7 +76,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	// 4. The deletion timestamp has successfully been set for the NodeClaim, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting expired nodeclaim")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       metrics.ExpiredReason,
+		metrics.ReasonLabel:       strings.ToLower(metrics.ExpiredReason),
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	})

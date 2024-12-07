@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
@@ -341,7 +342,7 @@ var _ = Describe("Node Health", func() {
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-				metrics.ReasonLabel:   string(cloudProvider.RepairPolicies()[0].ConditionType),
+				metrics.ReasonLabel:   pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
 				metrics.NodePoolLabel: nodePool.Name,
 			})
 		})
