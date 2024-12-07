@@ -41,7 +41,9 @@ type Registration struct {
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsUnknown() {
+	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered); !cond.IsUnknown() {
+		// Ensure that we always set the status condition to the latest generation
+		nodeClaim.StatusConditions().Set(*cond)
 		return reconcile.Result{}, nil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
