@@ -26,7 +26,7 @@ import (
 
 func main() {
 	ctx, op := operator.NewOperator()
-	instanceTypes, err := kwok.ConstructInstanceTypes()
+	instanceTypes, err := kwok.ConstructInstanceTypes(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed constructing instance types")
 	}
