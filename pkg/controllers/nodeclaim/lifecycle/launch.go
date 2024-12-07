@@ -43,7 +43,9 @@ type Launch struct {
 }
 
 func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsUnknown() {
+	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); !cond.IsUnknown() {
+		// Ensure that we always set the status condition to the latest generation
+		nodeClaim.StatusConditions().Set(*cond)
 		return reconcile.Result{}, nil
 	}
 

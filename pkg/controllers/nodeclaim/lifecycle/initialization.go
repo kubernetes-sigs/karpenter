@@ -45,7 +45,9 @@ type Initialization struct {
 // c) all extended resources have been registered
 // This method handles both nil nodepools and nodes without extended resources gracefully.
 func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsUnknown() {
+	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized); !cond.IsUnknown() {
+		// Ensure that we always set the status condition to the latest generation
+		nodeClaim.StatusConditions().Set(*cond)
 		return reconcile.Result{}, nil
 	}
 	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() {
