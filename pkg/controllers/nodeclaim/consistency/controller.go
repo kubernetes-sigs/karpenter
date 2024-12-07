@@ -70,7 +70,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		recorder:      recorder,
 		lastScanned:   cache.New(scanPeriod, 1*time.Minute),
 		checks: []Check{
-			NewTermination(clk, kubeClient),
 			NewNodeShape(),
 		},
 	}
