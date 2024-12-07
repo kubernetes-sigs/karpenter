@@ -249,10 +249,11 @@ func (c CloudProvider) toNodeClaim(node *corev1.Node) (*v1.NodeClaim, error) {
 			NodeClassRef:  nil,
 		},
 		Status: v1.NodeClaimStatus{
-			NodeName:    node.Name,
-			ProviderID:  node.Spec.ProviderID,
-			Capacity:    node.Status.Capacity,
-			Allocatable: node.Status.Allocatable,
+			NodeName:       node.Name,
+			ProviderID:     node.Spec.ProviderID,
+			KubeletVersion: node.Status.NodeInfo.KubeletVersion,
+			Capacity:       node.Status.Capacity,
+			Allocatable:    node.Status.Allocatable,
 		},
 	}, nil
 }
