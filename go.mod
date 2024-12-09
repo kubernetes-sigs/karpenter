@@ -6,7 +6,7 @@ require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/awslabs/operatorpkg v0.0.0-20241205163410-0fff9f28d115
-	github.com/docker/docker v27.3.1+incompatible
+	github.com/docker/docker v27.4.0+incompatible
 	github.com/go-logr/logr v1.4.2
 	github.com/imdario/mergo v0.3.16
 	github.com/klauspost/compress v1.17.9 // indirect
@@ -19,7 +19,7 @@ require (
 	github.com/samber/lo v1.47.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/text v0.20.0
+	golang.org/x/text v0.21.0
 	golang.org/x/time v0.8.0
 	k8s.io/api v0.31.3
 	k8s.io/apiextensions-apiserver v0.31.3
