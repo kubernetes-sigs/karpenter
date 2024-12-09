@@ -18,7 +18,6 @@ package nodeclaim
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -36,6 +35,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/operator"
 )
 
 func IsManaged(nodeClaim *v1.NodeClaim, cp cloudprovider.CloudProvider) bool {
@@ -147,54 +147,6 @@ func NodeClassEventHandler(c client.Client) handler.EventHandler {
 	})
 }
 
-// NodeNotFoundError is an error returned when no corev1.Nodes are found matching the passed providerID
-type NodeNotFoundError struct {
-	ProviderID string
-}
-
-func (e *NodeNotFoundError) Error() string {
-	return fmt.Sprintf("no nodes found for provider id '%s'", e.ProviderID)
-}
-
-func IsNodeNotFoundError(err error) bool {
-	if err == nil {
-		return false
-	}
-	nnfErr := &NodeNotFoundError{}
-	return errors.As(err, &nnfErr)
-}
-
-func IgnoreNodeNotFoundError(err error) error {
-	if !IsNodeNotFoundError(err) {
-		return err
-	}
-	return nil
-}
-
-// DuplicateNodeError is an error returned when multiple corev1.Nodes are found matching the passed providerID
-type DuplicateNodeError struct {
-	ProviderID string
-}
-
-func (e *DuplicateNodeError) Error() string {
-	return fmt.Sprintf("multiple found for provider id '%s'", e.ProviderID)
-}
-
-func IsDuplicateNodeError(err error) bool {
-	if err == nil {
-		return false
-	}
-	dnErr := &DuplicateNodeError{}
-	return errors.As(err, &dnErr)
-}
-
-func IgnoreDuplicateNodeError(err error) error {
-	if !IsDuplicateNodeError(err) {
-		return err
-	}
-	return nil
-}
-
 // NodeForNodeClaim is a helper function that takes a v1.NodeClaim and attempts to find the matching corev1.Node by its providerID
 // This function will return errors if:
 //  1. No corev1.Nodes match the v1.NodeClaim providerID
@@ -260,4 +212,12 @@ func HasTerminationGracePeriodElapsed(clk clock.Clock, nc *v1.NodeClaim) (bool, 
 		return false, nil
 	}
 	return clk.Now().After(*expirationTime), nil
+}
+
+func IsHydrated(nc *v1.NodeClaim) bool {
+	version, ok := nc.Annotations[v1.HydrationAnnotationKey]
+	if !ok {
+		return false
+	}
+	return version == operator.Version
 }
