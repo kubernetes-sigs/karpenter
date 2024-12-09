@@ -340,8 +340,6 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
-	// ACK the pending pods at the start of the scheduling loop so that we can emit metrics on when we actually first try to schedule it.
-	p.cluster.AckPods(pendingPods...)
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	scheduler.UnschedulablePodsCount.Set(float64(len(results.PodErrors)), map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
 	if len(results.NewNodeClaims) > 0 {

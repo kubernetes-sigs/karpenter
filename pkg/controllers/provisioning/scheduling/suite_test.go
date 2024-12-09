@@ -70,6 +70,7 @@ var cloudProvider *fake.CloudProvider
 var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
 var podStateController *informer.PodController
+var podController *provisioning.PodController
 
 const csiProvider = "fake.csi.provider"
 const isDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"
@@ -93,6 +94,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+	podController = provisioning.NewPodController(env.Client, prov, cluster)
 })
 
 var _ = AfterSuite(func() {
@@ -3755,7 +3757,9 @@ var _ = Context("Scheduling", func() {
 			podsUnschedulable := test.UnschedulablePods(test.PodOptions{}, 3)
 			for _, p := range podsUnschedulable {
 				ExpectApplied(ctx, env.Client, p)
-				cluster.AckPods(p)
+				_, ok := FindMetricWithLabelValues("karpenter_pods_scheduling_decision_duration_seconds", nil)
+				Expect(ok).To(BeFalse())
+				ExpectObjectReconciled(ctx, env.Client, podController, p)
 			}
 
 			// step the clock so the metric isn't 0
