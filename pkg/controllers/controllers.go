@@ -74,7 +74,7 @@ func NewControllers(
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
 		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
-		provisioning.NewPodController(kubeClient, p),
+		provisioning.NewPodController(kubeClient, p, cluster),
 		provisioning.NewNodeController(kubeClient, p),
 		nodepoolhash.NewController(kubeClient, cloudProvider),
 		expiration.NewController(clock, kubeClient, cloudProvider),
