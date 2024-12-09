@@ -58,7 +58,7 @@ func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile
 		return reconcile.Result{}, nil
 	}
 	c.provisioner.Trigger()
-	// ACK the pending pod at the start of the scheduling loop so that we can emit metrics on when we actually first try to schedule it.
+	// ACK the pending pod when first observed so that total time spent pending due to Karpenter is tracked.
 	c.cluster.AckPods(p)
 	// Continue to requeue until the pod is no longer provisionable. Pods may
 	// not be scheduled as expected if new pods are created while nodes are
