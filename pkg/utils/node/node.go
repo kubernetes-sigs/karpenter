@@ -134,8 +134,11 @@ func IsManagedPredicateFuncs(cp cloudprovider.CloudProvider) predicate.Funcs {
 	})
 }
 
-func NodeClaimEventHandler(c client.Client) handler.EventHandler {
+func NodeClaimEventHandler(c client.Client, cloudProvider cloudprovider.CloudProvider) handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+		if !nodeclaimutils.IsManaged(o.(*v1.NodeClaim), cloudProvider) {
+			return nil
+		}
 		providerID := o.(*v1.NodeClaim).Status.ProviderID
 		if providerID == "" {
 			return nil

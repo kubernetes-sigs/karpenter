@@ -64,7 +64,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&corev1.Node{}).
-		Watches(&v1.NodeClaim{}, nodeutils.NodeClaimEventHandler(c.kubeClient)).
+		Watches(&v1.NodeClaim{}, nodeutils.NodeClaimEventHandler(c.kubeClient, c.cloudProvider)).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
 			MaxConcurrentReconciles: 1000,

@@ -51,7 +51,7 @@ type DuplicateNodeClaimError struct {
 }
 
 func (e *DuplicateNodeClaimError) Error() string {
-	return fmt.Sprintf("multiple found for provider id '%s'", e.ProviderID)
+	return fmt.Sprintf("multiple nodeclaims found for provider id '%s'", e.ProviderID)
 }
 
 func IsDuplicateNodeClaimError(err error) bool {
@@ -72,7 +72,7 @@ func IgnoreDuplicateNodeClaimError(err error) error {
 type HydrationError struct{}
 
 func (e *HydrationError) Error() string {
-	return fmt.Sprintf("resource has not been hydrated")
+	return "resource has not been hydrated"
 }
 
 func IsHydrationError(err error) bool {

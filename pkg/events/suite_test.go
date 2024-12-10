@@ -30,7 +30,7 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/drain"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/eviction"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -97,8 +97,8 @@ var _ = Describe("Event Creation", func() {
 		Expect(internalRecorder.Calls(scheduling.PodFailedToScheduleEvent(PodWithUID(), fmt.Errorf("")).Reason)).To(Equal(1))
 	})
 	It("should create a NodeFailedToDrain event", func() {
-		eventRecorder.Publish(termination.NodeDrainFailedEvent(NodeWithUID(), fmt.Errorf("")))
-		Expect(internalRecorder.Calls(termination.NodeDrainFailedEvent(NodeWithUID(), fmt.Errorf("")).Reason)).To(Equal(1))
+		eventRecorder.Publish(drain.NodeDrainFailedEvent(NodeWithUID(), fmt.Errorf("")))
+		Expect(internalRecorder.Calls(drain.NodeDrainFailedEvent(NodeWithUID(), fmt.Errorf("")).Reason)).To(Equal(1))
 	})
 })
 

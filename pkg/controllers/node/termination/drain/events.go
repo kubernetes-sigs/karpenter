@@ -14,18 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package termination
+package drain
 
 import (
 	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	storagev1 "k8s.io/api/storage/v1"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
+
+func NodeTerminationGracePeriodExpiringEvent(node *corev1.Node, t time.Time) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           corev1.EventTypeWarning,
+		Reason:         "TerminationGracePeriodExpiring",
+		Message:        fmt.Sprintf("All pods will be deleted by %s", t.Format(time.RFC3339)),
+		DedupeValues:   []string{node.Name},
+	}
+}
 
 func PodDeletedEvent(pod *corev1.Pod, gracePeriodSeconds *int64, nodeGracePeriodTerminationTime *time.Time) events.Event {
 	return events.Event{
@@ -44,35 +52,5 @@ func NodeDrainFailedEvent(node *corev1.Node, err error) events.Event {
 		Reason:         "FailedDraining",
 		Message:        fmt.Sprintf("Failed to drain node, %s", err),
 		DedupeValues:   []string{node.Name},
-	}
-}
-
-func NodeAwaitingVolumeDetachmentEvent(node *corev1.Node, volumeAttachments ...*storagev1.VolumeAttachment) events.Event {
-	return events.Event{
-		InvolvedObject: node,
-		Type:           corev1.EventTypeNormal,
-		Reason:         "AwaitingVolumeDetachment",
-		Message:        fmt.Sprintf("Awaiting deletion of %d VolumeAttachments bound to node", len(volumeAttachments)),
-		DedupeValues:   []string{node.Name},
-	}
-}
-
-func NodeTerminationGracePeriodExpiringEvent(node *corev1.Node, t time.Time) events.Event {
-	return events.Event{
-		InvolvedObject: node,
-		Type:           corev1.EventTypeWarning,
-		Reason:         "TerminationGracePeriodExpiring",
-		Message:        fmt.Sprintf("All pods will be deleted by %s", t.Format(time.RFC3339)),
-		DedupeValues:   []string{node.Name},
-	}
-}
-
-func NodeClaimTerminationGracePeriodExpiringEvent(nodeClaim *v1.NodeClaim, terminationTime string) events.Event {
-	return events.Event{
-		InvolvedObject: nodeClaim,
-		Type:           corev1.EventTypeWarning,
-		Reason:         "TerminationGracePeriodExpiring",
-		Message:        fmt.Sprintf("All pods will be deleted by %s", terminationTime),
-		DedupeValues:   []string{nodeClaim.Name},
 	}
 }

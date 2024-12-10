@@ -38,8 +38,10 @@ import (
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	nodehydration "sigs.k8s.io/karpenter/pkg/controllers/node/hydration"
-	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/drain"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/eviction"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/instancetermination"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/volumedetachment"
 	nodeclaimconsistency "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/expiration"
@@ -83,7 +85,9 @@ func NewControllers(
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster),
-		termination.NewController(clock, kubeClient, cloudProvider, recorder, evictionQueue),
+		drain.NewController(clock, kubeClient, cloudProvider, recorder, evictionQueue),
+		volumedetachment.NewController(clock, kubeClient, cloudProvider, recorder),
+		instancetermination.NewController(clock, kubeClient, cloudProvider),
 		metricspod.NewController(kubeClient, cluster),
 		metricsnodepool.NewController(kubeClient, cloudProvider),
 		metricsnode.NewController(cluster),
