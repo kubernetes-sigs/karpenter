@@ -55,6 +55,13 @@ func IsPodBlockEvictionError(err error) bool {
 	return errors.As(err, &podBlockEvictionError)
 }
 
+func IgnorePodBlockEvictionError(err error) error {
+	if IsPodBlockEvictionError(err) {
+		return nil
+	}
+	return err
+}
+
 //go:generate controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
 
 // StateNodes is a typed version of a list of *Node

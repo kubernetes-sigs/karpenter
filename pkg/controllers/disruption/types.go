@@ -93,9 +93,11 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
 	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
-		// if the disruption class is not eventual or the nodepool has no TerminationGracePeriod, block disruption of pods
-		// if the error is anything but a PodBlockEvictionError, also block disruption of pods
-		if !(state.IsPodBlockEvictionError(err) && node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass) {
+		// If the NodeClaim has a TerminationGracePeriod set and the disruption class is eventual, the node should be
+		// considered a candidate even if there's a pod that will block eviction. Other error types should still cause
+		// failure creating the candidate.
+		eventualDisruptionCandidate := node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass
+		if lo.Ternary(eventualDisruptionCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
 			return nil, err
 		}
