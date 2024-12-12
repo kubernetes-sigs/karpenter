@@ -35,6 +35,9 @@ spec:
         - jsonPath: .metadata.creationTimestamp
           name: Age
           type: date
+        - jsonPath: .status.kubeletVersion
+          name: Version
+          type: string
         - jsonPath: .status.providerID
           name: ID
           priority: 1
@@ -365,6 +368,9 @@ spec:
                   type: array
                 imageID:
                   description: ImageID is an identifier for the image that runs on the node
+                  type: string
+                kubeletVersion:
+                  description: KubeletVersion is the version of kubelet on the node
                   type: string
                 lastPodEventTime:
                   description: |-

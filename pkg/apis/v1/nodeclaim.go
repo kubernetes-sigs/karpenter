@@ -133,6 +133,7 @@ type Provider = runtime.RawExtension
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.nodeName",description=""
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
+// +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".status.kubeletVersion",description=""
 // +kubebuilder:printcolumn:name="ID",type="string",JSONPath=".status.providerID",priority=1,description=""
 // +kubebuilder:printcolumn:name="NodePool",type="string",JSONPath=".metadata.labels.karpenter\\.sh/nodepool",priority=1,description=""
 // +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.nodeClassRef.name",priority=1,description=""
