@@ -439,7 +439,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
-		ExpectToWait(&wg)
+		ExpectToWait(fakeClock, &wg)
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
@@ -564,7 +564,7 @@ var _ = Describe("Disruption Taints", func() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ExpectToWait(&wg)
+			ExpectToWait(fakeClock, &wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 		}()
 
@@ -1889,7 +1889,7 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectToWait(&wg)
+		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -1931,7 +1931,7 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectToWait(&wg)
+		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -1993,7 +1993,7 @@ var _ = Describe("Metrics", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectToWait(&wg)
+		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -2028,24 +2028,6 @@ func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 func fromInt(i int) *intstr.IntOrString {
 	v := intstr.FromInt(i)
 	return &v
-}
-
-// This continually polls the wait group to see if there
-// is a timer waiting, incrementing the clock if not.
-func ExpectToWait(wg *sync.WaitGroup) {
-	wg.Add(1)
-	Expect(fakeClock.HasWaiters()).To(BeFalse())
-	go func() {
-		defer GinkgoRecover()
-		defer wg.Done()
-		Eventually(func() bool { return fakeClock.HasWaiters() }).
-			// Caution: if another go routine takes longer than this timeout to
-			// wait on the clock, we will deadlock until the test suite timeout
-			WithTimeout(10 * time.Second).
-			WithPolling(10 * time.Millisecond).
-			Should(BeTrue())
-		fakeClock.Step(45 * time.Second)
-	}()
 }
 
 // ExpectTaintedNodeCount will assert the number of nodes and tainted nodes in the cluster and return the tainted nodes.

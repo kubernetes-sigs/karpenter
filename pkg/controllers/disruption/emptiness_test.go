@@ -103,7 +103,7 @@ var _ = Describe("Emptiness", func() {
 
 			fakeClock.Step(10 * time.Minute)
 			wg := sync.WaitGroup{}
-			ExpectToWait(&wg)
+			ExpectToWait(fakeClock, &wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -147,7 +147,7 @@ var _ = Describe("Emptiness", func() {
 
 			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
 			var wg sync.WaitGroup
-			ExpectToWait(&wg)
+			ExpectToWait(fakeClock, &wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -235,7 +235,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			wg := sync.WaitGroup{}
-			ExpectToWait(&wg)
+			ExpectToWait(fakeClock, &wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -303,7 +303,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			wg := sync.WaitGroup{}
-			ExpectToWait(&wg)
+			ExpectToWait(fakeClock, &wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -372,7 +372,7 @@ var _ = Describe("Emptiness", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			wg := sync.WaitGroup{}
-			ExpectToWait(&wg)
+			ExpectToWait(fakeClock, &wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -398,7 +398,7 @@ var _ = Describe("Emptiness", func() {
 
 			fakeClock.Step(10 * time.Minute)
 			wg := sync.WaitGroup{}
-			ExpectToWait(&wg)
+			ExpectToWait(fakeClock, &wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
@@ -479,7 +479,7 @@ var _ = Describe("Emptiness", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		wg := sync.WaitGroup{}
-		ExpectToWait(&wg)
+		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -594,7 +594,7 @@ var _ = Describe("Emptiness", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectToWait(&wg)
+		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
@@ -659,7 +659,7 @@ var _ = Describe("Emptiness", func() {
 		fakeClock.Step(10 * time.Minute)
 
 		var wg sync.WaitGroup
-		ExpectToWait(&wg)
+		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
 		wg.Wait()
 
