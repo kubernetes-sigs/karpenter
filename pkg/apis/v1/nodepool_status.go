@@ -27,6 +27,8 @@ const (
 	ConditionTypeValidationSucceeded = "ValidationSucceeded"
 	// ConditionTypeNodeClassReady = "NodeClassReady" condition indicates that underlying nodeClass was resolved and is reporting as Ready
 	ConditionTypeNodeClassReady = "NodeClassReady"
+	// TODO
+	ConditionTypeDegraded = "Degraded"
 )
 
 // NodePoolStatus defines the observed state of NodePool
@@ -34,6 +36,9 @@ type NodePoolStatus struct {
 	// Resources is the list of resources that have been provisioned.
 	// +optional
 	Resources v1.ResourceList `json:"resources,omitempty"`
+	// FailedLaunches tracks the number of times a nodepool failed before being marked degraded
+	// +optional
+	FailedLaunches int `json:"failedlaunches,omitempty"`
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`

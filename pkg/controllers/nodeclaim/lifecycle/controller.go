@@ -80,7 +80,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10), recorder: recorder},
 		registration:   &Registration{kubeClient: kubeClient},
 		initialization: &Initialization{kubeClient: kubeClient},
-		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
+		liveness:       &Liveness{clock: clk, kubeClient: kubeClient, cloudProvider: cloudProvider},
 	}
 }
 
@@ -88,10 +88,8 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
-		Watches(
-			&corev1.Node{},
-			nodeclaimutils.NodeEventHandler(c.kubeClient, c.cloudProvider),
-		).
+		Watches(&corev1.Node{}, nodeclaimutils.NodeEventHandler(c.kubeClient, c.cloudProvider)).
+		Watches(&v1.NodePool{}, nodeclaimutils.NodePoolEventHandler(c.kubeClient, c.cloudProvider)).
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
 				// back off until last attempt occurs ~90 seconds before nodeclaim expiration
