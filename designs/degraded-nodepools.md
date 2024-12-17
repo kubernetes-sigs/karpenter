@@ -66,8 +66,8 @@ The implementation is roughly the same except that validation is a pre-condition
 
 1. 👎👎 Validation implies the original state of the NodePool was correct and is something Karpenter can vet with certainty. A NodePool could have been correctly validated but then degraded.
 2. 👎👎 Changes the meaning of `Validated` in terms of `Readiness`
-2. 👎 Relies on statuses that were not part of the original validation of a NodePool.
-3. 👍 Limits changes to customer-facing APIs.
+3. 👎 Relies on statuses that were not part of the original validation of a NodePool.
+4. 👍 Status condition already exists
 
 ### Further Dicussion Needed
 
