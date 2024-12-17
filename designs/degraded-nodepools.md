@@ -34,7 +34,7 @@ type NodePoolStatus struct {
 }
 ```
 
-Once a NodePool is `Degraded`, it recovers with `Degraded: false` after an update to the NodePool or when the NodeClaim registration expiration TTL (currently 15 minutes) passes since the NodePool first entered a `Degraded` state, whichever comes first. A `Degraded` NodePool is not passed over when provisioning and may continue to be chosen during scheduling. A successful provisioning could also remove the status condition but this may cause more apiserver and metric churn than is necessary.
+Once a NodePool is `Degraded`, it recovers with `Degraded: false` after an update to the NodePool or when the NodeClaim registration expiration TTL (currently 15 minutes) passes since the `lastTransitionTime` for the status condition on the NodePool, whichever comes first. A `Degraded` NodePool is not passed over when provisioning and may continue to be chosen during scheduling. A successful provisioning could also remove the status condition but this may cause more apiserver and metric churn than is necessary.
 
 As additional misconfigurations are handled, they can be added to the `Degraded` status condition and the `Degraded` controller expanded to handle automated recovery efforts. This is probably most simpoly achieved by changing the Status Condition metrics to use comma-delimiting for `Reason`s with the most recent change present in the `Message`.
 
