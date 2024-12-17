@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -52,15 +53,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	if nodePool.Status.FailedLaunches >= 3 {
 		nodePool.StatusConditions().SetTrueWithReason(v1.ConditionTypeDegraded, "NodeRegistrationFailures",
 			"Node registration failing for nodepool, verify cluster networking is configured correctly")
-		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
-			}
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
+	} else {
+		nodePool.StatusConditions().SetFalse(v1.ConditionTypeDegraded, "NodeLaunchSuccess", "")
 	}
-	if nodePool.Status.FailedLaunches == 0 {
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeDegraded, "", "")
+	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
@@ -72,12 +68,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	b := controllerruntime.NewControllerManagedBy(m).
+	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.degraded").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
-	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
-		b.Watches(nodeClass, nodepoolutils.NodeClassEventHandler(c.kubeClient))
-	}
-	return b.Complete(reconcile.AsReconciler(m.GetClient(), c))
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
