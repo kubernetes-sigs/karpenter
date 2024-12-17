@@ -54,9 +54,8 @@ Finally, this status condition would not be a precondition for NodePool `Readine
 #### Considerations
 
 1. 👎 Three retries can still be a long time to wait on compute that would never succeed
-2. 👍 Karpenter continues to try and launch with other potentially valid NodePools
-3. 👍 Observability improvements so that users can begin triaging misconfigurations
-4. 👍 `Degraded` is not a pre-condition for NodePool readiness
+2. 👍 Observability improvements so that users can begin triaging misconfigurations
+3. 👍 `Degraded` is not a pre-condition for NodePool readiness
 
 ### Option 2: Expand `Validated` Status Condition and Use Reasons
 
