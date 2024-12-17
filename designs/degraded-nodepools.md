@@ -8,9 +8,6 @@ One example is that when a network path does not exist due to a misconfigured VP
 
 To improve visibility of these possible failure modes, this RFC proposes the addition of a `Degraded` status condition that indicates to cluster admins there may be a problem with a NodePool needs to be investigated and corrected.
 
-👎
-👍
-
 ## Options
 
 ### [Recommended] Option 1: Introduce a Generalized `Degraded` Status Condition
@@ -20,7 +17,7 @@ To improve visibility of these possible failure modes, this RFC proposes the add
 ConditionTypeDegraded = "Degraded"
 ```
 
-This option would set `Degraded: true` on a NodePool whenever Karpenter suspects something is wrong with the launch path but isn't sure. In this case, if 3 or more NodeClaims fail to launch with a NodePool then the NodePool will be marked as degraded. The retries are included to account for transient errors. The number of failed launches is stored as a status on the NodePool and then reset to zero following a successful NodeClaim launch.
+This option would set `Degraded: true` on a NodePool whenever Karpenter suspects something is wrong with the launch path but isn't sure. In this case, if 3 or more NodeClaims fail to launch with a NodePool then the NodePool will be marked as degraded. The retries are included to account for transient errors. The number of failed launches is stored as a status on the NodePool and then reset to zero following an edit to the NodePool or a sufficient amount time has passed.
 
 ```
 // NodePoolStatus defines the observed state of NodePool
@@ -37,18 +34,29 @@ type NodePoolStatus struct {
 }
 ```
 
-Once a NodePool is `Degraded`, it recovers with `Degraded: false` after an update to the NodePool, after the first successful NodeClaim launch for that NodePool, or when the NodeClaim registration expiration TTL (currently 15 minutes) passes since the NodePool first entered a `Degraded` state, whichever comes first. A `Degraded` NodePool is not passed over when provisioning and is instead treated with the lowest weight possible. This is done so that other potentially healthy NodePools can be chosen.
+Once a NodePool is `Degraded`, it recovers with `Degraded: false` after an update to the NodePool or when the NodeClaim registration expiration TTL (currently 15 minutes) passes since the NodePool first entered a `Degraded` state, whichever comes first. A `Degraded` NodePool is not passed over when provisioning and may continue to be chosen during scheduling. A successful provisioning could also remove the status condition but this may cause more apiserver and metric churn than is necessary.
 
-As additional misconfigurations are discovered, they can be handled by moving NodePools into this `Degraded` state for observability and adding various automated recovery efforts. 
+As additional misconfigurations are handled, they can be added to the `Degraded` status condition and the `Degraded` controller expanded to handle automated recovery efforts. This is probably most simpoly achieved by changing the Status Condition metrics to use comma-delimiting for `Reason`s with the most recent change present in the `Message`.
+
+```
+  - lastTransitionTime: "2024-12-16T12:34:56Z"
+    message: "FizzBuzz component was misconfigured"
+    observedGeneration: 1
+    reason: FizzBuzzFailure,FooBarFailure
+    status: "True"
+    type: Degraded
+```
+
+This introduces challenges when determining when to evaluate contributors to the status condition but since the `Degraded` status condition only has a single contributor this decision can be punted. When the time comes to implement the multiple contributors to this status condition, this probably looks like a `Degraded` controller which acts as a "heartbeat" and evaluates each of the contributors.
+
+Finally, this status condition would not be a precondition for NodePool `Readiness` because the NodePool should still be considered for scheduling purposes.
 
 #### Considerations
 
-1. 👎 The reason field on a Status Condition is a string and if multiple misconfigurations contribute to the `Degraded` Status Condition then only the most recent will be visible.
-2. 👎 Because `Degraded` NodePools are deprioritized in scheduling, costs could unexpectedly increase because a NodePool constrained by more expensive compute options is chosen.
-3. 👎 Three retries can still be a long time to wait on compute that would never succeed
-4. 👍 Karpenter continues to try and launch with other potentially valid NodePools
-5. 👍 Observability improvements so that users can begin triaging misconfigurations
-6. 👍 `Degraded` is not a pre-condition for NodePool readiness
+1. 👎 Three retries can still be a long time to wait on compute that would never succeed
+2. 👍 Karpenter continues to try and launch with other potentially valid NodePools
+3. 👍 Observability improvements so that users can begin triaging misconfigurations
+4. 👍 `Degraded` is not a pre-condition for NodePool readiness
 
 ### Option 2: Expand `Validated` Status Condition and Use Reasons
 
@@ -60,3 +68,7 @@ The implementation is roughly the same except that validation is a pre-condition
 2. 👎👎 Changes the meaning of `Validated` in terms of `Readiness`
 2. 👎 Relies on statuses that were not part of the original validation of a NodePool.
 3. 👍 Limits changes to customer-facing APIs.
+
+### Further Dicussion Needed
+
+Should this status condition be used to affect Karpenter functionality/scheduling or should it only exist to improve observability? For example, NodePools with this status condition could be seen as having a lower weight than normal so that other NodePools are prioritized. This is probably more surprising than not for most users and should not be considered pursuing.
