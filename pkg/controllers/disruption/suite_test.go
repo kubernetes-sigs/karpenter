@@ -534,6 +534,7 @@ var _ = Describe("Disruption Taints", func() {
 		})
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDisruptionReason)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -542,6 +543,12 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectSingletonReconciled(ctx, disruptionController)
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+
+		nodeClaims := lo.Filter(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
+			return nc.Status.ProviderID == node.Spec.ProviderID
+		})
+		Expect(nodeClaims).To(HaveLen(1))
+		Expect(nodeClaims[0].StatusConditions().Get(v1.ConditionTypeDisruptionReason)).To(BeNil())
 	})
 	It("should add and remove taints from NodeClaims that fail to disrupt", func() {
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
@@ -579,6 +586,12 @@ var _ = Describe("Disruption Taints", func() {
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
+		nodeClaims := lo.Filter(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
+			return nc.Status.ProviderID == node.Spec.ProviderID
+		})
+		Expect(nodeClaims).To(HaveLen(1))
+		Expect(nodeClaims[0].StatusConditions().Get(v1.ConditionTypeDisruptionReason)).ToNot(BeNil())
+		Expect(nodeClaims[0].StatusConditions().Get(v1.ConditionTypeDisruptionReason).IsTrue()).To(BeTrue())
 
 		createdNodeClaim := lo.Reject(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
 			return nc.Name == nodeClaim.Name
@@ -595,6 +608,12 @@ var _ = Describe("Disruption Taints", func() {
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+
+		nodeClaims = lo.Filter(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
+			return nc.Status.ProviderID == node.Spec.ProviderID
+		})
+		Expect(nodeClaims).To(HaveLen(1))
+		Expect(nodeClaims[0].StatusConditions().Get(v1.ConditionTypeDisruptionReason)).To(BeNil())
 	})
 })
 
