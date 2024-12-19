@@ -26,11 +26,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
@@ -38,23 +40,30 @@ import (
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	cluster       *state.Cluster
 }
 
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
+		cluster:       cluster,
 	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepool.degraded")
 	stored := nodePool.DeepCopy()
-	if nodePool.Status.FailedLaunches >= 3 {
-		nodePool.StatusConditions().SetTrueWithReason(v1.ConditionTypeDegraded, "NodeRegistrationFailures",
-			"Node registration failing for nodepool, verify cluster networking is configured correctly")
-	} else {
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeDegraded, "NodeLaunchSuccess", "")
+	nodePool.StatusConditions().SetUnknown(v1.ConditionTypeStable)
+	score, scored := c.cluster.NodePoolLaunchesFor(string(nodePool.UID)).Evaluate()
+	if !scored {
+		// no-op for an evaluation that doesn't exist
+		return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
+	}
+	if score < 0 {
+		nodePool.StatusConditions().SetFalse(v1.ConditionTypeStable, "unhealthy", "")
+	} else if score > 0 {
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeStable)
 	}
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
@@ -64,7 +73,8 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
-	return reconcile.Result{RequeueAfter: 15 * time.Second}, nil
+	log.FromContext(ctx).WithValues("score: ", score).Info("end of rec loop")
+	return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
