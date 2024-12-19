@@ -71,9 +71,8 @@ After doing this, you can create a deployment to test node scaling with kwok pro
 ## Specifying Instance Types
 
 By default, the KWOK provider will create a hypothetical set of instance types that it uses for node provisioning.  You
-can specify a custom set of instance types by providing a JSON file with the list of supported instance options.  This
-set of instance types is embedded into the binary on creation; if you want to change the instance types that
-Karpenter+KWOK support, you will need to adjust the embedded data and recompile.
+can specify a custom set of instance types by providing a JSON file with the list of supported instance options. To do so,
+set the `--instance-types-file-path` flag or `INSTANCE_TYPES_FILE_PATH` environment variable to your custom file's path.
 
 There is an example instance types file in [examples/instance\_types.json](examples/instance_types.json) that you can
 regenerate with `make gen_instance_types`.
