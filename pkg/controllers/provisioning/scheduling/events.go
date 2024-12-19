@@ -49,6 +49,17 @@ func NominatePodEvent(pod *corev1.Pod, node *corev1.Node, nodeClaim *v1.NodeClai
 	}
 }
 
+func NoCompatibleInstanceTypes(np *v1.NodePool) events.Event {
+	return events.Event{
+		InvolvedObject: np,
+		Type:           corev1.EventTypeWarning,
+		Reason:         "NoCompatibleInstanceTypes",
+		Message:        fmt.Sprintf("NodePool requirements filtered out all compatible instance types"),
+		DedupeValues:   []string{string(np.UID)},
+		DedupeTimeout:  1 * time.Minute,
+	}
+}
+
 func PodFailedToScheduleEvent(pod *corev1.Pod, err error) events.Event {
 	return events.Event{
 		InvolvedObject: pod,
