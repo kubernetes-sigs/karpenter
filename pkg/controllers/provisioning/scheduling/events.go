@@ -54,7 +54,7 @@ func NoCompatibleInstanceTypes(np *v1.NodePool) events.Event {
 		InvolvedObject: np,
 		Type:           corev1.EventTypeWarning,
 		Reason:         "NoCompatibleInstanceTypes",
-		Message:        "NodePool requirements filtered out all compatible instance types",
+		Message:        "NodePool requirements filtered out all compatible available instance types",
 		DedupeValues:   []string{string(np.UID)},
 		DedupeTimeout:  1 * time.Minute,
 	}
