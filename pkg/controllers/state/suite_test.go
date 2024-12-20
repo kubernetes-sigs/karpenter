@@ -1480,7 +1480,7 @@ var _ = Describe("Consolidated State", func() {
 		fakeClock.Step(time.Minute)
 		Expect(cluster.ConsolidationState()).To(Equal(state))
 
-		fakeClock.Step(time.Minute * 3)
+		fakeClock.Step(time.Minute * 2)
 		Expect(cluster.ConsolidationState()).To(Equal(state))
 
 		fakeClock.Step(time.Minute * 2)
