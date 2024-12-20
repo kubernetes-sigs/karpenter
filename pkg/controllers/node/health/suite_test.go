@@ -24,6 +24,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
@@ -171,7 +172,7 @@ var _ = Describe("Node Health", func() {
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, fakeClock.Now().Format(time.RFC3339)))
 		})
 		It("should not respect termination grace period if set on the nodepool", func() {
-			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Minute}
+			nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: fakeClock.Now().Add(120 * time.Minute).Format(time.RFC3339)})
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
@@ -185,6 +186,23 @@ var _ = Describe("Node Health", func() {
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, fakeClock.Now().Format(time.RFC3339)))
+		})
+		It("should not update termination grace period if set before the current time", func() {
+			terminationTime := fakeClock.Now().Add(-3 * time.Minute).Format(time.RFC3339)
+			nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
+			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+				Type:   "BadNode",
+				Status: corev1.ConditionFalse,
+				// We expect the last transition for HealthyNode condition to wait 30 minutes
+				LastTransitionTime: metav1.Time{Time: time.Now()},
+			})
+			fakeClock.Step(60 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			// Determine to delete unhealthy nodes
+			ExpectObjectReconciled(ctx, env.Client, healthController, node)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime))
 		})
 		It("should return the requeue interval for the condition closest to its terminationDuration", func() {
 			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{

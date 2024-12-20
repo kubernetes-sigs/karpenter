@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -120,10 +121,18 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	if err := c.annotateTerminationGracePeriod(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+
+	return c.deleteNodeClaim(ctx, nodeClaim, node, unhealthyNodeCondition)
+}
+
+// deleteNodeClaim removes the NodeClaim from the api-server
+func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node, unhealthyNodeCondition *corev1.NodeCondition) (reconcile.Result, error) {
+	if !nodeClaim.DeletionTimestamp.IsZero() {
+		return reconcile.Result{}, nil
+	}
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting unhealthy node")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
@@ -155,11 +164,22 @@ func (c *Controller) findUnhealthyConditions(node *corev1.Node) (nc *corev1.Node
 }
 
 func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeClaim *v1.NodeClaim) error {
-	stored := nodeClaim.DeepCopy()
-	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: c.clock.Now().Format(time.RFC3339)})
+	if expirationTimeString, exists := nodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
+		expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
+		if err == nil && expirationTime.Before(c.clock.Now()) {
+			return nil
+		}
+	}
 
-	if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
-		return err
+	stored := nodeClaim.DeepCopy()
+	terminationTime := c.clock.Now().Format(time.RFC3339)
+	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
+
+	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+			return err
+		}
+		log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated nodeclaim")
 	}
 
 	return nil
