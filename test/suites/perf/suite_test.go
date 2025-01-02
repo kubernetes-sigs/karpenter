@@ -46,12 +46,14 @@ func TestPerf(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = common.NewEnvironment(t)
+		debug.BeforeSuite(env.Context, env.Config, env.Client)
 	})
 	AfterSuite(func() {
 		// Write out the timestamps from our tests
 		if err := debug.WriteTimestamps(env.OutputDir, env.TimeIntervalCollector); err != nil {
 			log.FromContext(env).Info(fmt.Sprintf("Failed to write timestamps to files, %s", err))
 		}
+		debug.AfterSuite(env.Context, env.Config, env.Client)
 		env.Stop()
 	})
 	RunSpecs(t, "Perf")
