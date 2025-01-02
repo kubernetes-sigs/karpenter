@@ -88,8 +88,8 @@ var _ = Describe("Event Creation", func() {
 		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()).Reason)).To(Equal(1))
 	})
 	It("should create a EvictPod event", func() {
-		eventRecorder.Publish(terminatorevents.EvictPod(PodWithUID()))
-		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID()).Reason)).To(Equal(1))
+		eventRecorder.Publish(terminatorevents.EvictPod(PodWithUID(), ""))
+		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(1))
 	})
 	It("should create a PodFailedToSchedule event", func() {
 		eventRecorder.Publish(schedulingevents.PodFailedToScheduleEvent(PodWithUID(), fmt.Errorf("")))
@@ -105,31 +105,31 @@ var _ = Describe("Dedupe", func() {
 	It("should only create a single event when many events are created quickly", func() {
 		pod := PodWithUID()
 		for i := 0; i < 100; i++ {
-			eventRecorder.Publish(terminatorevents.EvictPod(pod))
+			eventRecorder.Publish(terminatorevents.EvictPod(pod, ""))
 		}
-		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID()).Reason)).To(Equal(1))
+		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(1))
 	})
 	It("should allow the dedupe timeout to be overridden", func() {
 		pod := PodWithUID()
-		evt := terminatorevents.EvictPod(pod)
+		evt := terminatorevents.EvictPod(pod, "")
 		evt.DedupeTimeout = time.Second * 2
 
 		// Generate a set of events within the dedupe timeout
 		for i := 0; i < 10; i++ {
 			eventRecorder.Publish(evt)
 		}
-		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID()).Reason)).To(Equal(1))
+		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(1))
 
 		// Wait until after the overridden dedupe timeout
 		time.Sleep(time.Second * 3)
 		eventRecorder.Publish(evt)
-		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID()).Reason)).To(Equal(2))
+		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(2))
 	})
 	It("should allow events with different entities to be created", func() {
 		for i := 0; i < 100; i++ {
-			eventRecorder.Publish(terminatorevents.EvictPod(PodWithUID()))
+			eventRecorder.Publish(terminatorevents.EvictPod(PodWithUID(), ""))
 		}
-		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID()).Reason)).To(Equal(100))
+		Expect(internalRecorder.Calls(terminatorevents.EvictPod(PodWithUID(), "").Reason)).To(Equal(100))
 	})
 })
 

@@ -18,7 +18,7 @@ package state
 
 import (
 	"context"
-	"errors"
+	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -52,7 +52,7 @@ func IsPodBlockEvictionError(err error) bool {
 		return false
 	}
 	var podBlockEvictionError *PodBlockEvictionError
-	return errors.As(err, &podBlockEvictionError)
+	return stderrors.As(err, &podBlockEvictionError)
 }
 
 func IgnorePodBlockEvictionError(err error) error {
@@ -398,8 +398,11 @@ func (in *StateNode) MarkedForDeletion() bool {
 	//  1. The Node has MarkedForDeletion set
 	//  2. The Node has a NodeClaim counterpart and is actively deleting (or the nodeclaim is marked as terminating)
 	//  3. The Node has no NodeClaim counterpart and is actively deleting
-	return in.markedForDeletion ||
-		(in.NodeClaim != nil && (!in.NodeClaim.DeletionTimestamp.IsZero() || in.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue())) ||
+	return in.markedForDeletion || in.Deleted()
+}
+
+func (in *StateNode) Deleted() bool {
+	return (in.NodeClaim != nil && (!in.NodeClaim.DeletionTimestamp.IsZero() || in.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue())) ||
 		(in.Node != nil && in.NodeClaim == nil && !in.Node.DeletionTimestamp.IsZero())
 }
 
@@ -501,4 +504,26 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		}
 	}
 	return multiErr
+}
+
+// ClearNodeClaimsCondition will remove the conditionType from the NodeClaim status of the provided statenodes
+func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, conditionType string, nodes ...*StateNode) error {
+	return multierr.Combine(lo.Map(nodes, func(s *StateNode, _ int) error {
+		if !s.Initialized() || s.NodeClaim == nil {
+			return nil
+		}
+		nodeClaim := &v1.NodeClaim{}
+		if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(s.NodeClaim), nodeClaim); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		stored := nodeClaim.DeepCopy()
+		_ = nodeClaim.StatusConditions().Clear(conditionType)
+
+		if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+			if err := kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+				return client.IgnoreNotFound(err)
+			}
+		}
+		return nil
+	})...)
 }

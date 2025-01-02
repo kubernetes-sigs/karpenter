@@ -40,9 +40,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/utils/node"
 )
 
 const (
@@ -68,13 +70,15 @@ func IsNodeDrainError(err error) bool {
 
 type QueueKey struct {
 	types.NamespacedName
-	UID types.UID
+	UID        types.UID
+	providerID string
 }
 
-func NewQueueKey(pod *corev1.Pod) QueueKey {
+func NewQueueKey(pod *corev1.Pod, providerID string) QueueKey {
 	return QueueKey{
 		NamespacedName: client.ObjectKeyFromObject(pod),
 		UID:            pod.UID,
+		providerID:     providerID,
 	}
 }
 
@@ -118,12 +122,12 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 }
 
 // Add adds pods to the Queue
-func (q *Queue) Add(pods ...*corev1.Pod) {
+func (q *Queue) Add(node *corev1.Node, pods ...*corev1.Pod) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	for _, pod := range pods {
-		qk := NewQueueKey(pod)
+		qk := NewQueueKey(pod, node.Spec.ProviderID)
 		if !q.set.Has(qk) {
 			q.set.Insert(qk)
 			q.TypedRateLimitingInterface.Add(qk)
@@ -131,11 +135,11 @@ func (q *Queue) Add(pods ...*corev1.Pod) {
 	}
 }
 
-func (q *Queue) Has(pod *corev1.Pod) bool {
+func (q *Queue) Has(node *corev1.Node, pod *corev1.Pod) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	return q.set.Has(NewQueueKey(pod))
+	return q.set.Has(NewQueueKey(pod, node.Spec.ProviderID))
 }
 
 func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
@@ -171,6 +175,11 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 // Evict returns true if successful eviction call, and false if there was an eviction-related error
 func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(key.Namespace, key.Name)))
+	evictionMessage, err := evictionReason(ctx, key, q.kubeClient)
+	if err != nil {
+		// XXX(cmcavoy): this should be unreachable, but we log it if it happens
+		log.FromContext(ctx).V(1).Error(err, "failed looking up pod eviction reason")
+	}
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}},
 		&policyv1.Eviction{
@@ -205,6 +214,18 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 		return false
 	}
 	NodesEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
-	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}))
+	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}, evictionMessage))
 	return true
+}
+
+func evictionReason(ctx context.Context, key QueueKey, kubeClient client.Client) (string, error) {
+	nodeClaim, err := node.NodeClaimForNode(ctx, kubeClient, &corev1.Node{Spec: corev1.NodeSpec{ProviderID: key.providerID}})
+	if err != nil {
+		return "", err
+	}
+	terminationCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason)
+	if terminationCondition.IsTrue() {
+		return terminationCondition.Message, nil
+	}
+	return "Forceful Termination", nil
 }
