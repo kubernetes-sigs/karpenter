@@ -23,6 +23,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -100,7 +102,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
-			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, results.NonPendingPodSchedulingErrors())...)
+			d.recorder.Publish(disruptionevents.Blocked(candidate.Node, candidate.NodeClaim, pretty.Sentence(results.NonPendingPodSchedulingErrors()))...)
 			continue
 		}
 

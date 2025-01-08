@@ -2748,7 +2748,7 @@ var _ = Describe("Consolidation", func() {
 			// Expect Unconsolidatable events to be fired
 			evts := recorder.Events()
 			_, ok := lo.Find(evts, func(e events.Event) bool {
-				return strings.Contains(e.Message, "not all pods would schedule")
+				return strings.Contains(e.Message, "Not all pods would schedule")
 			})
 			Expect(ok).To(BeTrue())
 			_, ok = lo.Find(evts, func(e events.Event) bool {
