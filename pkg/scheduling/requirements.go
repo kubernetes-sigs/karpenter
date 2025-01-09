@@ -306,7 +306,17 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 func (r Requirements) Labels() map[string]string {
 	labels := map[string]string{}
 	for key, requirement := range r {
-		if !v1.IsRestrictedNodeLabel(key) {
+		if value := requirement.Any(); value != "" {
+			labels[key] = value
+		}
+	}
+	return labels
+}
+
+func (r Requirements) KubeletLabels() map[string]string {
+	labels := map[string]string{}
+	for key, requirement := range r {
+		if v1.IsKubeletLabel(key) {
 			if value := requirement.Any(); value != "" {
 				labels[key] = value
 			}
