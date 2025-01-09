@@ -26,6 +26,8 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
@@ -70,10 +72,10 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue, disruptionClass string) (*Candidate, error) {
 	var err error
 	var pods []*corev1.Pod
-	if err = node.ValidateNodeDisruptable(ctx, kubeClient); err != nil {
+	if err = node.ValidateNodeDisruptable(); err != nil {
 		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
 		if node.NodeClaim != nil {
-			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
+			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 		}
 		return nil, err
 	}
@@ -88,7 +90,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	// skip any candidates where we can't determine the nodePool
 	if nodePool == nil || instanceTypeMap == nil {
 		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("NodePool %q not found", nodePoolName))...)
-		return nil, fmt.Errorf("nodepool %q can't be resolved for state node", nodePoolName)
+		return nil, fmt.Errorf("nodepool %q not found", nodePoolName)
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
@@ -98,7 +100,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		// failure creating the candidate.
 		eventualDisruptionCandidate := node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass
 		if lo.Ternary(eventualDisruptionCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
-			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, err.Error())...)
+			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 			return nil, err
 		}
 	}

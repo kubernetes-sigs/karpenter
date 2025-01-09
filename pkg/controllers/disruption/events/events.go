@@ -69,13 +69,13 @@ func Terminating(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) []ev
 
 // Unconsolidatable is an event that informs the user that a NodeClaim/Node combination cannot be consolidated
 // due to the state of the NodeClaim/Node or due to some state of the pods that are scheduled to the NodeClaim/Node
-func Unconsolidatable(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) []events.Event {
+func Unconsolidatable(node *corev1.Node, nodeClaim *v1.NodeClaim, msg string) []events.Event {
 	return []events.Event{
 		{
 			InvolvedObject: node,
 			Type:           corev1.EventTypeNormal,
 			Reason:         "Unconsolidatable",
-			Message:        reason,
+			Message:        msg,
 			DedupeValues:   []string{string(node.UID)},
 			DedupeTimeout:  time.Minute * 15,
 		},
@@ -83,7 +83,7 @@ func Unconsolidatable(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string)
 			InvolvedObject: nodeClaim,
 			Type:           corev1.EventTypeNormal,
 			Reason:         "Unconsolidatable",
-			Message:        reason,
+			Message:        msg,
 			DedupeValues:   []string{string(nodeClaim.UID)},
 			DedupeTimeout:  time.Minute * 15,
 		},
@@ -92,13 +92,13 @@ func Unconsolidatable(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string)
 
 // Blocked is an event that informs the user that a NodeClaim/Node combination is blocked on deprovisioning
 // due to the state of the NodeClaim/Node or due to some state of the pods that are scheduled to the NodeClaim/Node
-func Blocked(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) (evs []events.Event) {
+func Blocked(node *corev1.Node, nodeClaim *v1.NodeClaim, msg string) (evs []events.Event) {
 	if node != nil {
 		evs = append(evs, events.Event{
 			InvolvedObject: node,
 			Type:           corev1.EventTypeNormal,
 			Reason:         "DisruptionBlocked",
-			Message:        fmt.Sprintf("Cannot disrupt Node: %s", reason),
+			Message:        msg,
 			DedupeValues:   []string{string(node.UID)},
 		})
 	}
@@ -107,7 +107,7 @@ func Blocked(node *corev1.Node, nodeClaim *v1.NodeClaim, reason string) (evs []e
 			InvolvedObject: nodeClaim,
 			Type:           corev1.EventTypeNormal,
 			Reason:         "DisruptionBlocked",
-			Message:        fmt.Sprintf("Cannot disrupt NodeClaim: %s", reason),
+			Message:        msg,
 			DedupeValues:   []string{string(nodeClaim.UID)},
 		})
 	}
