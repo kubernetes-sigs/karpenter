@@ -25,9 +25,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -69,7 +71,7 @@ type CloudProvider interface {
 	// Availability of types or zone may vary by nodepool or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
-	GetInstanceTypes(context.Context, *v1.NodePool) ([]*InstanceType, error)
+	GetInstanceTypes(context.Context, *v1.NodePool, ...option.Function[GetInstanceTypeOptions]) ([]*InstanceType, error)
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
 	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
@@ -81,6 +83,18 @@ type CloudProvider interface {
 	// GetSupportedNodeClasses returns CloudProvider NodeClass that implements status.Object
 	// NOTE: It returns a list where the first element should be the default NodeClass
 	GetSupportedNodeClasses() []status.Object
+}
+
+type GetInstanceTypeOptions struct {
+	AvailabilitySnapshotUUID *types.UID
+}
+
+// GetInstanceTypes calls made with the same snapshot ID should have a consistent view of offering availability. This
+// is crucial for offerings with capacity type "reserved" since cross-nodepool offerings may share availability.
+func WithAvailabilitySnapshotUUID(uuid types.UID) option.Function[GetInstanceTypeOptions] {
+	return func(opts *GetInstanceTypeOptions) {
+		opts.AvailabilitySnapshotUUID = lo.ToPtr(uuid)
+	}
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
@@ -226,6 +240,15 @@ func (its InstanceTypes) Truncate(requirements scheduling.Requirements, maxItems
 	return truncatedInstanceTypes, nil
 }
 
+func (its InstanceTypes) Difference(other InstanceTypes) InstanceTypes {
+	names := sets.New(lo.Map(other, func(it *InstanceType, _ int) string {
+		return it.Name
+	})...)
+	return lo.Reject(its, func(it *InstanceType, _ int) bool {
+		return names.Has(it.Name)
+	})
+}
+
 type InstanceTypeOverhead struct {
 	// KubeReserved returns the default resources allocated to kubernetes system daemons by default
 	KubeReserved corev1.ResourceList
@@ -239,25 +262,72 @@ func (i InstanceTypeOverhead) Total() corev1.ResourceList {
 	return resources.Merge(i.KubeReserved, i.SystemReserved, i.EvictionThreshold)
 }
 
+// ReservationManager is used to track the availability of a reserved offering over the course of a scheduling
+// simulation. Reserved offerings may have a limited number of available instances associated with them,
+// This is exposed as an interface for cloudprovider's to implement to give flexibility when dealing with separate
+// offerings with associated availablility.
+type ReservationManager interface {
+	// Reserve takes a unique identifier for a reservation, and returns a boolean indicating if the reservation was
+	// successful. Reserve should be idempotent, i.e. multiple calls with the same reservation ID should only count for a
+	// single reservation.
+	Reserve(string) bool
+	// Release takes a unique identifier for a reservation, and should discard any matching reservations. If no
+	// reservations exist for the given id, release should be a no-op.
+	Release(string)
+}
+
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
 // these properties are captured with labels in Requirements.
-// Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone
+// Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone.
 type Offering struct {
+	// ReservationManager is used for tracking availabity of reserved offerings over the course of a scheduling loop. It
+	// must be non-nil for offerings with capacity type "reserved", but may be nil otherwise.
+	ReservationManager
+
 	Requirements scheduling.Requirements
 	Price        float64
-	// Available is added so that Offerings can return all offerings that have ever existed for an instance type,
-	// so we can get historical pricing data for calculating savings in consolidation
-	Available bool
+	Available    bool
 }
 
 type Offerings []Offering
+
+// WithCapacityType filters the offerings by the provided capacity type.
+func (ofs Offerings) WithCapacityType(capacityType string) Offerings {
+	return lo.Filter(ofs, func(o Offering, _ int) bool {
+		return o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == capacityType
+	})
+}
+
+// Reserve attempts to make a reservation for each offering, returning true if it was successful for any.
+func (ofs Offerings) Reserve(id string) Offerings {
+	return lo.Filter(ofs, func(o Offering, _ int) bool {
+		return o.Reserve(id)
+	})
+}
+
+func (ofs Offerings) Release(id string) {
+	for i := range ofs {
+		ofs[i].Release(id)
+	}
+}
 
 // Available filters the available offerings from the returned offerings
 func (ofs Offerings) Available() Offerings {
 	return lo.Filter(ofs, func(o Offering, _ int) bool {
 		return o.Available
 	})
+}
+
+func (ofs Offerings) PartitionCompatible(reqs scheduling.Requirements) (compatible Offerings, incompatible Offerings) {
+	for _, o := range ofs {
+		if reqs.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+			compatible = append(compatible, o)
+		} else {
+			incompatible = append(incompatible, o)
+		}
+	}
+	return compatible, incompatible
 }
 
 // Compatible returns the offerings based on the passed requirements

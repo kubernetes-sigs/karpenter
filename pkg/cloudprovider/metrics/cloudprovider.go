@@ -20,6 +20,7 @@ import (
 	"context"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -133,7 +134,7 @@ func (d *decorator) List(ctx context.Context) ([]*v1.NodeClaim, error) {
 	return nodeClaims, err
 }
 
-func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
+func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool, opts ...option.Function[cloudprovider.GetInstanceTypeOptions]) ([]*cloudprovider.InstanceType, error) {
 	method := "GetInstanceTypes"
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	instanceType, err := d.CloudProvider.GetInstanceTypes(ctx, nodePool)
