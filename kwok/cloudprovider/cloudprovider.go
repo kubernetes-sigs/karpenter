@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
@@ -109,7 +110,7 @@ func (c CloudProvider) List(ctx context.Context) ([]*v1.NodeClaim, error) {
 }
 
 // Return the hard-coded instance types.
-func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
+func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool, _ ...option.Function[cloudprovider.GetInstanceTypeOptions]) ([]*cloudprovider.InstanceType, error) {
 	return c.instanceTypes, nil
 }
 

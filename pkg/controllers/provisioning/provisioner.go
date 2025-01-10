@@ -31,6 +31,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -213,7 +214,12 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
-func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stateNodes []*state.StateNode) (*scheduler.Scheduler, error) {
+func (p *Provisioner) NewScheduler(
+	ctx context.Context,
+	pods []*corev1.Pod,
+	stateNodes []*state.StateNode,
+	reservedOfferingMode scheduler.ReservedOfferingMode,
+) (*scheduler.Scheduler, error) {
 	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
 	if err != nil {
 		return nil, fmt.Errorf("listing nodepools, %w", err)
@@ -229,6 +235,8 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 		return nil, ErrNodePoolsNotFound
 	}
 
+	schedulerID := uuid.NewUUID()
+
 	// nodeTemplates generated from NodePools are ordered by weight
 	// since they are stored within a slice and scheduling
 	// will always attempt to schedule on the first nodeTemplate
@@ -237,7 +245,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	for _, np := range nodePools {
 		// Get instance type options
-		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
+		its, err := p.cloudProvider.GetInstanceTypes(ctx, np, cloudprovider.WithAvailabilitySnapshotUUID(schedulerID))
 		if err != nil {
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
 			continue
@@ -261,7 +269,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock), nil
+	return scheduler.NewScheduler(ctx, schedulerID, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, reservedOfferingMode), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -299,7 +307,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, nil
 	}
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
-	s, err := p.NewScheduler(ctx, pods, nodes.Active())
+	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.ReservedOfferingModeStrict)
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			log.FromContext(ctx).Info("no nodepools found")

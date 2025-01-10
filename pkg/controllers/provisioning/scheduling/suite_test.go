@@ -130,7 +130,7 @@ var _ = Context("Scheduling", func() {
 								NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 									Key:      v1.CapacityTypeLabelKey,
 									Operator: corev1.NodeSelectorOpIn,
-									Values:   []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand},
+									Values:   []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand, v1.CapacityTypeReserved},
 								},
 							},
 						},
@@ -1758,12 +1758,12 @@ var _ = Context("Scheduling", func() {
 					},
 					Offerings: []cloudprovider.Offering{
 						{
+							Available: true,
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
 								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 								corev1.LabelTopologyZone: "test-zone-1a",
 							}),
-							Price:     3.00,
-							Available: true,
+							Price: 3.00,
 						},
 					},
 				}),
@@ -1775,12 +1775,12 @@ var _ = Context("Scheduling", func() {
 					},
 					Offerings: []cloudprovider.Offering{
 						{
+							Available: true,
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
 								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 								corev1.LabelTopologyZone: "test-zone-1a",
 							}),
-							Price:     2.00,
-							Available: true,
+							Price: 2.00,
 						},
 					},
 				}),
@@ -1792,12 +1792,12 @@ var _ = Context("Scheduling", func() {
 					},
 					Offerings: []cloudprovider.Offering{
 						{
+							Available: true,
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
 								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 								corev1.LabelTopologyZone: "test-zone-1a",
 							}),
-							Price:     1.00,
-							Available: true,
+							Price: 1.00,
 						},
 					},
 				}),
@@ -3668,7 +3668,7 @@ var _ = Context("Scheduling", func() {
 					},
 				},
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
-			s, err := prov.NewScheduler(ctx, pods, nil)
+			s, err := prov.NewScheduler(ctx, pods, nil, scheduling.ReservedOfferingModeStrict)
 			Expect(err).To(BeNil())
 
 			var wg sync.WaitGroup
@@ -3740,7 +3740,7 @@ var _ = Context("Scheduling", func() {
 					},
 				},
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
-			s, err := prov.NewScheduler(ctx, pods, nil)
+			s, err := prov.NewScheduler(ctx, pods, nil, scheduling.ReservedOfferingModeStrict)
 			Expect(err).To(BeNil())
 			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
 
@@ -3777,6 +3777,98 @@ var _ = Context("Scheduling", func() {
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Histogram.SampleCount)).To(BeNumerically("==", val+3))
 		})
+	})
+
+	Describe("Reserved Instance Types", func() {
+		BeforeEach(func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "large-instance-type",
+					Resources: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:    resource.MustParse("6"),
+						corev1.ResourceMemory: resource.MustParse("6Gi"),
+					},
+				}),
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "medium-instance-type",
+					Resources: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:    resource.MustParse("3"),
+						corev1.ResourceMemory: resource.MustParse("3Gi"),
+					},
+				}),
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "small-instance-type",
+					Resources: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("2Gi"),
+					},
+				}),
+			}
+			reservedInstanceTypes := []*cloudprovider.InstanceType{cloudProvider.InstanceTypes[1], cloudProvider.InstanceTypes[2]}
+			for _, it := range reservedInstanceTypes {
+				it.Offerings = append(it.Offerings, cloudprovider.Offering{
+					Available: true,
+					Requirements: pscheduling.NewLabelRequirements(map[string]string{
+						v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
+						corev1.LabelTopologyZone:    "test-zone-1",
+						v1alpha1.LabelReservationID: fmt.Sprintf("r-%s", it.Name),
+					}),
+					Price: fake.PriceFromResources(it.Capacity) / 10000.0,
+				})
+			}
+		})
+		FIt("shouldn't fallback to on-demand or spot when compatible reserved offerings are available", func() {
+			// With the pessimistic nature of scheduling reservations, we'll only be able to provision one instance per loop if a
+			// nodeclaim is compatible with both instance types
+			cloudProvider.ReservationManagerProvider.SetCapacity("r-small-instance-type", 1)
+			cloudProvider.ReservationManagerProvider.SetCapacity("r-medium-instance-type", 1)
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			pods := lo.Times(3, func(_ int) *corev1.Pod {
+				return test.UnschedulablePod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							// Ensures that this can fit on both small and medium, but two can't fit on medium
+							corev1.ResourceCPU: resource.MustParse("1800m"),
+						},
+					},
+				})
+			})
+
+			// All pods won't be able to fit on a single small or medium instance, but we're not going to create a large instance
+			// since that would involve falling back to on-demand or spot. Instead, we'll schedule a single pod this loop. We
+			// can't schedule all three because we don't know what instance type will be selected in the launch flow, so the
+			// single nodeclaim reserves both the small and medium offerings.
+			bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			Expect(len(bindings)).To(Equal(1))
+			node := lo.Values(bindings)[0].Node
+			Expect(node.Labels).To(HaveKeyWithValue(v1.CapacityTypeLabelKey, v1.CapacityTypeReserved))
+			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "small-instance-type"))
+
+			pods = lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
+				return bindings.Get(p) == nil
+			})
+
+			// Again, we'll only be able to schedule a single pod
+			bindings = ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			Expect(len(bindings)).To(Equal(1))
+			node = lo.Values(bindings)[0].Node
+			Expect(node.Labels).To(HaveKeyWithValue(v1.CapacityTypeLabelKey, v1.CapacityTypeReserved))
+			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "medium-instance-type"))
+
+			pods = lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
+				return bindings.Get(p) == nil
+			})
+
+			bindings = ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			Expect(len(bindings)).To(Equal(1))
+			node = lo.Values(bindings)[0].Node
+			Expect(node.Labels).To(HaveKeyWithValue(v1.CapacityTypeLabelKey, Not(Equal(v1.CapacityTypeReserved))))
+			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "small-instance-type"))
+		})
+		// It("should fallback to on-demand or spot when no compatible reserved offerings are available", func() {
+		//
+		// })
 	})
 })
 
