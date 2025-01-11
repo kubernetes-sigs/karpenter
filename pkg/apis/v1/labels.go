@@ -58,19 +58,14 @@ const (
 )
 
 var (
-	// RestrictedLabelDomains are either prohibited by the kubelet or reserved by karpenter
+	// RestrictedLabelDomains are reserved by karpenter
 	RestrictedLabelDomains = sets.New(
-		"kubernetes.io",
-		"k8s.io",
 		apis.Group,
 	)
 
-	// LabelDomainExceptions are sub-domains of the RestrictedLabelDomains but allowed because
-	// they are not used in a context where they may be passed as argument to kubelet.
-	LabelDomainExceptions = sets.New(
-		"kops.k8s.io",
-		v1.LabelNamespaceSuffixNode,
-		v1.LabelNamespaceNodeRestriction,
+	K8sLabelDomains = sets.New(
+		"kubernetes.io",
+		"k8s.io",
 	)
 
 	// WellKnownLabels are labels that belong to the RestrictedLabelDomains but allowed.
@@ -109,32 +104,65 @@ func IsRestrictedLabel(key string) error {
 	if WellKnownLabels.Has(key) {
 		return nil
 	}
-	if IsRestrictedNodeLabel(key) {
+
+	labelDomain := GetLabelDomain(key)
+	for restrictedLabelDomain := range RestrictedLabelDomains {
+		if strings.HasSuffix(labelDomain, restrictedLabelDomain) {
+			return fmt.Errorf("label %s is restricted; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, sets.List(WellKnownLabels), sets.List(RestrictedLabelDomains))
+		}
+	}
+
+	if RestrictedLabels.Has(key) {
 		return fmt.Errorf("label %s is restricted; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, sets.List(WellKnownLabels), sets.List(RestrictedLabelDomains))
 	}
+
 	return nil
 }
 
-// IsRestrictedNodeLabel returns true if a node label should not be injected by Karpenter.
-// They are either known labels that will be injected by cloud providers,
-// or label domain managed by other software (e.g., kops.k8s.io managed by kOps).
-func IsRestrictedNodeLabel(key string) bool {
+// IsKubeletLabel returns true if the label key is one that kubelets are allowed to set on their own Node object.
+// This function is similar the one used by the node restriction admission https://github.com/kubernetes/kubernetes/blob/e319c541f144e9bee6160f1dd8671638a9029f4c/staging/src/k8s.io/kubelet/pkg/apis/well_known_labels.go#L67
+// but karpenter also restricts the known labels to be passed to kubelet. Only the kubeletLabelNamespaces are allowed.
+func IsKubeletLabel(key string) bool {
 	if WellKnownLabels.Has(key) {
+		return false
+	}
+
+	if !isKubernetesLabel(key) {
 		return true
 	}
-	labelDomain := GetLabelDomain(key)
-	for exceptionLabelDomain := range LabelDomainExceptions {
-		if strings.HasSuffix(labelDomain, exceptionLabelDomain) {
-			return false
-		}
-	}
-	for restrictedLabelDomain := range RestrictedLabelDomains {
-		if strings.HasSuffix(labelDomain, restrictedLabelDomain) {
+
+	namespace := getLabelNamespace(key)
+	for allowedNamespace := range kubeletLabelNamespaces {
+		if namespace == allowedNamespace || strings.HasSuffix(namespace, "."+allowedNamespace) {
 			return true
 		}
 	}
-	return RestrictedLabels.Has(key)
+
+	return false
 }
+
+func isKubernetesLabel(key string) bool {
+	namespace := getLabelNamespace(key)
+	if namespace == "kubernetes.io" || strings.HasSuffix(namespace, ".kubernetes.io") {
+		return true
+	}
+	if namespace == "k8s.io" || strings.HasSuffix(namespace, ".k8s.io") {
+		return true
+	}
+	return false
+}
+
+func getLabelNamespace(key string) string {
+	if parts := strings.SplitN(key, "/", 2); len(parts) == 2 {
+		return parts[0]
+	}
+	return ""
+}
+
+var kubeletLabelNamespaces = sets.NewString(
+	v1.LabelNamespaceSuffixKubelet,
+	v1.LabelNamespaceSuffixNode,
+)
 
 func GetLabelDomain(key string) string {
 	if parts := strings.SplitN(key, "/", 2); len(parts) == 2 {
