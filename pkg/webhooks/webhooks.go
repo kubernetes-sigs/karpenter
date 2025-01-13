@@ -19,7 +19,7 @@ package webhooks
 import (
 	"context"
 	"crypto/tls"
-	"errors"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +29,8 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	"knative.dev/pkg/configmap"
@@ -45,6 +47,7 @@ import (
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1beta1"
@@ -186,7 +189,7 @@ func Start(ctx context.Context, cfg *rest.Config, ctors ...knativeinjection.Name
 	<-egCtx.Done()
 
 	// Don't forward ErrServerClosed as that indicates we're already shutting down.
-	if err := eg.Wait(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := eg.Wait(); err != nil && !stderrors.Is(err, http.ErrServerClosed) {
 		logger.Errorw("Error while running server", zap.Error(err))
 	}
 }
@@ -220,21 +223,30 @@ func HealthProbe(ctx context.Context) healthz.Checker {
 	}
 }
 
-func ValidateConversionEnabled(ctx context.Context, kubeclient client.Client) {
-	// allow context to exist longer than cache sync timeout which has a default of 120 seconds
-	listCtx, cancel := context.WithTimeout(ctx, 130*time.Second)
-	defer cancel()
-	var err error
-	v1np := &v1.NodePoolList{}
+func ValidateConversionEnabled(ctx context.Context, directKubeClient client.Client) {
+	failureCount := 0
 	for {
-		err = kubeclient.List(listCtx, v1np, &client.ListOptions{Limit: 1})
-		if err == nil {
-			return
+		// We only need to try to get a single NodePool from the API server
+		err := directKubeClient.List(ctx, &v1.NodePoolList{}, &client.ListOptions{Limit: 1})
+		// We only want to bail out with a failure if we know the reason that we are not able to List on this API
+		// is due to an internal error on the conversion webhook
+		if errors.IsInternalError(err) && strings.Contains(err.Error(), "conversion webhook for karpenter.sh/v1beta1, Kind=NodePool failed") {
+			failureCount++
+			// If we see more than 2 consecutive failures, then we should panic at that point
+			if failureCount > 2 {
+				panic(fmt.Sprintf("validating conversion webhook reachable, %s", err.Error()))
+			}
+		} else {
+			failureCount = 0
+		}
+		// If there's an error that occurs that we don't know about, and it's not about the API not existing, then log the error
+		if err != nil && !meta.IsNoMatchError(err) {
+			log.FromContext(ctx).Error(err, "failed validating conversion webhook reachable")
 		}
 		select {
-		case <-listCtx.Done():
-			panic("Conversion webhook enabled but unable to complete call: " + err.Error())
-		case <-time.After(10 * time.Second):
+		case <-ctx.Done(): // process is completing, so just exit
+			return
+		case <-time.After(time.Minute): // poll the API every minute
 		}
 	}
 }
