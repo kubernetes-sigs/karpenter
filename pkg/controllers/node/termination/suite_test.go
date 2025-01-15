@@ -549,7 +549,7 @@ var _ = Describe("Termination", func() {
 			ExpectSingletonReconciled(ctx, queue)
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsFalse()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsUnknown()).To(BeTrue())
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).Reason).To(Equal("Draining"))
 
 			// Expect the pods to be evicted
@@ -560,7 +560,7 @@ var _ = Describe("Termination", func() {
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainValidation
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsFalse()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsUnknown()).To(BeTrue())
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).Reason).To(Equal("Draining"))
 
 			ExpectDeleted(ctx, env.Client, pods[1])
@@ -795,7 +795,7 @@ var _ = Describe("Termination", func() {
 				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // VolumeDetachmentInitiation
 				ExpectExists(ctx, env.Client, node)
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsFalse()).To(BeTrue())
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).Reason).To(Equal("AwaitingVolumeDetachment"))
 
 				ExpectDeleted(ctx, env.Client, va)
@@ -837,7 +837,7 @@ var _ = Describe("Termination", func() {
 				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // VolumeDetachment
 				ExpectExists(ctx, env.Client, node)
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsFalse()).To(BeTrue())
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).Reason).To(Equal("AwaitingVolumeDetachment"))
 
 				ExpectDeleted(ctx, env.Client, vaDrainable)
@@ -865,7 +865,8 @@ var _ = Describe("Termination", func() {
 				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // VolumeDetachment
 				ExpectExists(ctx, env.Client, node)
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsFalse()).To(BeTrue())
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).Reason).To(Equal("AwaitingVolumeDetachment"))
 
 				fakeClock.Step(5 * time.Minute)
 				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // VolumeDetachment
