@@ -97,8 +97,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
 		if nodeutils.IsDuplicateNodeClaimError(err) || nodeutils.IsNodeClaimNotFoundError(err) {
-			log.FromContext(ctx).Error(err, "failed to terminate node")
-			return reconcile.Result{}, nil
+			return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, %w", err))
 		}
 		return reconcile.Result{}, err
 	}
