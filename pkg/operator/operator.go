@@ -239,7 +239,8 @@ func (o *Operator) Start(ctx context.Context, cp cloudprovider.CloudProvider) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			webhooks.ValidateConversionEnabled(ctx, o.GetClient())
+			// Create a direct kubernetes API client so that we don't hit the read cache on subsequent reads during this check
+			webhooks.ValidateConversionEnabled(ctx, lo.Must(client.New(o.GetConfig(), client.Options{Scheme: o.GetScheme()})))
 		}()
 	}
 	wg.Wait()
