@@ -77,32 +77,24 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef(node.Namespace, node.Name)))
 
 	// Validate that the node is owned by us
+	if !nodeutils.IsManaged(node, c.cloudProvider) {
+		return reconcile.Result{}, nil
+	}
 	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
-		return reconcile.Result{}, nodeutils.IgnoreNodeClaimNotFoundError(err)
-	}
-
-	// If a nodeclaim does has a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
-	// In the case of standalone nodeclaim, validate the nodes inside the cluster are healthy before proceeding
-	// to repair the nodes
-	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
-	if found {
-		nodePoolHealthy, err := c.isNodePoolHealthy(ctx, nodePoolName)
-		if err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
-		if !nodePoolHealthy {
-			return reconcile.Result{}, c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName)
-		}
-	} else {
-		clusterHealthy, err := c.isClusterHealthy(ctx)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-		if !clusterHealthy {
-			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
+		if nodeutils.IsDuplicateNodeClaimError(err) {
+			log.FromContext(ctx).Error(err, "failed to validate node health")
 			return reconcile.Result{}, nil
 		}
+		return reconcile.Result{}, nodeutils.IgnoreNodeClaimNotFoundError(fmt.Errorf("validating node health, %w", err))
+	}
+
+	healthyOwnerResources, err := c.vaildateNodeClaimOwnerHealth(ctx, nodeClaim, node)
+	if err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	if !healthyOwnerResources {
+		return reconcile.Result{}, nil
 	}
 
 	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node)
@@ -183,6 +175,32 @@ func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeCla
 	}
 
 	return nil
+}
+
+// If a nodeclaim does has a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
+// In the case of standalone nodeclaim, validate the nodes inside the cluster are healthy before proceeding
+// to repair the nodes
+func (c *Controller) vaildateNodeClaimOwnerHealth(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node) (bool, error) {
+	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if found {
+		nodePoolHealthy, err := c.isNodePoolHealthy(ctx, nodePoolName)
+		if err != nil {
+			return false, err
+		}
+		if !nodePoolHealthy {
+			return false, c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName)
+		}
+	} else {
+		clusterHealthy, err := c.isClusterHealthy(ctx)
+		if err != nil {
+			return false, err
+		}
+		if !clusterHealthy {
+			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // isNodePoolHealthy checks if the number of unhealthy nodes managed by the given NodePool exceeds the health threshold.
