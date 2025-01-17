@@ -64,6 +64,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1
 		nct := NewNodeClaimTemplate(np)
 		nct.InstanceTypeOptions = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}).remaining
 		if len(nct.InstanceTypeOptions) == 0 {
+			recorder.Publish(NoCompatibleInstanceTypes(np))
 			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Info("skipping, nodepool requirements filtered out all instance types")
 			return nil, false
 		}

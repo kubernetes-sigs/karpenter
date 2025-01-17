@@ -17,9 +17,11 @@ limitations under the License.
 package kwok
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 
 	"github.com/samber/lo"
@@ -27,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/kwok/options"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -61,12 +64,21 @@ type InstanceTypeOptions struct {
 }
 
 //go:embed instance_types.json
-var rawInstanceTypes []byte
+var defaultRawInstanceTypes []byte
 
 // ConstructInstanceTypes create many instance types based on the embedded instance type data
-func ConstructInstanceTypes() ([]*cloudprovider.InstanceType, error) {
+func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType, error) {
 	var instanceTypes []*cloudprovider.InstanceType
 	var instanceTypeOptions []InstanceTypeOptions
+
+	rawInstanceTypes := defaultRawInstanceTypes
+	if customInstanceTypes := options.FromContext(ctx).InstanceTypesFilePath; customInstanceTypes != "" {
+		customRawInstanceTypes, err := os.ReadFile(customInstanceTypes)
+		if err != nil {
+			return nil, fmt.Errorf("could not read custom instance types file: %w", err)
+		}
+		rawInstanceTypes = customRawInstanceTypes
+	}
 
 	if err := json.Unmarshal(rawInstanceTypes, &instanceTypeOptions); err != nil {
 		return nil, fmt.Errorf("could not parse JSON data: %w", err)

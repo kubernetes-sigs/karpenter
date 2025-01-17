@@ -79,7 +79,7 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	ginkgo \
 		--race \
 		--focus="${FOCUS}" \
-		--timeout=10m \
+		--timeout=20m \
 		--randomize-all \
 		--until-it-fails \
 		-v \
