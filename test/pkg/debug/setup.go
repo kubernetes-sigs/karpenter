@@ -34,12 +34,20 @@ const (
 var m *Monitor
 var e *EventClient
 
+func BeforeSuite(ctx context.Context, config *rest.Config, kubeClient client.Client) {
+	m = New(ctx, config, kubeClient)
+	m.MustStart()
+}
+
+func AfterSuite(ctx context.Context, config *rest.Config, kubeClient client.Client) {
+	m.Stop()
+}
+
 func BeforeEach(ctx context.Context, config *rest.Config, kubeClient client.Client) {
 	// If the test is labeled as NoWatch, then the node/pod monitor will just list at the beginning
 	// of the test rather than perform a watch during it
-	if !lo.Contains(ginkgo.CurrentSpecReport().Labels(), NoWatch) {
-		m = New(ctx, config, kubeClient)
-		m.MustStart()
+	if lo.Contains(ginkgo.CurrentSpecReport().Labels(), NoWatch) {
+		m.Stop()
 	}
 	if !lo.Contains(ginkgo.CurrentSpecReport().Labels(), NoEvents) {
 		e = NewEventClient(kubeClient)
@@ -47,8 +55,8 @@ func BeforeEach(ctx context.Context, config *rest.Config, kubeClient client.Clie
 }
 
 func AfterEach(ctx context.Context) {
-	if !lo.Contains(ginkgo.CurrentSpecReport().Labels(), NoWatch) {
-		m.Stop()
+	if lo.Contains(ginkgo.CurrentSpecReport().Labels(), NoWatch) {
+		m.MustStart()
 	}
 	if !lo.Contains(ginkgo.CurrentSpecReport().Labels(), NoEvents) {
 		Expect(e.DumpEvents(ctx)).To(Succeed())
