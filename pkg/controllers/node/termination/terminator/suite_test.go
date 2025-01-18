@@ -35,6 +35,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -112,7 +113,7 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectApplied(ctx, env.Client, pod)
 			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
-			Expect(recorder.Calls("Evicted")).To(Equal(1))
+			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 		It("should succeed with no event when there are PDBs that allow an eviction", func() {
 			pdb = test.PodDisruptionBudget(test.PDBOptions{
@@ -121,12 +122,12 @@ var _ = Describe("Eviction/Queue", func() {
 			})
 			ExpectApplied(ctx, env.Client, pod)
 			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
-			Expect(recorder.Calls("Evicted")).To(Equal(1))
+			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
 			ExpectApplied(ctx, env.Client, pdb, pod)
 			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeFalse())
-			Expect(recorder.Calls("FailedDraining")).To(Equal(1))
+			Expect(recorder.Calls(events.FailedDraining)).To(Equal(1))
 		})
 		It("should fail when two PDBs refer to the same pod", func() {
 			pdb2 := test.PodDisruptionBudget(test.PDBOptions{
@@ -171,7 +172,7 @@ var _ = Describe("Eviction/Queue", func() {
 
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, nil)).To(Succeed())
 			ExpectExists(ctx, env.Client, pod)
-			Expect(recorder.Calls("Disrupted")).To(Equal(0))
+			Expect(recorder.Calls(events.Disrupted)).To(Equal(0))
 		})
 		It("should not delete a pod with terminationGracePeriodSeconds still remaining before nodeTerminationTime", func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](60)
@@ -180,7 +181,7 @@ var _ = Describe("Eviction/Queue", func() {
 			nodeTerminationTime := time.Now().Add(time.Minute * 5)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
 			ExpectExists(ctx, env.Client, pod)
-			Expect(recorder.Calls("Disrupted")).To(Equal(0))
+			Expect(recorder.Calls(events.Disrupted)).To(Equal(0))
 		})
 		It("should delete a pod with less than terminationGracePeriodSeconds remaining before nodeTerminationTime", func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
@@ -189,7 +190,7 @@ var _ = Describe("Eviction/Queue", func() {
 			nodeTerminationTime := time.Now().Add(time.Minute * 1)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
 			ExpectNotFound(ctx, env.Client, pod)
-			Expect(recorder.Calls("Disrupted")).To(Equal(1))
+			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
 		})
 	})
 })

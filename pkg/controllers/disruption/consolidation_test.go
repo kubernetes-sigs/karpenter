@@ -112,7 +112,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(0))
+			Expect(recorder.Calls(events.Unconsolidatable)).To(Equal(0))
 		})
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidation set to WhenEmpty", func() {
 			pod := test.Pod()
@@ -123,7 +123,7 @@ var _ = Describe("Consolidation", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(4))
+			Expect(recorder.Calls(events.Unconsolidatable)).To(Equal(4))
 		})
 		It("should fire an event for ConsolidationDisabled when the NodePool has consolidateAfter set to 'Never'", func() {
 			pod := test.Pod()
@@ -135,7 +135,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectSingletonReconciled(ctx, disruptionController)
 			// We get six calls here because we have Nodes and NodeClaims that fired for this event
 			// and each of the consolidation mechanisms specifies that this event should be fired
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(6))
+			Expect(recorder.Calls(events.Unconsolidatable)).To(Equal(6))
 		})
 		It("should fire an event when a candidate does not have a resolvable instance type", func() {
 			pod := test.Pod()
@@ -148,7 +148,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			// We get four calls since we only care about this since we don't emit for empty node consolidation
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(4))
+			Expect(recorder.Calls(events.Unconsolidatable)).To(Equal(4))
 		})
 		It("should fire an event when a candidate does not have the capacity type label", func() {
 			pod := test.Pod()
@@ -161,7 +161,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			// We get four calls since we only care about this since we don't emit for empty node consolidation
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(4))
+			Expect(recorder.Calls(events.Unconsolidatable)).To(Equal(4))
 		})
 		It("should fire an event when a candidate does not have the zone label", func() {
 			pod := test.Pod()
@@ -174,7 +174,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			// We get four calls since we only care about this since we don't emit for empty node consolidation
-			Expect(recorder.Calls("Unconsolidatable")).To(Equal(4))
+			Expect(recorder.Calls(events.Unconsolidatable)).To(Equal(4))
 		})
 	})
 	Context("Metrics", func() {
