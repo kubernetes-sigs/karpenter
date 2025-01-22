@@ -388,12 +388,14 @@ func IsNodeClassNotReadyError(err error) bool {
 // CreateError is an error type returned by CloudProviders when instance creation fails
 type CreateError struct {
 	error
+	ConditionReason  string
 	ConditionMessage string
 }
 
-func NewCreateError(err error, message string) *CreateError {
+func NewCreateError(err error, reason, message string) *CreateError {
 	return &CreateError{
 		error:            err,
+		ConditionReason:  reason,
 		ConditionMessage: message,
 	}
 }
