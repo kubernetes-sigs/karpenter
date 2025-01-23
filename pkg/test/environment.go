@@ -114,7 +114,7 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 	opts := option.Resolve(options...)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.31.x"), ".x", ".0", -1))
+	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.32.x"), ".x", ".0", -1))
 	environment := envtest.Environment{Scheme: scheme.Scheme, CRDs: opts.crds}
 	if version.Minor() >= 21 {
 		// PodAffinityNamespaceSelector is used for label selectors in pod affinities.  If the feature-gate is turned off,
