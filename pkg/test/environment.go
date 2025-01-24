@@ -114,16 +114,17 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 	opts := option.Resolve(options...)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.31.x"), ".x", ".0", -1))
+	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.32.x"), ".x", ".0", -1))
 	environment := envtest.Environment{Scheme: scheme.Scheme, CRDs: opts.crds}
-	if version.Minor() >= 21 {
+	if version.Minor() >= 21 && version.Minor() < 32 {
 		// PodAffinityNamespaceSelector is used for label selectors in pod affinities.  If the feature-gate is turned off,
 		// the api-server just clears out the label selector so we never see it.  If we turn it on, the label selectors
 		// are passed to us and we handle them. This feature is alpha in apiextensionsv1.21, beta in apiextensionsv1.22 and will be GA in 1.24. See
 		// https://github.com/kubernetes/enhancements/issues/2249 for more info.
 		environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "PodAffinityNamespaceSelector=true")
 	}
-	if version.Minor() >= 24 {
+	//MinDomains got promoted to stable in 1.32
+	if version.Minor() >= 24 && version.Minor() < 32 {
 		// MinDomainsInPodTopologySpread enforces a minimum number of eligible node domains for pod scheduling
 		// See https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/#spread-constraint-definition
 		// Ref: https://github.com/aws/karpenter-core/pull/330
