@@ -123,6 +123,7 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 		// https://github.com/kubernetes/enhancements/issues/2249 for more info.
 		environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "PodAffinityNamespaceSelector=true")
 	}
+	//MinDomains got promoted to stable in 1.32
 	if version.Minor() >= 24 && version.Minor() < 32 {
 		// MinDomainsInPodTopologySpread enforces a minimum number of eligible node domains for pod scheduling
 		// See https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/#spread-constraint-definition
