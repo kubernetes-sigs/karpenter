@@ -3625,6 +3625,8 @@ var _ = Context("Scheduling", func() {
 
 			// Mark for deletion so that we consider all pods on this node for reschedulability
 			cluster.MarkForDeletion(node.Spec.ProviderID)
+			err := env.Client.Delete(ctx, node)
+			Expect(err).To(BeNil())
 
 			// Trigger an eviction to set the deletion timestamp but not delete the pod
 			ExpectEvicted(ctx, env.Client, pod)

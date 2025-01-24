@@ -51,7 +51,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
+	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+)
+
+const (
+	AvgProvisionTimeSeconds = 90
 )
 
 // LaunchOptions are the set of options that can be used to trigger certain
@@ -319,11 +324,33 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, err
 	}
 
+	nodesMarkedForDeletion := nodes.Deleting()
+
+	nodesMarkedForDeletion = lo.Filter(nodesMarkedForDeletion, func(n *state.StateNode, _ int) bool {
+		expirationTimeString, exists := n.NodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]
+		if !exists {
+			pods, err := n.ReschedulablePods(ctx, p.kubeClient)
+			if err != nil {
+				return false
+			}
+
+			evictablePods := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p) })
+			return len(evictablePods) == len(pods)
+		}
+
+		expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
+		if err != nil {
+			return false
+		}
+
+		return time.Until(expirationTime) <= AvgProvisionTimeSeconds*time.Second
+	})
+
 	// Get pods from nodes that are preparing for deletion
 	// We do this after getting the pending pods so that we undershoot if pods are
 	// actively migrating from a node that is being deleted
 	// NOTE: The assumption is that these nodes are cordoned and no additional pods will schedule to them
-	deletingNodePods, err := nodes.Deleting().ReschedulablePods(ctx, p.kubeClient)
+	deletingNodePods, err := nodesMarkedForDeletion.ReschedulablePods(ctx, p.kubeClient)
 	if err != nil {
 		return scheduler.Results{}, err
 	}
