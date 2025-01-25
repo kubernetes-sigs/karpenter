@@ -20,7 +20,6 @@ package scheduling_test
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"math"
 	"math/rand"
@@ -35,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -58,9 +58,6 @@ var r = rand.New(rand.NewSource(42))
 
 // To run the benchmarks use:
 // `go test -tags=test_performance -run=XXX -bench=.`
-//
-// To run the benchmarks with minValues included in NodePool requirements, use:
-// `go test -tags=test_performance -run=XXX -bench=. -minValues=true`
 //
 // to get something statistically significant for comparison we need to run them several times and then
 // compare the results between the old performance and the new performance.
@@ -92,12 +89,6 @@ func BenchmarkScheduling2000(b *testing.B) {
 }
 func BenchmarkScheduling5000(b *testing.B) {
 	benchmarkScheduler(b, 400, 5000)
-}
-
-var includeMinValues bool
-
-func init() {
-	flag.BoolVar(&includeMinValues, "minValues", false, "include minValues in NodePool requirement")
 }
 
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
@@ -133,32 +124,23 @@ func TestSchedulingProfile(t *testing.T) {
 			totalNodes += int(nodeCount)
 		}
 	}
-	fmt.Println("scheduled", totalPods, "against", totalNodes, "nodes in total in", totalTime, "with minValues included", includeMinValues, float64(totalPods)/totalTime.Seconds(), "pods/sec")
+	fmt.Println("scheduled", totalPods, "against", totalNodes, "nodes in total in", totalTime, float64(totalPods)/totalTime.Seconds(), "pods/sec")
 	tw.Flush()
 }
 
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx = ctrl.IntoContext(context.Background(), operatorlogging.NopLogger)
-	nodePoolWithMinValues := test.NodePool(v1.NodePool{
+	nodePool := test.NodePool(v1.NodePool{
 		Spec: v1.NodePoolSpec{
-			Template: v1.NodeClaimTemplate{
-				Spec: v1.NodeClaimTemplateSpec{
-					Requirements: []v1.NodeSelectorRequirementWithMinValues{
-						{
-							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-								Key:      corev1.LabelInstanceTypeStable,
-								Operator: corev1.NodeSelectorOpExists,
-							},
-							MinValues: lo.ToPtr(50), // Adding highest possible minValues and safest way to add it would be to instanceType requirement.
-						},
-					},
-				},
+			Limits: v1.Limits{
+				corev1.ResourceCPU:    resource.MustParse("10000000"),
+				corev1.ResourceMemory: resource.MustParse("10000000Gi"),
 			},
 		},
 	})
-	nodePoolWithoutMinValues := test.NodePool()
-	nodePool := lo.Ternary(includeMinValues, nodePoolWithMinValues, nodePoolWithoutMinValues)
+
+	// Apply limits to both of the NodePools
 	instanceTypes := fake.InstanceTypes(instanceCount)
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = instanceTypes
@@ -255,7 +237,10 @@ func makePodAntiAffinityPods(count int, key string) []*corev1.Pod {
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					UID:    uuid.NewUUID(),
+				},
 				PodAntiRequirements: []corev1.PodAffinityTerm{
 					{
 						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
@@ -276,7 +261,10 @@ func makePodAffinityPods(count int, key string) []*corev1.Pod {
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: randomAffinityLabels()},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: randomAffinityLabels(),
+					UID:    uuid.NewUUID(),
+				},
 				PodRequirements: []corev1.PodAffinityTerm{
 					{
 						LabelSelector: &metav1.LabelSelector{MatchLabels: randomAffinityLabels()},
@@ -298,7 +286,10 @@ func makeTopologySpreadPods(count int, key string) []*corev1.Pod {
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: randomLabels()},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: randomLabels(),
+					UID:    uuid.NewUUID(),
+				},
 				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
 					{
 						MaxSkew:           1,
@@ -324,7 +315,10 @@ func makeGenericPods(count int) []*corev1.Pod {
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: randomLabels()},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: randomLabels(),
+					UID:    uuid.NewUUID(),
+				},
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceCPU:    randomCPU(),
