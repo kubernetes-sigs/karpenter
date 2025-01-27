@@ -2151,8 +2151,6 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 	provisioner *provisioning.Provisioner) *orchestration.Queue {
 
 	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
-	// nolint:staticcheck
-	// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
-	q.RateLimitingInterface = test.NewRateLimitingInterface(workqueue.QueueConfig{Name: "disruption.workqueue"})
+	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface[*orchestration.Command](workqueue.TypedQueueConfig[*orchestration.Command]{Name: "disruption.workqueue"})
 	return q
 }
