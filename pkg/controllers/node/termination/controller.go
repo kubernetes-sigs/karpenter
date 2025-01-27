@@ -96,8 +96,12 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 
 	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
+		// This should not occur. The NodeClaim is required to track details about the termination stage and termination grace
+		// period and will not be finalized until after the Node has been terminated by Karpenter. If there are duplicates or
+		// the nodeclaim does not exist, this indicates a customer induced error (e.g. removing finalizers or manually
+		// creating nodeclaims with matching provider IDs).
 		if nodeutils.IsDuplicateNodeClaimError(err) || nodeutils.IsNodeClaimNotFoundError(err) {
-			return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, %w", err))
+			return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, expected a single associated nodeclaim, %w", err))
 		}
 		return reconcile.Result{}, err
 	}
@@ -105,7 +109,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	if nodeClaim.DeletionTimestamp.IsZero() {
 		if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 			if errors.IsNotFound(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, expected a single associated nodeclaim, %w", err))
 			}
 			return reconcile.Result{}, fmt.Errorf("deleting nodeclaim, %w", err)
 		}
@@ -129,7 +133,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, err
 	}
 	if err = c.terminator.Taint(ctx, node, v1.DisruptedNoScheduleTaint); err != nil {
-		if errors.IsConflict(err) || errors.IsNotFound(err) {
+		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
 		return reconcile.Result{}, fmt.Errorf("tainting node with %s, %w", pretty.Taint(v1.DisruptedNoScheduleTaint), err)
@@ -142,8 +146,11 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		stored := nodeClaim.DeepCopy()
 		if modified := nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeDrained, "Draining", "Draining"); modified {
 			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				if errors.IsConflict(err) || errors.IsNotFound(err) {
+				if errors.IsConflict(err) {
 					return reconcile.Result{Requeue: true}, nil
+				}
+				if errors.IsNotFound(err) {
+					return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, expected a single associated nodeclaim, %w", err))
 				}
 				return reconcile.Result{}, err
 			}
@@ -154,8 +161,11 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		stored := nodeClaim.DeepCopy()
 		_ = nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrained)
 		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-			if errors.IsConflict(err) || errors.IsNotFound(err) {
+			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
+			}
+			if errors.IsNotFound(err) {
+				return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, expected a single associated nodeclaim, %w", err))
 			}
 			return reconcile.Result{}, err
 		}
@@ -170,16 +180,19 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	// In order for Pods associated with PersistentVolumes to smoothly migrate from the terminating Node, we wait
 	// for VolumeAttachments of drain-able Pods to be cleaned up before terminating Node and removing its finalizer.
 	// However, if TerminationGracePeriod is configured for Node, and we are past that period, we will skip waiting.
-	volumesDetached, err := c.ensureVolumesDetached(ctx, node)
+	pendingVolumeAttachments, err := c.pendingVolumeAttachments(ctx, node)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("ensuring no volume attachments, %w", err)
 	}
-	if volumesDetached {
+	if len(pendingVolumeAttachments) == 0 {
 		stored := nodeClaim.DeepCopy()
 		if modified := nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeVolumesDetached); modified {
 			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				if errors.IsConflict(err) || errors.IsNotFound(err) {
+				if errors.IsConflict(err) {
 					return reconcile.Result{Requeue: true}, nil
+				}
+				if errors.IsNotFound(err) {
+					return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, expected a single associated nodeclaim, %w", err))
 				}
 				return reconcile.Result{}, err
 			}
@@ -188,12 +201,15 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
 	} else if !c.hasTerminationGracePeriodElapsed(nodeTerminationTime) {
-		c.recorder.Publish(terminatorevents.NodeAwaitingVolumeDetachmentEvent(node))
+		c.recorder.Publish(terminatorevents.NodeAwaitingVolumeDetachmentEvent(node, pendingVolumeAttachments...))
 		stored := nodeClaim.DeepCopy()
 		if modified := nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeVolumesDetached, "AwaitingVolumeDetachment", "AwaitingVolumeDetachment"); modified {
 			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				if errors.IsConflict(err) || errors.IsNotFound(err) {
+				if errors.IsConflict(err) {
 					return reconcile.Result{Requeue: true}, nil
+				}
+				if errors.IsNotFound(err) {
+					return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, expected a single associated nodeclaim, %w", err))
 				}
 				return reconcile.Result{}, err
 			}
@@ -203,8 +219,11 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		stored := nodeClaim.DeepCopy()
 		if modified := nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeVolumesDetached, "TerminationGracePeriodElapsed", "TerminationGracePeriodElapsed"); modified {
 			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				if errors.IsConflict(err) || errors.IsNotFound(err) {
+				if errors.IsConflict(err) {
 					return reconcile.Result{Requeue: true}, nil
+				}
+				if errors.IsNotFound(err) {
+					return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, expected a single associated nodeclaim, %w", err))
 				}
 				return reconcile.Result{}, err
 			}
@@ -238,17 +257,17 @@ func (c *Controller) hasTerminationGracePeriodElapsed(nodeTerminationTime *time.
 	return !c.clock.Now().Before(*nodeTerminationTime)
 }
 
-func (c *Controller) ensureVolumesDetached(ctx context.Context, node *corev1.Node) (volumesDetached bool, err error) {
+func (c *Controller) pendingVolumeAttachments(ctx context.Context, node *corev1.Node) ([]*storagev1.VolumeAttachment, error) {
 	volumeAttachments, err := nodeutils.GetVolumeAttachments(ctx, c.kubeClient, node)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	// Filter out VolumeAttachments associated with not drain-able Pods
 	filteredVolumeAttachments, err := filterVolumeAttachments(ctx, c.kubeClient, node, volumeAttachments, c.clock)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return len(filteredVolumeAttachments) == 0, nil
+	return filteredVolumeAttachments, nil
 }
 
 // filterVolumeAttachments filters out storagev1.VolumeAttachments that should not block the termination
