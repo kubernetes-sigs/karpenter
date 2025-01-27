@@ -18,12 +18,12 @@ package nodepool_test
 
 import (
 	"context"
+	"math/rand/v2"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	"golang.org/x/exp/rand"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -64,7 +64,7 @@ var _ = Describe("NodePoolUtils", func() {
 			nps := lo.Shuffle(lo.Times(10, func(_ int) *v1.NodePool {
 				return test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
-						Weight: lo.ToPtr[int32](int32(rand.Intn(100) + 1)), //nolint:gosec
+						Weight: lo.ToPtr[int32](int32(rand.IntN(100) + 1)), //nolint:gosec
 					},
 				})
 			}))
