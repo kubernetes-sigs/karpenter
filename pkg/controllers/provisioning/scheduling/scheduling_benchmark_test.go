@@ -90,6 +90,12 @@ func BenchmarkScheduling2000(b *testing.B) {
 func BenchmarkScheduling5000(b *testing.B) {
 	benchmarkScheduler(b, 400, 5000)
 }
+func BenchmarkScheduling10000(b *testing.B) {
+	benchmarkScheduler(b, 400, 10000)
+}
+func BenchmarkScheduling20000(b *testing.B) {
+	benchmarkScheduler(b, 400, 20000)
+}
 
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
 // Go benchmark functions
@@ -114,7 +120,7 @@ func TestSchedulingProfile(t *testing.T) {
 	totalNodes := 0
 	var totalTime time.Duration
 	for _, instanceCount := range []int{400} {
-		for _, podCount := range []int{10, 100, 500, 1000, 1500, 2000, 5000} {
+		for _, podCount := range []int{1, 50, 100, 500, 1000, 1500, 2000, 5000, 10000, 20000} {
 			start := time.Now()
 			res := testing.Benchmark(func(b *testing.B) { benchmarkScheduler(b, instanceCount, podCount) })
 			totalTime += time.Since(start) / time.Duration(res.N)
@@ -128,6 +134,7 @@ func TestSchedulingProfile(t *testing.T) {
 	tw.Flush()
 }
 
+// nolint:gocyclo
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	// disable logging
 	ctx = ctrl.IntoContext(context.Background(), operatorlogging.NopLogger)
@@ -149,8 +156,8 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	pods := makeDiversePods(podCount)
 	clock := &clock.RealClock{}
 	cluster = state.NewCluster(clock, client, cloudProvider)
-	domains := map[string]sets.Set[string]{}
-	topology, err := scheduling.NewTopology(ctx, client, cluster, domains, pods)
+
+	topology, err := scheduling.NewTopology(ctx, client, cluster, getDomains(instanceTypes), pods)
 	if err != nil {
 		b.Fatalf("creating topology, %s", err)
 	}
@@ -167,8 +174,10 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	nodesInRound1 := 0
 	for i := 0; i < b.N; i++ {
 		results := scheduler.Solve(ctx, pods)
+		if len(results.PodErrors) > 0 {
+			b.Fatalf("expected all pods to schedule, got %d pods that didn't", len(results.PodErrors))
+		}
 		if i == 0 {
-
 			minPods := math.MaxInt64
 			maxPods := 0
 			var podCounts []int
@@ -212,13 +221,30 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	}
 }
 
+func getDomains(instanceTypes []*cloudprovider.InstanceType) map[string]sets.Set[string] {
+	domains := map[string]sets.Set[string]{}
+	for _, it := range instanceTypes {
+		for key, requirement := range it.Requirements {
+			// This code used to execute a Union between domains[key] and requirement.Values().
+			// The downside of this is that Union is immutable and takes a copy of the set it is executed upon.
+			// This resulted in a lot of memory pressure on the heap and poor performance
+			// https://github.com/aws/karpenter/issues/3565
+			if domains[key] == nil {
+				domains[key] = sets.New(requirement.Values()...)
+			} else {
+				domains[key].Insert(requirement.Values()...)
+			}
+		}
+	}
+	return domains
+}
+
 func makeDiversePods(count int) []*corev1.Pod {
 	var pods []*corev1.Pod
-	numTypes := 6
+	numTypes := 5
 	pods = append(pods, makeGenericPods(count/numTypes)...)
 	pods = append(pods, makeTopologySpreadPods(count/numTypes, corev1.LabelTopologyZone)...)
 	pods = append(pods, makeTopologySpreadPods(count/numTypes, corev1.LabelHostname)...)
-	pods = append(pods, makePodAffinityPods(count/numTypes, corev1.LabelHostname)...)
 	pods = append(pods, makePodAffinityPods(count/numTypes, corev1.LabelTopologyZone)...)
 	pods = append(pods, makePodAntiAffinityPods(count/numTypes, corev1.LabelHostname)...)
 
@@ -259,15 +285,20 @@ func makePodAntiAffinityPods(count int, key string) []*corev1.Pod {
 func makePodAffinityPods(count int, key string) []*corev1.Pod {
 	var pods []*corev1.Pod
 	for i := 0; i < count; i++ {
+		// We use self-affinity here because using affinity that relies on other pod
+		// domains doens't guarantee that all pods can schedule. In the case where you are not
+		// using self-affinity and the domain doesn't exist, scheduling will fail for all pods with
+		// affinities against this domain
+		labels := randomAffinityLabels()
 		pods = append(pods, test.Pod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: randomAffinityLabels(),
+					Labels: labels,
 					UID:    uuid.NewUUID(),
 				},
 				PodRequirements: []corev1.PodAffinityTerm{
 					{
-						LabelSelector: &metav1.LabelSelector{MatchLabels: randomAffinityLabels()},
+						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
 						TopologyKey:   key,
 					},
 				},
