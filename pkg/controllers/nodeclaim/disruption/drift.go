@@ -70,7 +70,7 @@ func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	// 3. Finally, if the NodeClaim is drifted, but doesn't have status condition, add it.
 	nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDrifted, string(driftedReason), string(driftedReason))
 	if !hasDriftedCondition {
-		log.FromContext(ctx).V(1).WithValues("reason", string(driftedReason)).Info("marking drifted")
+		log.FromContext(ctx).WithValues("reason", string(driftedReason)).Info("marking drifted")
 	}
 	// Requeue after 5 minutes for the cache TTL
 	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
