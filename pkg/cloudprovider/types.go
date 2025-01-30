@@ -111,7 +111,7 @@ func (i *InstanceType) precompute() {
 
 func (i *InstanceType) Allocatable() corev1.ResourceList {
 	i.once.Do(i.precompute)
-	return i.allocatable.DeepCopy()
+	return i.allocatable
 }
 
 func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceTypes {
