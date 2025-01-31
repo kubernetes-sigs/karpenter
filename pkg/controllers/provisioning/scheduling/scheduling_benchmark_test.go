@@ -114,7 +114,7 @@ func TestSchedulingProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating heap profile: %s", err)
 	}
-	defer lo.Must0(pprof.WriteHeapProfile(heapf))
+	defer func() { lo.Must0(pprof.WriteHeapProfile(heapf)) }()
 
 	totalPods := 0
 	totalNodes := 0
