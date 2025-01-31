@@ -262,7 +262,16 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// about why scheduling failed
 		itCompat := compatible(it, requirements)
 		itFits := fits(it, requests)
-		itHasOffering := it.Offerings.Available().HasCompatible(requirements)
+
+		// By using this iterative approach vs. the Available() function it prevents allocations
+		// which have to be garbage collected and slow down Karpenter's scheduling algorithm
+		itHasOffering := false
+		for _, of := range it.Offerings {
+			if of.Available && requirements.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+				itHasOffering = true
+				break
+			}
+		}
 
 		// track if any single instance type met a single criteria
 		results.requirementsMet = results.requirementsMet || itCompat
