@@ -33,6 +33,7 @@ const (
 	// Reasons for CREATE/DELETE shared metrics
 	ProvisionedReason = "provisioned"
 	ExpiredReason     = "expired"
+	UnhealthyReason   = "unhealthy"
 )
 
 // DurationBuckets returns a []float64 of default threshold values for duration histograms.
