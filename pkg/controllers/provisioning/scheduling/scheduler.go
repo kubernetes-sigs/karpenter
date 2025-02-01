@@ -31,6 +31,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -225,8 +226,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	lastLogTime := s.clock.Now()
 	batchSize := len(q.pods)
 	for {
-		UnfinishedWorkSeconds.Set(s.clock.Since(startTime).Seconds(), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
-		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
+		UnfinishedWorkSeconds.Set(s.clock.Since(startTime).Seconds(), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id), reconcileIDLabel: string(controller.ReconcileIDFromContext(ctx))})
+		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id), reconcileIDLabel: string(controller.ReconcileIDFromContext(ctx))})
 
 		if s.clock.Since(lastLogTime) > time.Minute {
 			log.FromContext(ctx).WithValues("pods-scheduled", batchSize-len(q.pods), "pods-remaining", len(q.pods), "duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.id)).Info("computing pod scheduling...")
@@ -253,7 +254,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			}
 		}
 	}
-	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
+	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id), reconcileIDLabel: string(controller.ReconcileIDFromContext(ctx))})
 	for _, m := range s.newNodeClaims {
 		m.FinalizeScheduling()
 	}

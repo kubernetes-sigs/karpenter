@@ -27,6 +27,7 @@ import (
 const (
 	ControllerLabel    = "controller"
 	schedulingIDLabel  = "scheduling_id"
+	reconcileIDLabel   = "reconcile_id"
 	schedulerSubsystem = "scheduler"
 )
 
@@ -55,6 +56,7 @@ var (
 		[]string{
 			ControllerLabel,
 			schedulingIDLabel,
+			reconcileIDLabel,
 		},
 	)
 	UnfinishedWorkSeconds = opmetrics.NewPrometheusGauge(
@@ -68,6 +70,7 @@ var (
 		[]string{
 			ControllerLabel,
 			schedulingIDLabel,
+			reconcileIDLabel,
 		},
 	)
 	IgnoredPodCount = opmetrics.NewPrometheusGauge(
