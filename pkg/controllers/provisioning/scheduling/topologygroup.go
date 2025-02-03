@@ -69,9 +69,20 @@ type TopologyGroup struct {
 	emptyDomains sets.Set[string]       // domains for which we know that no pod exists
 }
 
-func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, taintPolicy *v1.NodeInclusionPolicy, affinityPolicy *v1.NodeInclusionPolicy, domainGroup TopologyDomainGroup) *TopologyGroup {
+func NewTopologyGroup(
+	topologyType TopologyType,
+	topologyKey string,
+	pod *v1.Pod,
+	namespaces sets.Set[string],
+	labelSelector *metav1.LabelSelector,
+	maxSkew int32,
+	minDomains *int32,
+	taintPolicy *v1.NodeInclusionPolicy,
+	affinityPolicy *v1.NodeInclusionPolicy,
+	domainGroup TopologyDomainGroup,
+) *TopologyGroup {
 	// the nil *TopologyNodeFilter always passes which is what we need for affinity/anti-affinity
-	var nodeSelector TopologyNodeFilter
+	var nodeFilter TopologyNodeFilter
 	if topologyType == TopologyTypeSpread {
 		nodeTaintsPolicy := v1.NodeInclusionPolicyIgnore
 		if taintPolicy != nil {
@@ -81,7 +92,7 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		if affinityPolicy != nil {
 			nodeAffinityPolicy = *affinityPolicy
 		}
-		nodeSelector = MakeTopologyNodeFilter(pod, nodeTaintsPolicy, nodeAffinityPolicy)
+		nodeFilter = MakeTopologyNodeFilter(pod, nodeTaintsPolicy, nodeAffinityPolicy)
 	}
 
 	selector, err := metav1.LabelSelectorAsSelector(labelSelector)
@@ -90,7 +101,7 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 	}
 
 	domains := map[string]int32{}
-	if nodeSelector.TaintPolicy == v1.NodeInclusionPolicyHonor {
+	if nodeFilter.TaintPolicy == v1.NodeInclusionPolicyHonor {
 		domainGroup.ForEachToleratedDomain(pod, func(domain string) {
 			domains[domain] = 0
 		})
@@ -99,11 +110,10 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 			domains[domain] = 0
 		})
 	}
-
 	emptyDomains := sets.New[string]()
-	domainGroup.ForEachDomain(func(domain string) {
+	for domain := range domains {
 		emptyDomains.Insert(domain)
-	})
+	}
 
 	return &TopologyGroup{
 		Type:         topologyType,
@@ -111,7 +121,7 @@ func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod
 		namespaces:   namespaces,
 		selector:     selector,
 		rawSelector:  labelSelector,
-		nodeFilter:   nodeSelector,
+		nodeFilter:   nodeFilter,
 		maxSkew:      maxSkew,
 		domains:      domains,
 		emptyDomains: emptyDomains,
