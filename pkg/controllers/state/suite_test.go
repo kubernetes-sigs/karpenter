@@ -1474,17 +1474,26 @@ var _ = Describe("Consolidated State", func() {
 		cluster.MarkUnconsolidated()
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
-	It("should update the consolidated value when consolidation timeout (5m) has passed and state hasn't changed", func() {
+	It("should update the consolidated value when state timeout (5m) has passed and state hasn't changed", func() {
+		// TODO: Remove these print logs in the future once we track down the flake
+		fmt.Printf("Current time: %v\n", fakeClock.Now())
 		state := cluster.ConsolidationState()
+		fmt.Printf("Initial state: %v\n", state)
 
 		fakeClock.Step(time.Minute)
-		Expect(cluster.ConsolidationState()).To(Equal(state))
+		initial := cluster.ConsolidationState()
+		fmt.Printf("After moving a minute: %v\n", initial)
+		Expect(initial).To(Equal(state))
 
 		fakeClock.Step(time.Minute * 2)
-		Expect(cluster.ConsolidationState()).To(Equal(state))
+		initial2 := cluster.ConsolidationState()
+		fmt.Printf("After moving two minutes: %v\n", initial2)
+		Expect(initial2).To(Equal(state))
 
 		fakeClock.Step(time.Minute * 2)
-		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
+		initial3 := cluster.ConsolidationState()
+		fmt.Printf("After moving two more minutes: %v\n", initial3)
+		Expect(initial3).ToNot(Equal(state))
 	})
 	It("should cause consolidation state to change when a NodePool is updated", func() {
 		cluster.MarkUnconsolidated()
