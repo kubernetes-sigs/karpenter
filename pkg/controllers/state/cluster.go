@@ -547,7 +547,7 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNo
 
 func (c *Cluster) cleanupNode(name string) {
 	if id := c.nodeNameToProviderID[name]; id != "" {
-		if c.nodes[id].NodeClaim == nil {
+		if c.nodes[id] != nil && c.nodes[id].NodeClaim == nil {
 			delete(c.nodes, id)
 		} else {
 			c.nodes[id].Node = nil
