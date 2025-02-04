@@ -136,9 +136,15 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting unhealthy node")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
+		metrics.ReasonLabel:       metrics.UnhealthyReason,
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
+	})
+	NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
+		Condition:                 pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
+		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
+		ImageID:                   nodeClaim.Status.ImageID,
 	})
 	return reconcile.Result{}, nil
 }
