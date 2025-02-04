@@ -284,8 +284,7 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 	for key := range r.intersectKeys(requirements) {
 		existing := r.Get(key)
 		incoming := requirements.Get(key)
-		// There must be some value, except
-		if existing.Intersection(incoming).Len() == 0 {
+		if !existing.HasIntersection(incoming) {
 			// where the incoming requirement has operator { NotIn, DoesNotExist }
 			if operator := incoming.Operator(); operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
 				// and the existing requirement has operator { NotIn, DoesNotExist }
