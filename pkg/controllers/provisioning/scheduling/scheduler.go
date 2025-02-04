@@ -62,7 +62,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1
 	// Pre-filter instance types eligible for NodePools to reduce work done during scheduling loops for pods
 	templates := lo.FilterMap(nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
 		nct := NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}).remaining
+		nct.InstanceTypeOptions, _ = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{})
 		if len(nct.InstanceTypeOptions) == 0 {
 			recorder.Publish(NoCompatibleInstanceTypes(np))
 			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Info("skipping, nodepool requirements filtered out all instance types")
