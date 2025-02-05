@@ -1338,6 +1338,40 @@ var _ = Describe("Cluster State Sync", func() {
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 1, nil)
 	})
+	It("should consider the cluster state synced when a new node is added after the initial sync", func() {
+		// Deploy 250 nodes to the cluster that also have nodeclaims
+		for i := 0; i < 250; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.RandomProviderID(),
+			})
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				Status: v1.NodeClaimStatus{
+					ProviderID: node.Spec.ProviderID,
+				},
+			})
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		}
+		// Deploy 250 nodes to the cluster
+		for i := 0; i < 250; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: test.RandomProviderID(),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+
+		// Add a new node but don't reconcile it
+		node := test.Node(test.NodeOptions{
+			ProviderID: test.RandomProviderID(),
+		})
+		ExpectApplied(ctx, env.Client, node)
+
+		// Cluster state should still be synced because we already synced our changes
+		Expect(cluster.Synced(ctx)).To(BeTrue())
+	})
 })
 
 var _ = Describe("DaemonSet Controller", func() {

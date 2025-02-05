@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -46,9 +47,11 @@ import (
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
 type Cluster struct {
-	kubeClient                client.Client
-	cloudProvider             cloudprovider.CloudProvider
-	clock                     clock.Clock
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
+	clock         clock.Clock
+	hasSynced     atomic.Bool
+
 	mu                        sync.RWMutex
 	nodes                     map[string]*StateNode           // provider id -> cached node
 	bindings                  map[types.NamespacedName]string // pod namespaced named -> node name
@@ -110,6 +113,26 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	defer func() {
 		ClusterStateSynced.Set(lo.Ternary[float64](synced, 1, 0), nil)
 	}()
+
+	// If the cluster state has already synced once, then we assume that objects are kept internally consistent
+	// with each other to avoid having to continually re-check that we have fully captured the same view
+	// of cluster state that controller-runtime has
+	if c.hasSynced.Load() {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+
+		for _, providerID := range c.nodeClaimNameToProviderID {
+			// Check to see if any node claim doesn't have a provider ID. If it doesn't, then the nodeclaim hasn't been
+			// launched, and we need to wait to see what the resolved values are before continuing.
+			if providerID == "" {
+				return false
+			}
+		}
+		return true
+	}
+
+	// If we haven't synced before, then we need to make sure that our internal cache is fully hydrated
+	// before we start doing operations against the state
 	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
@@ -120,6 +143,7 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
+
 	c.mu.RLock()
 	stateNodeClaimNames := sets.New[string]()
 	for name, providerID := range c.nodeClaimNameToProviderID {
@@ -146,7 +170,11 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// This doesn't ensure that the two states are exactly aligned (we could still not be tracking a node
 	// that exists in the cluster state but not in the apiserver) but it ensures that we have a state
 	// representation for every node/nodeClaim that exists on the apiserver
-	return stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
+	synced = stateNodeClaimNames.IsSuperset(nodeClaimNames) && stateNodeNames.IsSuperset(nodeNames)
+	if synced {
+		c.hasSynced.Store(true)
+	}
+	return synced
 }
 
 // ForPodsWithAntiAffinity calls the supplied function once for each pod with required anti affinity terms that is
@@ -428,6 +456,7 @@ func (c *Cluster) Reset() {
 	defer c.mu.Unlock()
 	c.clusterState = time.Time{}
 	c.unsyncedStartTime = time.Time{}
+	c.hasSynced.Store(false)
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
