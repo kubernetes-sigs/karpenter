@@ -151,6 +151,9 @@ var _ = Describe("Provisioning", func() {
 				// We expect to have waiters on the fakeClock since this is still within the batch idle duration of 5s.
 				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod.UID)
+
+				time.Sleep(time.Second) // give the process time to iterate on the batching section
+
 				// Step the clock again by 3s to just cross the batch idle duration. We should be able to get out of the
 				// provisioning loop because the same pod will not cause the idle duration to reset.
 				fakeClock.Step(3 * time.Second)
@@ -191,12 +194,15 @@ var _ = Describe("Provisioning", func() {
 				// We expect to have waiters on the fakeClock since this is still within the batch idle duration of 5s.
 				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod2.UID)
-				// Step the clock by 5s as we expect provisioning to not happen until another 5s because the
+
+				time.Sleep(time.Second) // give the process time to iterate on the batching section
+
+				// Step the clock by 3s as we expect provisioning to not happen until another 5s because the
 				// batch idle duration was reset due to a new pod being added.
-				fakeClock.Step(5 * time.Second)
+				fakeClock.Step(3 * time.Second)
 				Consistently(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
-				// Stepping the clock again by 2s. We should be able to get out of the
-				// provisioning loop at this point
+				// Stepping the clock again by 3s. We should be able to get out of the
+				// provisioning loop at this point (since we have exceeded the idle duration)
 				fakeClock.Step(3 * time.Second)
 				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeFalse())
 			}()
