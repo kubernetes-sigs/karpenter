@@ -378,7 +378,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	})
-	// Update the nodeclaim manually in state to avoid evenutal consistency delay races with our watcher.
+	// Update the nodeclaim manually in state to avoid eventual consistency delay races with our watcher.
 	// This is essential to avoiding races where disruption can create a replacement node, then immediately
 	// requeue. This can race with controller-runtime's internal cache as it watches events on the cluster
 	// to then trigger cluster state updates. Triggering it manually ensures that Karpenter waits for the
