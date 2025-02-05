@@ -77,7 +77,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1
 		topology:           topology,
 		cluster:            cluster,
 		daemonOverhead:     getDaemonOverhead(templates, daemonSetPods),
-		cachedPodRequests:  map[types.UID]corev1.ResourceList{}, // cache pod requests to avoid having to continually recompute this total
+		cachedPodData:      map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
 		recorder:           recorder,
 		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
@@ -89,6 +89,12 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1
 	return s
 }
 
+type PodData struct {
+	Requests           corev1.ResourceList
+	Requirements       scheduling.Requirements
+	StrictRequirements scheduling.Requirements
+}
+
 type Scheduler struct {
 	id                 types.UID // Unique UUID attached to this scheduling loop
 	newNodeClaims      []*NodeClaim
@@ -96,7 +102,7 @@ type Scheduler struct {
 	nodeClaimTemplates []*NodeClaimTemplate
 	remainingResources map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead     map[*NodeClaimTemplate]corev1.ResourceList
-	cachedPodRequests  map[types.UID]corev1.ResourceList // (Pod Namespace/Name) -> calculated resource requests for the pod
+	cachedPodData      map[types.UID]*PodData // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
 	preferences        *Preferences
 	topology           *Topology
 	cluster            *state.Cluster
@@ -217,9 +223,9 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	QueueDepth.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	for _, p := range pods {
-		s.cachedPodRequests[p.UID] = resources.RequestsForPods(p)
+		s.updateCachedPodData(p)
 	}
-	q := NewQueue(pods, s.cachedPodRequests)
+	q := NewQueue(pods, s.cachedPodData)
 
 	startTime := s.clock.Now()
 	lastLogTime := s.clock.Now()
@@ -251,6 +257,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			if err := s.topology.Update(ctx, pod); err != nil {
 				log.FromContext(ctx).Error(err, "failed updating topology")
 			}
+			// Update the cached podData since the pod was relaxed and it could have changed its requirement set
+			s.updateCachedPodData(pod)
 		}
 	}
 	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
@@ -265,10 +273,25 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	}
 }
 
+func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
+	requirements := scheduling.NewPodRequirements(p)
+	strictRequirements := requirements
+	if scheduling.HasPreferredNodeAffinity(p) {
+		// strictPodRequirements is important as it ensures we don't inadvertently restrict the possible pod domains by a
+		// preferred node affinity.  Only required node affinities can actually reduce pod domains.
+		strictRequirements = scheduling.NewStrictPodRequirements(p)
+	}
+	s.cachedPodData[p.UID] = &PodData{
+		Requests:           resources.RequestsForPods(p),
+		Requirements:       requirements,
+		StrictRequirements: strictRequirements,
+	}
+}
+
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
-		if err := node.Add(ctx, s.kubeClient, pod, s.cachedPodRequests[pod.UID]); err == nil {
+		if err := node.Add(ctx, s.kubeClient, pod, s.cachedPodData[pod.UID]); err == nil {
 			return nil
 		}
 	}
@@ -278,7 +301,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// Pick existing node that we are about to create
 	for _, nodeClaim := range s.newNodeClaims {
-		if err := nodeClaim.Add(pod, s.cachedPodRequests[pod.UID]); err == nil {
+		if err := nodeClaim.Add(pod, s.cachedPodData[pod.UID]); err == nil {
 			return nil
 		}
 	}
@@ -299,7 +322,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 			}
 		}
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
-		if err := nodeClaim.Add(pod, s.cachedPodRequests[pod.UID]); err != nil {
+		if err := nodeClaim.Add(pod, s.cachedPodData[pod.UID]); err != nil {
 			nodeClaim.Destroy() // Ensure we cleanup any changes that we made while mocking out a NodeClaim
 			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, daemonset overhead=%s, %w",
 				nodeClaimTemplate.NodePoolName,

@@ -65,7 +65,7 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 	return node
 }
 
-func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod, podRequests v1.ResourceList) error {
+func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod, podData *PodData) error {
 	// Check Taints
 	if err := scheduling.Taints(n.cachedTaints).Tolerates(pod); err != nil {
 		return err
@@ -86,29 +86,21 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 
 	// check resource requests first since that's a pretty likely reason the pod won't schedule on an in-flight
 	// node, which at this point can't be increased in size
-	requests := resources.Merge(n.requests, podRequests)
+	requests := resources.Merge(n.requests, podData.Requests)
 
 	if !resources.Fits(requests, n.cachedAvailable) {
 		return fmt.Errorf("exceeds node resources")
 	}
 
 	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
-	podRequirements := scheduling.NewPodRequirements(pod)
 	// Check NodeClaim Affinity Requirements
-	if err = nodeRequirements.Compatible(podRequirements); err != nil {
+	if err = nodeRequirements.Compatible(podData.Requirements); err != nil {
 		return err
 	}
-	nodeRequirements.Add(podRequirements.Values()...)
-
-	strictPodRequirements := podRequirements
-	if scheduling.HasPreferredNodeAffinity(pod) {
-		// strictPodRequirements is important as it ensures we don't inadvertently restrict the possible pod domains by a
-		// preferred node affinity.  Only required node affinities can actually reduce pod domains.
-		strictPodRequirements = scheduling.NewStrictPodRequirements(pod)
-	}
+	nodeRequirements.Add(podData.Requirements.Values()...)
 
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(strictPodRequirements, nodeRequirements, pod)
+	topologyRequirements, err := n.topology.AddRequirements(podData.StrictRequirements, nodeRequirements, pod)
 	if err != nil {
 		return err
 	}
