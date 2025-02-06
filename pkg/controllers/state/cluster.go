@@ -19,7 +19,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -478,22 +477,22 @@ func (c *Cluster) GetDaemonSetPod(daemonset *appsv1.DaemonSet) *corev1.Pod {
 
 func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonSet) error {
 	pods := &corev1.PodList{}
-	err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.Namespace))
-	if err != nil {
+	// Scope down this call to only select the pods in this namespace that specifically match the DaemonSet
+	// Because we get so many pods from this response, we are not DeepCopying the cached data here
+	// DO NOT MUTATE pods in this function as this will affect the underlying cached pod
+	if err := c.kubeClient.List(ctx, pods, client.InNamespace(daemonset.Namespace), client.UnsafeDisableDeepCopy); err != nil {
 		return err
 	}
-
-	sort.Slice(pods.Items, func(i, j int) bool {
-		return pods.Items[i].CreationTimestamp.Unix() > pods.Items[j].CreationTimestamp.Unix()
-	})
-
-	for i := range pods.Items {
-		if metav1.IsControlledBy(&pods.Items[i], daemonset) {
-			c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), &pods.Items[i])
-			break
+	if len(pods.Items) == 0 {
+		return nil
+	}
+	pod := &pods.Items[0]
+	for _, p := range pods.Items {
+		if metav1.IsControlledBy(&p, daemonset) && p.CreationTimestamp.After(pod.CreationTimestamp.Time) {
+			pod = &p
 		}
 	}
-
+	c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), pod.DeepCopy())
 	return nil
 }
 
