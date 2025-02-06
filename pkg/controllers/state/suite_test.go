@@ -1496,6 +1496,22 @@ var _ = Describe("DaemonSet Controller", func() {
 
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(BeNil())
 	})
+	It("should only return daemonset pods from the daemonset cache", func() {
+		daemonset := test.DaemonSet(
+			test.DaemonSetOptions{PodOptions: test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+			}},
+		)
+		ExpectApplied(ctx, env.Client, daemonset)
+		otherPods := test.Pods(1000, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: daemonset.Namespace,
+			},
+		})
+		ExpectApplied(ctx, env.Client, lo.Map(otherPods, func(p *corev1.Pod, _ int) client.Object { return p })...)
+		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
+		Expect(cluster.GetDaemonSetPod(daemonset)).To(BeNil())
+	})
 })
 
 var _ = Describe("Consolidated State", func() {
