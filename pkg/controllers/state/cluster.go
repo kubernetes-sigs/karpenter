@@ -486,13 +486,15 @@ func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonS
 	if len(pods.Items) == 0 {
 		return nil
 	}
-	pod := &pods.Items[0]
+	var pod *corev1.Pod
 	for _, p := range pods.Items {
-		if metav1.IsControlledBy(&p, daemonset) && p.CreationTimestamp.After(pod.CreationTimestamp.Time) {
+		if metav1.IsControlledBy(&p, daemonset) && (pod == nil || p.CreationTimestamp.After(pod.CreationTimestamp.Time)) {
 			pod = &p
 		}
 	}
-	c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), pod.DeepCopy())
+	if pod != nil {
+		c.daemonSetPods.Store(client.ObjectKeyFromObject(daemonset), pod.DeepCopy())
+	}
 	return nil
 }
 
