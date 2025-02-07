@@ -57,7 +57,9 @@ type CloudProvider interface {
 	// Create launches a NodeClaim with the given resource requests and requirements and returns a hydrated
 	// NodeClaim back with resolved NodeClaim labels for the launched NodeClaim
 	Create(context.Context, *v1.NodeClaim) (*v1.NodeClaim, error)
-	// Delete removes a NodeClaim from the cloudprovider by its provider id
+	// Delete removes a NodeClaim from the cloudprovider by its provider id. Delete should return
+	// NodeClaimNotFoundError if the cloudProvider instance is already terminated and nil if deletion was triggered.
+	// Karpenter will keep retrying until Delete returns a NodeClaimNotFound error.
 	Delete(context.Context, *v1.NodeClaim) error
 	// Get retrieves a NodeClaim from the cloudprovider by its provider id
 	Get(context.Context, string) (*v1.NodeClaim, error)
