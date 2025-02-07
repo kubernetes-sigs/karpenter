@@ -176,7 +176,10 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
 	opts := option.Resolve(options...)
 
 	// Custom Labels must intersect, but if not defined are denied.
-	for key := range requirements.Keys().Difference(opts.AllowUndefined) {
+	for key := range requirements {
+		if opts.AllowUndefined.Has(key) {
+			continue
+		}
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
 			continue
 		}
