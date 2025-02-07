@@ -151,7 +151,7 @@ var _ = Describe("Termination", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
-	It("should requeue reconciliation if cloudProvider Get returns an error other than NodeClaimNotFoundError", func() {
+	It("should requeue reconciliation if cloudProvider Delete returns an error other than NodeClaimNotFoundError", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
@@ -161,8 +161,8 @@ var _ = Describe("Termination", func() {
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will set the nodeClaim status as terminating
 		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
-		cloudProvider.NextGetErr = errors.New("fake error")
-		// trigger nodeClaim Deletion that will make cloudProvider Get and fail due to error
+		cloudProvider.NextDeleteErr = errors.New("fake error")
+		// trigger nodeClaim Deletion that will make cloudProvider Delete and requeue reconciliation due to error
 		Expect(ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)).To(HaveOccurred())
 		result = ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will succeed
 		Expect(result.Requeue).To(BeFalse())
