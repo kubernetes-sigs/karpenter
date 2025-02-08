@@ -326,6 +326,10 @@ func (e *NodeClaimNotFoundError) Error() string {
 	return fmt.Sprintf("nodeclaim not found, %s", e.error)
 }
 
+func (e *NodeClaimNotFoundError) Unwrap() error {
+	return e.error
+}
+
 func IsNodeClaimNotFoundError(err error) bool {
 	if err == nil {
 		return false
@@ -356,6 +360,10 @@ func (e *InsufficientCapacityError) Error() string {
 	return fmt.Sprintf("insufficient capacity, %s", e.error)
 }
 
+func (e *InsufficientCapacityError) Unwrap() error {
+	return e.error
+}
+
 func IsInsufficientCapacityError(err error) bool {
 	if err == nil {
 		return false
@@ -379,6 +387,10 @@ func (e *NodeClassNotReadyError) Error() string {
 	return fmt.Sprintf("NodeClassRef not ready, %s", e.error)
 }
 
+func (e *NodeClassNotReadyError) Unwrap() error {
+	return e.error
+}
+
 func IsNodeClassNotReadyError(err error) bool {
 	if err == nil {
 		return false
@@ -400,4 +412,12 @@ func NewCreateError(err error, reason, message string) *CreateError {
 		ConditionReason:  reason,
 		ConditionMessage: message,
 	}
+}
+
+func (e *CreateError) Error() string {
+	return fmt.Sprintf("creating nodeclaim, %s", e.error)
+}
+
+func (e *CreateError) Unwrap() error {
+	return e.error
 }
