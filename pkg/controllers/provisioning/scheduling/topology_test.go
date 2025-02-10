@@ -1516,8 +1516,18 @@ var _ = Describe("Topology", func() {
 			ExpectApplied(ctx, env.Client, nodePools[0], nodePools[1])
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 
-			// There are three total domains (foo, bar, and baz), but each "deployment" can only schedule to two (foo and bar, and foo and baz).
-			// Two of the pods should schedule to
+			// There are three total domains (foo, bar, and baz) available across two NodePools. Each NodePool can create nodes
+			// in domain "foo", but "bar" and "baz" are exclusive per NodePool. Each NodePool is also tainted.
+			// There are two "deployments", one consists of two pods and the other of four. Each deployment has a toleration for
+			// one of the NodePools. Since the taint policy is honor, deployment one should be spread across domains "foo" and
+			// "bar", and deployment two should be spread across domains "foo" and "baz". As a result, we should see the
+			// following skew:
+			// - foo: 2 (nodepool 1 or 2)
+			// - bar: 1 (nodepool 1)
+			// - baz: 3 (nodepool 2)
+			// The pods in deployment one only count against nodes with domain foo and bar, which has a skew of one. The pods in
+			// deployment two only count against nodes with domain foo and baz, which also has a skew of one. It's important to
+			// remember that all of the pods select against each other, the only filtering is based on the node.
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 2, 1))
 		})
 	})
