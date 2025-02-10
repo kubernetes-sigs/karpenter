@@ -1157,6 +1157,8 @@ var _ = Describe("Topology", func() {
 			}, count)...)
 			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			// Expect two nodes to be created, each with a single pod from each "deployment". If matchLabelKeys didn't work as
+			// expected, we would see 4 nodes, each with 1 pod.
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
 		})
 
@@ -1235,13 +1237,12 @@ var _ = Describe("Topology", func() {
 			// there are now three domains for spreadLabel that Karpenter should know about, foo/bar from the two existing
 			// nodes and baz from the node pool
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
-			ignore := corev1.NodeInclusionPolicyIgnore
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       spreadLabel,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
-				NodeTaintsPolicy:  &ignore,
+				NodeTaintsPolicy:  lo.ToPtr(corev1.NodeInclusionPolicyIgnore),
 			}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1306,13 +1307,12 @@ var _ = Describe("Topology", func() {
 			// since two of the nodes are tainted, Karpenter should not consider them for topology domain discovery
 			// purposes
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
-			honor := corev1.NodeInclusionPolicyHonor
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       spreadLabel,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
-				NodeTaintsPolicy:  &honor,
+				NodeTaintsPolicy:  lo.ToPtr(corev1.NodeInclusionPolicyHonor),
 			}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1330,7 +1330,7 @@ var _ = Describe("Topology", func() {
 			// and should schedule all of the pods on the same node
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(5))
 		})
-		It("should balance pods across a label when discovered from the provisioner (NodeTaintsPolicy=ignore)", func() {
+		It("should balance pods across a label when discovered from the nodepool (NodeTaintsPolicy=ignore)", func() {
 			const spreadLabel = "fake-label"
 			const taintKey = "taint-key"
 			nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
@@ -1371,13 +1371,12 @@ var _ = Describe("Topology", func() {
 				},
 			})
 
-			honor := corev1.NodeInclusionPolicyIgnore
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       spreadLabel,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
-				NodeTaintsPolicy:  &honor,
+				NodeTaintsPolicy:  lo.ToPtr(corev1.NodeInclusionPolicyIgnore),
 			}}
 
 			pods := test.UnschedulablePods(test.PodOptions{
@@ -1390,10 +1389,10 @@ var _ = Describe("Topology", func() {
 			ExpectApplied(ctx, env.Client, nodePool, taintedNodePool)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 
-			// should fail to schedule both pods, one pod is scheduled to domain "foo" but the other can't be scheduled to domain "bar"
+			// should succeed to schedule one pod to domain "foo", but fail to schedule the other to domain "bar"
 			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1))
 		})
-		It("should balance pods across a label when discovered from the provisioner (NodeTaintsPolicy=honor)", func() {
+		It("should balance pods across a label when discovered from the nodepool (NodeTaintsPolicy=honor)", func() {
 			const spreadLabel = "fake-label"
 			const taintKey = "taint-key"
 			nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
@@ -1434,13 +1433,12 @@ var _ = Describe("Topology", func() {
 				},
 			})
 
-			honor := corev1.NodeInclusionPolicyHonor
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       spreadLabel,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
-				NodeTaintsPolicy:  &honor,
+				NodeTaintsPolicy:  lo.ToPtr(corev1.NodeInclusionPolicyHonor),
 			}}
 
 			pods := test.UnschedulablePods(test.PodOptions{
@@ -1493,16 +1491,15 @@ var _ = Describe("Topology", func() {
 				})
 			})
 
-			honor := corev1.NodeInclusionPolicyHonor
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       spreadLabel,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:           1,
-				NodeTaintsPolicy:  &honor,
+				NodeTaintsPolicy:  lo.ToPtr(corev1.NodeInclusionPolicyHonor),
 			}}
 
-			pods := lo.Flatten(lo.Map(nodePools, func(np *v1.NodePool, _ int) []*corev1.Pod {
+			pods := lo.Flatten(lo.Map(nodePools, func(np *v1.NodePool, i int) []*corev1.Pod {
 				return test.UnschedulablePods(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: labels,
@@ -1513,14 +1510,15 @@ var _ = Describe("Topology", func() {
 						Effect: corev1.TaintEffectNoSchedule,
 						Value:  np.Spec.Template.Spec.Taints[0].Value,
 					}},
-				}, 2)
+				}, (i+1)*2)
 			}))
 
 			ExpectApplied(ctx, env.Client, nodePools[0], nodePools[1])
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 
-			// Expect 3 total nodes provisioned, 2 pods schedule to foo, 1 to bar, and 1 to baz
-			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(1, 2, 1))
+			// There are three total domains (foo, bar, and baz), but each "deployment" can only schedule to two (foo and bar, and foo and baz).
+			// Two of the pods should schedule to
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(3, 2, 1))
 		})
 	})
 
@@ -1570,13 +1568,12 @@ var _ = Describe("Topology", func() {
 			// fact that the pod can't schedule to two of them because of a required node affinity. foo/bar from the two
 			// existing nodes with an affinityLabel=affinityMismatch label and baz from the node pool
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
-			ignore := corev1.NodeInclusionPolicyIgnore
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:        spreadLabel,
 				WhenUnsatisfiable:  corev1.DoNotSchedule,
 				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:            1,
-				NodeAffinityPolicy: &ignore,
+				NodeAffinityPolicy: lo.ToPtr(corev1.NodeInclusionPolicyIgnore),
 			}}
 
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -1635,13 +1632,12 @@ var _ = Describe("Topology", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node2))
 
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
-			ignore := corev1.NodeInclusionPolicyHonor
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:        spreadLabel,
 				WhenUnsatisfiable:  corev1.DoNotSchedule,
 				LabelSelector:      &metav1.LabelSelector{MatchLabels: labels},
 				MaxSkew:            1,
-				NodeAffinityPolicy: &ignore,
+				NodeAffinityPolicy: lo.ToPtr(corev1.NodeInclusionPolicyHonor),
 			}}
 
 			ExpectApplied(ctx, env.Client, nodePool)

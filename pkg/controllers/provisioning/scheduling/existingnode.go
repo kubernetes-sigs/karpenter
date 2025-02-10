@@ -100,7 +100,7 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 	nodeRequirements.Add(podData.Requirements.Values()...)
 
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(podData.StrictRequirements, nodeRequirements, pod)
+	topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 	n.Pods = append(n.Pods, pod)
 	n.requests = requests
 	n.requirements = nodeRequirements
-	n.topology.Record(pod, nodeRequirements)
+	n.topology.Record(pod, n.cachedTaints, nodeRequirements)
 	n.HostPortUsage().Add(pod, hostPorts)
 	n.VolumeUsage().Add(pod, volumes)
 	return nil

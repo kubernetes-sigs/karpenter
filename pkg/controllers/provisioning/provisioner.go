@@ -233,7 +233,6 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	nodepoolutils.OrderByWeight(nodePools)
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
-	domainGroups := map[string]scheduler.TopologyDomainGroup{}
 	for _, np := range nodePools {
 		// Get instance type options
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
@@ -245,46 +244,14 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Info("skipping, no resolved instance types found")
 			continue
 		}
-
 		instanceTypes[np.Name] = its
-		nodePoolTaints := np.Spec.Template.Spec.Taints
-		// Construct Topology Domains
-		for _, it := range its {
-			// We need to intersect the instance type requirements with the current nodePool requirements.  This
-			// ensures that something like zones from an instance type don't expand the universe of valid domains.
-			requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-			requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
-			requirements.Add(it.Requirements.Values()...)
-
-			for topologyKey, requirement := range requirements {
-				if _, ok := domainGroups[topologyKey]; !ok {
-					domainGroups[topologyKey] = scheduler.NewTopologyDomainGroup()
-				}
-				for _, domain := range requirement.Values() {
-					domainGroups[topologyKey].Insert(domain, nodePoolTaints...)
-				}
-			}
-		}
-
-		requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-		requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
-		for key, requirement := range requirements {
-			if requirement.Operator() == corev1.NodeSelectorOpIn {
-				if _, ok := domainGroups[key]; !ok {
-					domainGroups[key] = scheduler.NewTopologyDomainGroup()
-				}
-				for _, value := range requirement.Values() {
-					domainGroups[key].Insert(value, nodePoolTaints...)
-				}
-			}
-		}
 	}
 
 	// inject topology constraints
 	pods = p.injectVolumeTopologyRequirements(ctx, pods)
 
 	// Calculate cluster topology
-	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, domainGroups, pods)
+	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}

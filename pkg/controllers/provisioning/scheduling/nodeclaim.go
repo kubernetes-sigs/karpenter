@@ -84,7 +84,7 @@ func (n *NodeClaim) Add(pod *v1.Pod, podData *PodData) error {
 	nodeClaimRequirements.Add(podData.Requirements.Values()...)
 
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(podData.StrictRequirements, nodeClaimRequirements, pod, scheduling.AllowUndefinedWellKnownLabels)
+	topologyRequirements, err := n.topology.AddRequirements(pod, n.NodeClaimTemplate.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func (n *NodeClaim) Add(pod *v1.Pod, podData *PodData) error {
 	n.InstanceTypeOptions = remaining
 	n.Spec.Resources.Requests = requests
 	n.Requirements = nodeClaimRequirements
-	n.topology.Record(pod, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
+	n.topology.Record(pod, n.NodeClaim.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, hostPorts)
 	return nil
 }

@@ -155,7 +155,9 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	pods := makeDiversePods(podCount)
 	clock := &clock.RealClock{}
 	cluster = state.NewCluster(clock, client, cloudProvider)
-	topology, err := scheduling.NewTopology(ctx, client, cluster, getDomainGroups(instanceTypes), pods)
+	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, []*v1.NodePool{nodePool}, map[string][]*cloudprovider.InstanceType{
+		nodePool.Name: instanceTypes,
+	}, pods)
 	if err != nil {
 		b.Fatalf("creating topology, %s", err)
 	}
@@ -217,21 +219,6 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 			b.Fatalf("scheduled %f pods/sec, expected at least %f", podsPerSec, MinPodsPerSec)
 		}
 	}
-}
-
-func getDomainGroups(instanceTypes []*cloudprovider.InstanceType) map[string]scheduling.TopologyDomainGroup {
-	domainGroups := map[string]scheduling.TopologyDomainGroup{}
-	for _, it := range instanceTypes {
-		for key, requirement := range it.Requirements {
-			if _, ok := domainGroups[key]; !ok {
-				domainGroups[key] = scheduling.NewTopologyDomainGroup()
-			}
-			for _, domain := range requirement.Values() {
-				domainGroups[key].Insert(domain)
-			}
-		}
-	}
-	return domainGroups
 }
 
 func makeDiversePods(count int) []*corev1.Pod {

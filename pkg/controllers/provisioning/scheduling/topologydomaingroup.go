@@ -33,8 +33,6 @@ func NewTopologyDomainGroup() TopologyDomainGroup {
 
 // Insert either adds a new domain to the TopologyDomainGroup or updates an existing domain.
 func (t TopologyDomainGroup) Insert(domain string, taints ...v1.Taint) {
-	// Note: This could potentially be improved by removing any set of which the new set of taints is a proper subset.
-	// Currently this is only handled when the incoming set is the empty set.
 	if _, ok := t[domain]; !ok || len(taints) == 0 {
 		t[domain] = [][]v1.Taint{taints}
 		return
@@ -42,6 +40,8 @@ func (t TopologyDomainGroup) Insert(domain string, taints ...v1.Taint) {
 	if len(t[domain][0]) == 0 {
 		// The domain already contains a set of taints which is the empty set, therefore this domain can be considered
 		// by all pods, regardless of their tolerations. There is no longer a need to track new sets of taints.
+		// This could potentially be generalized by removing any set for which the new set of taints is a proper subset, but
+		// for now this is just handled for the empty set.
 		return
 	}
 	t[domain] = append(t[domain], taints)
@@ -56,6 +56,8 @@ func (t TopologyDomainGroup) ForEachDomain(f func(domain string)) {
 
 // ForEachToleratedDomain calls f on each domain tracked by the TopologyDomainGroup which are also tolerated by the provided pod.
 func (t TopologyDomainGroup) ForEachToleratedDomain(pod *v1.Pod, f func(domain string)) {
+	// Could potentially improve performance by hashing the pod's tolerations and storing a map from toleration hash to
+	// eligible domains.
 	for domain, taintGroups := range t {
 		for _, taints := range taintGroups {
 			if err := scheduling.Taints(taints).ToleratesPod(pod); err == nil {
