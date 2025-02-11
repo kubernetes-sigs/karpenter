@@ -101,19 +101,11 @@ func NewTopologyGroup(
 	}
 
 	domains := map[string]int32{}
-	if nodeFilter.TaintPolicy == corev1.NodeInclusionPolicyHonor {
-		domainGroup.ForEachToleratedDomain(pod, func(domain string) {
-			domains[domain] = 0
-		})
-	} else {
-		domainGroup.ForEachDomain(func(domain string) {
-			domains[domain] = 0
-		})
-	}
 	emptyDomains := sets.New[string]()
-	for domain := range domains {
+	domainGroup.ForEachDomain(pod, nodeFilter.TaintPolicy, func(domain string) {
+		domains[domain] = 0
 		emptyDomains.Insert(domain)
-	}
+	})
 
 	return &TopologyGroup{
 		Type:         topologyType,

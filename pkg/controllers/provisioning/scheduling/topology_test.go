@@ -1499,6 +1499,7 @@ var _ = Describe("Topology", func() {
 				NodeTaintsPolicy:  lo.ToPtr(corev1.NodeInclusionPolicyHonor),
 			}}
 
+			// Create two pods which tolerate the first nodepool's taint, and four which tolerate the second's
 			pods := lo.Flatten(lo.Map(nodePools, func(np *v1.NodePool, i int) []*corev1.Pod {
 				return test.UnschedulablePods(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
