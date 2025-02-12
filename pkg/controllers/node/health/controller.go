@@ -232,6 +232,6 @@ func (c *Controller) publishNodePoolHealthEvent(ctx context.Context, node *corev
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: npName}, np); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	c.recorder.Publish(NodeRepairBlocked(node, nodeClaim, np, fmt.Sprintf("more then %s nodes are unhealthy in the nodepool", allowedUnhealthyPercent.String()))...)
+	c.recorder.Publish(NodeRepairBlocked(node, nodeClaim, np, fmt.Sprintf("more than %s nodes are unhealthy in the nodepool", allowedUnhealthyPercent.String()))...)
 	return nil
 }
