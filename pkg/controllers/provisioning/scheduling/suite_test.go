@@ -107,6 +107,7 @@ var _ = BeforeEach(func() {
 	cloudProvider.InstanceTypes, _ = newCP.GetInstanceTypes(ctx, nil)
 	cloudProvider.CreateCalls = nil
 	scheduling.MaxInstanceTypes = 60
+	state.PodSchedulingDecisionSeconds.Reset()
 })
 
 var _ = AfterEach(func() {
@@ -401,8 +402,13 @@ var _ = Context("Scheduling", func() {
 						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 							{Key: label, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 						}})
+					nn := client.ObjectKeyFromObject(pod)
+					cluster.AckPods(pod)
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					ExpectNotScheduled(ctx, env.Client, pod)
+					Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
+					Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeFalse())
+					ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 1, nil)
 				}
 			})
 			It("should not schedule pods that have node selectors with restricted domains", func() {
