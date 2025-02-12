@@ -66,6 +66,8 @@ var _ = Describe("Registration", func() {
 			if isManagedNodeClaim {
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 				Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+				nodePool = ExpectExists(ctx, env.Client, nodePool)
+				Expect(ExpectStatusConditionExists(nodePool, v1.ConditionTypeNodeRegistrationHealthy).Status).To(Equal(metav1.ConditionTrue))
 			} else {
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsUnknown()).To(BeTrue())
 				Expect(nodeClaim.Status.NodeName).To(Equal(""))
