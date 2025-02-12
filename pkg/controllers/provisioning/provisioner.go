@@ -31,7 +31,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -236,8 +235,8 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	nodepoolutils.OrderByWeight(nodePools)
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
-	domains := map[string]sets.Set[string]{}
 	for _, np := range nodePools {
+		// Get instance type options
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
 			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Error(err, "skipping, unable to resolve instance types")
@@ -247,49 +246,14 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Info("skipping, no resolved instance types found")
 			continue
 		}
-
 		instanceTypes[np.Name] = its
-
-		// Construct Topology Domains
-		for _, it := range its {
-			// We need to intersect the instance type requirements with the current nodePool requirements.  This
-			// ensures that something like zones from an instance type don't expand the universe of valid domains.
-			requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-			requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
-			requirements.Add(it.Requirements.Values()...)
-
-			for key, requirement := range requirements {
-				// This code used to execute a Union between domains[key] and requirement.Values().
-				// The downside of this is that Union is immutable and takes a copy of the set it is executed upon.
-				// This resulted in a lot of memory pressure on the heap and poor performance
-				// https://github.com/aws/karpenter/issues/3565
-				if domains[key] == nil {
-					domains[key] = sets.New(requirement.Values()...)
-				} else {
-					domains[key].Insert(requirement.Values()...)
-				}
-			}
-		}
-
-		requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
-		requirements.Add(scheduling.NewLabelRequirements(np.Spec.Template.Labels).Values()...)
-		for key, requirement := range requirements {
-			if requirement.Operator() == corev1.NodeSelectorOpIn {
-				// The following is a performance optimisation, for the explanation see the comment above
-				if domains[key] == nil {
-					domains[key] = sets.New(requirement.Values()...)
-				} else {
-					domains[key].Insert(requirement.Values()...)
-				}
-			}
-		}
 	}
 
 	// inject topology constraints
 	pods = p.injectVolumeTopologyRequirements(ctx, pods)
 
 	// Calculate cluster topology
-	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, domains, pods)
+	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}

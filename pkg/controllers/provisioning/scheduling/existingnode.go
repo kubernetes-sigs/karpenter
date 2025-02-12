@@ -67,7 +67,7 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 
 func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v1.Pod, podData *PodData) error {
 	// Check Taints
-	if err := scheduling.Taints(n.cachedTaints).Tolerates(pod); err != nil {
+	if err := scheduling.Taints(n.cachedTaints).ToleratesPod(pod); err != nil {
 		return err
 	}
 	// determine the volumes that will be mounted if the pod schedules
@@ -100,7 +100,7 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 	nodeRequirements.Add(podData.Requirements.Values()...)
 
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(podData.StrictRequirements, nodeRequirements, pod)
+	topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 	n.Pods = append(n.Pods, pod)
 	n.requests = requests
 	n.requirements = nodeRequirements
-	n.topology.Record(pod, nodeRequirements)
+	n.topology.Record(pod, n.cachedTaints, nodeRequirements)
 	n.HostPortUsage().Add(pod, hostPorts)
 	n.VolumeUsage().Add(pod, volumes)
 	return nil

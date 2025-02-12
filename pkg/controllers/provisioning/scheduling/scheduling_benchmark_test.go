@@ -33,7 +33,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
@@ -156,8 +155,9 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	pods := makeDiversePods(podCount)
 	clock := &clock.RealClock{}
 	cluster = state.NewCluster(clock, client, cloudProvider)
-
-	topology, err := scheduling.NewTopology(ctx, client, cluster, getDomains(instanceTypes), pods)
+	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, []*v1.NodePool{nodePool}, map[string][]*cloudprovider.InstanceType{
+		nodePool.Name: instanceTypes,
+	}, pods)
 	if err != nil {
 		b.Fatalf("creating topology, %s", err)
 	}
@@ -219,24 +219,6 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 			b.Fatalf("scheduled %f pods/sec, expected at least %f", podsPerSec, MinPodsPerSec)
 		}
 	}
-}
-
-func getDomains(instanceTypes []*cloudprovider.InstanceType) map[string]sets.Set[string] {
-	domains := map[string]sets.Set[string]{}
-	for _, it := range instanceTypes {
-		for key, requirement := range it.Requirements {
-			// This code used to execute a Union between domains[key] and requirement.Values().
-			// The downside of this is that Union is immutable and takes a copy of the set it is executed upon.
-			// This resulted in a lot of memory pressure on the heap and poor performance
-			// https://github.com/aws/karpenter/issues/3565
-			if domains[key] == nil {
-				domains[key] = sets.New(requirement.Values()...)
-			} else {
-				domains[key].Insert(requirement.Values()...)
-			}
-		}
-	}
-	return domains
 }
 
 func makeDiversePods(count int) []*corev1.Pod {

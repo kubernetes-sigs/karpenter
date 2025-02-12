@@ -23,7 +23,7 @@ import (
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -69,36 +69,60 @@ type TopologyGroup struct {
 	emptyDomains sets.Set[string]       // domains for which we know that no pod exists
 }
 
-func NewTopologyGroup(topologyType TopologyType, topologyKey string, pod *v1.Pod, namespaces sets.Set[string], labelSelector *metav1.LabelSelector, maxSkew int32, minDomains *int32, domains sets.Set[string]) *TopologyGroup {
-	domainCounts := map[string]int32{}
-	for domain := range domains {
-		domainCounts[domain] = 0
-	}
+func NewTopologyGroup(
+	topologyType TopologyType,
+	topologyKey string,
+	pod *corev1.Pod,
+	namespaces sets.Set[string],
+	labelSelector *metav1.LabelSelector,
+	maxSkew int32,
+	minDomains *int32,
+	taintPolicy *corev1.NodeInclusionPolicy,
+	affinityPolicy *corev1.NodeInclusionPolicy,
+	domainGroup TopologyDomainGroup,
+) *TopologyGroup {
 	// the nil *TopologyNodeFilter always passes which is what we need for affinity/anti-affinity
-	var nodeSelector TopologyNodeFilter
+	var nodeFilter TopologyNodeFilter
 	if topologyType == TopologyTypeSpread {
-		nodeSelector = MakeTopologyNodeFilter(pod)
+		nodeTaintsPolicy := corev1.NodeInclusionPolicyIgnore
+		if taintPolicy != nil {
+			nodeTaintsPolicy = *taintPolicy
+		}
+		nodeAffinityPolicy := corev1.NodeInclusionPolicyHonor
+		if affinityPolicy != nil {
+			nodeAffinityPolicy = *affinityPolicy
+		}
+		nodeFilter = MakeTopologyNodeFilter(pod, nodeTaintsPolicy, nodeAffinityPolicy)
 	}
+
 	selector, err := metav1.LabelSelectorAsSelector(labelSelector)
 	if err != nil {
 		selector = labels.Nothing()
 	}
+
+	domains := map[string]int32{}
+	emptyDomains := sets.New[string]()
+	domainGroup.ForEachDomain(pod, nodeFilter.TaintPolicy, func(domain string) {
+		domains[domain] = 0
+		emptyDomains.Insert(domain)
+	})
+
 	return &TopologyGroup{
 		Type:         topologyType,
 		Key:          topologyKey,
 		namespaces:   namespaces,
 		selector:     selector,
 		rawSelector:  labelSelector,
-		nodeFilter:   nodeSelector,
+		nodeFilter:   nodeFilter,
 		maxSkew:      maxSkew,
-		domains:      domainCounts,
-		emptyDomains: domains.Clone(),
+		domains:      domains,
+		emptyDomains: emptyDomains,
 		owners:       map[types.UID]struct{}{},
 		minDomains:   minDomains,
 	}
 }
 
-func (t *TopologyGroup) Get(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
+func (t *TopologyGroup) Get(pod *corev1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	switch t.Type {
 	case TopologyTypeSpread:
 		return t.nextDomainTopologySpread(pod, podDomains, nodeDomains)
@@ -120,8 +144,8 @@ func (t *TopologyGroup) Record(domains ...string) {
 
 // Counts returns true if the pod would count for the topology, given that it schedule to a node with the provided
 // requirements
-func (t *TopologyGroup) Counts(pod *v1.Pod, requirements scheduling.Requirements, compatabilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
-	return t.selects(pod) && t.nodeFilter.MatchesRequirements(requirements, compatabilityOptions...)
+func (t *TopologyGroup) Counts(pod *corev1.Pod, taints []corev1.Taint, requirements scheduling.Requirements, compatabilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
+	return t.selects(pod) && t.nodeFilter.Matches(taints, requirements, compatabilityOptions...)
 }
 
 // Register ensures that the topology is aware of the given domain names.
@@ -178,7 +202,7 @@ func (t *TopologyGroup) Hash() uint64 {
 // If there are multiple eligible domains, we return any random domain that satisfies the `maxSkew` configuration.
 // If there are no eligible domains, we return a `DoesNotExist` requirement, implying that we could not satisfy the topologySpread requirement.
 // nolint:gocyclo
-func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
+func (t *TopologyGroup) nextDomainTopologySpread(pod *corev1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
 	// min count is calculated across all domains
 	min := t.domainMinCount(podDomains)
 	selfSelecting := t.selects(pod)
@@ -190,7 +214,7 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDo
 	// this is going to be more efficient to iterate through
 	// This is particularly useful when considering the hostname topology key that can have a
 	// lot of t.domains but only a single nodeDomain
-	if nodeDomains.Operator() == v1.NodeSelectorOpIn {
+	if nodeDomains.Operator() == corev1.NodeSelectorOpIn {
 		for _, domain := range nodeDomains.Values() {
 			if count, ok := t.domains[domain]; ok {
 				if selfSelecting {
@@ -221,14 +245,14 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *v1.Pod, podDomains, nodeDo
 	}
 	if minDomain == "" {
 		// avoids an error message about 'zone in [""]', preferring 'zone in []'
-		return scheduling.NewRequirement(podDomains.Key, v1.NodeSelectorOpDoesNotExist)
+		return scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpDoesNotExist)
 	}
-	return scheduling.NewRequirement(podDomains.Key, v1.NodeSelectorOpIn, minDomain)
+	return scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpIn, minDomain)
 }
 
 func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
 	// hostname based topologies always have a min pod count of zero since we can create one
-	if t.Key == v1.LabelHostname {
+	if t.Key == corev1.LabelHostname {
 		return 0
 	}
 
@@ -250,14 +274,14 @@ func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
 }
 
 // nolint:gocyclo
-func (t *TopologyGroup) nextDomainAffinity(pod *v1.Pod, podDomains *scheduling.Requirement, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
-	options := scheduling.NewRequirement(podDomains.Key, v1.NodeSelectorOpDoesNotExist)
+func (t *TopologyGroup) nextDomainAffinity(pod *corev1.Pod, podDomains *scheduling.Requirement, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
+	options := scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpDoesNotExist)
 
 	// If we are explicitly selecting on specific node domains ("In" requirement),
 	// this is going to be more efficient to iterate through
 	// This is particularly useful when considering the hostname topology key that can have a
 	// lot of t.domains but only a single nodeDomain
-	if nodeDomains.Operator() == v1.NodeSelectorOpIn {
+	if nodeDomains.Operator() == corev1.NodeSelectorOpIn {
 		for _, domain := range nodeDomains.Values() {
 			if count, ok := t.domains[domain]; podDomains.Has(domain) && ok && count > 0 {
 				options.Insert(domain)
@@ -314,7 +338,7 @@ func (t *TopologyGroup) anyCompatiblePodDomain(podDomains *scheduling.Requiremen
 
 // nolint:gocyclo
 func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
-	options := scheduling.NewRequirement(podDomains.Key, v1.NodeSelectorOpDoesNotExist)
+	options := scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpDoesNotExist)
 	// pods with anti-affinity must schedule to a domain where there are currently none of those pods (an empty
 	// domain). If there are none of those domains, then the pod can't schedule and we don't need to walk this
 	// list of domains.  The use case where this optimization is really great is when we are launching nodes for
@@ -325,7 +349,7 @@ func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduli
 	// is less than our empty domains, this is going to be more efficient to iterate through
 	// This is particularly useful when considering the hostname topology key that can have a
 	// lot of t.domains but only a single nodeDomain
-	if nodeDomains.Operator() == v1.NodeSelectorOpIn && nodeDomains.Len() < len(t.emptyDomains) {
+	if nodeDomains.Operator() == corev1.NodeSelectorOpIn && nodeDomains.Len() < len(t.emptyDomains) {
 		for _, domain := range nodeDomains.Values() {
 			if t.emptyDomains.Has(domain) && podDomains.Has(domain) {
 				options.Insert(domain)
@@ -342,6 +366,6 @@ func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduli
 }
 
 // selects returns true if the given pod is selected by this topology
-func (t *TopologyGroup) selects(pod *v1.Pod) bool {
+func (t *TopologyGroup) selects(pod *corev1.Pod) bool {
 	return t.namespaces.Has(pod.Namespace) && t.selector.Matches(labels.Set(pod.Labels))
 }
