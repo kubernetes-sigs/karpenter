@@ -165,7 +165,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	rejectedPods, pods := lo.FilterReject(pods, func(po *corev1.Pod, _ int) bool {
 		if err := p.Validate(ctx, po); err != nil {
 			// Mark in memory that this pod is unschedulable
-			p.cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, po)
+			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, po)
 			log.FromContext(ctx).WithValues("Pod", klog.KRef(po.Namespace, po.Name)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
@@ -304,7 +304,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			log.FromContext(ctx).Info("no nodepools found")
 			// Mark in memory that these pods are unschedulable
-			p.cluster.MarkPodSchedulingDecisions(lo.SliceToMap(pods, func(p *corev1.Pod) (*corev1.Pod, error) {
+			p.cluster.MarkPodSchedulingDecisions(ctx, lo.SliceToMap(pods, func(p *corev1.Pod) (*corev1.Pod, error) {
 				return p, fmt.Errorf("no nodepools found")
 			}), pods...)
 			return scheduler.Results{}, nil
@@ -317,7 +317,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
 	}
 	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
-	p.cluster.MarkPodSchedulingDecisions(results.PodErrors, pendingPods...)
+	p.cluster.MarkPodSchedulingDecisions(ctx, results.PodErrors, pendingPods...)
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }

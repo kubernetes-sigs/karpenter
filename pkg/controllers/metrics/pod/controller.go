@@ -115,7 +115,18 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
 			Name:      "provisioning_bound_duration_seconds",
-			Help:      "The time from when Karpenter first thinks the pod can schedule until it binds. Note: this calculated from a point in memory, not by the pod creation timestamp.",
+			Help:      "The time from when Karpenter first thinks the pod can schedule until it binds. Note: this is calculated from a point in memory, not by the pod creation timestamp.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{},
+	)
+	PodProvisioningBoundDurationSecondsNodePoolRegistrationHealthy = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.PodSubsystem,
+			Name:      "provisioning_bound_duration_seconds_nodepool_registration_healthy",
+			Help:      "The time from when Karpenter first thinks the pod can schedule to a nodePool that has NodeRegistrationHealthy=true until it binds. Note: this is calculated from a point in memory, not by the pod creation timestamp.",
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]string{},
@@ -139,6 +150,17 @@ var (
 			Subsystem: metrics.PodSubsystem,
 			Name:      "provisioning_startup_duration_seconds",
 			Help:      "The time from when Karpenter first thinks the pod can schedule until the pod is running. Note: this calculated from a point in memory, not by the pod creation timestamp.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{},
+	)
+	PodProvisioningStartupDurationSecondsNodePoolRegistrationHealthy = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.PodSubsystem,
+			Name:      "provisioning_startup_duration_seconds_nodepool_registration_healthy",
+			Help:      "The time from when Karpenter first thinks the pod can schedule to a nodePool that has NodeRegistrationHealthy=true until the pod is running. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 			Buckets:   metrics.DurationBuckets(),
 		},
 		[]string{},
@@ -252,9 +274,10 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	})
 	c.recordPodSchedulingUndecidedMetric(pod)
 	// Get the time for when we Karpenter first thought the pod was schedulable. This should be zero if we didn't simulate for this pod.
-	schedulableTime := c.cluster.PodSchedulingSuccessTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
-	c.recordPodStartupMetric(pod, schedulableTime)
-	c.recordPodBoundMetric(pod, schedulableTime)
+	schedulableTime := c.cluster.PodSchedulingSuccessTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, false)
+	healthyRegistrationSchedulableTime := c.cluster.PodSchedulingSuccessTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, true)
+	c.recordPodStartupMetric(pod, schedulableTime, healthyRegistrationSchedulableTime)
+	c.recordPodBoundMetric(pod, schedulableTime, healthyRegistrationSchedulableTime)
 	// Requeue every 30s for pods that are stuck without a state change
 	return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
 }
@@ -279,7 +302,7 @@ func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 	}
 }
 
-func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime time.Time) {
+func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime time.Time, healthyRegistrationSchedulableTime time.Time) {
 	key := client.ObjectKeyFromObject(pod).String()
 	if pod.Status.Phase == corev1.PodPending {
 		PodUnstartedTimeSeconds.Set(time.Since(pod.CreationTimestamp.Time).Seconds(), map[string]string{
@@ -324,13 +347,16 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 			if !schedulableTime.IsZero() {
 				PodProvisioningStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
 			}
+			if !healthyRegistrationSchedulableTime.IsZero() {
+				PodProvisioningStartupDurationSecondsNodePoolRegistrationHealthy.Observe(cond.LastTransitionTime.Sub(healthyRegistrationSchedulableTime).Seconds(), nil)
+			}
 			c.pendingPods.Delete(key)
 			// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
 			c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))
 		}
 	}
 }
-func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.Time) {
+func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.Time, healthyRegistrationSchedulableTime time.Time) {
 	key := client.ObjectKeyFromObject(pod).String()
 	cond, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
 		return c.Type == corev1.PodScheduled
@@ -366,6 +392,9 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 		PodBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
 		if !schedulableTime.IsZero() {
 			PodProvisioningBoundDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+		}
+		if !healthyRegistrationSchedulableTime.IsZero() {
+			PodProvisioningBoundDurationSecondsNodePoolRegistrationHealthy.Observe(cond.LastTransitionTime.Sub(healthyRegistrationSchedulableTime).Seconds(), nil)
 		}
 		c.unscheduledPods.Delete(key)
 	}
