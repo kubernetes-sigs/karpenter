@@ -164,7 +164,6 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 
 	scheduler := scheduling.NewScheduler(
 		ctx,
-		uuid.NewUUID(),
 		client,
 		[]*v1.NodePool{nodePool},
 		cluster,

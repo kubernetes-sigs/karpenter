@@ -77,9 +77,9 @@ var allKnownDisruptionReasons []v1.DisruptionReason
 var onDemandInstances []*cloudprovider.InstanceType
 var spotInstances []*cloudprovider.InstanceType
 var leastExpensiveInstance, mostExpensiveInstance *cloudprovider.InstanceType
-var leastExpensiveOffering, mostExpensiveOffering cloudprovider.Offering
+var leastExpensiveOffering, mostExpensiveOffering *cloudprovider.Offering
 var leastExpensiveSpotInstance, mostExpensiveSpotInstance *cloudprovider.InstanceType
-var leastExpensiveSpotOffering, mostExpensiveSpotOffering cloudprovider.Offering
+var leastExpensiveSpotOffering, mostExpensiveSpotOffering *cloudprovider.Offering
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -469,7 +469,7 @@ var _ = Describe("Disruption Taints", func() {
 	BeforeEach(func() {
 		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 			Name: "current-on-demand",
-			Offerings: []cloudprovider.Offering{
+			Offerings: []*cloudprovider.Offering{
 				{
 					Available:    false,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
@@ -479,7 +479,7 @@ var _ = Describe("Disruption Taints", func() {
 		})
 		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 			Name: "spot-replacement",
-			Offerings: []cloudprovider.Offering{
+			Offerings: []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),

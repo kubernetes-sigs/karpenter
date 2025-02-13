@@ -64,7 +64,7 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 		options.Resources[corev1.ResourcePods] = resource.MustParse("5")
 	}
 	if len(options.Offerings) == 0 {
-		options.Offerings = []cloudprovider.Offering{
+		options.Offerings = []*cloudprovider.Offering{
 			{
 				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
@@ -117,10 +117,10 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
-		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(corev1.LabelTopologyZone).Any()
 		})...),
-		scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+		scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
 		})...),
 		scheduling.NewRequirement(LabelInstanceSize, corev1.NodeSelectorOpDoesNotExist),
@@ -171,7 +171,7 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 								},
 							}
 							price := PriceFromResources(opts.Resources)
-							opts.Offerings = []cloudprovider.Offering{
+							opts.Offerings = []*cloudprovider.Offering{
 								{
 									Available: true,
 									Requirements: scheduling.NewLabelRequirements(map[string]string{

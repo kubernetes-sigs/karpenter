@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -66,17 +65,14 @@ type CloudProvider struct {
 	Drifted                   cloudprovider.DriftReason
 	NodeClassGroupVersionKind []schema.GroupVersionKind
 	RepairPolicy              []cloudprovider.RepairPolicy
-
-	ReservationManagerProvider *ReservationManagerProvider
 }
 
 func NewCloudProvider() *CloudProvider {
 	return &CloudProvider{
-		AllowedCreateCalls:         math.MaxInt,
-		CreatedNodeClaims:          map[string]*v1.NodeClaim{},
-		InstanceTypesForNodePool:   map[string][]*cloudprovider.InstanceType{},
-		ErrorsForNodePool:          map[string]error{},
-		ReservationManagerProvider: NewReservationManagerProvider(),
+		AllowedCreateCalls:       math.MaxInt,
+		CreatedNodeClaims:        map[string]*v1.NodeClaim{},
+		InstanceTypesForNodePool: map[string][]*cloudprovider.InstanceType{},
+		ErrorsForNodePool:        map[string]error{},
 	}
 }
 
@@ -110,7 +106,6 @@ func (c *CloudProvider) Reset() {
 			TolerationDuration: 30 * time.Minute,
 		},
 	}
-	c.ReservationManagerProvider.Reset()
 }
 
 func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
@@ -149,17 +144,24 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 		}
 	}
 	// Find offering, prioritizing reserved instances
-	offering := func() cloudprovider.Offering {
+	offering := func() *cloudprovider.Offering {
 		offerings := instanceType.Offerings.Available().Compatible(reqs)
 		lo.Must0(len(offerings) != 0, "created nodeclaim with no available offerings")
-		if reservedOfferings := offerings.WithCapacityType(v1.CapacityTypeReserved); len(reservedOfferings) != 0 {
-			c.ReservationManagerProvider.create(reservedOfferings[0].Requirements.Get(v1alpha1.LabelReservationID).Any())
-			return reservedOfferings[0]
+		for _, o := range offerings {
+			if o.CapacityType() == v1.CapacityTypeReserved {
+				o.ReservationCapacity -= 1
+				if o.ReservationCapacity == 0 {
+					o.Available = false
+				}
+				return o
+			}
 		}
 		return offerings[0]
 	}()
-	labels[corev1.LabelTopologyZone] = offering.Requirements.Get(corev1.LabelTopologyZone).Any()
-	labels[v1.CapacityTypeLabelKey] = offering.Requirements.Get(v1.CapacityTypeLabelKey).Any()
+	// Propagate labels dictated by offering requirements - e.g. zone, capacity-type, and reservation-id
+	for _, req := range offering.Requirements {
+		labels[req.Key] = req.Any()
+	}
 
 	created := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -203,8 +205,7 @@ func (c *CloudProvider) List(_ context.Context) ([]*v1.NodeClaim, error) {
 	}), nil
 }
 
-// Note: this fake implementation does **not** support availability snapshots. The burden of testing snapshot support should be on the cloudprovider implementation.
-func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool, opts ...option.Function[cloudprovider.GetInstanceTypeOptions]) ([]*cloudprovider.InstanceType, error) {
+func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	if np != nil {
 		if err, ok := c.ErrorsForNodePool[np.Name]; ok {
 			return nil, err
@@ -215,23 +216,7 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool, opt
 		}
 	}
 	if c.InstanceTypes != nil {
-		return lo.Map(c.InstanceTypes, func(it *cloudprovider.InstanceType, _ int) *cloudprovider.InstanceType {
-			for i := range it.Offerings {
-				if it.Offerings[i].Requirements.Get(v1.CapacityTypeLabelKey).Any() != v1.CapacityTypeReserved {
-					continue
-				}
-				lo.Must0(
-					it.Offerings[i].Requirements.Has(v1alpha1.LabelReservationID),
-					"reserved offering for instance type %s must define requirement for label %s",
-					it.Name,
-					v1alpha1.LabelReservationID,
-				)
-				reservationID := it.Offerings[i].Requirements.Get(v1alpha1.LabelReservationID).Any()
-				it.Offerings[i].ReservationManager = c.ReservationManagerProvider.ReservationManager(reservationID, opts...)
-				it.Offerings[i].Available = c.ReservationManagerProvider.Capacity(reservationID) > 0
-			}
-			return it
-		}), nil
+		return c.InstanceTypes, nil
 	}
 	return []*cloudprovider.InstanceType{
 		NewInstanceType(InstanceTypeOptions{
