@@ -2257,7 +2257,7 @@ func AddInstanceResources(instanceTypes []*cloudprovider.InstanceType, resources
 		OperatingSystems: sets.New(string(corev1.Linux)),
 	}
 	price := fake.PriceFromResources(opts.Resources)
-	opts.Offerings = []cloudprovider.Offering{
+	opts.Offerings = []*cloudprovider.Offering{
 		{
 			Available: true,
 			Requirements: scheduling.NewLabelRequirements(map[string]string{

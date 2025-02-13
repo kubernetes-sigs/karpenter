@@ -25,11 +25,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -71,7 +69,7 @@ type CloudProvider interface {
 	// Availability of types or zone may vary by nodepool or over time.  Regardless of
 	// availability, the GetInstanceTypes method should always return all instance types,
 	// even those with no offerings available.
-	GetInstanceTypes(context.Context, *v1.NodePool, ...option.Function[GetInstanceTypeOptions]) ([]*InstanceType, error)
+	GetInstanceTypes(context.Context, *v1.NodePool) ([]*InstanceType, error)
 	// IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 	// it is tied to.
 	IsDrifted(context.Context, *v1.NodeClaim) (DriftReason, error)
@@ -83,18 +81,6 @@ type CloudProvider interface {
 	// GetSupportedNodeClasses returns CloudProvider NodeClass that implements status.Object
 	// NOTE: It returns a list where the first element should be the default NodeClass
 	GetSupportedNodeClasses() []status.Object
-}
-
-type GetInstanceTypeOptions struct {
-	AvailabilitySnapshotUUID *types.UID
-}
-
-// GetInstanceTypes calls made with the same snapshot ID should have a consistent view of offering availability. This
-// is crucial for offerings with capacity type "reserved" since cross-nodepool offerings may share availability.
-func WithAvailabilitySnapshotUUID(uuid types.UID) option.Function[GetInstanceTypeOptions] {
-	return func(opts *GetInstanceTypeOptions) {
-		opts.AvailabilitySnapshotUUID = lo.ToPtr(uuid)
-	}
 }
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
@@ -240,15 +226,6 @@ func (its InstanceTypes) Truncate(requirements scheduling.Requirements, maxItems
 	return truncatedInstanceTypes, nil
 }
 
-func (its InstanceTypes) Difference(other InstanceTypes) InstanceTypes {
-	names := sets.New(lo.Map(other, func(it *InstanceType, _ int) string {
-		return it.Name
-	})...)
-	return lo.Reject(its, func(it *InstanceType, _ int) bool {
-		return names.Has(it.Name)
-	})
-}
-
 type InstanceTypeOverhead struct {
 	// KubeReserved returns the default resources allocated to kubernetes system daemons by default
 	KubeReserved corev1.ResourceList
@@ -281,58 +258,30 @@ type ReservationManager interface {
 // these properties are captured with labels in Requirements.
 // Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone.
 type Offering struct {
-	// ReservationManager is used for tracking availabity of reserved offerings over the course of a scheduling loop. It
-	// must be non-nil for offerings with capacity type "reserved", but may be nil otherwise.
-	ReservationManager
+	ReservationID       string
+	ReservationCapacity int
 
 	Requirements scheduling.Requirements
 	Price        float64
 	Available    bool
 }
 
-type Offerings []Offering
-
-// WithCapacityType filters the offerings by the provided capacity type.
-func (ofs Offerings) WithCapacityType(capacityType string) Offerings {
-	return lo.Filter(ofs, func(o Offering, _ int) bool {
-		return o.Requirements.Get(v1.CapacityTypeLabelKey).Any() == capacityType
-	})
+func (o *Offering) CapacityType() string {
+	return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
 }
 
-// Reserve attempts to make a reservation for each offering, returning true if it was successful for any.
-func (ofs Offerings) Reserve(id string) Offerings {
-	return lo.Filter(ofs, func(o Offering, _ int) bool {
-		return o.Reserve(id)
-	})
-}
-
-func (ofs Offerings) Release(id string) {
-	for i := range ofs {
-		ofs[i].Release(id)
-	}
-}
+type Offerings []*Offering
 
 // Available filters the available offerings from the returned offerings
 func (ofs Offerings) Available() Offerings {
-	return lo.Filter(ofs, func(o Offering, _ int) bool {
+	return lo.Filter(ofs, func(o *Offering, _ int) bool {
 		return o.Available
 	})
 }
 
-func (ofs Offerings) PartitionCompatible(reqs scheduling.Requirements) (compatible Offerings, incompatible Offerings) {
-	for _, o := range ofs {
-		if reqs.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-			compatible = append(compatible, o)
-		} else {
-			incompatible = append(incompatible, o)
-		}
-	}
-	return compatible, incompatible
-}
-
 // Compatible returns the offerings based on the passed requirements
 func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
-	return lo.Filter(ofs, func(offering Offering, _ int) bool {
+	return lo.Filter(ofs, func(offering *Offering, _ int) bool {
 		return reqs.IsCompatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels)
 	})
 }
@@ -348,15 +297,15 @@ func (ofs Offerings) HasCompatible(reqs scheduling.Requirements) bool {
 }
 
 // Cheapest returns the cheapest offering from the returned offerings
-func (ofs Offerings) Cheapest() Offering {
-	return lo.MinBy(ofs, func(a, b Offering) bool {
+func (ofs Offerings) Cheapest() *Offering {
+	return lo.MinBy(ofs, func(a, b *Offering) bool {
 		return a.Price < b.Price
 	})
 }
 
 // MostExpensive returns the most expensive offering from the return offerings
-func (ofs Offerings) MostExpensive() Offering {
-	return lo.MaxBy(ofs, func(a, b Offering) bool {
+func (ofs Offerings) MostExpensive() *Offering {
+	return lo.MaxBy(ofs, func(a, b *Offering) bool {
 		return a.Price > b.Price
 	})
 }

@@ -773,7 +773,7 @@ var _ = Describe("Drift", func() {
 		It("can replace drifted nodes with multiple nodes", func() {
 			currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "current-on-demand",
-				Offerings: []cloudprovider.Offering{
+				Offerings: []*cloudprovider.Offering{
 					{
 						Available:    false,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
@@ -783,7 +783,7 @@ var _ = Describe("Drift", func() {
 			})
 			replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "replacement-on-demand",
-				Offerings: []cloudprovider.Offering{
+				Offerings: []*cloudprovider.Offering{
 					{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),

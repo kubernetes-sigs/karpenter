@@ -607,7 +607,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceCPU:    resource.MustParse("1"),
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
-				Offerings: []cloudprovider.Offering{
+				Offerings: []*cloudprovider.Offering{
 					{
 						Available:    true,
 						Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
@@ -628,7 +628,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceCPU:    resource.MustParse("1"),
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
-				Offerings: []cloudprovider.Offering{
+				Offerings: []*cloudprovider.Offering{
 					{
 						Available:    true,
 						Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
@@ -671,7 +671,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -687,7 +687,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -749,7 +749,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -765,7 +765,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -781,7 +781,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts3.Offerings = []cloudprovider.Offering{
+			opts3.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -845,7 +845,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -861,7 +861,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -934,7 +934,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -950,7 +950,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -966,7 +966,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts3.Offerings = []cloudprovider.Offering{
+			opts3.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1029,7 +1029,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1045,7 +1045,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1098,7 +1098,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1114,7 +1114,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1130,7 +1130,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts3.Offerings = []cloudprovider.Offering{
+			opts3.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1200,7 +1200,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1216,7 +1216,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1232,7 +1232,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts3.Offerings = []cloudprovider.Offering{
+			opts3.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1248,7 +1248,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts4.Offerings = []cloudprovider.Offering{
+			opts4.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1346,7 +1346,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1362,7 +1362,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1421,7 +1421,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1437,7 +1437,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1506,7 +1506,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
@@ -1522,7 +1522,7 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
