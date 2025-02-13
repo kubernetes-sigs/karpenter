@@ -1756,7 +1756,7 @@ var _ = Context("Scheduling", func() {
 						corev1.ResourceCPU:    resource.MustParse("2"),
 						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					},
-					Offerings: []cloudprovider.Offering{
+					Offerings: []*cloudprovider.Offering{
 						{
 							Available: true,
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
@@ -1773,7 +1773,7 @@ var _ = Context("Scheduling", func() {
 						corev1.ResourceCPU:    resource.MustParse("1"),
 						corev1.ResourceMemory: resource.MustParse("1Gi"),
 					},
-					Offerings: []cloudprovider.Offering{
+					Offerings: []*cloudprovider.Offering{
 						{
 							Available: true,
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
@@ -1790,7 +1790,7 @@ var _ = Context("Scheduling", func() {
 						corev1.ResourceCPU:    resource.MustParse("4"),
 						corev1.ResourceMemory: resource.MustParse("4Gi"),
 					},
-					Offerings: []cloudprovider.Offering{
+					Offerings: []*cloudprovider.Offering{
 						{
 							Available: true,
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
@@ -3806,22 +3806,23 @@ var _ = Context("Scheduling", func() {
 			}
 			reservedInstanceTypes := []*cloudprovider.InstanceType{cloudProvider.InstanceTypes[1], cloudProvider.InstanceTypes[2]}
 			for _, it := range reservedInstanceTypes {
-				it.Offerings = append(it.Offerings, cloudprovider.Offering{
-					Available: true,
+				reservationID := fmt.Sprintf("r-%s", it.Name)
+				it.Offerings = append(it.Offerings, &cloudprovider.Offering{
+					ReservationID:       reservationID,
+					ReservationCapacity: 1,
+					Available:           true,
 					Requirements: pscheduling.NewLabelRequirements(map[string]string{
 						v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
 						corev1.LabelTopologyZone:    "test-zone-1",
 						v1alpha1.LabelReservationID: fmt.Sprintf("r-%s", it.Name),
 					}),
-					Price: fake.PriceFromResources(it.Capacity) / 10000.0,
+					Price: fake.PriceFromResources(it.Capacity) / 100_000.0,
 				})
 			}
 		})
-		FIt("shouldn't fallback to on-demand or spot when compatible reserved offerings are available", func() {
+		It("shouldn't fallback to on-demand or spot when compatible reserved offerings are available", func() {
 			// With the pessimistic nature of scheduling reservations, we'll only be able to provision one instance per loop if a
 			// nodeclaim is compatible with both instance types
-			cloudProvider.ReservationManagerProvider.SetCapacity("r-small-instance-type", 1)
-			cloudProvider.ReservationManagerProvider.SetCapacity("r-medium-instance-type", 1)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			pods := lo.Times(3, func(_ int) *corev1.Pod {

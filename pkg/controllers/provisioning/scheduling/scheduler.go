@@ -27,6 +27,7 @@ import (
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -66,7 +67,6 @@ const (
 
 func NewScheduler(
 	ctx context.Context,
-	uuid types.UID,
 	kubeClient client.Client,
 	nodePools []*v1.NodePool,
 	cluster *state.Cluster,
@@ -101,7 +101,7 @@ func NewScheduler(
 		return nct, true
 	})
 	s := &Scheduler{
-		uuid:               uuid,
+		uuid:               uuid.NewUUID(),
 		kubeClient:         kubeClient,
 		nodeClaimTemplates: templates,
 		topology:           topology,
@@ -114,6 +114,7 @@ func NewScheduler(
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
 		}),
 		clock:                clock,
+		reservationManager:   NewReservationManager(instanceTypes),
 		reservedOfferingMode: reservedOfferingMode,
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
@@ -140,6 +141,7 @@ type Scheduler struct {
 	recorder             events.Recorder
 	kubeClient           client.Client
 	clock                clock.Clock
+	reservationManager   *ReservationManager
 	reservedOfferingMode ReservedOfferingMode
 }
 
@@ -351,6 +353,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 			s.remainingResources[nodeClaimTemplate.NodePoolName],
 			pod,
 			s.cachedPodData[pod.UID],
+			s.reservationManager,
 			s.reservedOfferingMode,
 		)
 		if err != nil {

@@ -45,6 +45,7 @@ type NodeClaim struct {
 	Pods                 []*corev1.Pod
 	reservedOfferings    map[string]cloudprovider.Offerings
 	reservedOfferingMode ReservedOfferingMode
+	reservationManager   *ReservationManager
 	topology             *Topology
 	hostPortUsage        *scheduling.HostPortUsage
 	daemonResources      corev1.ResourceList
@@ -84,6 +85,7 @@ func NewNodeClaimForPod(
 	remainingResources corev1.ResourceList,
 	pod *corev1.Pod,
 	podData *PodData,
+	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
 ) (*NodeClaim, error) {
 	// Ensure we don't consider instance types which would exceed the limits of the NodePool
@@ -110,12 +112,14 @@ func NewNodeClaimForPod(
 	template.InstanceTypeOptions = instanceTypes
 	template.Spec.Resources.Requests = daemonResources
 	nodeClaim := &NodeClaim{
-		NodeClaimTemplate: template,
-		hostPortUsage:     scheduling.NewHostPortUsage(),
-		topology:          topology,
-		daemonResources:   daemonResources,
-		hostname:          hostname,
-		reservedOfferings: map[string]cloudprovider.Offerings{},
+		NodeClaimTemplate:    template,
+		hostPortUsage:        scheduling.NewHostPortUsage(),
+		topology:             topology,
+		daemonResources:      daemonResources,
+		hostname:             hostname,
+		reservedOfferings:    map[string]cloudprovider.Offerings{},
+		reservationManager:   reservationManager,
+		reservedOfferingMode: reservedOfferingMode,
 	}
 	if err := nodeClaim.Add(pod, podData); err != nil {
 		return nil, fmt.Errorf(
@@ -181,7 +185,7 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData) error {
 	n.hostPortUsage.Add(pod, hostPorts)
 	n.reservedOfferings = reservedOfferings
 	for _, o := range offeringsToRelease {
-		o.Release(n.hostname)
+		n.reservationManager.Release(n.hostname, o)
 	}
 	return nil
 }
@@ -194,28 +198,34 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData) error {
 func (n *NodeClaim) reserveOfferings(
 	instanceTypes []*cloudprovider.InstanceType,
 	nodeClaimRequirements scheduling.Requirements,
-) (reservedOfferings map[string]cloudprovider.Offerings, offeringsToRelease []cloudprovider.Offering, err error) {
+) (reservedOfferings map[string]cloudprovider.Offerings, offeringsToRelease []*cloudprovider.Offering, err error) {
 	compatibleReservedInstanceTypes := sets.New[string]()
 	reservedOfferings = map[string]cloudprovider.Offerings{}
 	for _, it := range instanceTypes {
-		offerings := it.Offerings.Available().WithCapacityType(v1.CapacityTypeReserved)
-		if len(offerings) == 0 {
-			continue
+		hasCompatibleOffering := false
+		for _, o := range it.Offerings {
+			if o.CapacityType() != v1.CapacityTypeReserved || !o.Available {
+				continue
+			}
+			// Track every incompatible reserved offering for release. Since releasing a reservation is a no-op when there is no
+			// reservation for the given host, there's no need to check that a reservation actually exists for the offering.
+			if !nodeClaimRequirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+				offeringsToRelease = append(offeringsToRelease, o)
+				continue
+			}
+			hasCompatibleOffering = true
+			// Note that reservation is an idempotent operation - if we have previously successfully reserved an offering for
+			// this host, this operation is guaranteed to succeed. As such, reservedOfferings is guaranteed to be a subset of
+			// the previous set of reserved offerings.
+			if n.reservationManager.Reserve(n.hostname, o) {
+				reservedOfferings[it.Name] = append(reservedOfferings[it.Name], o)
+			}
 		}
-		compatible, incompatible := offerings.PartitionCompatible(nodeClaimRequirements)
-		if len(compatible) != 0 {
+		if hasCompatibleOffering {
 			compatibleReservedInstanceTypes.Insert(it.Name)
 		}
-		offeringsToRelease = append(offeringsToRelease, incompatible...)
-		// Reserved is a superset of n.reservedOfferings - toRelease. Since reservation is idempotent, any reservations made
-		// in previous iterations are guaranteed to succeed, guaranteeing that it is at least an equal set. It may have
-		// additional elements since offerings may have been released by other nodeclaims in previous iterations, freeing
-		// them to be reserved for this nodeclaim. We want to expand the set of reserved offerings when possible to maximize
-		// flexibility, maximizing binpacking potential.
-		if reserved := compatible.Reserve(n.hostname); len(reserved) != 0 {
-			reservedOfferings[it.Name] = reserved
-		}
 	}
+
 	if n.reservedOfferingMode == ReservedOfferingModeStrict {
 		// If an instance type with a compatible reserved offering exists, but we failed to make any reservations, we should
 		// fail. We include this check due to the pessimistic nature of instance reservation - we have to reserve each potential
@@ -245,7 +255,7 @@ func (n *NodeClaim) reserveOfferings(
 func (n *NodeClaim) Destroy() {
 	n.topology.Unregister(corev1.LabelHostname, n.hostname)
 	for _, ofs := range n.reservedOfferings {
-		ofs.Release(n.hostname)
+		n.reservationManager.Release(n.hostname, ofs...)
 	}
 }
 
@@ -359,8 +369,6 @@ func (e InstanceTypeFilterError) Error() string {
 	return fmt.Sprintf("no instance type met the requirements/resources/offering tuple, requirements=%s, resources=%s", e.requirements, resources.String(resources.Merge(e.daemonRequests, e.podRequests)))
 }
 
-// TODO: When doing the comaptibllity check, we must also filtered by reserved offerings for the
-//
 //nolint:gocyclo
 func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, podRequests, daemonRequests, totalRequests corev1.ResourceList) (cloudprovider.InstanceTypes, error) {
 	// We hold the results of our scheduling simulation inside of this InstanceTypeFilterError struct

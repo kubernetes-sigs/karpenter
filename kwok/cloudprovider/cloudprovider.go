@@ -23,7 +23,6 @@ import (
 	"math/rand"
 	"strings"
 
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
@@ -110,7 +109,7 @@ func (c CloudProvider) List(ctx context.Context) ([]*v1.NodeClaim, error) {
 }
 
 // Return the hard-coded instance types.
-func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool, _ ...option.Function[cloudprovider.GetInstanceTypeOptions]) ([]*cloudprovider.InstanceType, error) {
+func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	return c.instanceTypes, nil
 }
 
@@ -165,10 +164,10 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 
 		availableOfferings := it.Offerings.Available().Compatible(requirements)
 
-		offeringsByPrice := lo.GroupBy(availableOfferings, func(of cloudprovider.Offering) float64 { return of.Price })
+		offeringsByPrice := lo.GroupBy(availableOfferings, func(of *cloudprovider.Offering) float64 { return of.Price })
 		minOfferingPrice := lo.Min(lo.Keys(offeringsByPrice))
 		if cheapestOffering == nil || minOfferingPrice < cheapestOffering.Price {
-			cheapestOffering = lo.ToPtr(lo.Sample(offeringsByPrice[minOfferingPrice]))
+			cheapestOffering = lo.Sample(offeringsByPrice[minOfferingPrice])
 			instanceType = it
 		}
 	}
