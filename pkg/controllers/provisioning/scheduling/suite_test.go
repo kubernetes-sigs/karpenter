@@ -3806,9 +3806,7 @@ var _ = Context("Scheduling", func() {
 			}
 			reservedInstanceTypes := []*cloudprovider.InstanceType{cloudProvider.InstanceTypes[1], cloudProvider.InstanceTypes[2]}
 			for _, it := range reservedInstanceTypes {
-				reservationID := fmt.Sprintf("r-%s", it.Name)
 				it.Offerings = append(it.Offerings, &cloudprovider.Offering{
-					ReservationID:       reservationID,
 					ReservationCapacity: 1,
 					Available:           true,
 					Requirements: pscheduling.NewLabelRequirements(map[string]string{

@@ -186,7 +186,6 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		Requirements: requirements,
 		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) *cloudprovider.Offering {
 			return &cloudprovider.Offering{
-				ReservationID:       off.ReservationID,
 				ReservationCapacity: off.ReservationCapacity,
 				Requirements: scheduling.NewRequirements(lo.Map(off.Requirements, func(req corev1.NodeSelectorRequirement, _ int) *scheduling.Requirement {
 					return scheduling.NewRequirement(req.Key, req.Operator, req.Values...)

@@ -230,6 +230,17 @@ func (n *NodeClaim) FinalizeScheduling() {
 	// We need nodes to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
 	// of the node as it will be displayed in error messages
 	delete(n.Requirements, corev1.LabelHostname)
+	// If there are any reserved offerings tracked, inject those requirements onto the NodeClaim. This ensures that if
+	// there are multiple reserved offerings for an instance type, we don't attempt to overlaunch into a single offering.
+	if len(n.reservedOfferings) != 0 {
+		n.Requirements.Add(scheduling.NewRequirement(
+			cloudprovider.ReservationIDLabel,
+			corev1.NodeSelectorOpIn,
+			lo.FlatMap(lo.Values(n.reservedOfferings), func(ofs cloudprovider.Offerings, _ int) []string {
+				return lo.Map(ofs, func(o *cloudprovider.Offering, _ int) string { return o.ReservationID() })
+			})...,
+		))
+	}
 }
 
 func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling.Requirements, maxPrice float64) (*NodeClaim, error) {

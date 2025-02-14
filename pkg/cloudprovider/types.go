@@ -38,6 +38,11 @@ import (
 var (
 	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
 	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand))
+
+	// ReservationIDLabel is a label injected into a reserved offering's requirements which is used to uniquely identify a
+	// reservation. For example, a reservation could be shared across multiple NodePools, and the value encoded in this
+	// requirement is used to inform the scheduler that a reservation for one should affect the other.
+	ReservationIDLabel string
 )
 
 type DriftReason string
@@ -258,16 +263,18 @@ type ReservationManager interface {
 // these properties are captured with labels in Requirements.
 // Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone.
 type Offering struct {
-	ReservationID       string
+	Requirements        scheduling.Requirements
+	Price               float64
+	Available           bool
 	ReservationCapacity int
-
-	Requirements scheduling.Requirements
-	Price        float64
-	Available    bool
 }
 
 func (o *Offering) CapacityType() string {
 	return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
+}
+
+func (o *Offering) ReservationID() string {
+	return o.Requirements.Get(ReservationIDLabel).Any()
 }
 
 type Offerings []*Offering
