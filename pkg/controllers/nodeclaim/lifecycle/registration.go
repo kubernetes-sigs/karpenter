@@ -18,12 +18,13 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/errors"
+	coreerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
@@ -38,6 +40,7 @@ import (
 
 type Registration struct {
 	kubeClient client.Client
+	recorder   events.Recorder
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
@@ -62,15 +65,15 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	_, hasStartupTaint := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
 		return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
 	})
-	// check if sync succeeded but setting the registered status condition failed
-	// if sync succeeded, then the label will be present and the taint will be gone
+	// if the sync hasn't happened yet and the race protecting startup taint isn't present then log it as missing and proceed
+	// if the sync has happened then the startup taint has been removed if it was present
 	if _, ok := node.Labels[v1.NodeRegisteredLabelKey]; !ok && !hasStartupTaint {
-		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeRegistered, "UnregisteredTaintNotFound", fmt.Sprintf("Invariant violated, %s taint must be present on Karpenter-managed nodes", v1.UnregisteredTaintKey))
-		return reconcile.Result{}, fmt.Errorf("missing required startup taint, %s", v1.UnregisteredTaintKey)
+		log.FromContext(ctx).Info(fmt.Sprintf("missing startup taint, %s taint prevents registration related race conditions on Karpenter-managed nodes", v1.UnregisteredTaintKey))
+		r.recorder.Publish(NodeClassUnregisteredTaintMissingEvent(nodeClaim, errors.New("missing startup taint that prevents registration related race conditions")))
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
 	if err = r.syncNode(ctx, nodeClaim, node); err != nil {
-		if errors.IsConflict(err) {
+		if coreerrors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
 		return reconcile.Result{}, err
