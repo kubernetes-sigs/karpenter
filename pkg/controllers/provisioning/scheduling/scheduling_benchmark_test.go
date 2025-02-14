@@ -173,7 +173,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 		nil,
 		events.NewRecorder(&record.FakeRecorder{}),
 		clock,
-		scheduling.ReservedOfferingModeStrict,
+		scheduling.DisableReservedFallback,
 	)
 
 	b.ResetTimer()

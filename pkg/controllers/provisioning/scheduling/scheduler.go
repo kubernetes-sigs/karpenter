@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -57,13 +58,23 @@ type ReservedOfferingMode int
 // I don't believe there's a solution to this short of the max-flow based instance selection algorithm, which has its own
 // drawbacks.
 const (
-	// ReservedOfferingModeStrict indicates that the scheduler should fail to add a pod to a nodeclaim if doing so would
-	// prevent it from scheduling to reserved capacity, when it would have otherwise.
-	ReservedOfferingModeStrict ReservedOfferingMode = iota
 	// ReservedOfferingModeFallbackAlways indicates to the scheduler that the addition of a pod to a nodeclaim which
 	// results in all potential reserved offerings being filtered out is allowed (e.g. on-demand / spot fallback).
-	ReservedOfferingModeFallback
+	ReservedOfferingModeFallback ReservedOfferingMode = iota
+	// ReservedOfferingModeStrict indicates that the scheduler should fail to add a pod to a nodeclaim if doing so would
+	// prevent it from scheduling to reserved capacity, when it would have otherwise.
+	ReservedOfferingModeStrict
 )
+
+type options struct {
+	reservedOfferingMode ReservedOfferingMode
+}
+
+type Options = option.Function[options]
+
+var DisableReservedFallback = func(opts *options) {
+	opts.reservedOfferingMode = ReservedOfferingModeStrict
+}
 
 func NewScheduler(
 	ctx context.Context,
@@ -76,7 +87,7 @@ func NewScheduler(
 	daemonSetPods []*corev1.Pod,
 	recorder events.Recorder,
 	clock clock.Clock,
-	reservedOfferingMode ReservedOfferingMode,
+	opts ...Options,
 ) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
@@ -115,7 +126,7 @@ func NewScheduler(
 		}),
 		clock:                clock,
 		reservationManager:   NewReservationManager(instanceTypes),
-		reservedOfferingMode: reservedOfferingMode,
+		reservedOfferingMode: option.Resolve(opts...).reservedOfferingMode,
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
 	return s
@@ -147,9 +158,10 @@ type Scheduler struct {
 
 // Results contains the results of the scheduling operation
 type Results struct {
-	NewNodeClaims []*NodeClaim
-	ExistingNodes []*ExistingNode
-	PodErrors     map[*corev1.Pod]error
+	NewNodeClaims          []*NodeClaim
+	ExistingNodes          []*ExistingNode
+	PodErrors              map[*corev1.Pod]error
+	ReservedOfferingErrors map[*corev1.Pod]error
 }
 
 // Record sends eventing and log messages back for the results that were produced from a scheduling run
@@ -245,6 +257,7 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 	return r
 }
 
+//nolint:gocyclo
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
@@ -300,12 +313,25 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		m.FinalizeScheduling()
 	}
 
+	// Parition errors into reserved offering and standard errors. Reserved offering errors can only occur when the
+	// reserved offering mode is set to strict and we failed to schedule a pod due to all reservations being consumed.
+	// This is different from a standard error since we expect that the pod may be able to schedule in subsequent
+	// simulations.
+	reservedOfferingErrors := map[*corev1.Pod]error{}
+	for pod, err := range errors {
+		if IsReservedOfferingError(err) {
+			reservedOfferingErrors[pod] = err
+		}
+	}
+	for pod := range reservedOfferingErrors {
+		delete(errors, pod)
+	}
+
 	return Results{
-		NewNodeClaims: s.newNodeClaims,
-		ExistingNodes: s.existingNodes,
-		PodErrors: lo.OmitBy(errors, func(_ *corev1.Pod, err error) bool {
-			return IsReservedOfferingError(err)
-		}),
+		NewNodeClaims:          s.newNodeClaims,
+		ExistingNodes:          s.existingNodes,
+		PodErrors:              errors,
+		ReservedOfferingErrors: reservedOfferingErrors,
 	}
 }
 
