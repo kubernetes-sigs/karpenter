@@ -112,7 +112,6 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 				// If the pod is on a deleting node, we assume one of two things has already happened:
 				// 1. The node was manually terminated, at which the provisioning controller has scheduled or is scheduling a node
 				//    for the pod.
-				// TODO: clarify this point, not clear to me
 				// 2. The node was chosen for a previous disruption command, we assume that the uninitialized node will come up
 				//    for this command, and we assume it will be successful. If it is not successful, the node will become
 				//    not terminating, and we will no longer need to consider these pods.

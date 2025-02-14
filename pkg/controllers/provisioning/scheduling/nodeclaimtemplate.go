@@ -42,16 +42,18 @@ type NodeClaimTemplate struct {
 
 	NodePoolName        string
 	NodePoolUUID        types.UID
+	NodePoolWeight      int32
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Requirements        scheduling.Requirements
 }
 
 func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 	nct := &NodeClaimTemplate{
-		NodeClaim:    *nodePool.Spec.Template.ToNodeClaim(),
-		NodePoolName: nodePool.Name,
-		NodePoolUUID: nodePool.UID,
-		Requirements: scheduling.NewRequirements(),
+		NodeClaim:      *nodePool.Spec.Template.ToNodeClaim(),
+		NodePoolName:   nodePool.Name,
+		NodePoolUUID:   nodePool.UID,
+		NodePoolWeight: lo.FromPtr(nodePool.Spec.Weight),
+		Requirements:   scheduling.NewRequirements(),
 	}
 	nct.Annotations = lo.Assign(nct.Annotations, map[string]string{
 		v1.NodePoolHashAnnotationKey:        nodePool.Hash(),
