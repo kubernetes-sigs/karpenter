@@ -17,7 +17,6 @@ limitations under the License.
 package scheduling
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -27,9 +26,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
-
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -52,14 +48,6 @@ type NodeClaim struct {
 	hostname             string
 }
 
-type NodePoolLimitsExceededError struct {
-	nodePool string
-}
-
-func (e NodePoolLimitsExceededError) Error() string {
-	return fmt.Sprintf("all available instance types exceed limits for nodepool: %q", e.nodePool)
-}
-
 // ReservedOfferingError indicates a NodeClaim couldn't be created or a pod couldn't be added to an exxisting NodeClaim
 // due to
 type ReservedOfferingError struct {
@@ -75,34 +63,20 @@ func IsReservedOfferingError(err error) bool {
 	return errors.As(err, roe)
 }
 
+func (e ReservedOfferingError) Unwrap() error {
+	return e.error
+}
+
 var nodeID int64
 
-func NewNodeClaimForPod(
-	ctx context.Context,
+func NewNodeClaim(
 	nodeClaimTemplate *NodeClaimTemplate,
 	topology *Topology,
 	daemonResources corev1.ResourceList,
-	remainingResources corev1.ResourceList,
-	pod *corev1.Pod,
-	podData *PodData,
+	instanceTypes []*cloudprovider.InstanceType,
 	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
-) (*NodeClaim, error) {
-	// Ensure we don't consider instance types which would exceed the limits of the NodePool
-	instanceTypes := filterByRemainingResources(nodeClaimTemplate.InstanceTypeOptions, remainingResources)
-	if len(instanceTypes) == 0 {
-		return nil, NodePoolLimitsExceededError{nodePool: nodeClaimTemplate.NodePoolName}
-	} else if len(nodeClaimTemplate.InstanceTypeOptions) != len(instanceTypes) {
-		log.FromContext(ctx).V(1).WithValues(
-			"NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName),
-		).Info(fmt.Sprintf(
-			"%d out of %d instance types were excluded because they would breach limits",
-			len(nodeClaimTemplate.InstanceTypeOptions)-len(instanceTypes),
-			len(nodeClaimTemplate.InstanceTypeOptions),
-		))
-	}
-
-	// Copy the template, and add hostname
+) *NodeClaim {
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
 	topology.Register(corev1.LabelHostname, hostname)
 	template := *nodeClaimTemplate
@@ -111,7 +85,7 @@ func NewNodeClaimForPod(
 	template.Requirements.Add(scheduling.NewRequirement(corev1.LabelHostname, corev1.NodeSelectorOpIn, hostname))
 	template.InstanceTypeOptions = instanceTypes
 	template.Spec.Resources.Requests = daemonResources
-	nodeClaim := &NodeClaim{
+	return &NodeClaim{
 		NodeClaimTemplate:    template,
 		hostPortUsage:        scheduling.NewHostPortUsage(),
 		topology:             topology,
@@ -121,15 +95,6 @@ func NewNodeClaimForPod(
 		reservationManager:   reservationManager,
 		reservedOfferingMode: reservedOfferingMode,
 	}
-	if err := nodeClaim.Add(pod, podData); err != nil {
-		return nil, fmt.Errorf(
-			"incomptible with nodepool %q, daemonset overhead=%s, %w",
-			nodeClaimTemplate.NodePoolName,
-			resources.String(daemonResources),
-			err,
-		)
-	}
-	return nodeClaim, nil
 }
 
 func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData) error {

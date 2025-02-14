@@ -324,6 +324,7 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 	}
 }
 
+//nolint:gocyclo
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
@@ -344,25 +345,79 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// Create new node
 	var errs error
+	var compatibleReservedNCT *NodeClaimTemplate
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
-		nodeClaim, err := NewNodeClaimForPod(
-			ctx,
-			nodeClaimTemplate,
-			s.topology,
-			s.daemonOverhead[nodeClaimTemplate],
-			s.remainingResources[nodeClaimTemplate.NodePoolName],
-			pod,
-			s.cachedPodData[pod.UID],
-			s.reservationManager,
-			s.reservedOfferingMode,
-		)
-		if err != nil {
-			if nodeClaim != nil {
-				nodeClaim.Destroy()
-			}
-			errs = multierr.Append(errs, err)
+		if s.reservedOfferingMode == ReservedOfferingModeStrict && compatibleReservedNCT != nil && compatibleReservedNCT.NodePoolWeight > nodeClaimTemplate.NodePoolWeight {
+			// We tried to schedule the pod to a NodeClaimTemplate previously and it would have scheduled to reserved capacity
+			// had the reservation limit not been exceeded for this scheduling simulation. Since the reserved offering mode is
+			// strict, we shouldn't allow fallback to a NodePool of lesser weight.
+			errs = multierr.Append(errs, NewReservedOfferingError(fmt.Errorf(
+				"skipping evalutation of nodepool %q, pod can schedule to nodepool %q with a greater weight on a reserved offering",
+				nodeClaimTemplate.NodePoolName,
+				compatibleReservedNCT.NodePoolName,
+			)))
 			continue
 		}
+
+		instanceTypes := nodeClaimTemplate.InstanceTypeOptions
+		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
+		if remaining, ok := s.remainingResources[nodeClaimTemplate.NodePoolName]; ok {
+			instanceTypes = filterByRemainingResources(instanceTypes, remaining)
+			if len(instanceTypes) == 0 {
+				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool %q", nodeClaimTemplate.NodePoolName))
+				continue
+			} else if len(nodeClaimTemplate.InstanceTypeOptions) != len(instanceTypes) {
+				log.FromContext(ctx).V(1).WithValues(
+					"NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName),
+				).Info(fmt.Sprintf(
+					"%d out of %d instance types were excluded because they would breach limits",
+					len(nodeClaimTemplate.InstanceTypeOptions)-len(instanceTypes),
+					len(nodeClaimTemplate.InstanceTypeOptions),
+				))
+			}
+		}
+
+		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes, s.reservationManager, s.reservedOfferingMode)
+		if err := nodeClaim.Add(pod, s.cachedPodData[pod.UID]); err != nil {
+			nodeClaim.Destroy()
+			if IsReservedOfferingError(err) {
+				errs = multierr.Append(errs, fmt.Errorf(
+					"compatible with nodepool %q but failed to add pod while adhering to reservation fallback policy, %w",
+					nodeClaimTemplate.NodePoolName,
+					err,
+				))
+				compatibleReservedNCT = nodeClaimTemplate
+			} else {
+				errs = multierr.Append(errs, fmt.Errorf(
+					"incompatible with nodepool %q, daemonset overhead=%s, %w",
+					nodeClaimTemplate.NodePoolName,
+					resources.String(s.daemonOverhead[nodeClaimTemplate]),
+					err,
+				))
+			}
+			continue
+		}
+
+		// TODO: If necessary, could mark the reserved offering status in the scheduling.NodeClaim rather than crawling the
+		// offerings. Granted, this won't be an issue unless there is a compatible reserved NodeClaimTemplate since we short
+		// circuit the conditional.
+		if s.reservedOfferingMode == ReservedOfferingModeStrict && compatibleReservedNCT != nil && !lo.ContainsBy(nodeClaim.InstanceTypeOptions, func(it *cloudprovider.InstanceType) bool {
+			return lo.ContainsBy(it.Offerings, func(o *cloudprovider.Offering) bool {
+				return o.CapacityType() == v1.CapacityTypeReserved
+			})
+		}) {
+			// We would have been able to schedule the pod to a NodeClaimTemplate of equal weight on a reserved instance, but
+			// were unable to do so since the reservation limit had been exceeded for this scheduling simulation. We shouldn't
+			// fallback to on-demand on a NodePool of equal weight.
+			errs = multierr.Append(errs, NewReservedOfferingError(fmt.Errorf(
+				"compatible with nodepool %q but failed to add pod while adhering to reservation fallback policy, pod can schedule to nodepool %q on a reserved offering",
+				nodeClaimTemplate.NodePoolName,
+				compatibleReservedNCT.NodePoolName,
+			)))
+			nodeClaim.Destroy()
+			continue
+		}
+
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
 		s.newNodeClaims = append(s.newNodeClaims, nodeClaim)
 		s.remainingResources[nodeClaimTemplate.NodePoolName] = subtractMax(s.remainingResources[nodeClaimTemplate.NodePoolName], nodeClaim.InstanceTypeOptions)
