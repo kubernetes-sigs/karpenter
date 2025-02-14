@@ -79,19 +79,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		pods = append(pods, n.reschedulablePods...)
 	}
 	pods = append(pods, deletingNodePods...)
-	scheduler, err := provisioner.NewScheduler(
-		log.IntoContext(ctx, operatorlogging.NopLogger),
-		pods,
-		stateNodes,
-		// ReservedOfferingModeFallback is used for the following reasons:
-		// - For consolidation, we're only going to accept a decision if it lowers the cost of the cluster, and if it only
-		//   requires a single additional nodeclaim. It doesn't matter in this scenario if we fallback.
-		// - For drift, fallback is required to ensure progress. Progress is only ensured with strict if multiple scheduling
-		//   loops are allowed to proceed, but we need to ensure all pods on the drifted node are scheduled within a single
-		//   iteration. This may result in non-ideal instance choices, but the alternative is deadlock.
-		//   See issue TODO for more details.
-		scheduling.ReservedOfferingModeFallback,
-	)
+	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, stateNodes)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
