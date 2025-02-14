@@ -41,8 +41,8 @@ func NewReservationManager(instanceTypes map[string][]*cloudprovider.InstanceTyp
 				// If we have multiple offerings with the same reservation ID, track the one with the least capacity. This could be
 				// the result of multiple nodepools referencing the same capacity reservation, and there being an update to the
 				// capacity between calls to GetInstanceTypes.
-				if current, ok := capacity[o.ReservationID]; !ok || current > o.ReservationCapacity {
-					capacity[o.ReservationID] = o.ReservationCapacity
+				if current, ok := capacity[o.ReservationID()]; !ok || current > o.ReservationCapacity {
+					capacity[o.ReservationID()] = o.ReservationCapacity
 				}
 			}
 		}
@@ -55,31 +55,31 @@ func NewReservationManager(instanceTypes map[string][]*cloudprovider.InstanceTyp
 
 func (rm *ReservationManager) Reserve(hostname string, offering *cloudprovider.Offering) bool {
 	reservations, ok := rm.reservations[hostname]
-	if ok && reservations.Has(offering.ReservationID) {
+	if ok && reservations.Has(offering.ReservationID()) {
 		return true
 	}
 	if !ok {
 		reservations = sets.New[string]()
 		rm.reservations[hostname] = reservations
 	}
-	capacity, ok := rm.capacity[offering.ReservationID]
+	capacity, ok := rm.capacity[offering.ReservationID()]
 	if !ok {
 		// Note: this panic should never occur, and would indicate a serious bug in the scheduling code.
-		panic(fmt.Sprintf("attempted to reserve non-existent offering with reservation id %q", offering.ReservationID))
+		panic(fmt.Sprintf("attempted to reserve non-existent offering with reservation id %q", offering.ReservationID()))
 	}
 	if capacity == 0 {
 		return false
 	}
-	rm.capacity[offering.ReservationID] -= 1
-	reservations.Insert(offering.ReservationID)
+	rm.capacity[offering.ReservationID()] -= 1
+	reservations.Insert(offering.ReservationID())
 	return true
 }
 
 func (rm *ReservationManager) Release(hostname string, offerings ...*cloudprovider.Offering) {
 	for _, o := range offerings {
-		if reservations, ok := rm.reservations[hostname]; ok && reservations.Has(o.ReservationID) {
-			reservations.Delete(o.ReservationID)
-			rm.capacity[o.ReservationID] += 1
+		if reservations, ok := rm.reservations[hostname]; ok && reservations.Has(o.ReservationID()) {
+			reservations.Delete(o.ReservationID())
+			rm.capacity[o.ReservationID()] += 1
 		}
 	}
 }
