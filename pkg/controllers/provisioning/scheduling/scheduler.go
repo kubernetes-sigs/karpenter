@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -44,10 +45,50 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1.NodePool,
-	cluster *state.Cluster, stateNodes []*state.StateNode, topology *Topology,
-	instanceTypes map[string][]*cloudprovider.InstanceType, daemonSetPods []*corev1.Pod,
-	recorder events.Recorder, clock clock.Clock) *Scheduler {
+type ReservedOfferingMode int
+
+// TODO: Evaluate if another mode should be created for drift. The problem with strict is that it assumes we can run
+// multiple scheduling loops to make progress, but if scheduling all pods from the drifted node in a single iteration
+// requires fallback, we're at a stalemate. This makes strict a non-starter for drift IMO.
+// On the other hand, fallback will result in non-ideal launches when there's constrained capacity. This should be
+// rectified by consolidation, but if we can be "right" the at initial launch that would be preferable.
+// One potential improvement is a "preferences" type strategy, where we attempt to schedule the pod without fallback
+// first. This is an improvement over the current fallback strategy since it ensures all new nodeclaims are attempted,
+// before then attempting all nodepools, but it still doesn't address the case when offerings are reserved pessimistically.
+// I don't believe there's a solution to this short of the max-flow based instance selection algorithm, which has its own
+// drawbacks.
+const (
+	// ReservedOfferingModeFallbackAlways indicates to the scheduler that the addition of a pod to a nodeclaim which
+	// results in all potential reserved offerings being filtered out is allowed (e.g. on-demand / spot fallback).
+	ReservedOfferingModeFallback ReservedOfferingMode = iota
+	// ReservedOfferingModeStrict indicates that the scheduler should fail to add a pod to a nodeclaim if doing so would
+	// prevent it from scheduling to reserved capacity, when it would have otherwise.
+	ReservedOfferingModeStrict
+)
+
+type options struct {
+	reservedOfferingMode ReservedOfferingMode
+}
+
+type Options = option.Function[options]
+
+var DisableReservedFallback = func(opts *options) {
+	opts.reservedOfferingMode = ReservedOfferingModeStrict
+}
+
+func NewScheduler(
+	ctx context.Context,
+	kubeClient client.Client,
+	nodePools []*v1.NodePool,
+	cluster *state.Cluster,
+	stateNodes []*state.StateNode,
+	topology *Topology,
+	instanceTypes map[string][]*cloudprovider.InstanceType,
+	daemonSetPods []*corev1.Pod,
+	recorder events.Recorder,
+	clock clock.Clock,
+	opts ...Options,
+) *Scheduler {
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
@@ -71,7 +112,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1
 		return nct, true
 	})
 	s := &Scheduler{
-		id:                 uuid.NewUUID(),
+		uuid:               uuid.NewUUID(),
 		kubeClient:         kubeClient,
 		nodeClaimTemplates: templates,
 		topology:           topology,
@@ -83,7 +124,9 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
 		}),
-		clock: clock,
+		clock:                clock,
+		reservationManager:   NewReservationManager(instanceTypes),
+		reservedOfferingMode: option.Resolve(opts...).reservedOfferingMode,
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
 	return s
@@ -96,26 +139,29 @@ type PodData struct {
 }
 
 type Scheduler struct {
-	id                 types.UID // Unique UUID attached to this scheduling loop
-	newNodeClaims      []*NodeClaim
-	existingNodes      []*ExistingNode
-	nodeClaimTemplates []*NodeClaimTemplate
-	remainingResources map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
-	daemonOverhead     map[*NodeClaimTemplate]corev1.ResourceList
-	cachedPodData      map[types.UID]*PodData // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
-	preferences        *Preferences
-	topology           *Topology
-	cluster            *state.Cluster
-	recorder           events.Recorder
-	kubeClient         client.Client
-	clock              clock.Clock
+	uuid                 types.UID // Unique UUID attached to this scheduling loop
+	newNodeClaims        []*NodeClaim
+	existingNodes        []*ExistingNode
+	nodeClaimTemplates   []*NodeClaimTemplate
+	remainingResources   map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
+	daemonOverhead       map[*NodeClaimTemplate]corev1.ResourceList
+	cachedPodData        map[types.UID]*PodData // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
+	preferences          *Preferences
+	topology             *Topology
+	cluster              *state.Cluster
+	recorder             events.Recorder
+	kubeClient           client.Client
+	clock                clock.Clock
+	reservationManager   *ReservationManager
+	reservedOfferingMode ReservedOfferingMode
 }
 
 // Results contains the results of the scheduling operation
 type Results struct {
-	NewNodeClaims []*NodeClaim
-	ExistingNodes []*ExistingNode
-	PodErrors     map[*corev1.Pod]error
+	NewNodeClaims          []*NodeClaim
+	ExistingNodes          []*ExistingNode
+	PodErrors              map[*corev1.Pod]error
+	ReservedOfferingErrors map[*corev1.Pod]error
 }
 
 // Record sends eventing and log messages back for the results that were produced from a scheduling run
@@ -211,6 +257,7 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 	return r
 }
 
+//nolint:gocyclo
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
@@ -231,11 +278,11 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	lastLogTime := s.clock.Now()
 	batchSize := len(q.pods)
 	for {
-		UnfinishedWorkSeconds.Set(s.clock.Since(startTime).Seconds(), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
-		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
+		UnfinishedWorkSeconds.Set(s.clock.Since(startTime).Seconds(), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
+		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 
 		if s.clock.Since(lastLogTime) > time.Minute {
-			log.FromContext(ctx).WithValues("pods-scheduled", batchSize-len(q.pods), "pods-remaining", len(q.pods), "existing-nodes", len(s.existingNodes), "simulated-nodes", len(s.newNodeClaims), "duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.id)).Info("computing pod scheduling...")
+			log.FromContext(ctx).WithValues("pods-scheduled", batchSize-len(q.pods), "pods-remaining", len(q.pods), "existing-nodes", len(s.existingNodes), "simulated-nodes", len(s.newNodeClaims), "duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("computing pod scheduling...")
 			lastLogTime = s.clock.Now()
 		}
 		// Try the next pod
@@ -261,15 +308,30 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			s.updateCachedPodData(pod)
 		}
 	}
-	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.id)})
+	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 	for _, m := range s.newNodeClaims {
 		m.FinalizeScheduling()
 	}
 
+	// Parition errors into reserved offering and standard errors. Reserved offering errors can only occur when the
+	// reserved offering mode is set to strict and we failed to schedule a pod due to all reservations being consumed.
+	// This is different from a standard error since we expect that the pod may be able to schedule in subsequent
+	// simulations.
+	reservedOfferingErrors := map[*corev1.Pod]error{}
+	for pod, err := range errors {
+		if IsReservedOfferingError(err) {
+			reservedOfferingErrors[pod] = err
+		}
+	}
+	for pod := range reservedOfferingErrors {
+		delete(errors, pod)
+	}
+
 	return Results{
-		NewNodeClaims: s.newNodeClaims,
-		ExistingNodes: s.existingNodes,
-		PodErrors:     errors,
+		NewNodeClaims:          s.newNodeClaims,
+		ExistingNodes:          s.existingNodes,
+		PodErrors:              errors,
+		ReservedOfferingErrors: reservedOfferingErrors,
 	}
 }
 
@@ -288,6 +350,7 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 	}
 }
 
+//nolint:gocyclo
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
@@ -308,28 +371,79 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// Create new node
 	var errs error
+	var compatibleReservedNCT *NodeClaimTemplate
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
+		if s.reservedOfferingMode == ReservedOfferingModeStrict && compatibleReservedNCT != nil && compatibleReservedNCT.NodePoolWeight > nodeClaimTemplate.NodePoolWeight {
+			// We tried to schedule the pod to a NodeClaimTemplate previously and it would have scheduled to reserved capacity
+			// had the reservation limit not been exceeded for this scheduling simulation. Since the reserved offering mode is
+			// strict, we shouldn't allow fallback to a NodePool of lesser weight.
+			errs = multierr.Append(errs, NewReservedOfferingError(fmt.Errorf(
+				"skipping evalutation of nodepool %q, pod can schedule to nodepool %q with a greater weight on a reserved offering",
+				nodeClaimTemplate.NodePoolName,
+				compatibleReservedNCT.NodePoolName,
+			)))
+			continue
+		}
+
 		instanceTypes := nodeClaimTemplate.InstanceTypeOptions
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[nodeClaimTemplate.NodePoolName]; ok {
 			instanceTypes = filterByRemainingResources(instanceTypes, remaining)
 			if len(instanceTypes) == 0 {
-				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool: %q", nodeClaimTemplate.NodePoolName))
+				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool %q", nodeClaimTemplate.NodePoolName))
 				continue
 			} else if len(nodeClaimTemplate.InstanceTypeOptions) != len(instanceTypes) {
-				log.FromContext(ctx).V(1).WithValues("NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName)).Info(fmt.Sprintf("%d out of %d instance types were excluded because they would breach limits",
-					len(nodeClaimTemplate.InstanceTypeOptions)-len(instanceTypes), len(nodeClaimTemplate.InstanceTypeOptions)))
+				log.FromContext(ctx).V(1).WithValues(
+					"NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName),
+				).Info(fmt.Sprintf(
+					"%d out of %d instance types were excluded because they would breach limits",
+					len(nodeClaimTemplate.InstanceTypeOptions)-len(instanceTypes),
+					len(nodeClaimTemplate.InstanceTypeOptions),
+				))
 			}
 		}
-		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes)
+
+		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes, s.reservationManager, s.reservedOfferingMode)
 		if err := nodeClaim.Add(pod, s.cachedPodData[pod.UID]); err != nil {
-			nodeClaim.Destroy() // Ensure we cleanup any changes that we made while mocking out a NodeClaim
-			errs = multierr.Append(errs, fmt.Errorf("incompatible with nodepool %q, daemonset overhead=%s, %w",
-				nodeClaimTemplate.NodePoolName,
-				resources.String(s.daemonOverhead[nodeClaimTemplate]),
-				err))
+			nodeClaim.Destroy()
+			if IsReservedOfferingError(err) {
+				errs = multierr.Append(errs, fmt.Errorf(
+					"compatible with nodepool %q but failed to add pod while adhering to reservation fallback policy, %w",
+					nodeClaimTemplate.NodePoolName,
+					err,
+				))
+				compatibleReservedNCT = nodeClaimTemplate
+			} else {
+				errs = multierr.Append(errs, fmt.Errorf(
+					"incompatible with nodepool %q, daemonset overhead=%s, %w",
+					nodeClaimTemplate.NodePoolName,
+					resources.String(s.daemonOverhead[nodeClaimTemplate]),
+					err,
+				))
+			}
 			continue
 		}
+
+		// TODO: If necessary, could mark the reserved offering status in the scheduling.NodeClaim rather than crawling the
+		// offerings. Granted, this won't be an issue unless there is a compatible reserved NodeClaimTemplate since we short
+		// circuit the conditional.
+		if s.reservedOfferingMode == ReservedOfferingModeStrict && compatibleReservedNCT != nil && !lo.ContainsBy(nodeClaim.InstanceTypeOptions, func(it *cloudprovider.InstanceType) bool {
+			return lo.ContainsBy(it.Offerings, func(o *cloudprovider.Offering) bool {
+				return o.CapacityType() == v1.CapacityTypeReserved
+			})
+		}) {
+			// We would have been able to schedule the pod to a NodeClaimTemplate of equal weight on a reserved instance, but
+			// were unable to do so since the reservation limit had been exceeded for this scheduling simulation. We shouldn't
+			// fallback to on-demand on a NodePool of equal weight.
+			errs = multierr.Append(errs, NewReservedOfferingError(fmt.Errorf(
+				"compatible with nodepool %q but failed to add pod while adhering to reservation fallback policy, pod can schedule to nodepool %q on a reserved offering",
+				nodeClaimTemplate.NodePoolName,
+				compatibleReservedNCT.NodePoolName,
+			)))
+			nodeClaim.Destroy()
+			continue
+		}
+
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
 		s.newNodeClaims = append(s.newNodeClaims, nodeClaim)
 		s.remainingResources[nodeClaimTemplate.NodePoolName] = subtractMax(s.remainingResources[nodeClaimTemplate.NodePoolName], nodeClaim.InstanceTypeOptions)

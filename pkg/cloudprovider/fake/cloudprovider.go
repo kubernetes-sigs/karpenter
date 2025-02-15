@@ -40,6 +40,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
+func init() {
+	v1.WellKnownLabels = v1.WellKnownLabels.Insert(v1alpha1.LabelReservationID)
+	cloudprovider.ReservationIDLabel = v1alpha1.LabelReservationID
+}
+
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 
 type CloudProvider struct {
@@ -139,14 +144,26 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 			labels[key] = requirement.Values()[0]
 		}
 	}
-	// Find Offering
-	for _, o := range instanceType.Offerings.Available() {
-		if reqs.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-			labels[corev1.LabelTopologyZone] = o.Requirements.Get(corev1.LabelTopologyZone).Any()
-			labels[v1.CapacityTypeLabelKey] = o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
-			break
+	// Find offering, prioritizing reserved instances
+	offering := func() *cloudprovider.Offering {
+		offerings := instanceType.Offerings.Available().Compatible(reqs)
+		lo.Must0(len(offerings) != 0, "created nodeclaim with no available offerings")
+		for _, o := range offerings {
+			if o.CapacityType() == v1.CapacityTypeReserved {
+				o.ReservationCapacity -= 1
+				if o.ReservationCapacity == 0 {
+					o.Available = false
+				}
+				return o
+			}
 		}
+		return offerings[0]
+	}()
+	// Propagate labels dictated by offering requirements - e.g. zone, capacity-type, and reservation-id
+	for _, req := range offering.Requirements {
+		labels[req.Key] = req.Any()
 	}
+
 	created := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        nodeClaim.Name,

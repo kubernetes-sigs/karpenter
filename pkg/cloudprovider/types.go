@@ -38,6 +38,11 @@ import (
 var (
 	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
 	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand))
+
+	// ReservationIDLabel is a label injected into a reserved offering's requirements which is used to uniquely identify a
+	// reservation. For example, a reservation could be shared across multiple NodePools, and the value encoded in this
+	// requirement is used to inform the scheduler that a reservation for one should affect the other.
+	ReservationIDLabel string
 )
 
 type DriftReason string
@@ -239,30 +244,51 @@ func (i InstanceTypeOverhead) Total() corev1.ResourceList {
 	return resources.Merge(i.KubeReserved, i.SystemReserved, i.EvictionThreshold)
 }
 
+// ReservationManager is used to track the availability of a reserved offering over the course of a scheduling
+// simulation. Reserved offerings may have a limited number of available instances associated with them,
+// This is exposed as an interface for cloudprovider's to implement to give flexibility when dealing with separate
+// offerings with associated availablility.
+type ReservationManager interface {
+	// Reserve takes a unique identifier for a reservation, and returns a boolean indicating if the reservation was
+	// successful. Reserve should be idempotent, i.e. multiple calls with the same reservation ID should only count for a
+	// single reservation.
+	Reserve(string) bool
+	// Release takes a unique identifier for a reservation, and should discard any matching reservations. If no
+	// reservations exist for the given id, release should be a no-op.
+	Release(string)
+}
+
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
 // these properties are captured with labels in Requirements.
-// Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone
+// Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone.
 type Offering struct {
-	Requirements scheduling.Requirements
-	Price        float64
-	// Available is added so that Offerings can return all offerings that have ever existed for an instance type,
-	// so we can get historical pricing data for calculating savings in consolidation
-	Available bool
+	Requirements        scheduling.Requirements
+	Price               float64
+	Available           bool
+	ReservationCapacity int
 }
 
-type Offerings []Offering
+func (o *Offering) CapacityType() string {
+	return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
+}
+
+func (o *Offering) ReservationID() string {
+	return o.Requirements.Get(ReservationIDLabel).Any()
+}
+
+type Offerings []*Offering
 
 // Available filters the available offerings from the returned offerings
 func (ofs Offerings) Available() Offerings {
-	return lo.Filter(ofs, func(o Offering, _ int) bool {
+	return lo.Filter(ofs, func(o *Offering, _ int) bool {
 		return o.Available
 	})
 }
 
 // Compatible returns the offerings based on the passed requirements
 func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
-	return lo.Filter(ofs, func(offering Offering, _ int) bool {
+	return lo.Filter(ofs, func(offering *Offering, _ int) bool {
 		return reqs.IsCompatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels)
 	})
 }
@@ -278,15 +304,15 @@ func (ofs Offerings) HasCompatible(reqs scheduling.Requirements) bool {
 }
 
 // Cheapest returns the cheapest offering from the returned offerings
-func (ofs Offerings) Cheapest() Offering {
-	return lo.MinBy(ofs, func(a, b Offering) bool {
+func (ofs Offerings) Cheapest() *Offering {
+	return lo.MinBy(ofs, func(a, b *Offering) bool {
 		return a.Price < b.Price
 	})
 }
 
 // MostExpensive returns the most expensive offering from the return offerings
-func (ofs Offerings) MostExpensive() Offering {
-	return lo.MaxBy(ofs, func(a, b Offering) bool {
+func (ofs Offerings) MostExpensive() *Offering {
+	return lo.MaxBy(ofs, func(a, b *Offering) bool {
 		return a.Price > b.Price
 	})
 }
