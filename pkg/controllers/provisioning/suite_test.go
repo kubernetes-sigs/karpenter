@@ -241,7 +241,7 @@ var _ = Describe("Provisioning", func() {
 		// Provisioning should fail here since there are no valid nodePools to schedule the pod
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		ExpectNotScheduled(ctx, env.Client, pod)
-		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
+		Expect(cluster.PodSchedulingSuccessTime(nn, false).IsZero()).To(BeTrue())
 		Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeFalse())
 		ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 1, nil)
 	})

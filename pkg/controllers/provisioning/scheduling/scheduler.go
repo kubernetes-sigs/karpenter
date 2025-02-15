@@ -302,6 +302,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// Pick existing node that we are about to create
 	for _, nodeClaim := range s.newNodeClaims {
 		if err := nodeClaim.Add(pod, s.cachedPodData[pod.UID]); err == nil {
+			s.cluster.MarkPodToNodePoolSchedulingDecision(pod, nodeClaim.Labels[v1.NodePoolLabelKey])
 			return nil
 		}
 	}
@@ -333,6 +334,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
 		s.newNodeClaims = append(s.newNodeClaims, nodeClaim)
 		s.remainingResources[nodeClaimTemplate.NodePoolName] = subtractMax(s.remainingResources[nodeClaimTemplate.NodePoolName], nodeClaim.InstanceTypeOptions)
+		s.cluster.MarkPodToNodePoolSchedulingDecision(pod, nodeClaim.Labels[v1.NodePoolLabelKey])
 		return nil
 	}
 	return errs
