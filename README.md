@@ -22,6 +22,7 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [AlibabaCloud](https://github.com/cloudpilot-ai/karpenter-provider-alibabacloud)
 - [Cluster API](https://github.com/kubernetes-sigs/karpenter-provider-cluster-api)
 - [GCP](https://github.com/cloudpilot-ai/karpenter-provider-gcp)
+- [Proxmox](https://github.com/sergelogvinov/karpenter-provider-proxmox)
 
 ## Community, discussion, contribution, and support
 
