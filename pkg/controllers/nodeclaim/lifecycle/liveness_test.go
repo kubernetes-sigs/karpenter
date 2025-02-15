@@ -20,6 +20,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,6 +79,11 @@ var _ = Describe("Liveness", func() {
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 			if isManagedNodeClaim {
 				ExpectNotFound(ctx, env.Client, nodeClaim)
+				nodePool = ExpectExists(ctx, env.Client, nodePool)
+				nodeRegistrationHealthySC := ExpectStatusConditionExists(nodePool, v1.ConditionTypeNodeRegistrationHealthy)
+				Expect(nodeRegistrationHealthySC.Status).To(Equal(metav1.ConditionFalse))
+				Expect(nodeRegistrationHealthySC.Reason).To(Equal("RegistrationFailed"))
+				Expect(nodeRegistrationHealthySC.Message).To(Equal("Failed to register node"))
 			} else {
 				ExpectExists(ctx, env.Client, nodeClaim)
 			}
@@ -141,6 +147,44 @@ var _ = Describe("Liveness", func() {
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
 		fakeClock.Step(time.Minute * 20)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodeRegistrationHealthySC := ExpectStatusConditionExists(nodePool, v1.ConditionTypeNodeRegistrationHealthy)
+		Expect(nodeRegistrationHealthySC.Status).To(Equal(metav1.ConditionFalse))
+		Expect(nodeRegistrationHealthySC.Reason).To(Equal(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).Reason))
+		Expect(nodeRegistrationHealthySC.Message).To(Equal(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).Message))
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
+	})
+	It("should not update NodeRegistrationHealthy status condition if it is already set to True", func() {
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
+						fake.ResourceGPUVendorA: resource.MustParse("1"),
+					},
+				},
+			},
+		})
+		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
+		fakeClock.Step(time.Minute * 20)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		// NodeClaim registration failed, but we should not update the NodeRegistrationHealthy status condition if it is already True
+		Expect(ExpectStatusConditionExists(nodePool, v1.ConditionTypeNodeRegistrationHealthy).Status).To(Equal(metav1.ConditionTrue))
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
