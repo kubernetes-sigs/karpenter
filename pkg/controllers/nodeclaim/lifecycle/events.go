@@ -35,6 +35,16 @@ func InsufficientCapacityErrorEvent(nodeClaim *v1.NodeClaim, err error) events.E
 	}
 }
 
+func NodeClassUnregisteredTaintMissingEvent(nodeClaim *v1.NodeClaim, err error) events.Event {
+	return events.Event{
+		InvolvedObject: nodeClaim,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.NodeClassUnregisteredTaintMissing,
+		Message:        fmt.Sprintf("NodeClaim %s event: %s", nodeClaim.Name, truncateMessage(err.Error())),
+		DedupeValues:   []string{string(nodeClaim.UID)},
+	}
+}
+
 func NodeClassNotReadyEvent(nodeClaim *v1.NodeClaim, err error) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
