@@ -112,8 +112,11 @@ var _ = Describe("Drift", func() {
 	It("should detect stale instance type drift if the instance type offerings aren't compatible with the nodeclaim", func() {
 		cp.InstanceTypes = lo.Map(cp.InstanceTypes, func(it *cloudprovider.InstanceType, _ int) *cloudprovider.InstanceType {
 			if it.Name == nodeClaim.Labels[corev1.LabelInstanceTypeStable] {
-				newLabels := lo.Keys(nodeClaim.Labels)
-				it.Requirements = scheduling.NewLabelRequirements(map[string]string{newLabels[0]: test.RandomName()})
+				for i := range it.Offerings {
+					it.Offerings[i].Requirements = scheduling.NewLabelRequirements(map[string]string{
+						corev1.LabelTopologyZone: test.RandomName(),
+					})
+				}
 			}
 			return it
 		})
