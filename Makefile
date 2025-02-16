@@ -22,14 +22,14 @@ uninstall-kwok: ## Uninstall kwok provider
 build-with-kind: # build with kind assumes the image will be uploaded directly onto the kind control plane, without an image repository
 	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build sigs.k8s.io/karpenter/kwok))
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d ":" -f 1))
-	$(eval IMG_TAG=latest) 
+	$(eval IMG_TAG=latest)
 
 build: ## Build the Karpenter KWOK controller images using ko build
 	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build -B sigs.k8s.io/karpenter/kwok))
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
-	
+
 apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	kubectl apply -f kwok/charts/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
@@ -38,7 +38,7 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 		--set controller.image.tag=$(IMG_TAG) \
 		--set serviceMonitor.enabled=true \
 		--set-string controller.env[0].name=ENABLE_PROFILING \
-		--set-string controller.env[0].value=true 
+		--set-string controller.env[0].value=true
 
 e2etests: ## Run the e2e suite against your local cluster
 	cd test && go test \
