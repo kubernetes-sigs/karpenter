@@ -166,7 +166,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 		if err := p.Validate(ctx, po); err != nil {
 			// Mark in memory that this pod is unschedulable
 			p.cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, po)
-			log.FromContext(ctx).WithValues("Pod", klog.KRef(po.Namespace, po.Name)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
 		return false
@@ -220,7 +220,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	}
 	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
 		if !np.StatusConditions().IsTrue(status.ConditionReady) {
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Error(err, "ignoring nodepool, not ready")
+			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring nodepool, not ready")
 			return false
 		}
 		return np.DeletionTimestamp.IsZero()
@@ -239,11 +239,11 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 		// Get instance type options
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Error(err, "skipping, unable to resolve instance types")
+			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
 			continue
 		}
 		if len(its) == 0 {
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Info("skipping, no resolved instance types found")
+			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, no resolved instance types found")
 			continue
 		}
 		instanceTypes[np.Name] = its
@@ -314,7 +314,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	scheduler.UnschedulablePodsCount.Set(float64(len(results.PodErrors)), map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
 	if len(results.NewNodeClaims) > 0 {
-		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
+		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KObj(p).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
 	}
 	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
 	p.cluster.MarkPodSchedulingDecisions(results.PodErrors, pendingPods...)
@@ -341,7 +341,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 		return req.Key == corev1.LabelInstanceTypeStable
 	})
 
-	log.FromContext(ctx).WithValues("NodeClaim", klog.KRef("", nodeClaim.Name), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
+	log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
 		Info("created nodeclaim")
 	metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
 		metrics.ReasonLabel:       options.Reason,
@@ -429,7 +429,7 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 	var schedulablePods []*corev1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
-			log.FromContext(ctx).WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)).Error(err, "failed getting volume topology requirements")
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}
