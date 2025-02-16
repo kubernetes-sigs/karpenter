@@ -115,7 +115,6 @@ var _ = Describe("Drift", func() {
 				for i := range it.Offerings {
 					it.Offerings[i].Requirements = scheduling.NewLabelRequirements(map[string]string{
 						corev1.LabelTopologyZone: test.RandomName(),
-						// v1.CapacityTypeLabelKey:  test.RandomName(),
 					})
 				}
 			}
