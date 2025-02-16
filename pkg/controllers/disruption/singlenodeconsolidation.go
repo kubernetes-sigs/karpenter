@@ -84,7 +84,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		}
 		if err := v.IsValid(ctx, cmd, consolidationTTL); err != nil {
 			if IsValidationError(err) {
-				log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
+				log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid")
 				return Command{}, scheduling.Results{}, nil
 			}
 			return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)

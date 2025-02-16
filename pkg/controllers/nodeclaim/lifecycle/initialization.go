@@ -59,7 +59,7 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim)
 		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeInitialized, "NodeNotFound", "Node not registered with cluster")
 		return reconcile.Result{}, nil //nolint:nilerr
 	}
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", node.Name)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KObj(node)))
 	if nodeutils.GetCondition(node, corev1.NodeReady).Status != corev1.ConditionTrue {
 		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeInitialized, "NodeNotReady", "Node status is NotReady")
 		return reconcile.Result{}, nil

@@ -202,7 +202,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 // 3. Add Command to orchestration.Queue to wait to delete the candiates.
 func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, schedulingResults scheduling.Results) error {
 	commandID := uuid.NewUUID()
-	log.FromContext(ctx).WithValues("command-id", commandID, "reason", strings.ToLower(string(m.Reason()))).Info(fmt.Sprintf("disrupting nodeclaim(s) via %s", cmd))
+	log.FromContext(ctx).WithValues(append([]any{"command-id", string(commandID), "reason", strings.ToLower(string(m.Reason()))}, cmd.LogValues()...)...).Info("disrupting node(s)")
 
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
 	if err := c.MarkDisrupted(ctx, m, cmd.candidates...); err != nil {

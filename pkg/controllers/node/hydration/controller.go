@@ -56,7 +56,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 
 func (c *Controller) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef(n.Namespace, n.Name)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KObj(n)))
 
 	nc, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, n)
 	if err != nil {
