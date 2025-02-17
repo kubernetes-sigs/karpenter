@@ -6,6 +6,7 @@ on:
       - opened
       - edited
       - synchronize
+      - reopened
 
 permissions:
   # write permission is required for the wip feature to update PR status to pending when [WIP] is in the title
