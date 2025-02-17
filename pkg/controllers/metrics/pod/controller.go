@@ -252,7 +252,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	})
 	c.recordPodSchedulingUndecidedMetric(pod)
 	// Get the time for when we Karpenter first thought the pod was schedulable. This should be zero if we didn't simulate for this pod.
-	schedulableTime := c.cluster.PodSchedulingSuccessTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
+	schedulableTime := c.cluster.PodSchedulingSuccessTime(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, false)
 	c.recordPodStartupMetric(pod, schedulableTime)
 	c.recordPodBoundMetric(pod, schedulableTime)
 	// Requeue every 30s for pods that are stuck without a state change
