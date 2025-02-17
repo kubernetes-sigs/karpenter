@@ -8,6 +8,7 @@ on:
       - synchronize
 
 permissions:
+  # write permission is required for the wip feature to update PR status to pending when [WIP] is in the title
   pull-requests: write
 
 jobs:
