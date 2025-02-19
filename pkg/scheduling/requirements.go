@@ -189,45 +189,6 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
 	return multierr.Append(errs, r.Intersects(requirements))
 }
 
-// editDistance is an implementation of edit distance from Algorithms/DPV
-func editDistance(s, t string) int {
-	min := func(a, b, c int) int {
-		m := a
-		if b < m {
-			m = b
-		}
-		if c < m {
-			m = c
-		}
-		return m
-	}
-
-	m := len(s)
-	n := len(t)
-	if m == 0 {
-		return n
-	}
-	if n == 0 {
-		return m
-	}
-	prevRow := make([]int, n)
-	curRow := make([]int, n)
-	for j := 1; j < n; j++ {
-		prevRow[j] = j
-	}
-	for i := 1; i < m; i++ {
-		for j := 1; j < n; j++ {
-			diff := 0
-			if s[i] != t[j] {
-				diff = 1
-			}
-			curRow[j] = min(prevRow[j]+1, curRow[j-1]+1, prevRow[j-1]+diff)
-		}
-		prevRow, curRow = curRow, prevRow
-	}
-	return prevRow[n-1]
-}
-
 func getSuffix(key string) string {
 	before, after, found := strings.Cut(key, "/")
 	return lo.Ternary(found, after, before)
@@ -235,7 +196,7 @@ func getSuffix(key string) string {
 
 func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
 	for wellKnown := range allowedUndefined {
-		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
+		if strings.Contains(wellKnown, key) {
 			return fmt.Sprintf(" (typo of %q?)", wellKnown)
 		}
 		if strings.HasSuffix(wellKnown, getSuffix(key)) {
@@ -243,7 +204,7 @@ func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) st
 		}
 	}
 	for existing := range r {
-		if strings.Contains(existing, key) || editDistance(key, existing) < len(existing)/5 {
+		if strings.Contains(existing, key) {
 			return fmt.Sprintf(" (typo of %q?)", existing)
 		}
 		if strings.HasSuffix(existing, getSuffix(key)) {
