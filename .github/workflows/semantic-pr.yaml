@@ -9,8 +9,7 @@ on:
       - reopened
 
 permissions:
-  # write permission is required for the wip feature to update PR status to pending when [WIP] is in the title
-  pull-requests: write
+  pull-requests: read
 
 jobs:
   main:
@@ -20,5 +19,3 @@ jobs:
       - uses: amannn/action-semantic-pull-request@0723387faaf9b38adef4775cd42cfd5155ed6017 # v5.5.3, to avoid Unpinned tag for 3rd party Action in workflow from CodeQL
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          wip: true
