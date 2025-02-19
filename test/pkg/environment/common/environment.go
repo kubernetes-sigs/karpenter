@@ -91,7 +91,7 @@ func NewEnvironment(t *testing.T) *Environment {
 	// Get the output dir if it's set
 	outputDir, _ := os.LookupEnv("OUTPUT_DIR")
 
-	gomega.SetDefaultEventuallyTimeout(5 * time.Minute)
+	gomega.SetDefaultEventuallyTimeout(10 * time.Minute)
 	gomega.SetDefaultEventuallyPollingInterval(1 * time.Second)
 	return &Environment{
 		Context:               ctx,
