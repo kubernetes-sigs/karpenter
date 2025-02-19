@@ -72,7 +72,7 @@ type options struct {
 
 type Options = option.Function[options]
 
-var DisableReservedFallback = func(opts *options) {
+var DisableReservedCapacityFallback = func(opts *options) {
 	opts.reservedOfferingMode = ReservedOfferingModeStrict
 }
 
@@ -297,16 +297,20 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			continue
 		}
 
-		// If unsuccessful, relax the pod and recompute topology
-		relaxed := s.preferences.Relax(ctx, pod)
-		q.Push(pod, relaxed)
-		if relaxed {
-			if err := s.topology.Update(ctx, pod); err != nil {
-				log.FromContext(ctx).Error(err, "failed updating topology")
+		// We should only relax the pod's requirements when the error is not a reserved offering error because the pod may be
+		// able to schedule later without relaxing constraints. This could occur in this scheduling run, if other NodeClaims
+		// release the required reservations when constrained, or in subsequent runs.
+		var relaxed bool
+		if !IsReservedOfferingError(errors[pod]) {
+			if relaxed = s.preferences.Relax(ctx, pod); relaxed {
+				if err := s.topology.Update(ctx, pod); err != nil {
+					log.FromContext(ctx).Error(err, "failed updating topology")
+				}
+				// Update the cached podData since the pod was relaxed and it could have changed its requirement set
+				s.updateCachedPodData(pod)
 			}
-			// Update the cached podData since the pod was relaxed and it could have changed its requirement set
-			s.updateCachedPodData(pod)
 		}
+		q.Push(pod, relaxed)
 	}
 	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 	for _, m := range s.newNodeClaims {
@@ -371,20 +375,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// Create new node
 	var errs error
-	var compatibleReservedNCT *NodeClaimTemplate
 	for _, nodeClaimTemplate := range s.nodeClaimTemplates {
-		if s.reservedOfferingMode == ReservedOfferingModeStrict && compatibleReservedNCT != nil && compatibleReservedNCT.NodePoolWeight > nodeClaimTemplate.NodePoolWeight {
-			// We tried to schedule the pod to a NodeClaimTemplate previously and it would have scheduled to reserved capacity
-			// had the reservation limit not been exceeded for this scheduling simulation. Since the reserved offering mode is
-			// strict, we shouldn't allow fallback to a NodePool of lesser weight.
-			errs = multierr.Append(errs, NewReservedOfferingError(fmt.Errorf(
-				"skipping evalutation of nodepool %q, pod can schedule to nodepool %q with a greater weight on a reserved offering",
-				nodeClaimTemplate.NodePoolName,
-				compatibleReservedNCT.NodePoolName,
-			)))
-			continue
-		}
-
 		instanceTypes := nodeClaimTemplate.InstanceTypeOptions
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[nodeClaimTemplate.NodePoolName]; ok {
@@ -412,35 +403,17 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 					nodeClaimTemplate.NodePoolName,
 					err,
 				))
-				compatibleReservedNCT = nodeClaimTemplate
-			} else {
-				errs = multierr.Append(errs, fmt.Errorf(
-					"incompatible with nodepool %q, daemonset overhead=%s, %w",
-					nodeClaimTemplate.NodePoolName,
-					resources.String(s.daemonOverhead[nodeClaimTemplate]),
-					err,
-				))
+				// If the pod is compatible with a NodePool with reserved offerings available, we shouldn't fall back to a NodePool
+				// with a lower weight. We could consider allowing "fallback" to NodePools with equal weight if they also have
+				// reserved capacity in the future if scheduling latency becomes an issue.
+				break
 			}
-			continue
-		}
-
-		// TODO: If necessary, could mark the reserved offering status in the scheduling.NodeClaim rather than crawling the
-		// offerings. Granted, this won't be an issue unless there is a compatible reserved NodeClaimTemplate since we short
-		// circuit the conditional.
-		if s.reservedOfferingMode == ReservedOfferingModeStrict && compatibleReservedNCT != nil && !lo.ContainsBy(nodeClaim.InstanceTypeOptions, func(it *cloudprovider.InstanceType) bool {
-			return lo.ContainsBy(it.Offerings, func(o *cloudprovider.Offering) bool {
-				return o.CapacityType() == v1.CapacityTypeReserved
-			})
-		}) {
-			// We would have been able to schedule the pod to a NodeClaimTemplate of equal weight on a reserved instance, but
-			// were unable to do so since the reservation limit had been exceeded for this scheduling simulation. We shouldn't
-			// fallback to on-demand on a NodePool of equal weight.
-			errs = multierr.Append(errs, NewReservedOfferingError(fmt.Errorf(
-				"compatible with nodepool %q but failed to add pod while adhering to reservation fallback policy, pod can schedule to nodepool %q on a reserved offering",
+			errs = multierr.Append(errs, fmt.Errorf(
+				"incompatible with nodepool %q, daemonset overhead=%s, %w",
 				nodeClaimTemplate.NodePoolName,
-				compatibleReservedNCT.NodePoolName,
-			)))
-			nodeClaim.Destroy()
+				resources.String(s.daemonOverhead[nodeClaimTemplate]),
+				err,
+			))
 			continue
 		}
 

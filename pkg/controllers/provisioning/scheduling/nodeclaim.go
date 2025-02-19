@@ -136,7 +136,7 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData) error {
 		return err
 	}
 
-	reservedOfferings, offeringsToRelease, err := n.reserveOfferings(remaining, nodeClaimRequirements)
+	reservedOfferings, err := n.reserveOfferings(remaining, nodeClaimRequirements)
 	if err != nil {
 		return err
 	}
@@ -148,11 +148,27 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData) error {
 	n.Requirements = nodeClaimRequirements
 	n.topology.Record(pod, n.NodeClaim.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, hostPorts)
+	n.releaseReservedOfferings(n.reservedOfferings, reservedOfferings)
 	n.reservedOfferings = reservedOfferings
-	for _, o := range offeringsToRelease {
-		n.reservationManager.Release(n.hostname, o)
-	}
 	return nil
+}
+
+// releaseReservedOfferings releases all offerings which are present in the current reserved offerings, but are not
+// present in the updated reserved offerings.
+func (n *NodeClaim) releaseReservedOfferings(current, updated map[string]cloudprovider.Offerings) {
+	updatedIDs := sets.New[string]()
+	for _, ofs := range updated {
+		for _, o := range ofs {
+			updatedIDs.Insert(o.ReservationID())
+		}
+	}
+	for _, ofs := range current {
+		for _, o := range ofs {
+			if !updatedIDs.Has(o.ReservationID()) {
+				n.reservationManager.Release(n.hostname, o)
+			}
+		}
+	}
 }
 
 // reserveOfferings handles the reservation of `karpenter.sh/capacity-type: reserved` offerings, returning the reserved
@@ -163,11 +179,10 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData) error {
 func (n *NodeClaim) reserveOfferings(
 	instanceTypes []*cloudprovider.InstanceType,
 	nodeClaimRequirements scheduling.Requirements,
-) (reservedOfferings map[string]cloudprovider.Offerings, offeringsToRelease []*cloudprovider.Offering, err error) {
-	compatibleReservedInstanceTypes := sets.New[string]()
-	reservedOfferings = map[string]cloudprovider.Offerings{}
+) (map[string]cloudprovider.Offerings, error) {
+	hasCompatibleOffering := false
+	reservedOfferings := map[string]cloudprovider.Offerings{}
 	for _, it := range instanceTypes {
-		hasCompatibleOffering := false
 		for _, o := range it.Offerings {
 			if o.CapacityType() != v1.CapacityTypeReserved || !o.Available {
 				continue
@@ -175,7 +190,6 @@ func (n *NodeClaim) reserveOfferings(
 			// Track every incompatible reserved offering for release. Since releasing a reservation is a no-op when there is no
 			// reservation for the given host, there's no need to check that a reservation actually exists for the offering.
 			if !nodeClaimRequirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-				offeringsToRelease = append(offeringsToRelease, o)
 				continue
 			}
 			hasCompatibleOffering = true
@@ -186,35 +200,24 @@ func (n *NodeClaim) reserveOfferings(
 				reservedOfferings[it.Name] = append(reservedOfferings[it.Name], o)
 			}
 		}
-		if hasCompatibleOffering {
-			compatibleReservedInstanceTypes.Insert(it.Name)
-		}
 	}
 
 	if n.reservedOfferingMode == ReservedOfferingModeStrict {
 		// If an instance type with a compatible reserved offering exists, but we failed to make any reservations, we should
-		// fail. We include this check due to the pessimistic nature of instance reservation - we have to reserve each potential
-		// offering for every nodeclaim, since we don't know what we'll launch with. Without this check we would fall back to
-		// on-demand / spot even when there's sufficient reserved capacity. This check means we may fail to schedule the pod
-		// during this scheduling simulation, but with the possibility of success on subsequent simulations.
-		// Note: while this can occur both on initial creation and on
-		if len(compatibleReservedInstanceTypes) != 0 && len(reservedOfferings) == 0 {
-			return nil, nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
+		// fail. This could occur when all of the capacity for compatible instances has been reserved by previously created
+		// nodeclaims. Since we reserve offering pessimistically, i.e. we will reserve any offering that the instance could
+		// be launched with, we should fall back and attempt to schedule this pod in a subsequent scheduling simulation once
+		// reservation capacity is available again.
+		if hasCompatibleOffering && len(reservedOfferings) == 0 {
+			return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
 		}
 		// If the nodeclaim previously had compatible reserved offerings, but the additional requirements filtered those out,
 		// we should fail to add the pod to this nodeclaim.
 		if len(n.reservedOfferings) != 0 && len(reservedOfferings) == 0 {
-			return nil, nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
+			return nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
 		}
 	}
-	// Ensure we release any offerings for instance types which are no longer compatible with nodeClaimRequirements
-	for instanceName, offerings := range n.reservedOfferings {
-		if compatibleReservedInstanceTypes.Has(instanceName) {
-			continue
-		}
-		offeringsToRelease = append(offeringsToRelease, offerings...)
-	}
-	return reservedOfferings, offeringsToRelease, nil
+	return reservedOfferings, nil
 }
 
 func (n *NodeClaim) Destroy() {

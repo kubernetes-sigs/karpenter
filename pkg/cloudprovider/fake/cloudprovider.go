@@ -43,6 +43,7 @@ import (
 func init() {
 	v1.WellKnownLabels = v1.WellKnownLabels.Insert(v1alpha1.LabelReservationID)
 	cloudprovider.ReservationIDLabel = v1alpha1.LabelReservationID
+	cloudprovider.ReservedCapacityPriceFactor = 1.0 / 1_000_000.0
 }
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
@@ -109,6 +110,7 @@ func (c *CloudProvider) Reset() {
 	}
 }
 
+//nolint:gocyclo
 func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodeClaim, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -126,9 +128,16 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	np := &v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nodeClaim.Labels[v1.NodePoolLabelKey]}}
 	instanceTypes := lo.Filter(lo.Must(c.GetInstanceTypes(ctx, np)), func(i *cloudprovider.InstanceType, _ int) bool {
-		return reqs.IsCompatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) &&
-			i.Offerings.Available().HasCompatible(reqs) &&
-			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
+		if !reqs.IsCompatible(i.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+			return false
+		}
+		if !i.Offerings.Available().HasCompatible(reqs) {
+			return false
+		}
+		if !resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable()) {
+			return false
+		}
+		return true
 	})
 	// Order instance types so that we get the cheapest instance types of the available offerings
 	sort.Slice(instanceTypes, func(i, j int) bool {
@@ -145,20 +154,22 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 		}
 	}
 	// Find offering, prioritizing reserved instances
-	offering := func() *cloudprovider.Offering {
-		offerings := instanceType.Offerings.Available().Compatible(reqs)
-		lo.Must0(len(offerings) != 0, "created nodeclaim with no available offerings")
-		for _, o := range offerings {
-			if o.CapacityType() == v1.CapacityTypeReserved {
-				o.ReservationCapacity -= 1
-				if o.ReservationCapacity == 0 {
-					o.Available = false
-				}
-				return o
+	var offering *cloudprovider.Offering
+	offerings := instanceType.Offerings.Available().Compatible(reqs)
+	lo.Must0(len(offerings) != 0, "created nodeclaim with no available offerings")
+	for _, o := range offerings {
+		if o.CapacityType() == v1.CapacityTypeReserved {
+			o.ReservationCapacity -= 1
+			if o.ReservationCapacity == 0 {
+				o.Available = false
 			}
+			offering = o
+			break
 		}
-		return offerings[0]
-	}()
+	}
+	if offering == nil {
+		offering = offerings[0]
+	}
 	// Propagate labels dictated by offering requirements - e.g. zone, capacity-type, and reservation-id
 	for _, req := range offering.Requirements {
 		labels[req.Key] = req.Any()

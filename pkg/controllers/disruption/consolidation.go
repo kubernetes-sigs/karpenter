@@ -211,7 +211,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 	// We are consolidating a node from OD -> [OD,Spot] but have filtered the instance types by cost based on the
 	// assumption, that the spot variant will launch. We also need to add a requirement to the node to ensure that if
 	// spot capacity is insufficient we don't replace the node with a more expensive on-demand node.  Instead the launch
-	// should fail and we'll just leave the node alone.
+	// should fail and we'll just leave the node alone. We don't need to do the same for reserved since the requirements
+	// are injected on by the scheduler.
 	ctReq := results.NewNodeClaims[0].Requirements.Get(v1.CapacityTypeLabelKey)
 	if ctReq.Has(v1.CapacityTypeSpot) && ctReq.Has(v1.CapacityTypeOnDemand) {
 		results.NewNodeClaims[0].Requirements.Add(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
@@ -307,11 +308,24 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	var price float64
 	for _, c := range candidates {
-		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduling.NewLabelRequirements(c.StateNode.Labels()))
-		if len(compatibleOfferings) == 0 {
-			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
+		var compatibleOfferings cloudprovider.Offerings
+		reservedFallback := false
+		reqs := scheduling.NewLabelRequirements(c.StateNode.Labels())
+		for {
+			compatibleOfferings = c.instanceType.Offerings.Compatible(reqs)
+			if len(compatibleOfferings) != 0 {
+				break
+			}
+			if c.capacityType != v1.CapacityTypeReserved {
+				return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
+			}
+			// If there are no compatible offerings, but the capacity type for the candidate is reserved, we can fall-back to
+			// the on-demand offering to derive pricing.
+			reqs[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand)
+			delete(reqs, cloudprovider.ReservationIDLabel)
+			reservedFallback = true
 		}
-		price += compatibleOfferings.Cheapest().Price
+		price += compatibleOfferings.Cheapest().Price * lo.Ternary(reservedFallback, cloudprovider.ReservedCapacityPriceFactor, 1.0)
 	}
 	return price, nil
 }

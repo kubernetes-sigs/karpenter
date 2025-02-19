@@ -43,6 +43,10 @@ var (
 	// reservation. For example, a reservation could be shared across multiple NodePools, and the value encoded in this
 	// requirement is used to inform the scheduler that a reservation for one should affect the other.
 	ReservationIDLabel string
+
+	// ReservedCapacityPriceFactor is a constant which should be applied when determining the cost of a reserved offering,
+	// if unavailable from `GetInstanceTypes`.
+	ReservedCapacityPriceFactor float64
 )
 
 type DriftReason string
@@ -244,20 +248,6 @@ func (i InstanceTypeOverhead) Total() corev1.ResourceList {
 	return resources.Merge(i.KubeReserved, i.SystemReserved, i.EvictionThreshold)
 }
 
-// ReservationManager is used to track the availability of a reserved offering over the course of a scheduling
-// simulation. Reserved offerings may have a limited number of available instances associated with them,
-// This is exposed as an interface for cloudprovider's to implement to give flexibility when dealing with separate
-// offerings with associated availablility.
-type ReservationManager interface {
-	// Reserve takes a unique identifier for a reservation, and returns a boolean indicating if the reservation was
-	// successful. Reserve should be idempotent, i.e. multiple calls with the same reservation ID should only count for a
-	// single reservation.
-	Reserve(string) bool
-	// Release takes a unique identifier for a reservation, and should discard any matching reservations. If no
-	// reservations exist for the given id, release should be a no-op.
-	Release(string)
-}
-
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
 // these properties are captured with labels in Requirements.
@@ -271,6 +261,10 @@ type Offering struct {
 
 func (o *Offering) CapacityType() string {
 	return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
+}
+
+func (o *Offering) Zone() string {
+	return o.Requirements.Get(corev1.LabelTopologyZone).Any()
 }
 
 func (o *Offering) ReservationID() string {
