@@ -304,7 +304,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, nil
 	}
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
-	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.DisableReservedFallback)
+	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.DisableReservedCapacityFallback)
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			log.FromContext(ctx).Info("no nodepools found")
@@ -318,7 +318,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	}
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	if len(results.ReservedOfferingErrors) != 0 {
-		log.FromContext(ctx).V(1).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5)).Info("deferring scheduling decision for provisionable pod(s) to future simulation due to limited reserved offering capacity")
+		log.FromContext(ctx).V(1).WithValues("Pods", pretty.Slice(lo.Map(lo.Keys(results.ReservedOfferingErrors), func(p *corev1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5)).Info("deferring scheduling decision for provisionable pod(s) to future simulation due to limited reserved offering capacity")
 	}
 	scheduler.UnschedulablePodsCount.Set(float64(len(results.PodErrors)), map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
 	if len(results.NewNodeClaims) > 0 {
