@@ -172,7 +172,7 @@ func (r Requirements) IsCompatible(requirements Requirements, options ...option.
 }
 
 // Compatible ensures the provided requirements can loosely be met.
-func (r Requirements) Compatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) (errs error) {
+func (r Requirements) Compatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) error {
 	opts := option.Resolve(options...)
 
 	// Custom Labels must intersect, but if not defined are denied.
@@ -183,10 +183,11 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
 			continue
 		}
-		errs = multierr.Append(errs, fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined)))
+		// break early so we only report the first error
+		return fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined))
 	}
 	// Well Known Labels must intersect, but if not defined, are allowed.
-	return multierr.Append(errs, r.Intersects(requirements))
+	return r.Intersects(requirements)
 }
 
 // editDistance is an implementation of edit distance from Algorithms/DPV
