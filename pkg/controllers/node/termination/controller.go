@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -96,9 +97,11 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing nodeclaims, %w", err)
 	}
-
 	if err = c.deleteAllNodeClaims(ctx, nodeClaims...); err != nil {
 		return reconcile.Result{}, fmt.Errorf("deleting nodeclaims, %w", err)
+	}
+	if len(nodeClaims) != 0 {
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaims[0])))
 	}
 
 	nodeTerminationTime, err := c.nodeTerminationTime(node, nodeClaims...)
