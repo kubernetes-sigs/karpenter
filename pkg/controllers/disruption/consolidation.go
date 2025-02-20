@@ -308,24 +308,11 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	var price float64
 	for _, c := range candidates {
-		var compatibleOfferings cloudprovider.Offerings
-		reservedFallback := false
-		reqs := scheduling.NewLabelRequirements(c.StateNode.Labels())
-		for {
-			compatibleOfferings = c.instanceType.Offerings.Compatible(reqs)
-			if len(compatibleOfferings) != 0 {
-				break
-			}
-			if c.capacityType != v1.CapacityTypeReserved {
-				return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
-			}
-			// If there are no compatible offerings, but the capacity type for the candidate is reserved, we can fall-back to
-			// the on-demand offering to derive pricing.
-			reqs[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand)
-			delete(reqs, cloudprovider.ReservationIDLabel)
-			reservedFallback = true
+		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduling.NewLabelRequirements(c.StateNode.Labels()))
+		if len(compatibleOfferings) == 0 {
+			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
 		}
-		price += compatibleOfferings.Cheapest().Price * lo.Ternary(reservedFallback, cloudprovider.ReservedCapacityPriceFactor, 1.0)
+		price += compatibleOfferings.Cheapest().Price
 	}
 	return price, nil
 }

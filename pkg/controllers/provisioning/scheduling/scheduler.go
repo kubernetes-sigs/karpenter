@@ -158,10 +158,9 @@ type Scheduler struct {
 
 // Results contains the results of the scheduling operation
 type Results struct {
-	NewNodeClaims          []*NodeClaim
-	ExistingNodes          []*ExistingNode
-	PodErrors              map[*corev1.Pod]error
-	ReservedOfferingErrors map[*corev1.Pod]error
+	NewNodeClaims []*NodeClaim
+	ExistingNodes []*ExistingNode
+	PodErrors     map[*corev1.Pod]error
 }
 
 // Record sends eventing and log messages back for the results that were produced from a scheduling run
@@ -170,6 +169,9 @@ type Results struct {
 func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
 	// Report failures and nominations
 	for p, err := range r.PodErrors {
+		if IsReservedOfferingError(err) {
+			continue
+		}
 		log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
@@ -201,6 +203,12 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 		return
 	}
 	log.FromContext(ctx).WithValues("nodes", inflightCount, "pods", existingCount).Info("computed unready node(s) will fit pod(s)")
+}
+
+func (r Results) ReservedOfferingErrors() map[*corev1.Pod]error {
+	return lo.PickBy(r.PodErrors, func(_ *corev1.Pod, err error) bool {
+		return IsReservedOfferingError(err)
+	})
 }
 
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
@@ -299,7 +307,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 
 		// We should only relax the pod's requirements when the error is not a reserved offering error because the pod may be
 		// able to schedule later without relaxing constraints. This could occur in this scheduling run, if other NodeClaims
-		// release the required reservations when constrained, or in subsequent runs.
+		// release the required reservations when constrained, or in subsequent runs. For an example, reference the following
+		// test: "shouldn't relax preferences when a pod fails to schedule due to a reserved offering error".
 		var relaxed bool
 		if !IsReservedOfferingError(errors[pod]) {
 			if relaxed = s.preferences.Relax(ctx, pod); relaxed {
@@ -317,25 +326,10 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		m.FinalizeScheduling()
 	}
 
-	// Parition errors into reserved offering and standard errors. Reserved offering errors can only occur when the
-	// reserved offering mode is set to strict and we failed to schedule a pod due to all reservations being consumed.
-	// This is different from a standard error since we expect that the pod may be able to schedule in subsequent
-	// simulations.
-	reservedOfferingErrors := map[*corev1.Pod]error{}
-	for pod, err := range errors {
-		if IsReservedOfferingError(err) {
-			reservedOfferingErrors[pod] = err
-		}
-	}
-	for pod := range reservedOfferingErrors {
-		delete(errors, pod)
-	}
-
 	return Results{
-		NewNodeClaims:          s.newNodeClaims,
-		ExistingNodes:          s.existingNodes,
-		PodErrors:              errors,
-		ReservedOfferingErrors: reservedOfferingErrors,
+		NewNodeClaims: s.newNodeClaims,
+		ExistingNodes: s.existingNodes,
+		PodErrors:     errors,
 	}
 }
 
@@ -368,7 +362,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 
 	// Pick existing node that we are about to create
 	for _, nodeClaim := range s.newNodeClaims {
-		if err := nodeClaim.Add(pod, s.cachedPodData[pod.UID]); err == nil {
+		if err := nodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID]); err == nil {
 			return nil
 		}
 	}
@@ -395,7 +389,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 		}
 
 		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes, s.reservationManager, s.reservedOfferingMode)
-		if err := nodeClaim.Add(pod, s.cachedPodData[pod.UID]); err != nil {
+		if err := nodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID]); err != nil {
 			nodeClaim.Destroy()
 			if IsReservedOfferingError(err) {
 				errs = multierr.Append(errs, fmt.Errorf(

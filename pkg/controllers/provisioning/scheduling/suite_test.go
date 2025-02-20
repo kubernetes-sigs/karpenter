@@ -3807,6 +3807,7 @@ var _ = Context("Scheduling", func() {
 			}
 			reservedInstanceTypes := []*cloudprovider.InstanceType{cloudProvider.InstanceTypes[1], cloudProvider.InstanceTypes[2]}
 			for _, it := range reservedInstanceTypes {
+				it.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
 				it.Offerings = append(it.Offerings, &cloudprovider.Offering{
 					ReservationCapacity: 1,
 					Available:           true,
@@ -3818,6 +3819,7 @@ var _ = Context("Scheduling", func() {
 					Price: fake.PriceFromResources(it.Capacity) / 100_000.0,
 				})
 			}
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{CapacityReservations: lo.ToPtr(true)}}))
 		})
 		It("shouldn't fallback to on-demand or spot when compatible reserved offerings are available", func() {
 			// With the pessimistic nature of scheduling reservations, we'll only be able to provision one instance per loop if a
@@ -3952,6 +3954,7 @@ var _ = Context("Scheduling", func() {
 				}),
 				Price: fake.PriceFromResources(distinctInstanceType.Capacity) / 100_000.0,
 			})
+			distinctInstanceType.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
 			cloudProvider.InstanceTypesForNodePool[nodePool2.Name] = []*cloudprovider.InstanceType{distinctInstanceType}
 
 			pods := lo.Times(2, func(i int) *corev1.Pod {

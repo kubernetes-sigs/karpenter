@@ -316,13 +316,30 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
+
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
-	if len(results.ReservedOfferingErrors) != 0 {
-		log.FromContext(ctx).V(1).WithValues("Pods", pretty.Slice(lo.Map(lo.Keys(results.ReservedOfferingErrors), func(p *corev1.Pod, _ int) string { return klog.KRef(p.Namespace, p.Name).String() }), 5)).Info("deferring scheduling decision for provisionable pod(s) to future simulation due to limited reserved offering capacity")
+	reservedOfferingErrors := results.ReservedOfferingErrors()
+	if len(reservedOfferingErrors) != 0 {
+		log.FromContext(ctx).V(1).WithValues(
+			"Pods", pretty.Slice(lo.Map(lo.Keys(reservedOfferingErrors), func(p *corev1.Pod, _ int) string {
+				return klog.KRef(p.Namespace, p.Name).String()
+			}), 5),
+		).Info("deferring scheduling decision for provisionable pod(s) to future simulation due to limited reserved offering capacity")
 	}
-	scheduler.UnschedulablePodsCount.Set(float64(len(results.PodErrors)), map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
+	scheduler.UnschedulablePodsCount.Set(
+		// A reserved offering error doesn't indicate a pod is unschedulable, just that the scheduling decision was deferred.
+		float64(len(results.PodErrors)-len(reservedOfferingErrors)),
+		map[string]string{
+			scheduler.ControllerLabel: injection.GetControllerName(ctx),
+		},
+	)
 	if len(results.NewNodeClaims) > 0 {
-		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KObj(p).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
+		log.FromContext(ctx).WithValues(
+			"Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string {
+				return klog.KObj(p).String()
+			}), 5),
+			"duration", time.Since(start),
+		).Info("found provisionable pod(s)")
 	}
 	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
 	p.cluster.MarkPodSchedulingDecisions(results.PodErrors, pendingPods...)

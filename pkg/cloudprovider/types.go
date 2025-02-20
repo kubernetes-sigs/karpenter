@@ -38,15 +38,12 @@ import (
 var (
 	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
 	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand))
+	ReservedRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved))
 
 	// ReservationIDLabel is a label injected into a reserved offering's requirements which is used to uniquely identify a
 	// reservation. For example, a reservation could be shared across multiple NodePools, and the value encoded in this
 	// requirement is used to inform the scheduler that a reservation for one should affect the other.
 	ReservationIDLabel string
-
-	// ReservedCapacityPriceFactor is a constant which should be applied when determining the cost of a reserved offering,
-	// if unavailable from `GetInstanceTypes`.
-	ReservedCapacityPriceFactor float64
 )
 
 type DriftReason string
@@ -311,21 +308,17 @@ func (ofs Offerings) MostExpensive() *Offering {
 	})
 }
 
-// WorstLaunchPrice gets the worst-case launch price from the offerings that are offered
-// on an instance type. If the instance type has a spot offering available, then it uses the spot offering
-// to get the launch price; else, it uses the on-demand launch price
+// WorstLaunchPrice gets the worst-case launch price from the offerings that are offered on an instance type. Only
+// offerings for the capacity type we will launch with are considered. The following precedence order is used to
+// determine which capacity type is used: reserved, spot, on-demand.
 func (ofs Offerings) WorstLaunchPrice(reqs scheduling.Requirements) float64 {
-	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeSpot) {
-		spotOfferings := ofs.Compatible(reqs).Compatible(SpotRequirement)
-		if len(spotOfferings) > 0 {
-			return spotOfferings.MostExpensive().Price
-		}
-	}
-	if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand) {
-		onDemandOfferings := ofs.Compatible(reqs).Compatible(OnDemandRequirement)
-		if len(onDemandOfferings) > 0 {
-			return onDemandOfferings.MostExpensive().Price
+	for _, ctReqs := range []scheduling.Requirements{
+		ReservedRequirement,
+		SpotRequirement,
+		OnDemandRequirement,
+	} {
+		if compatOfs := ofs.Compatible(reqs).Compatible(ctReqs); len(compatOfs) != 0 {
+			return compatOfs.MostExpensive().Price
 		}
 	}
 	return math.MaxFloat64
