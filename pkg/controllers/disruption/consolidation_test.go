@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 var _ = Describe("Consolidation", func() {
@@ -4378,5 +4379,143 @@ var _ = Describe("Consolidation", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 		})
+	})
+	Context("Reserved Capacity", func() {
+		var reservedNodeClaim *v1.NodeClaim
+		var reservedNode *corev1.Node
+		var mostExpensiveReservationID string
+
+		BeforeEach(func() {
+			mostExpensiveReservationID = fmt.Sprintf("r-%s", mostExpensiveInstance.Name)
+			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(
+				cloudprovider.ReservationIDLabel,
+				corev1.NodeSelectorOpIn,
+				mostExpensiveReservationID,
+			))
+			mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
+				Price:               mostExpensiveOffering.Price / 1_000_000.0,
+				Available:           true,
+				ReservationCapacity: 10,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
+					corev1.LabelTopologyZone:    mostExpensiveOffering.Zone(),
+					v1alpha1.LabelReservationID: mostExpensiveReservationID,
+				}),
+			})
+			reservedNodeClaim, reservedNode = test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:              nodePool.Name,
+						corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+						corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+						cloudprovider.ReservationIDLabel: mostExpensiveReservationID,
+					},
+				},
+			})
+			reservedNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{CapacityReservations: lo.ToPtr(true)}}))
+		})
+		DescribeTable(
+			"can replace node",
+			func(initialCapacityType string) {
+				nodeClaim = lo.Switch[string, *v1.NodeClaim](initialCapacityType).
+					Case(v1.CapacityTypeOnDemand, nodeClaim).
+					Case(v1.CapacityTypeSpot, spotNodeClaim).
+					Default(reservedNodeClaim)
+				node = lo.Switch[string, *corev1.Node](initialCapacityType).
+					Case(v1.CapacityTypeOnDemand, node).
+					Case(v1.CapacityTypeSpot, spotNode).
+					Default(reservedNode)
+
+				// If the capacity type is reserved, we will need a cheaper reserved instance to consolidat into
+				var leastExpensiveReservationID string
+				if initialCapacityType == v1.CapacityTypeReserved {
+					leastExpensiveReservationID = fmt.Sprintf("r-%s", leastExpensiveInstance.Name)
+					leastExpensiveInstance.Requirements.Add(scheduling.NewRequirement(
+						cloudprovider.ReservationIDLabel,
+						corev1.NodeSelectorOpIn,
+						leastExpensiveReservationID,
+					))
+					leastExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+					leastExpensiveInstance.Offerings = append(leastExpensiveInstance.Offerings, &cloudprovider.Offering{
+						Price:               leastExpensiveOffering.Price / 1_000_000.0,
+						Available:           true,
+						ReservationCapacity: 10,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
+							corev1.LabelTopologyZone:    leastExpensiveOffering.Zone(),
+							v1alpha1.LabelReservationID: leastExpensiveReservationID,
+						}),
+					})
+				}
+
+				// create our RS so we can link a pod to it
+				rs := test.ReplicaSet()
+				ExpectApplied(ctx, env.Client, rs)
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+				pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					},
+				}})
+				ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool)
+
+				// bind pods to node
+				ExpectManualBinding(ctx, env.Client, pod, node)
+
+				// inform cluster state about nodes and nodeClaims
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				fakeClock.Step(10 * time.Minute)
+
+				// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
+				var wg sync.WaitGroup
+				ExpectToWait(fakeClock, &wg)
+				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+				ExpectSingletonReconciled(ctx, disruptionController)
+				wg.Wait()
+
+				// Process the item so that the nodes can be deleted.
+				ExpectSingletonReconciled(ctx, queue)
+
+				// Cascade any deletion of the nodeclaim to the node
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+				// should create a new nodeclaim as there is a cheaper one that can hold the pod
+				nodeClaims := ExpectNodeClaims(ctx, env.Client)
+				nodes := ExpectNodes(ctx, env.Client)
+				Expect(nodeClaims).To(HaveLen(1))
+				Expect(nodes).To(HaveLen(1))
+
+				Expect(nodeClaims[0].Name).ToNot(Equal(nodeClaim.Name))
+				// If the original capacity type was OD or spot, we should be able to consolidate into the reserved offering of the
+				// same type.
+				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(corev1.LabelInstanceTypeStable)).To(BeTrue())
+				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(corev1.LabelInstanceTypeStable).Has(mostExpensiveInstance.Name)).To(Equal(initialCapacityType != v1.CapacityTypeReserved))
+				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Has(cloudprovider.ReservationIDLabel)).To(BeTrue())
+				Expect(scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaims[0].Spec.Requirements...).Get(cloudprovider.ReservationIDLabel).Any()).To(Equal(lo.Ternary(
+					initialCapacityType == v1.CapacityTypeReserved,
+					leastExpensiveReservationID,
+					mostExpensiveReservationID,
+				)))
+
+				// and delete the old one
+				ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			},
+			Entry("on-demand", v1.CapacityTypeOnDemand),
+			Entry("spot", v1.CapacityTypeSpot),
+			Entry("reserved", v1.CapacityTypeReserved),
+		)
 	})
 })
