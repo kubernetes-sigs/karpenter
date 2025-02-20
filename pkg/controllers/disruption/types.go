@@ -157,19 +157,22 @@ func (c Command) String() string {
 	}
 	odNodeClaims := 0
 	spotNodeClaims := 0
+	reservedNodeClaims := 0
 	for _, nodeClaim := range c.replacements {
 		ct := nodeClaim.Requirements.Get(v1.CapacityTypeLabelKey)
-		if ct.Has(v1.CapacityTypeOnDemand) {
+		switch {
+		case ct.Has(v1.CapacityTypeOnDemand):
 			odNodeClaims++
-		}
-		if ct.Has(v1.CapacityTypeSpot) {
+		case ct.Has(v1.CapacityTypeSpot):
 			spotNodeClaims++
+		case ct.Has(v1.CapacityTypeReserved):
+			reservedNodeClaims++
 		}
 	}
 	// Print list of instance types for the first replacements.
 	if len(c.replacements) > 1 {
-		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand, from types %s",
-			spotNodeClaims, odNodeClaims,
+		fmt.Fprintf(&buf, " and replacing with %d spot, %d on-demand, and %d reserved, from types %s",
+			spotNodeClaims, odNodeClaims, reservedNodeClaims,
 			scheduling.InstanceTypeList(c.replacements[0].InstanceTypeOptions))
 		return buf.String()
 	}

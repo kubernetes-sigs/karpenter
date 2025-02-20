@@ -38,6 +38,12 @@ import (
 var (
 	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
 	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand))
+	ReservedRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved))
+
+	// ReservationIDLabel is a label injected into a reserved offering's requirements which is used to uniquely identify a
+	// reservation. For example, a reservation could be shared across multiple NodePools, and the value encoded in this
+	// requirement is used to inform the scheduler that a reservation for one should affect the other.
+	ReservationIDLabel string
 )
 
 type DriftReason string
@@ -242,27 +248,38 @@ func (i InstanceTypeOverhead) Total() corev1.ResourceList {
 // An Offering describes where an InstanceType is available to be used, with the expectation that its properties
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
 // these properties are captured with labels in Requirements.
-// Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone
+// Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone.
 type Offering struct {
-	Requirements scheduling.Requirements
-	Price        float64
-	// Available is added so that Offerings can return all offerings that have ever existed for an instance type,
-	// so we can get historical pricing data for calculating savings in consolidation
-	Available bool
+	Requirements        scheduling.Requirements
+	Price               float64
+	Available           bool
+	ReservationCapacity int
 }
 
-type Offerings []Offering
+func (o *Offering) CapacityType() string {
+	return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
+}
+
+func (o *Offering) Zone() string {
+	return o.Requirements.Get(corev1.LabelTopologyZone).Any()
+}
+
+func (o *Offering) ReservationID() string {
+	return o.Requirements.Get(ReservationIDLabel).Any()
+}
+
+type Offerings []*Offering
 
 // Available filters the available offerings from the returned offerings
 func (ofs Offerings) Available() Offerings {
-	return lo.Filter(ofs, func(o Offering, _ int) bool {
+	return lo.Filter(ofs, func(o *Offering, _ int) bool {
 		return o.Available
 	})
 }
 
 // Compatible returns the offerings based on the passed requirements
 func (ofs Offerings) Compatible(reqs scheduling.Requirements) Offerings {
-	return lo.Filter(ofs, func(offering Offering, _ int) bool {
+	return lo.Filter(ofs, func(offering *Offering, _ int) bool {
 		return reqs.IsCompatible(offering.Requirements, scheduling.AllowUndefinedWellKnownLabels)
 	})
 }
@@ -278,34 +295,30 @@ func (ofs Offerings) HasCompatible(reqs scheduling.Requirements) bool {
 }
 
 // Cheapest returns the cheapest offering from the returned offerings
-func (ofs Offerings) Cheapest() Offering {
-	return lo.MinBy(ofs, func(a, b Offering) bool {
+func (ofs Offerings) Cheapest() *Offering {
+	return lo.MinBy(ofs, func(a, b *Offering) bool {
 		return a.Price < b.Price
 	})
 }
 
 // MostExpensive returns the most expensive offering from the return offerings
-func (ofs Offerings) MostExpensive() Offering {
-	return lo.MaxBy(ofs, func(a, b Offering) bool {
+func (ofs Offerings) MostExpensive() *Offering {
+	return lo.MaxBy(ofs, func(a, b *Offering) bool {
 		return a.Price > b.Price
 	})
 }
 
-// WorstLaunchPrice gets the worst-case launch price from the offerings that are offered
-// on an instance type. If the instance type has a spot offering available, then it uses the spot offering
-// to get the launch price; else, it uses the on-demand launch price
+// WorstLaunchPrice gets the worst-case launch price from the offerings that are offered on an instance type. Only
+// offerings for the capacity type we will launch with are considered. The following precedence order is used to
+// determine which capacity type is used: reserved, spot, on-demand.
 func (ofs Offerings) WorstLaunchPrice(reqs scheduling.Requirements) float64 {
-	// We prefer to launch spot offerings, so we will get the worst price based on the node requirements
-	if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeSpot) {
-		spotOfferings := ofs.Compatible(reqs).Compatible(SpotRequirement)
-		if len(spotOfferings) > 0 {
-			return spotOfferings.MostExpensive().Price
-		}
-	}
-	if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeOnDemand) {
-		onDemandOfferings := ofs.Compatible(reqs).Compatible(OnDemandRequirement)
-		if len(onDemandOfferings) > 0 {
-			return onDemandOfferings.MostExpensive().Price
+	for _, ctReqs := range []scheduling.Requirements{
+		ReservedRequirement,
+		SpotRequirement,
+		OnDemandRequirement,
+	} {
+		if compatOfs := ofs.Compatible(reqs).Compatible(ctReqs); len(compatOfs) != 0 {
+			return compatOfs.MostExpensive().Price
 		}
 	}
 	return math.MaxFloat64
