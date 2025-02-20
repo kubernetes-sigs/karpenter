@@ -3717,7 +3717,7 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, i)
 			}
 			_, err := prov.Schedule(injection.WithControllerName(ctx, "provisioner"))
-			m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", map[string]string{"controller": "provisioner"})
+			m, ok := FindMetricWithLabelValues("karpenter_scheduler_unschedulable_pods_count", map[string]string{})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", 10))
 			Expect(err).To(BeNil())
