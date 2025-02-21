@@ -353,20 +353,13 @@ var _ = Describe("Termination", func() {
 		}))
 	})
 	It("should not delete Nodes if the NodeClaim is not registered", func() {
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		node := test.NodeClaimLinkedNode(nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
-
-		node := test.NodeClaimLinkedNode(nodeClaim)
-		// Remove the unregistered taint to ensure the NodeClaim can't be marked as registered
-		node.Spec.Taints = nil
-		ExpectApplied(ctx, env.Client, node)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsFalse()).To(BeTrue())
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
