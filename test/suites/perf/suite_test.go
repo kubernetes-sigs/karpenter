@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
@@ -34,7 +35,7 @@ import (
 )
 
 var nodePool *v1.NodePool
-var nodeClass *v1alpha1.KWOKNodeClass
+var nodeClass client.Object
 var env *common.Environment
 
 var testLabels = map[string]string{
@@ -61,7 +62,7 @@ func TestPerf(t *testing.T) {
 
 var _ = BeforeEach(func() {
 	env.BeforeEach()
-	nodeClass = env.DefaultNodeClass()
+	nodeClass = env.DefaultNodeClass.DeepCopy()
 	nodePool = env.DefaultNodePool(nodeClass)
 	test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
 		NodeSelectorRequirement: corev1.NodeSelectorRequirement{

@@ -52,10 +52,6 @@ import (
 	terminationutil "sigs.k8s.io/karpenter/pkg/utils/termination"
 )
 
-type nodeClaimReconciler interface {
-	Reconcile(context.Context, *v1.NodeClaim) (reconcile.Result, error)
-}
-
 // Controller is a NodeClaim Lifecycle controller that manages the lifecycle of the NodeClaim up until its termination
 // The controller is responsible for ensuring that new Nodes get launched, that they have properly registered with
 // the cluster as nodes and that they are properly initialized, ensuring that nodeclaims that do not have matching nodes
@@ -108,9 +104,15 @@ func (c *Controller) Name() string {
 	return "nodeclaim.lifecycle"
 }
 
+// nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
-
+	if nodeClaim.Status.ProviderID != "" {
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
+	}
+	if nodeClaim.Status.NodeName != "" {
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName)))
+	}
 	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
@@ -137,7 +139,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	stored = nodeClaim.DeepCopy()
 	var results []reconcile.Result
 	var errs error
-	for _, reconciler := range []nodeClaimReconciler{
+	for _, reconciler := range []reconcile.TypedReconciler[*v1.NodeClaim]{
 		c.launch,
 		c.registration,
 		c.initialization,
@@ -169,7 +171,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 //nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName), "provider-id", nodeClaim.Status.ProviderID))
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
