@@ -193,7 +193,6 @@ var _ = Describe("Drift", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim if the nodeClaim is no longer drifted", func() {
-		cp.Drifted = ""
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
@@ -205,8 +204,6 @@ var _ = Describe("Drift", func() {
 	Context("NodeRequirement Drift", func() {
 		DescribeTable("",
 			func(oldNodePoolReq []v1.NodeSelectorRequirementWithMinValues, newNodePoolReq []v1.NodeSelectorRequirementWithMinValues, labels map[string]string, drifted bool) {
-				cp.Drifted = ""
-
 				nodePool.Spec.Template.Spec.Requirements = oldNodePoolReq
 				nodeClaim.Labels = lo.Assign(nodeClaim.Labels, labels)
 
@@ -356,7 +353,6 @@ var _ = Describe("Drift", func() {
 			),
 		)
 		It("should return drifted only on NodeClaims that are drifted from an updated nodePool", func() {
-			cp.Drifted = ""
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}}},
 				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelOSStable, Operator: corev1.NodeSelectorOpIn, Values: []string{string(corev1.Linux), string(corev1.Windows)}}},
@@ -411,7 +407,6 @@ var _ = Describe("Drift", func() {
 	Context("NodePool Static Drift", func() {
 		var nodePoolController *hash.Controller
 		BeforeEach(func() {
-			cp.Drifted = ""
 			nodePoolController = hash.NewController(env.Client, cp)
 			nodePool = &v1.NodePool{
 				ObjectMeta: nodePool.ObjectMeta,
