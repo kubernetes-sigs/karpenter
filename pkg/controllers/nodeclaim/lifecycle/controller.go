@@ -219,7 +219,6 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			return reconcile.Result{}, fmt.Errorf("ensuring instance termination, %w", err)
 		}
 		if !isInstanceTerminated {
-			fmt.Println("no error terminating but we didn't terminate?")
 			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 		InstanceTerminationDurationSeconds.Observe(time.Since(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).LastTransitionTime.Time).Seconds(), map[string]string{
