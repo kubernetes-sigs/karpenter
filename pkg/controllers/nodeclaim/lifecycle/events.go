@@ -45,14 +45,12 @@ func NodeClassNotReadyEvent(nodeClaim *v1.NodeClaim, err error) events.Event {
 	}
 }
 
-var NodeClassUnregisteredTaintMissingMessage = fmt.Sprintf("event: missing %s taint which prevents registration related race conditions on Karpenter-managed nodes", v1.UnregisteredTaintKey)
-
-func NodeClassUnregisteredTaintMissingEvent(nodeClaim *v1.NodeClaim) events.Event {
+func UnregisteredTaintMissingEvent(nodeClaim *v1.NodeClaim) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
 		Type:           corev1.EventTypeWarning,
-		Reason:         events.NodeClassUnregisteredTaintMissing,
-		Message:        NodeClassUnregisteredTaintMissingMessage,
+		Reason:         events.UnregisteredTaintMissing,
+		Message:        fmt.Sprintf("missing %s taint which prevents registration related race conditions on Karpenter-managed nodes", v1.UnregisteredTaintKey),
 		DedupeValues:   []string{string(nodeClaim.UID)},
 	}
 }

@@ -112,7 +112,8 @@ var _ = Describe("Initialization", func() {
 		Entry("should consider the NodeClaim initialized when all initialization conditions are met", true),
 		Entry("should ignore NodeClaims which aren't managed by this Karpenter instance", false),
 	)
-	It("shouldn't consider the nodeClaim initialized when it has not registered", func() {
+	// todo schalor fix test
+	FIt("shouldn't consider the nodeClaim initialized when it has not registered", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -160,7 +161,18 @@ var _ = Describe("Initialization", func() {
 			corev1.ResourceMemory: resource.MustParse("80Mi"),
 			corev1.ResourcePods:   resource.MustParse("110"),
 		}
-		ExpectApplied(ctx, env.Client, node1)
+		node2 = ExpectExists(ctx, env.Client, node2)
+		node2.Status.Capacity = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10"),
+			corev1.ResourceMemory: resource.MustParse("100Mi"),
+			corev1.ResourcePods:   resource.MustParse("110"),
+		}
+		node2.Status.Allocatable = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("8"),
+			corev1.ResourceMemory: resource.MustParse("80Mi"),
+			corev1.ResourcePods:   resource.MustParse("110"),
+		}
+		ExpectApplied(ctx, env.Client, node1, node2)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)

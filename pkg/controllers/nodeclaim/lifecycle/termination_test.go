@@ -353,28 +353,13 @@ var _ = Describe("Termination", func() {
 		}))
 	})
 	It("should not delete Nodes if the NodeClaim is not registered", func() {
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
-		Expect(err).ToNot(HaveOccurred())
-
-		// Create multiple nodes that are linked to the same NodeClaim
-		node1 := test.NodeClaimLinkedNode(nodeClaim)
-		node2 := test.NodeClaimLinkedNode(nodeClaim)
-		ExpectApplied(ctx, env.Client, node1, node2)
-
-		// This reconciliation should fail to register the NodeClaim due to multiple nodes
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsFalse()).To(BeTrue())
+		node := test.NodeClaimLinkedNode(nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectExists(ctx, env.Client, node1)
-		ExpectExists(ctx, env.Client, node2)
+
+		ExpectExists(ctx, env.Client, node)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 

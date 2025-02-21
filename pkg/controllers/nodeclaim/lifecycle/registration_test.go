@@ -139,7 +139,7 @@ var _ = Describe("Registration", func() {
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeRegisteredLabelKey, "true"))
 
-		Expect(recorder.Calls(events.NodeClassUnregisteredTaintMissing)).To(Equal(1))
+		Expect(recorder.Calls(events.UnregisteredTaintMissing)).To(Equal(1))
 	})
 
 	It("should sync the labels to the Node when the Node comes online", func() {

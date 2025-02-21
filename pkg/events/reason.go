@@ -43,7 +43,7 @@ const (
 	FailedConsistencyCheck = "FailedConsistencyCheck"
 
 	// nodeclaim/lifecycle
-	InsufficientCapacityError         = "InsufficientCapacityError"
-	NodeClassUnregisteredTaintMissing = "NodeClassUnregisteredTaintMissing"
-	NodeClassNotReady                 = "NodeClassNotReady"
+	InsufficientCapacityError = "InsufficientCapacityError"
+	UnregisteredTaintMissing  = "UnregisteredTaintMissing"
+	NodeClassNotReady         = "NodeClassNotReady"
 )
