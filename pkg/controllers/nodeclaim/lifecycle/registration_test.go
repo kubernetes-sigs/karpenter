@@ -21,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -92,7 +93,7 @@ var _ = Describe("Registration", func() {
 		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeRegisteredLabelKey, "true"))
 		Expect(node.Spec.Taints).To(Not(ContainElement(v1.UnregisteredNoExecuteTaint)))
 	})
-	It("should fail registration if the karpenter.sh/unregistered taint is not present on the node and the node isn't labeled as registered", func() {
+	It("should succeed registration if the karpenter.sh/unregistered taint is not present and emit an event", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -104,12 +105,23 @@ var _ = Describe("Registration", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
+		// Create a node without the unregistered taint
 		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+		// Verify the NodeClaim is registered
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+
+		// Verify the node is registered
+		node = ExpectExists(ctx, env.Client, node)
+		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeRegisteredLabelKey, "true"))
+
+		Expect(recorder.Calls(events.UnregisteredTaintMissing)).To(Equal(1))
 	})
+
 	It("should sync the labels to the Node when the Node comes online", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
