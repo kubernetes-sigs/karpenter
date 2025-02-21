@@ -120,8 +120,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	lastSavedCommand := Command{}
 	lastSavedResults := scheduling.Results{}
 	// Set a timeout
-	start := m.clock.Now()
-	timeoutCtx, cancel := context.WithDeadline(ctx, start.Add(MultiNodeConsolidationTimeoutDuration))
+	timeoutCtx, cancel := context.WithDeadline(ctx, m.clock.Now().Add(MultiNodeConsolidationTimeoutDuration))
 	defer cancel()
 	for min <= max {
 		// Check for timeout using select
