@@ -129,7 +129,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		case <-timeoutCtx.Done():
 			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
 			if lastSavedCommand.candidates == nil {
-				log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d candidates", (min+max)/2))
+				log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d nodes", (min+max)/2))
 			} else {
 				log.FromContext(ctx).V(1).Info(fmt.Sprintf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand))
 			}
@@ -144,6 +144,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 				return Command{}, scheduling.Results{}, err
 			}
 
+			// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
+			// required
 			replacementHasValidInstanceTypes := false
 			if cmd.Decision() == ReplaceDecision {
 				log.FromContext(ctx).V(1).Info(fmt.Sprintf("evaluating replace decision, candidates: %v, replacements: %v", len(lastSavedCommand.candidates), len(lastSavedCommand.replacements)))
@@ -151,7 +153,10 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 				replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0 && err == nil
 			}
 
+			// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
+
 			if replacementHasValidInstanceTypes || cmd.Decision() == DeleteDecision {
+				// We can consolidate NodeClaims [0,mid]
 				lastSavedCommand = cmd
 				lastSavedResults = results
 				min = mid + 1
