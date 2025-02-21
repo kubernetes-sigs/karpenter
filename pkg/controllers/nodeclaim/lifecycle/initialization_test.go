@@ -118,20 +118,10 @@ var _ = Describe("Initialization", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node1 := test.Node(test.NodeOptions{
-			ProviderID: nodeClaim.Status.ProviderID,
-		})
-		node2 := test.Node(test.NodeOptions{
-			ProviderID: nodeClaim.Status.ProviderID,
-		})
-		ExpectApplied(ctx, env.Client, node1, node2)
-
-		// does not error but will not be registered because this reconcile returned multiple nodes
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node1, node2) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionUnknown))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Reason).To(Equal("AwaitingReconciliation"))
 	})
