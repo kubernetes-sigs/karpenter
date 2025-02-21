@@ -308,8 +308,16 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	var price float64
 	for _, c := range candidates {
-		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduling.NewLabelRequirements(c.StateNode.Labels()))
+		reqs := scheduling.NewLabelRequirements(c.StateNode.Labels())
+		compatibleOfferings := c.instanceType.Offerings.Compatible(reqs)
 		if len(compatibleOfferings) == 0 {
+			// It's expected that offerings may no longer exist for capacity reservations once a NodeClass stops selecting on
+			// them (or they are no longer considered for some other reason on by the cloudprovider). By definition though,
+			// reserved capacity is free. By modeling it as free, consolidation won't be able to succeed, but the node should be
+			// disrupted via drift regardless.
+			if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeReserved) {
+				return 0.0, nil
+			}
 			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
 		}
 		price += compatibleOfferings.Cheapest().Price

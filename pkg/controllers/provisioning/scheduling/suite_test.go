@@ -3819,7 +3819,7 @@ var _ = Context("Scheduling", func() {
 					Price: fake.PriceFromResources(it.Capacity) / 100_000.0,
 				})
 			}
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{CapacityReservations: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true)}}))
 		})
 		It("shouldn't fallback to on-demand or spot when compatible reserved offerings are available", func() {
 			// With the pessimistic nature of scheduling reservations, we'll only be able to provision one instance per loop if a
@@ -3864,6 +3864,8 @@ var _ = Context("Scheduling", func() {
 				return bindings.Get(p) == nil
 			})
 
+			// Finally, we schedule the final pod. Since both capacity reservations are now exhausted and their offerings are
+			// marked as unavailable, we will fall back to either OD or spot.
 			bindings = ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 			Expect(len(bindings)).To(Equal(1))
 			node = lo.Values(bindings)[0].Node
@@ -3987,9 +3989,8 @@ var _ = Context("Scheduling", func() {
 				})
 			})
 
-			// Even though the pods schedule to separate NodePools, those NodePools share a capacity reservation for the
-			// selected instance type. Karpenter should successfully provision a reserved instance for one pod, but fail
-			// to provision anything for the second since it won't fallback to OD or spot.
+			// Since each pod can only schedule to one of the NodePools, and each NodePool has a distinct capacity reservation,
+			// we should be able to schedule both pods simultaneously despite them selecting on the same instance pool.
 			bindings := lo.Values(ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...))
 			Expect(len(bindings)).To(Equal(2))
 			for _, binding := range bindings {

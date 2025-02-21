@@ -188,7 +188,7 @@ func (n *NodeClaim) reserveOfferings(
 	instanceTypes []*cloudprovider.InstanceType,
 	nodeClaimRequirements scheduling.Requirements,
 ) (cloudprovider.Offerings, error) {
-	if !opts.FromContext(ctx).FeatureGates.CapacityReservations {
+	if !opts.FromContext(ctx).FeatureGates.ReservedCapacity {
 		return nil, nil
 	}
 

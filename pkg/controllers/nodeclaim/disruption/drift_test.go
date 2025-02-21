@@ -551,11 +551,10 @@ var _ = Describe("Drift", func() {
 				}))
 			}
 
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{CapacityReservations: lo.ToPtr(true)}}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true)}}))
 		})
 		// This is required to support cloudproviders dynamically updating the capacity type based on reservation expirations
 		It("should drift reserved nodeclaim if the capacity type label has been updated", func() {
-			cp.Drifted = ""
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -568,7 +567,6 @@ var _ = Describe("Drift", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		})
 		It("should drift reserved nodeclaims if there are no reserved offerings available for the nodepool", func() {
-			cp.Drifted = ""
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -582,7 +580,6 @@ var _ = Describe("Drift", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		})
 		It("should drift reserved nodeclaims if an offering with the reservation ID is no longer available for the nodepool", func() {
-			cp.Drifted = ""
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
