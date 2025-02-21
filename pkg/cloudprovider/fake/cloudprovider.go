@@ -87,7 +87,7 @@ func (c *CloudProvider) Reset() {
 	c.NextGetErr = nil
 	c.DeleteCalls = []*v1.NodeClaim{}
 	c.GetCalls = nil
-	c.Drifted = "drifted"
+	c.Drifted = ""
 	c.NodeClassGroupVersionKind = []schema.GroupVersionKind{
 		{
 			Group:   "",
