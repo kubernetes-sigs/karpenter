@@ -50,9 +50,9 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim)
 		nodeClaim.StatusConditions().Set(*cond)
 		return reconcile.Result{}, nil
 	}
-	// if !nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() {
-	// 	return reconcile.Result{}, nil
-	// }
+	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue() {
+		return reconcile.Result{}, nil
+	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
 	node, err := nodeclaimutils.NodeForNodeClaim(ctx, i.kubeClient, nodeClaim)
 	if err != nil {

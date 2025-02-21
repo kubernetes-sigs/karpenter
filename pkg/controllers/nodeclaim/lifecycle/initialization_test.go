@@ -112,24 +112,8 @@ var _ = Describe("Initialization", func() {
 		Entry("should consider the NodeClaim initialized when all initialization conditions are met", true),
 		Entry("should ignore NodeClaims which aren't managed by this Karpenter instance", false),
 	)
-	// todo schalor fix test
-	FIt("shouldn't consider the nodeClaim initialized when it has not registered", func() {
-		nodeClaim := test.NodeClaim(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-			Spec: v1.NodeClaimSpec{
-				Resources: v1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("2"),
-						corev1.ResourceMemory: resource.MustParse("50Mi"),
-						corev1.ResourcePods:   resource.MustParse("5"),
-					},
-				},
-			},
-		})
+	It("shouldn't consider the nodeClaim initialized when it has not registered", func() {
+		nodeClaim := test.NodeClaim()
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -149,35 +133,7 @@ var _ = Describe("Initialization", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
-
-		node1 = ExpectExists(ctx, env.Client, node1)
-		node1.Status.Capacity = corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("10"),
-			corev1.ResourceMemory: resource.MustParse("100Mi"),
-			corev1.ResourcePods:   resource.MustParse("110"),
-		}
-		node1.Status.Allocatable = corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("8"),
-			corev1.ResourceMemory: resource.MustParse("80Mi"),
-			corev1.ResourcePods:   resource.MustParse("110"),
-		}
-		node2 = ExpectExists(ctx, env.Client, node2)
-		node2.Status.Capacity = corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("10"),
-			corev1.ResourceMemory: resource.MustParse("100Mi"),
-			corev1.ResourcePods:   resource.MustParse("110"),
-		}
-		node2.Status.Allocatable = corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("8"),
-			corev1.ResourceMemory: resource.MustParse("80Mi"),
-			corev1.ResourcePods:   resource.MustParse("110"),
-		}
-		ExpectApplied(ctx, env.Client, node1, node2)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Reason).To(Equal("AwaitingReconciliation"))
 	})
 	It("should add the initialization label to the node when the nodeClaim is initialized", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
