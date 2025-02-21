@@ -50,7 +50,7 @@ func UnregisteredTaintMissingEvent(nodeClaim *v1.NodeClaim) events.Event {
 		InvolvedObject: nodeClaim,
 		Type:           corev1.EventTypeWarning,
 		Reason:         events.UnregisteredTaintMissing,
-		Message:        fmt.Sprintf("missing %s taint which prevents registration related race conditions on Karpenter-managed nodes", v1.UnregisteredTaintKey),
+		Message:        fmt.Sprintf("Missing %s taint which prevents registration related race conditions on Karpenter-managed nodes", v1.UnregisteredTaintKey),
 		DedupeValues:   []string{string(nodeClaim.UID)},
 	}
 }
