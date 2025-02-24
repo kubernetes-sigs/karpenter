@@ -65,7 +65,7 @@ func NewScheduler(ctx context.Context, kubeClient client.Client, nodePools []*v1
 		nct.InstanceTypeOptions, _ = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{})
 		if len(nct.InstanceTypeOptions) == 0 {
 			recorder.Publish(NoCompatibleInstanceTypes(np))
-			log.FromContext(ctx).WithValues("NodePool", klog.KRef("", np.Name)).Info("skipping, nodepool requirements filtered out all instance types")
+			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, nodepool requirements filtered out all instance types")
 			return nil, false
 		}
 		return nct, true
@@ -124,7 +124,7 @@ type Results struct {
 func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
 	// Report failures and nominations
 	for p, err := range r.PodErrors {
-		log.FromContext(ctx).WithValues("Pod", klog.KRef(p.Namespace, p.Name)).Error(err, "could not schedule pod")
+		log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
 		recorder.Publish(PodFailedToScheduleEvent(p, err))
 	}
 	for _, existing := range r.ExistingNodes {

@@ -98,7 +98,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 
 	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue, m.Reason()).IsValid(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
+			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
 			return Command{}, scheduling.Results{}, nil
 		}
 		return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)
@@ -129,9 +129,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		case <-timeoutCtx.Done():
 			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
 			if lastSavedCommand.candidates == nil {
-				return Command{}, scheduling.Results{}, fmt.Errorf("multi-node consolidation timed out after %s without finding a valid command", MultiNodeConsolidationTimeoutDuration)
+				return Command{}, scheduling.Results{}, fmt.Errorf("multi-node consolidation timed out while considering %d nodes without finding a valid command", (min+max)/2))
 			}
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand))
+      log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info(fmt.Sprintf("stopping multi-node consolidation after timeout, returning last valid command"))
 			return lastSavedCommand, lastSavedResults, nil
 		default:
 			mid := (min + max) / 2

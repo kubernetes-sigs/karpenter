@@ -104,7 +104,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
 	if err != nil {
 		if IsValidationError(err) {
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
+			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
 			return Command{}, scheduling.Results{}, nil
 		}
 		return Command{}, scheduling.Results{}, err
@@ -114,7 +114,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	if lo.ContainsBy(validatedCandidates, func(c *Candidate) bool {
 		return len(c.reschedulablePods) != 0
 	}) {
-		log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning empty node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
+		log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
 		return Command{}, scheduling.Results{}, nil
 	}
 

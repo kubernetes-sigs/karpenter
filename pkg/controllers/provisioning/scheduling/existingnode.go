@@ -92,11 +92,13 @@ func (n *ExistingNode) Add(ctx context.Context, kubeClient client.Client, pod *v
 		return fmt.Errorf("exceeds node resources")
 	}
 
-	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
 	// Check NodeClaim Affinity Requirements
-	if err = nodeRequirements.Compatible(podData.Requirements); err != nil {
+	if err = n.requirements.Compatible(podData.Requirements); err != nil {
 		return err
 	}
+	// avoid creating our temp set of requirements until after we've ensured that at least
+	// the pod is compatible
+	nodeRequirements := scheduling.NewRequirements(n.requirements.Values()...)
 	nodeRequirements.Add(podData.Requirements.Values()...)
 
 	// Check Topology Requirements

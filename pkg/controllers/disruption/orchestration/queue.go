@@ -30,6 +30,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -61,6 +62,29 @@ type Command struct {
 	reason            v1.DisruptionReason // used for metrics
 	consolidationType string              // used for metrics
 	lastError         error
+}
+
+func (c *Command) LogValues() []any {
+	candidateNodes := lo.Map(c.candidates, func(candidate *state.StateNode, _ int) interface{} {
+		return map[string]interface{}{
+			"Node":      klog.KObj(candidate.Node),
+			"NodeClaim": klog.KObj(candidate.NodeClaim),
+		}
+	})
+	replacementNodes := lo.Map(c.Replacements, func(replacement Replacement, _ int) interface{} {
+		return map[string]interface{}{
+			"NodeClaim": klog.KRef("", replacement.name),
+		}
+	})
+	return []any{
+		"command-id", c.id,
+		"reason", c.reason,
+		"decision", c.Decision(),
+		"disrupted-node-count", len(candidateNodes),
+		"replacement-node-count", len(replacementNodes),
+		"disrupted-nodes", candidateNodes,
+		"replacement-nodes", replacementNodes,
+	}
 }
 
 // Replacement wraps a NodeClaim name with an initialized field to save on readiness checks and identify
@@ -175,7 +199,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	if shutdown {
 		panic("unexpected failure, disruption queue has shut down")
 	}
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("command-id", string(cmd.id)))
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues(cmd.LogValues()...))
 
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
