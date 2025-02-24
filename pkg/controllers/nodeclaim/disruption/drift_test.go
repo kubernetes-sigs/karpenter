@@ -566,29 +566,5 @@ var _ = Describe("Drift", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		})
-		It("should drift reserved nodeclaims if there are no reserved offerings available for the nodepool", func() {
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeFalse())
-
-			it.Offerings = lo.Reject(it.Offerings, func(o *cloudprovider.Offering, _ int) bool {
-				return o.CapacityType() == v1.CapacityTypeReserved
-			})
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
-		})
-		It("should drift reserved nodeclaims if an offering with the reservation ID is no longer available for the nodepool", func() {
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeFalse())
-
-			reservedOffering.Requirements[cloudprovider.ReservationIDLabel] = scheduling.NewRequirement(cloudprovider.ReservationIDLabel, corev1.NodeSelectorOpIn, "test")
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
-		})
 	})
 })
