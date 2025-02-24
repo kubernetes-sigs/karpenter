@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -105,6 +106,10 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 				//    not terminating, and we will no longer need to consider these pods.
 				if _, ok := deletingNodePodKeys[client.ObjectKeyFromObject(p)]; !ok {
 					results.PodErrors[p] = NewUninitializedNodeError(n)
+				}
+				// check for a pod that was not scheduled due to ctx timeout
+				if err, ok := results.PodErrors[p]; ok && errors.Is(err, context.DeadlineExceeded) {
+					return pscheduling.Results{}, err
 				}
 			}
 		}
