@@ -129,9 +129,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		case <-timeoutCtx.Done():
 			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
 			if lastSavedCommand.candidates == nil {
-				return Command{}, scheduling.Results{}, fmt.Errorf("multi-node consolidation timed out while considering %d nodes without finding a valid command", (min+max)/2))
+				return Command{}, scheduling.Results{}, fmt.Errorf("multi-node consolidation timed out while considering %d nodes without finding a valid command", (min+max)/2)
 			}
-      log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info(fmt.Sprintf("stopping multi-node consolidation after timeout, returning last valid command"))
+			log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info(fmt.Sprintf("stopping multi-node consolidation after timeout, returning last valid command"))
 			return lastSavedCommand, lastSavedResults, nil
 		default:
 			mid := (min + max) / 2
