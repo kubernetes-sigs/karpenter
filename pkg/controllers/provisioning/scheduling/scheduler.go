@@ -244,6 +244,12 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			break
 		}
 
+		// the presence of a pod error will indicate to consolidation that not all pods could schedule
+		if ctx.Err() != nil {
+			errors[pod] = ctx.Err()
+			break
+		}
+
 		// Schedule to existing nodes or create a new node
 		if errors[pod] = s.add(ctx, pod); errors[pod] == nil {
 			delete(errors, pod)
@@ -289,6 +295,10 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 }
 
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
+	// Check if context has been canceled or deadline exceeded
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
 		if err := node.Add(ctx, s.kubeClient, pod, s.cachedPodData[pod.UID]); err == nil {

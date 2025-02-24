@@ -236,6 +236,9 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	for _, np := range nodePools {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("context error while getting instance types, %w", ctx.Err())
+		}
 		// Get instance type options
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {

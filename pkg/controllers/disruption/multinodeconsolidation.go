@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -128,10 +129,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		case <-timeoutCtx.Done():
 			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
 			if lastSavedCommand.candidates == nil {
-				log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d nodes", (min+max)/2))
-			} else {
-				log.FromContext(ctx).V(1).Info(fmt.Sprintf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand))
+				return Command{}, scheduling.Results{}, fmt.Errorf("multi-node consolidation timed out after %s without finding a valid command", MultiNodeConsolidationTimeoutDuration)
 			}
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("stopping multi-node consolidation after timeout, returning last valid command %s", lastSavedCommand))
 			return lastSavedCommand, lastSavedResults, nil
 		default:
 			mid := (min + max) / 2
@@ -139,6 +139,10 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 
 			// Pass the timeout context to ensure sub-operations can be canceled
 			cmd, results, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
+			// context deadline exceeded will return to the timeoutCtx.Done() channel case and either return nothing or the last saved command
+			if errors.Is(err, context.DeadlineExceeded) {
+				continue
+			}
 			if err != nil {
 				return Command{}, scheduling.Results{}, err
 			}
@@ -147,7 +151,6 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			// required
 			replacementHasValidInstanceTypes := false
 			if cmd.Decision() == ReplaceDecision {
-				log.FromContext(ctx).V(1).Info(fmt.Sprintf("evaluating replace decision, candidates: %v, replacements: %v", len(lastSavedCommand.candidates), len(lastSavedCommand.replacements)))
 				cmd.replacements[0].InstanceTypeOptions, err = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
 				replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0 && err == nil
 			}
