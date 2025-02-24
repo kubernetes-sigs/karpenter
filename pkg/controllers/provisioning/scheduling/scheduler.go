@@ -244,7 +244,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			break
 		}
 
-		// the presence of a pod error will indicate to consolidation that not all pods could schedule
+		// when context has been canceled or deadline exceeded, stop attempting to schedule pods and mark current pod as unschedulable
 		if ctx.Err() != nil {
 			errors[pod] = ctx.Err()
 			break
