@@ -112,7 +112,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		zone:              node.Labels()[corev1.LabelTopologyZone],
 		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
-		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
+		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim) * node.Utilization(),
 	}, nil
 }
 
