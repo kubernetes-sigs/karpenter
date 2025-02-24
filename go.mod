@@ -6,15 +6,15 @@ require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/awslabs/operatorpkg v0.0.0-20241205163410-0fff9f28d115
-	github.com/docker/docker v27.5.1+incompatible
+	github.com/docker/docker v28.0.0+incompatible
 	github.com/go-logr/logr v1.4.2
 	github.com/imdario/mergo v0.3.16
-	github.com/klauspost/compress v1.17.9 // indirect
+	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/prometheus/client_golang v1.20.5
+	github.com/prometheus/client_golang v1.21.0
 	github.com/prometheus/client_model v0.6.1
 	github.com/samber/lo v1.49.1
 	go.uber.org/multierr v1.11.0
@@ -60,14 +60,14 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/prometheus/common v0.55.0 // indirect
+	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.8.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/net v0.35.0 // indirect
-	golang.org/x/oauth2 v0.23.0 // indirect
+	golang.org/x/oauth2 v0.24.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/term v0.29.0 // indirect
 	golang.org/x/tools v0.30.0 // indirect
