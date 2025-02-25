@@ -126,46 +126,44 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	defer cancel()
 	for min <= max {
 		// Check for timeout using select
-		select {
-		case <-timeoutCtx.Done():
+		if timeoutCtx.Err() != nil {
 			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
 			if lastSavedCommand.candidates == nil {
 				return Command{}, scheduling.Results{}, fmt.Errorf("multi-node consolidation timed out while considering %d nodes without finding a valid command", (min+max)/2)
 			}
 			log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("stopping multi-node consolidation after timeout, returning last valid command")
 			return lastSavedCommand, lastSavedResults, nil
-		default:
-			mid := (min + max) / 2
-			candidatesToConsolidate := candidates[0 : mid+1]
+		}
+		mid := (min + max) / 2
+		candidatesToConsolidate := candidates[0 : mid+1]
 
-			// Pass the timeout context to ensure sub-operations can be canceled
-			cmd, results, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
-			// context deadline exceeded will return to the timeoutCtx.Done() channel case and either return nothing or the last saved command
-			if errors.Is(err, context.DeadlineExceeded) {
-				continue
-			}
-			if err != nil {
-				return Command{}, scheduling.Results{}, err
-			}
+		// Pass the timeout context to ensure sub-operations can be canceled
+		cmd, results, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
+		// context deadline exceeded will return to the timeoutCtx.Done() channel case and either return nothing or the last saved command
+		if errors.Is(err, context.DeadlineExceeded) {
+			continue
+		}
+		if err != nil {
+			return Command{}, scheduling.Results{}, err
+		}
 
-			// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
-			// required
-			replacementHasValidInstanceTypes := false
-			if cmd.Decision() == ReplaceDecision {
-				cmd.replacements[0].InstanceTypeOptions, err = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
-				replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0 && err == nil
-			}
+		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
+		// required
+		replacementHasValidInstanceTypes := false
+		if cmd.Decision() == ReplaceDecision {
+			cmd.replacements[0].InstanceTypeOptions, err = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
+			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0 && err == nil
+		}
 
-			// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
+		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
 
-			if replacementHasValidInstanceTypes || cmd.Decision() == DeleteDecision {
-				// We can consolidate NodeClaims [0,mid]
-				lastSavedCommand = cmd
-				lastSavedResults = results
-				min = mid + 1
-			} else {
-				max = mid - 1
-			}
+		if replacementHasValidInstanceTypes || cmd.Decision() == DeleteDecision {
+			// We can consolidate NodeClaims [0,mid]
+			lastSavedCommand = cmd
+			lastSavedResults = results
+			min = mid + 1
+		} else {
+			max = mid - 1
 		}
 	}
 	return lastSavedCommand, lastSavedResults, nil
