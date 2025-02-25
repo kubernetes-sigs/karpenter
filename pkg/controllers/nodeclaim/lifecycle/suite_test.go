@@ -59,6 +59,7 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
+	recorder = test.NewEventRecorder()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(func(c cache.Cache) error {
 		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
 			return []string{obj.(*corev1.Node).Spec.ProviderID}
