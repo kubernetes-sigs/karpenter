@@ -2022,6 +2022,62 @@ var _ = Describe("Metrics", func() {
 			"consolidation_type": "multi",
 		})
 	})
+	It("should stop multi-node consolidation after context deadline is reached", func() {
+		nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Allocatable: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU:  resource.MustParse("32"),
+					corev1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		for _, nc := range nodeClaims {
+			nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		pods := test.Pods(4, test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
+				},
+			},
+		})
+
+		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
+
+		// bind pods to nodes
+		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+		ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+		ExpectManualBinding(ctx, env.Client, pods[3], nodes[2])
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+		// create deadline in the past
+		deadlineCtx, cancel := context.WithDeadline(ctx, fakeClock.Now().Add(-disruption.MultiNodeConsolidationTimeoutDuration))
+		defer cancel()
+
+		ExpectSingletonReconciled(deadlineCtx, disruptionController)
+		// expect that due to timeout zero nodes were tainted in consolidation
+		ExpectTaintedNodeCount(ctx, env.Client, 0)
+	})
 })
 
 func leastExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
