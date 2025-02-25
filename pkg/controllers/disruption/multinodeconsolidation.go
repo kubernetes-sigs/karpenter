@@ -139,7 +139,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 
 		// Pass the timeout context to ensure sub-operations can be canceled
 		cmd, results, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
-		// context deadline exceeded will return to the timeoutCtx.Done() channel case and either return nothing or the last saved command
+		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if errors.Is(err, context.DeadlineExceeded) {
 			continue
 		}
