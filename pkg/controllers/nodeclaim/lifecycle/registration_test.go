@@ -23,7 +23,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -139,7 +138,7 @@ var _ = Describe("Registration", func() {
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeRegisteredLabelKey, "true"))
 
-		Expect(recorder.Calls(events.UnregisteredTaintMissing)).To(Equal(1))
+		Expect(recorder.Calls("UnregisteredTaintMissing")).To(Equal(1))
 	})
 
 	It("should sync the labels to the Node when the Node comes online", func() {
