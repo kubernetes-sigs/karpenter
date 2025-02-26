@@ -1,0 +1,53 @@
+name: "Run Bench Test"
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Path to the performance test
+        required: true
+        type: string
+      runName:
+        description: Name of the run, for the purpose of file naming and github comments
+        required: true
+        type: string
+      githubSha:
+        description: Sha of the github commit to check out
+        required: true
+        type: string
+jobs:
+  run-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.githubSha }}
+      - name: Run Test
+        id: test-run
+        shell: bash
+        run: |
+          {
+            cd ${{ inputs.path }}
+            mkdir output
+            go test -tags=test_performance -run=1 -bench=. -count=1 -cpuprofile output/cpu.out -memprofile output/mem.out > output/results.txt
+            echo 'OUTPUT<<EOF'
+            cat output/results.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        id: artifact-upload
+        with:
+          name: ${{ inputs.runName }}
+          path: ${{ inputs.path }}/output
+      - uses: actions/github-script@v7
+        env:
+          RESULTS: ${{ steps.test-run.outputs.OUTPUT }}
+          UPLOAD: ${{ steps.artifact-upload.outputs.artifact-url }}
+        with:
+          script: |
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `# :mag: ${{ inputs.runName }} :mag:\nResults of benchmarking testing in \`${{ inputs.path }}\`: \n\`\`\`${process.env.RESULTS}\n\`\`\`\n${process.env.UPLOAD}`
+              })
