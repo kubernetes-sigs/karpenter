@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"time"
 
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
@@ -73,10 +72,6 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 	// 3. Otherwise, add the consolidatable status condition if not already set
 	if !hasConsolidatableCondition {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		// We sleep here after a set operation since we want to ensure that we are able to read our own writes
-		// so that we avoid duplicating log lines due to quick re-queues from our node watcher
-		time.Sleep(100 * time.Millisecond)
-
 		log.FromContext(ctx).V(1).Info("marking consolidatable")
 	}
 	return reconcile.Result{}, nil
