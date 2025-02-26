@@ -154,7 +154,11 @@ func (c Command) LogValues() []any {
 	replacementNodes := lo.Map(c.replacements, func(replacement *scheduling.NodeClaim, _ int) interface{} {
 		ct := replacement.Requirements.Get(v1.CapacityTypeLabelKey)
 		m := map[string]interface{}{
-			"capacity-type": lo.Ternary[string](ct.Has(v1.CapacityTypeSpot), v1.CapacityTypeSpot, v1.CapacityTypeOnDemand),
+			"capacity-type": lo.If(
+				ct.Has(v1.CapacityTypeReserved), v1.CapacityTypeReserved,
+			).ElseIf(
+				ct.Has(v1.CapacityTypeSpot), v1.CapacityTypeSpot,
+			).Else(v1.CapacityTypeOnDemand),
 		}
 		if len(c.replacements) == 1 {
 			m["instance-types"] = scheduling.InstanceTypeList(replacement.InstanceTypeOptions)
