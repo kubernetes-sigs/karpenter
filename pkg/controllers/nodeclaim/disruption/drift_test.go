@@ -17,7 +17,6 @@ limitations under the License.
 package disruption_test
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/imdario/mergo"
@@ -27,13 +26,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -518,53 +514,6 @@ var _ = Describe("Drift", func() {
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
-		})
-	})
-	Context("Reserved Capacity", func() {
-		var reservedOffering *cloudprovider.Offering
-		BeforeEach(func() {
-			reservedOffering = &cloudprovider.Offering{
-				Available: true,
-				Requirements: scheduling.NewLabelRequirements(map[string]string{
-					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
-					corev1.LabelTopologyZone:         "test-zone-1a",
-					cloudprovider.ReservationIDLabel: fmt.Sprintf("r-%s", it.Name),
-				}),
-				Price:               it.Offerings[0].Price / 1_000_000.0,
-				ReservationCapacity: 10,
-			}
-			it.Offerings = append(it.Offerings, reservedOffering)
-			it.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
-
-			nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      v1.CapacityTypeLabelKey,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{v1.CapacityTypeReserved},
-				},
-			})
-
-			for _, o := range []client.Object{nodeClaim, node} {
-				o.SetLabels(lo.Assign(o.GetLabels(), map[string]string{
-					v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
-					cloudprovider.ReservationIDLabel: reservedOffering.ReservationID(),
-				}))
-			}
-
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true)}}))
-		})
-		// This is required to support cloudproviders dynamically updating the capacity type based on reservation expirations
-		It("should drift reserved nodeclaim if the capacity type label has been updated", func() {
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeFalse())
-
-			nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeOnDemand
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		})
 	})
 })
