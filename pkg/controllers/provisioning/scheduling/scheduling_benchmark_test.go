@@ -37,7 +37,6 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
-	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -45,7 +44,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -135,8 +134,9 @@ func TestSchedulingProfile(t *testing.T) {
 
 // nolint:gocyclo
 func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
-	// disable logging
-	ctx = ctrl.IntoContext(context.Background(), operatorlogging.NopLogger)
+	// create context from background with test options
+	// test options disable logging by default
+	ctx = options.ToContext(context.Background(), test.Options())
 	nodePool := test.NodePool(v1.NodePool{
 		Spec: v1.NodePoolSpec{
 			Limits: v1.Limits{
