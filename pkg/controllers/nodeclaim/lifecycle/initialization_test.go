@@ -113,50 +113,50 @@ var _ = Describe("Initialization", func() {
 		Entry("should ignore NodeClaims which aren't managed by this Karpenter instance", false),
 	)
 	It("shouldn't consider the nodeClaim initialized when it has not registered", func() {
-		nodeClaim := test.NodeClaim(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-			Spec: v1.NodeClaimSpec{
-				Resources: v1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("2"),
-						corev1.ResourceMemory: resource.MustParse("50Mi"),
-						corev1.ResourcePods:   resource.MustParse("5"),
-					},
-				},
-			},
-		})
+		nodeClaim := test.NodeClaim()
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		node := test.Node(test.NodeOptions{
+		node1 := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
 		})
-		ExpectApplied(ctx, env.Client, node)
+		node2 := test.Node(test.NodeOptions{
+			ProviderID: nodeClaim.Status.ProviderID,
+		})
+		ExpectApplied(ctx, env.Client, node1, node2)
 
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		// does not error but will not be registered because this reconcile returned multiple nodes
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectMakeNodesReady(ctx, env.Client, node1, node2) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
 
-		node = ExpectExists(ctx, env.Client, node)
-		node.Status.Capacity = corev1.ResourceList{
+		node1 = ExpectExists(ctx, env.Client, node1)
+		node1.Status.Capacity = corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse("10"),
 			corev1.ResourceMemory: resource.MustParse("100Mi"),
 			corev1.ResourcePods:   resource.MustParse("110"),
 		}
-		node.Status.Allocatable = corev1.ResourceList{
+		node1.Status.Allocatable = corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse("8"),
 			corev1.ResourceMemory: resource.MustParse("80Mi"),
 			corev1.ResourcePods:   resource.MustParse("110"),
 		}
-		ExpectApplied(ctx, env.Client, node)
+		node2 = ExpectExists(ctx, env.Client, node2)
+		node2.Status.Capacity = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10"),
+			corev1.ResourceMemory: resource.MustParse("100Mi"),
+			corev1.ResourcePods:   resource.MustParse("110"),
+		}
+		node2.Status.Allocatable = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("8"),
+			corev1.ResourceMemory: resource.MustParse("80Mi"),
+			corev1.ResourcePods:   resource.MustParse("110"),
+		}
+		ExpectApplied(ctx, env.Client, node1, node2)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
