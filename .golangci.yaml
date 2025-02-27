@@ -8,8 +8,8 @@ linters:
   enable:
     - asciicheck
     - bidichk
+    - copyloopvar
     - errorlint
-    - exportloopref
     - gosec
     - revive
     - stylecheck
