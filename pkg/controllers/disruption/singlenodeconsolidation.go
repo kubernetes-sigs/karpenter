@@ -138,10 +138,8 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
 	constrainedByBudgets := false
 
-	// Track which nodepools we've seen in this run
 	nodePoolsSeen := make(map[string]bool)
 
-	// Get all unique nodepool names from candidates
 	allNodePools := make(map[string]bool)
 	for _, candidate := range candidates {
 		allNodePools[candidate.nodePool.Name] = true
