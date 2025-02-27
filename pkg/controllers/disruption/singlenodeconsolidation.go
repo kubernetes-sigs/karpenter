@@ -45,7 +45,6 @@ func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolid
 	}
 }
 
-// Helper function to group candidates by nodepool
 func (s *SingleNodeConsolidation) groupCandidatesByNodePool(candidates []*Candidate) (map[string][]*Candidate, []string) {
 	nodePoolCandidates := make(map[string][]*Candidate)
 	nodePoolNames := []string{}
@@ -60,17 +59,14 @@ func (s *SingleNodeConsolidation) groupCandidatesByNodePool(candidates []*Candid
 	return nodePoolCandidates, nodePoolNames
 }
 
-// Helper function to sort nodepools with timed out ones prioritized
 func (s *SingleNodeConsolidation) sortNodePoolsByTimeout(ctx context.Context, nodePoolNames []string) {
-	logger := log.FromContext(ctx)
-
 	// Log the timed out nodepools that we're prioritizing
 	timedOutNodePools := []string{}
 	for np := range s.nodePoolsTimedOut {
 		timedOutNodePools = append(timedOutNodePools, np)
 	}
 	if len(timedOutNodePools) > 0 {
-		logger.V(1).Info("Prioritizing nodepools that timed out in previous runs", "nodepools", timedOutNodePools)
+		log.FromContext(ctx).V(1).Info("prioritizing nodepools that have not yet been considered due to timeouts in previous runs: %v", timedOutNodePools)
 	}
 
 	// Prioritize nodepools that timed out in previous runs
@@ -86,12 +82,9 @@ func (s *SingleNodeConsolidation) sortNodePoolsByTimeout(ctx context.Context, no
 		// If both or neither timed out, keep original order
 		return i < j
 	})
-
-	logger.V(1).Info("Nodepool order after prioritization", "nodepools", nodePoolNames)
 }
 
-// Helper function to interweave candidates from different nodepools
-func (s *SingleNodeConsolidation) interweaveCandidates(nodePoolCandidates map[string][]*Candidate, nodePoolNames []string) []*Candidate {
+func (s *SingleNodeConsolidation) shuffleCandidates(nodePoolCandidates map[string][]*Candidate, nodePoolNames []string) []*Candidate {
 	result := make([]*Candidate, 0)
 	maxCandidatesPerNodePool := 0
 
@@ -124,14 +117,11 @@ func (s *SingleNodeConsolidation) sortCandidates(candidates []*Candidate) []*Can
 		return candidates[i].disruptionCost < candidates[j].disruptionCost
 	})
 
-	// Group candidates by nodepool
 	nodePoolCandidates, nodePoolNames := s.groupCandidatesByNodePool(candidates)
 
-	// Sort nodepools with timed out ones prioritized
 	s.sortNodePoolsByTimeout(ctx, nodePoolNames)
 
-	// Interweave candidates from different nodepools
-	return s.interweaveCandidates(nodePoolCandidates, nodePoolNames)
+	return s.shuffleCandidates(nodePoolCandidates, nodePoolNames)
 }
 
 // ComputeCommand generates a disruption command given candidates
@@ -176,21 +166,13 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		}
 		if s.clock.Now().After(timeout) {
 			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: s.ConsolidationType()})
-			logger := log.FromContext(ctx)
-			logger.V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
 
 			// Mark all nodepools that we haven't seen yet as timed out
-			timedOutNodePools := []string{}
 			for _, c := range candidates[i:] {
 				if !nodePoolsSeen[c.nodePool.Name] {
 					s.nodePoolsTimedOut[c.nodePool.Name] = true
-					timedOutNodePools = append(timedOutNodePools, c.nodePool.Name)
 				}
-			}
-
-			// Log the nodepools that were timed out
-			if len(timedOutNodePools) > 0 {
-				logger.V(1).Info("Marking nodepools as timed out for prioritization in next run", "nodepools", timedOutNodePools)
 			}
 
 			return Command{}, scheduling.Results{}, nil
@@ -226,14 +208,6 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 
 	// If we've considered all nodepools, reset the timed out nodepools
 	if allNodePoolsConsidered {
-		logger := log.FromContext(ctx)
-		timedOutNodePools := []string{}
-		for np := range s.nodePoolsTimedOut {
-			timedOutNodePools = append(timedOutNodePools, np)
-		}
-		if len(timedOutNodePools) > 0 {
-			logger.V(1).Info("Resetting timed out nodepools as all nodepools have been considered", "nodepools", timedOutNodePools)
-		}
 		s.nodePoolsTimedOut = make(map[string]bool)
 	}
 
