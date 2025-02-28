@@ -30,6 +30,7 @@ import (
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -42,6 +43,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -76,6 +78,7 @@ type Provisioner struct {
 	batcher        *Batcher[types.UID]
 	volumeTopology *scheduler.VolumeTopology
 	cluster        *state.Cluster
+	evictionQueue  *terminator.Queue
 	recorder       events.Recorder
 	cm             *pretty.ChangeMonitor
 	clock          clock.Clock
@@ -83,7 +86,7 @@ type Provisioner struct {
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
-	clock clock.Clock,
+	evictionQueue *terminator.Queue, clock clock.Clock,
 ) *Provisioner {
 	p := &Provisioner{
 		batcher:        NewBatcher[types.UID](clock),
@@ -91,6 +94,7 @@ func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 		kubeClient:     kubeClient,
 		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
 		cluster:        cluster,
+		evictionQueue:  evictionQueue,
 		recorder:       recorder,
 		cm:             pretty.NewChangeMonitor(),
 		clock:          clock,
@@ -303,6 +307,12 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if err != nil {
 		return scheduler.Results{}, err
 	}
+	// Don't provision capacity for pods which aren't getting evicted due to PDB violation.
+	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
+	// these pods are evicted is wasteful.
+	deletingNodePods = lo.Filter(deletingNodePods, func(pod *corev1.Pod, _ int) bool {
+		return !apierrors.IsTooManyRequests(p.evictionQueue.EvictionError(pod))
+	})
 	pods := append(pendingPods, deletingNodePods...)
 	// nothing to schedule, so just return success
 	if len(pods) == 0 {
