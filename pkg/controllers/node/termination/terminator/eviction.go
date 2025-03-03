@@ -215,6 +215,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	}
 	NodesEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
 	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}, evictionMessage))
+	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: evictionMessage})
 	return true
 }
 
