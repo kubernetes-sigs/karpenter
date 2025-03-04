@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -1474,7 +1475,7 @@ var _ = Describe("Consolidated State", func() {
 		cluster.MarkUnconsolidated()
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
-	It("should update the consolidated value when consolidation timeout (5m) has passed and state hasn't changed", func() {
+	It("should update the consolidated value when state timeout (5m) has passed and state hasn't changed", func() {
 		state := cluster.ConsolidationState()
 
 		fakeClock.Step(time.Minute)
@@ -1497,14 +1498,21 @@ var _ = Describe("Consolidated State", func() {
 })
 
 var _ = Describe("Data Races", func() {
+	var wg sync.WaitGroup
+	var cancelCtx context.Context
+	var cancel context.CancelFunc
+	BeforeEach(func() {
+		cancelCtx, cancel = context.WithCancel(ctx)
+	})
+	AfterEach(func() {
+		cancel()
+		wg.Wait()
+	})
 	It("should ensure that calling Synced() is valid while making updates to Nodes", func() {
-		cancelCtx, cancel := context.WithCancel(ctx)
-		DeferCleanup(func() {
-			cancel()
-		})
-
 		// Keep calling Synced for the entirety of this test
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for {
 				_ = cluster.Synced(ctx)
 				if cancelCtx.Err() != nil {
@@ -1523,13 +1531,10 @@ var _ = Describe("Data Races", func() {
 		}
 	})
 	It("should ensure that calling Synced() is valid while making updates to NodeClaims", func() {
-		cancelCtx, cancel := context.WithCancel(ctx)
-		DeferCleanup(func() {
-			cancel()
-		})
-
 		// Keep calling Synced for the entirety of this test
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for {
 				_ = cluster.Synced(ctx)
 				if cancelCtx.Err() != nil {
