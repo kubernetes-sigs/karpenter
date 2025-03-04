@@ -278,7 +278,7 @@ func (c *Controller) MarkDisrupted(ctx context.Context, m Method, candidates ...
 			return client.IgnoreNotFound(err)
 		}
 		stored := nodeClaim.DeepCopy()
-		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, v1.ConditionTypeDisruptionReason, string(m.Reason()))
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(m.Reason()), string(m.Reason()))
 		return client.IgnoreNotFound(c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)))
 	})...)
 }

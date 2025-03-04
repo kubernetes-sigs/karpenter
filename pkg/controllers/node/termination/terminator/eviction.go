@@ -175,11 +175,6 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 // Evict returns true if successful eviction call, and false if there was an eviction-related error
 func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(key.Namespace, key.Name)))
-	evictionMessage, err := evictionReason(ctx, key, q.kubeClient)
-	if err != nil {
-		// XXX(cmcavoy): this should be unreachable, but we log it if it happens
-		log.FromContext(ctx).V(1).Error(err, "failed looking up pod eviction reason")
-	}
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}},
 		&policyv1.Eviction{
@@ -214,18 +209,18 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 		return false
 	}
 	NodesEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
-	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}, evictionMessage))
+	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}, evictionReason(ctx, key, q.kubeClient)))
 	return true
 }
 
-func evictionReason(ctx context.Context, key QueueKey, kubeClient client.Client) (string, error) {
+func evictionReason(ctx context.Context, key QueueKey, kubeClient client.Client) string {
 	nodeClaim, err := node.NodeClaimForNode(ctx, kubeClient, &corev1.Node{Spec: corev1.NodeSpec{ProviderID: key.providerID}})
 	if err != nil {
-		return "", err
+		log.FromContext(ctx).V(1).Error(err, "node has no nodeclaim, failed looking up pod eviction reason")
+		return ""
 	}
-	terminationCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason)
-	if terminationCondition.IsTrue() {
-		return terminationCondition.Message, nil
+	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason); cond.IsTrue() {
+		return cond.Reason
 	}
-	return "Forceful Termination", nil
+	return "Forceful Termination"
 }
