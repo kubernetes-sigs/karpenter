@@ -87,7 +87,7 @@ var _ = AfterEach(func() {
 	cloudProvider.Reset()
 })
 
-var _ = FDescribe("Finalizer", func() {
+var _ = Describe("Finalizer", func() {
 	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
@@ -136,7 +136,7 @@ var _ = FDescribe("Finalizer", func() {
 			})
 			Expect(ok).To(BeFalse())
 		})
-		FIt("should update status conditions to the latest generation when finalizing", func() {
+		It("should update status conditions to the latest generation when finalizing", func() {
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
