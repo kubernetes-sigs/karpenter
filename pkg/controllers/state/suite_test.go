@@ -1467,14 +1467,17 @@ var _ = Describe("Consolidated State", func() {
 })
 
 var _ = Describe("Data Races", func() {
+	var wg sync.WaitGroup
+	var cancelCtx context.Context
+	var cancel context.CancelFunc
+	BeforeEach(func() {
+		cancelCtx, cancel = context.WithCancel(ctx)
+	})
+	AfterEach(func() {
+		cancel()
+		wg.Wait()
+	})
 	It("should ensure that calling Synced() is valid while making updates to Nodes", func() {
-		cancelCtx, cancel := context.WithCancel(ctx)
-		var wg sync.WaitGroup
-		DeferCleanup(func() {
-			cancel()
-			wg.Wait()
-		})
-
 		// Keep calling Synced for the entirety of this test
 		wg.Add(1)
 		go func() {
@@ -1497,13 +1500,6 @@ var _ = Describe("Data Races", func() {
 		}
 	})
 	It("should ensure that calling Synced() is valid while making updates to NodeClaims", func() {
-		cancelCtx, cancel := context.WithCancel(ctx)
-		var wg sync.WaitGroup
-		DeferCleanup(func() {
-			cancel()
-			wg.Wait()
-		})
-
 		// Keep calling Synced for the entirety of this test
 		wg.Add(1)
 		go func() {
