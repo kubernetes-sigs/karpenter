@@ -171,6 +171,21 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 //nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+	// perform a no-op for whatever the status condition is currently set to
+	// so that we bump the observed generation to the latest and prevent the nodeclaim
+	// root status from entering an `Unknown` state
+	stored := nodeClaim.DeepCopy()
+	for _, condition := range nodeClaim.GetConditions() {
+		if condition.ObservedGeneration != nodeClaim.Generation {
+			nodeClaim.StatusConditions().Set(condition)
+		}
+	}
+	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
+	}
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
@@ -226,7 +241,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		})
 	}
-	stored := nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
+	stored = nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
 	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
