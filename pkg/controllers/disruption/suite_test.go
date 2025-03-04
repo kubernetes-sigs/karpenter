@@ -2070,11 +2070,11 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
-		// create deadline in the past
-		deadlineCtx, cancel := context.WithDeadline(ctx, fakeClock.Now().Add(-disruption.MultiNodeConsolidationTimeoutDuration))
+		// create timeout in the past
+		timeoutCtx, cancel := context.WithTimeout(ctx, -disruption.MultiNodeConsolidationTimeoutDuration)
 		defer cancel()
 
-		ExpectSingletonReconciled(deadlineCtx, disruptionController)
+		ExpectSingletonReconciled(timeoutCtx, disruptionController)
 		// expect that due to timeout zero nodes were tainted in consolidation
 		ExpectTaintedNodeCount(ctx, env.Client, 0)
 	})

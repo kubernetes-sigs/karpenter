@@ -122,10 +122,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	lastSavedCommand := Command{}
 	lastSavedResults := scheduling.Results{}
 	// Set a timeout
-	timeoutCtx, cancel := context.WithDeadline(ctx, m.clock.Now().Add(MultiNodeConsolidationTimeoutDuration))
+	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
 	for min <= max {
-		// Check for timeout using select
 		if timeoutCtx.Err() != nil {
 			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
 			if lastSavedCommand.candidates == nil {
@@ -140,10 +139,10 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// Pass the timeout context to ensure sub-operations can be canceled
 		cmd, results, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
-		if errors.Is(err, context.DeadlineExceeded) {
-			continue
-		}
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				continue
+			}
 			return Command{}, scheduling.Results{}, err
 		}
 
