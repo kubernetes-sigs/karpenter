@@ -36,6 +36,14 @@ spec:
             type: string
           metadata:
             type: object
+          spec:
+            properties:
+              tags:
+                additionalProperties:
+                  type: string
+                description: Tags to be applied on resources like instances
+                type: object
+            type: object
           status:
             description: TestNodeClassStatus contains the resolved state of the TestNodeClass
             properties:
