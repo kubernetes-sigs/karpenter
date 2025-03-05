@@ -136,6 +136,39 @@ var _ = Describe("Finalizer", func() {
 			})
 			Expect(ok).To(BeFalse())
 		})
+		It("should update status conditions to the latest generation when finalizing", func() {
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			// add a finalizer so we can make assertions about all status conditions
+			ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).ObservedGeneration).To(Equal(nodeClaim.Generation))
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).ObservedGeneration).To(Equal(nodeClaim.Generation))
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).ObservedGeneration).To(Equal(nodeClaim.Generation))
+			Expect(nodeClaim.StatusConditions().Get(status.ConditionReady).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(status.ConditionReady).ObservedGeneration).To(Equal(nodeClaim.Generation))
+
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).ObservedGeneration).To(Equal(nodeClaim.Generation))
+			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+			ExpectDeleted(ctx, env.Client, nodeClaim)
+		})
 	})
 	It("should update observedGeneration if generation increases after all conditions are marked True", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
