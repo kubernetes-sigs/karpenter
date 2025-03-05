@@ -222,8 +222,6 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 	// Randomly add each new node to one of the pre-created kwokPartitions.
 
 	ret[v1alpha1.KwokPartitionLabelKey] = lo.Sample(kwokPartitions)
-	ret[v1.CapacityTypeLabelKey] = offering.Requirements.Get(v1.CapacityTypeLabelKey).Any()
-	ret[corev1.LabelTopologyZone] = offering.Requirements.Get(corev1.LabelTopologyZone).Any()
 	ret[corev1.LabelHostname] = nodeClaim.Name
 
 	ret[v1alpha1.KwokLabelKey] = v1alpha1.KwokLabelValue
