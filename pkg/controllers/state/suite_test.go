@@ -127,6 +127,7 @@ var _ = Describe("Pod Healthy NodePool", func() {
 		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
 		Expect(setTime.IsZero()).To(BeFalse())
 
+		fakeClock.Step(time.Minute)
 		// We try to update pod schedulable time, but it should not change as we have already stored it
 		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
 		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))).To(Equal(setTime))

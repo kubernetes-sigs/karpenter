@@ -397,7 +397,7 @@ func (c *Cluster) UpdatePodHealthyNodePoolScheduledTime(ctx context.Context, nod
 			// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
 			// then mark the time when we thought it can schedule to now.
 			if nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
-				c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, time.Now())
+				c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
 			} else {
 				// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
 				// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
