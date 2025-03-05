@@ -139,6 +139,13 @@ func setDefaultOptions(opts InstanceTypeOptions) InstanceTypeOptions {
 		v1alpha1.InstanceCPULabelKey:    cpu,
 		v1alpha1.InstanceMemoryLabelKey: memory,
 	}
+	for _, offering := range opts.Offerings {
+		for _, req := range offering.Requirements {
+			if _, exists := opts.instanceTypeLabels[req.Key]; !exists {
+				opts.instanceTypeLabels[req.Key] = req.Values[0]
+			}
+		}
+	}
 
 	// if the user specified a different pod limit, override the default
 	opts.Resources = lo.Assign(corev1.ResourceList{
@@ -168,6 +175,12 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		})
 		return req.Values
 	})))
+
+	for _, offering := range options.Offerings {
+		for _, requirement := range offering.Requirements {
+			v1.WellKnownLabels = v1.WellKnownLabels.Insert(requirement.Key)
+		}
+	}
 
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, options.Name),
