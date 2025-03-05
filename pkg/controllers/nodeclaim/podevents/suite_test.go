@@ -38,11 +38,13 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
-var ctx context.Context
-var podEventsController *podevents.Controller
-var env *test.Environment
-var fakeClock *clock.FakeClock
-var cp *fake.CloudProvider
+var (
+	ctx                 context.Context
+	podEventsController *podevents.Controller
+	env                 *test.Environment
+	fakeClock           *clock.FakeClock
+	cp                  *fake.CloudProvider
+)
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -75,6 +77,7 @@ var _ = AfterEach(func() {
 	cp.Reset()
 	ExpectCleanedUp(ctx, env.Client)
 })
+
 var _ = Describe("PodEvents", func() {
 	var nodePool *v1.NodePool
 	var nodeClaim *v1.NodeClaim
@@ -98,13 +101,31 @@ var _ = Describe("PodEvents", func() {
 			NodeName: node.Name,
 		})
 	})
-	It("should set the nodeclaim lastPodEvent", func() {
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		timeToCheck := fakeClock.Now().Truncate(time.Second)
+	It("should set the nodeclaim lastPodEvent based on PodScheduled condition", func() {
+		scheduledTime := fakeClock.Now().Truncate(time.Second)
+		pod.Status.Conditions = []corev1.PodCondition{{
+			Type:               corev1.PodScheduled,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: metav1.Time{Time: scheduledTime},
+		}}
+		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(timeToCheck))
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(scheduledTime))
+
+		// Update the PodScheduled condition's lastTransitionTime
+		newScheduledTime := fakeClock.Now().Add(time.Minute).Truncate(time.Second)
+		pod.Status.Conditions = []corev1.PodCondition{{
+			Type:               corev1.PodScheduled,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: metav1.Time{Time: newScheduledTime},
+		}}
+		ExpectApplied(ctx, env.Client, pod)
+		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(newScheduledTime))
 	})
 	It("should not set the nodeclaim lastPodEvent when the node does not exist", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, pod)
@@ -117,36 +138,74 @@ var _ = Describe("PodEvents", func() {
 		ExpectApplied(ctx, env.Client, nodePool, node, pod)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 	})
-	It("should set the nodeclaim lastPodEvent when it's been set before", func() {
-		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
+	It("should set the nodeclaim lastPodEvent when pod becomes terminal", func() {
+		// First set up a regular pod
+		scheduledTime := fakeClock.Now().Truncate(time.Second)
+		pod.Status.Conditions = []corev1.PodCondition{{
+			Type:               corev1.PodScheduled,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: metav1.Time{Time: scheduledTime},
+		}}
 		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
-		timeToCheck := fakeClock.Now().Truncate(time.Second)
+		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
+
+		// Make pod terminal now
+		timeToCheck := fakeClock.Now().Add(time.Minute).Truncate(time.Second)
+		fakeClock.SetTime(timeToCheck)
+		pod.Status.Phase = corev1.PodSucceeded // Setting pod as terminal directly
+		ExpectApplied(ctx, env.Client, pod)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(timeToCheck))
 	})
-	It("should only set the nodeclaim lastPodEvent once within the dedupe timeframe", func() {
+	It("should set the nodeclaim lastPodEvent when pod becomes terminating", func() {
 		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
+		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
+
 		timeToCheck := fakeClock.Now().Truncate(time.Second)
+		fakeClock.SetTime(timeToCheck)
+		// Make pod terminating by deleting it
+		ExpectDeletionTimestampSet(ctx, env.Client, pod)
+		// Reconcile for the terminating pod
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		// Expect that the lastPodEventTime is set
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(timeToCheck))
-
-		// step through half of the dedupe timeout, and re-reconcile, expecting the status to not change
-		fakeClock.Step(5 * time.Second)
+	})
+	It("should not update lastPodEvent when pod has no PodScheduled condition", func() {
+		// Pod with no conditions
+		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
 		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Status.LastPodEventTime.Time.IsZero()).To(BeTrue())
+	})
+	It("should not update lastPodEvent when PodScheduled condition is not True", func() {
+		pod.Status.Conditions = []corev1.PodCondition{{
+			Type:               corev1.PodScheduled,
+			Status:             corev1.ConditionFalse,
+			LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+		}}
+		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
+		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Status.LastPodEventTime.Time.IsZero()).To(BeTrue())
+	})
+	It("should set the nodeclaim lastPodEvent when pod is already in a terminal state", func() {
+		// Setup time
+		timeToCheck := fakeClock.Now().Truncate(time.Second)
+		fakeClock.SetTime(timeToCheck)
+
+		// Set the pod to a terminal state directly - mocks podutils.IsTerminal() return true
+		pod.Status.Phase = corev1.PodSucceeded
+
+		// Apply objects and reconcile
+		ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
+		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
+
+		// Verify the last pod event time is set
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(timeToCheck))
-
-		// step through rest of the dedupe timeout, and re-reconcile, expecting the status to change
-		fakeClock.Step(5 * time.Second)
-		ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
-
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Status.LastPodEventTime.Time).ToNot(BeEquivalentTo(timeToCheck))
 	})
 })
