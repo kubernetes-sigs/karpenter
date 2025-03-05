@@ -171,20 +171,23 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 //nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
+	// setting the deletion timestamp will bump the generation, so we need to
 	// perform a no-op for whatever the status condition is currently set to
 	// so that we bump the observed generation to the latest and prevent the nodeclaim
 	// root status from entering an `Unknown` state
 	stored := nodeClaim.DeepCopy()
-	for _, condition := range nodeClaim.GetConditions() {
-		if condition.ObservedGeneration != nodeClaim.Generation {
+	for _, condition := range nodeClaim.Status.Conditions {
+		if nodeClaim.StatusConditions().IsDependentCondition(condition.Type) {
 			nodeClaim.StatusConditions().Set(condition)
 		}
 	}
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
 			return reconcile.Result{}, err
 		}
-		return reconcile.Result{}, nil
 	}
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
