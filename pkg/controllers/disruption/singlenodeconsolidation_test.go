@@ -95,6 +95,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 
 	AfterEach(func() {
 		disruption.SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
+		fakeClock.SetTime(time.Now())
 		ExpectCleanedUp(ctx, env.Client)
 	})
 
@@ -138,7 +139,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			Expect(err).To(BeNil())
 
 			// Combine all candidates
-			allCandidates := append(candidates1, append(candidates2, candidates3...)...)
+			allCandidates := append(candidates3, append(candidates2, candidates1...)...)
 
 			// Sort candidates
 			sortedCandidates := consolidation.SortCandidates(allCandidates)
@@ -155,6 +156,9 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				sortedCandidates[2].NodePool().Name,
 			}
 			Expect(nodePoolsInFirstGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
+			for i := 0; i < 3; i++ {
+				Expect(sortedCandidates[i].DisruptionCost()).To(Equal(1.0))
+			}
 
 			// Check next three candidates (all with cost 2)
 			nodePoolsInSecondGroup := []string{
@@ -163,6 +167,9 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				sortedCandidates[5].NodePool().Name,
 			}
 			Expect(nodePoolsInSecondGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
+			for i := 3; i < 6; i++ {
+				Expect(sortedCandidates[i].DisruptionCost()).To(Equal(2.0))
+			}
 
 			// Check last three candidates (all with cost 3)
 			nodePoolsInThirdGroup := []string{
@@ -171,6 +178,9 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				sortedCandidates[8].NodePool().Name,
 			}
 			Expect(nodePoolsInThirdGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
+			for i := 6; i < 9; i++ {
+				Expect(sortedCandidates[i].DisruptionCost()).To(Equal(3.0))
+			}
 		})
 
 		It("should reset timed out nodepools when all nodepools are evaluated", func() {
