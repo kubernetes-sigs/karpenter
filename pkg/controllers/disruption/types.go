@@ -171,3 +171,18 @@ func (c Command) LogValues() []any {
 		"replacement-nodes", replacementNodes,
 	}
 }
+
+// SetDisruptionCost sets the disruption cost of a candidate for testing
+func (c *Candidate) SetDisruptionCost(cost float64) {
+	c.disruptionCost = cost
+}
+
+// DisruptionCost returns the disruption cost of a candidate for testing
+func (c *Candidate) DisruptionCost() float64 {
+	return c.disruptionCost
+}
+
+// NodePool returns the nodepool of a candidate for testing
+func (c *Candidate) NodePool() *v1.NodePool {
+	return c.nodePool
+}
