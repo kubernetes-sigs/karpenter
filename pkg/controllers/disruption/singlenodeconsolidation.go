@@ -35,7 +35,7 @@ const SingleNodeConsolidationType = "single"
 // SingleNodeConsolidation is the consolidation controller that performs single-node consolidation.
 type SingleNodeConsolidation struct {
 	consolidation
-	// nodePoolsTimedOut tracks which nodepools were not fully considered due to timeout
+	// nodePoolsTimedOut tracks which nodepools were not considered due to the timeout
 	nodePoolsTimedOut map[string]bool
 }
 
@@ -68,22 +68,6 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	}
 
 	for i, candidate := range candidates {
-		if s.clock.Now().After(timeout) {
-			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: s.ConsolidationType()})
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
-
-			// Mark all nodepools that we haven't seen yet as timed out
-			for _, c := range candidates[i:] {
-				if !nodePoolsSeen[c.nodePool.Name] {
-					s.nodePoolsTimedOut[c.nodePool.Name] = true
-				}
-			}
-
-			return Command{}, scheduling.Results{}, nil
-		}
-		// Track that we've considered this nodepool
-		nodePoolsSeen[candidate.nodePool.Name] = true
-
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.
@@ -97,6 +81,23 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		if len(candidate.reschedulablePods) == 0 {
 			continue
 		}
+		if s.clock.Now().After(timeout) {
+			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: s.ConsolidationType()})
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
+
+			// Mark all nodepools that we haven't seen yet as timed out
+			for _, c := range candidates[i:] {
+				if !nodePoolsSeen[c.nodePool.Name] {
+					s.nodePoolsTimedOut[c.nodePool.Name] = true
+				}
+			}
+
+			return Command{}, scheduling.Results{}, nil
+		}
+
+		// Track that we've considered this nodepool
+		nodePoolsSeen[candidate.nodePool.Name] = true
+
 		// compute a possible consolidation option
 		cmd, results, err := s.computeConsolidation(ctx, candidate)
 		if err != nil {
@@ -106,7 +107,6 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		if cmd.Decision() == NoOpDecision {
 			continue
 		}
-		// might have some edge cases where if there is an error, we should remove the nodepool from the list of "seen" nodepools
 		if err := v.IsValid(ctx, cmd, consolidationTTL); err != nil {
 			if IsValidationError(err) {
 				log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid")
@@ -167,14 +167,15 @@ func (s *SingleNodeConsolidation) groupCandidatesByNodePool(candidates []*Candid
 }
 
 func (s *SingleNodeConsolidation) sortNodePoolsByTimeout(ctx context.Context, nodePoolNames []string) {
+	if len(s.nodePoolsTimedOut) == 0 {
+		return
+	}
 	// Log the timed out nodepools that we're prioritizing
 	timedOutNodePools := []string{}
 	for np := range s.nodePoolsTimedOut {
 		timedOutNodePools = append(timedOutNodePools, np)
 	}
-	if len(timedOutNodePools) > 0 {
-		log.FromContext(ctx).V(1).Info("prioritizing nodepools that have not yet been considered due to timeouts in previous runs: %v", timedOutNodePools)
-	}
+	log.FromContext(ctx).V(1).Info("prioritizing nodepools that have not yet been considered due to timeouts in previous runs: %v", timedOutNodePools)
 
 	// Prioritize nodepools that timed out in previous runs
 	sort.Slice(nodePoolNames, func(i, j int) bool {

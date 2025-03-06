@@ -88,7 +88,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			nodePool3.Name: {leastExpensiveInstance.Name: leastExpensiveInstance},
 		}
 
-		// Create a base consolidation
+		// Create a single node consolidation controller
 		baseConsolidation := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
 		consolidation = disruption.NewSingleNodeConsolidation(baseConsolidation)
 	})
