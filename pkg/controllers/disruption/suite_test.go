@@ -2142,11 +2142,3 @@ func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, wg *sync
 		}
 	}()
 }
-
-// func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clockiface.Clock,
-// 	provisioner *provisioning.Provisioner) *orchestration.Queue {
-
-// 	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
-// 	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface[*orchestration.Command](workqueue.TypedQueueConfig[*orchestration.Command]{Name: "disruption.workqueue"})
-// 	return q
-// }
