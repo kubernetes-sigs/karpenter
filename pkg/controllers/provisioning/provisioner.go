@@ -333,17 +333,9 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 			}), 5),
 		).Info("deferring scheduling decision for provisionable pod(s) to future simulation due to limited reserved offering capacity")
 	}
-	contextErrors := results.ContextDeadlineExceededErrors()
-	if len(contextErrors) != 0 {
-		log.FromContext(ctx).V(1).WithValues(
-			"Pods", pretty.Slice(lo.Map(lo.Keys(contextErrors), func(p *corev1.Pod, _ int) string {
-				return klog.KRef(p.Namespace, p.Name).String()
-			}), 5),
-		).Info("deferring scheduling decision for provisionable pod(s) to future simulation due to hitting provisioning loop timeout")
-	}
 	scheduler.UnschedulablePodsCount.Set(
 		// A reserved offering error doesn't indicate a pod is unschedulable, just that the scheduling decision was deferred.
-		float64(len(results.PodErrors)-len(reservedOfferingErrors)-len(contextErrors)),
+		float64(len(results.PodErrors)-len(reservedOfferingErrors)),
 		map[string]string{
 			scheduler.ControllerLabel: injection.GetControllerName(ctx),
 		},
