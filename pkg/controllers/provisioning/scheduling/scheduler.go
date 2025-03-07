@@ -211,6 +211,12 @@ func (r Results) ReservedOfferingErrors() map[*corev1.Pod]error {
 	})
 }
 
+func (r Results) ContextErrors() map[*corev1.Pod]error {
+	return lo.PickBy(r.PodErrors, func(_ *corev1.Pod, err error) bool {
+		return err != nil && err != context.DeadlineExceeded
+	})
+}
+
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
 // We don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we can't
 // schedule at all and don't want it to block consolidation.
@@ -299,10 +305,10 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			break
 		}
 
-		// when context has been canceled or deadline exceeded, stop attempting to schedule pods and mark current pod as unschedulable
+		// if a context error is encountered, stop attempting to schedule pods and add error to remaining pods
 		if ctx.Err() != nil {
 			errors[pod] = ctx.Err()
-			break
+			continue
 		}
 
 		// Schedule to existing nodes or create a new node
