@@ -1241,29 +1241,29 @@ var _ = Describe("Cluster State Sync", func() {
 	})
 	It("should consider the cluster state synced when nodes register provider id", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
-		var nodes []*corev1.Node
+		nodes := make([]*corev1.Node, 1000)
 		var wg sync.WaitGroup
-		for range 1000 {
+		for i := range 1000 {
 			wg.Add(1)
-			go func() {
+			go func(index int) {
 				defer wg.Done()
 				node := test.Node()
 				ExpectApplied(ctx, env.Client, node)
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-				nodes = append(nodes, node)
-			}()
+				nodes[index] = node
+			}(i)
 		}
 		wg.Wait()
 		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		for i := 0; i < 1000; i++ {
 			wg.Add(1)
-			go func() {
+			go func(index int) {
 				defer wg.Done()
-				nodes[i].Spec.ProviderID = test.RandomProviderID()
-				ExpectApplied(ctx, env.Client, nodes[i])
-				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
-			}()
+				nodes[index].Spec.ProviderID = test.RandomProviderID()
+				ExpectApplied(ctx, env.Client, nodes[index])
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[index]))
+			}(i)
 		}
 		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeTrue())
@@ -1481,13 +1481,16 @@ var _ = Describe("Cluster State Sync", func() {
 		// Deploy 250 nodes to the cluster
 		for range 250 {
 			wg.Add(1)
-			node := test.Node(test.NodeOptions{
-				ProviderID: test.RandomProviderID(),
-			})
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			wg.Done()
+			go func() {
+				defer wg.Done()
+				node := test.Node(test.NodeOptions{
+					ProviderID: test.RandomProviderID(),
+				})
+				ExpectApplied(ctx, env.Client, node)
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			}()
 		}
+		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 
 		// Add a new node but don't reconcile it
