@@ -51,6 +51,10 @@ spec:
           name: NodeClass
           priority: 1
           type: string
+        - jsonPath: .status.conditions[?(@.type=="Drifted")].status
+          name: Drifted
+          priority: 1
+          type: string
       name: v1
       schema:
         openAPIV3Schema:
