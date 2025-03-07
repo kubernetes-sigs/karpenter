@@ -241,6 +241,10 @@ func (p *Provisioner) NewScheduler(
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	for _, np := range nodePools {
+		// stop looping through nodepools if context has been canceled to avoid spurious errors from GetInstanceTypes
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("context error while getting instance types, %w", ctx.Err())
+		}
 		// Get instance type options
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
@@ -255,9 +259,12 @@ func (p *Provisioner) NewScheduler(
 	}
 
 	// inject topology constraints
-	pods = p.injectVolumeTopologyRequirements(ctx, pods)
+	pods, err = p.injectVolumeTopologyRequirements(ctx, pods)
+	if err != nil {
+		return nil, fmt.Errorf("injecting volume topology requirements, %w", err)
+	}
 
-	// Calculate cluster topology
+	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
@@ -464,16 +471,20 @@ func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 	return nil
 }
 
-func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) []*corev1.Pod {
+func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, error) {
 	var schedulablePods []*corev1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
+			// return because we can't consider any other pod schedulable
+			if errors.Is(err, context.Canceled) {
+				return nil, fmt.Errorf("context canceled while injecting volume topology requirements, %w", err)
+			}
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}
 	}
-	return schedulablePods
+	return schedulablePods, nil
 }
 
 func validateNodeSelector(p *corev1.Pod) (errs error) {

@@ -299,6 +299,12 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 			break
 		}
 
+		// if a context error is encountered, stop attempting to schedule pods and add error to remaining pods
+		if ctx.Err() != nil {
+			errors[pod] = ctx.Err()
+			continue
+		}
+
 		// Schedule to existing nodes or create a new node
 		if errors[pod] = s.add(ctx, pod); errors[pod] == nil {
 			delete(errors, pod)
