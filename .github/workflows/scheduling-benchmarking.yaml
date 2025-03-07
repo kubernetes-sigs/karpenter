@@ -1,0 +1,54 @@
+name: "Scheduling Benchmarking"
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+    paths:
+      - "**.go"
+    branches:
+      - main
+
+jobs:
+  before:
+    name: Before PR
+    runs-on: ubuntu-latest
+    permissions:
+        pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        path: ["pkg/controllers/provisioning/scheduling"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: ./.github/actions/run-bench-test
+        with:
+            path: ${{ matrix.path }}
+            runName: before-${{ strategy.job-index }}
+            githubToken: ${{ secrets.GITHUB_TOKEN }}
+  after:
+    name: After PR
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        path: ["pkg/controllers/provisioning/scheduling"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: ./.github/actions/run-bench-test
+        with:
+            path: ${{ matrix.path }}
+            runName: after-${{ strategy.job-index }}
+            githubToken: ${{ secrets.GITHUB_TOKEN }}
+  
