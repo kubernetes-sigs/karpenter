@@ -143,15 +143,14 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 	_ = lo.Must(environment.Start())
 
 	// Apply any config overrides
-	config := rest.CopyConfig(environment.Config)
 	for _, option := range opts.configOptions {
-		option(config)
+		option(environment.Config)
 	}
 
 	// We use a modified client if we need field indexers
 	var c client.Client
 	if len(opts.fieldIndexers) > 0 {
-		cache := lo.Must(cache.New(config, cache.Options{Scheme: scheme.Scheme}))
+		cache := lo.Must(cache.New(environment.Config, cache.Options{Scheme: scheme.Scheme}))
 		for _, index := range opts.fieldIndexers {
 			lo.Must0(index(cache))
 		}
@@ -160,7 +159,7 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 			return []string{pod.Spec.NodeName}
 		}))
 		c = &CacheSyncingClient{
-			Client: lo.Must(client.New(config, client.Options{Scheme: scheme.Scheme, Cache: &client.CacheOptions{Reader: cache}})),
+			Client: lo.Must(client.New(environment.Config, client.Options{Scheme: scheme.Scheme, Cache: &client.CacheOptions{Reader: cache}})),
 		}
 		go func() {
 			lo.Must0(cache.Start(ctx))
@@ -169,12 +168,12 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 			log.Fatalf("cache failed to sync")
 		}
 	} else {
-		c = lo.Must(client.New(config, client.Options{Scheme: scheme.Scheme}))
+		c = lo.Must(client.New(environment.Config, client.Options{Scheme: scheme.Scheme}))
 	}
 	return &Environment{
 		Environment:         environment,
 		Client:              c,
-		KubernetesInterface: kubernetes.NewForConfigOrDie(config),
+		KubernetesInterface: kubernetes.NewForConfigOrDie(environment.Config),
 		Version:             version,
 		Done:                make(chan struct{}),
 		Cancel:              cancel,
