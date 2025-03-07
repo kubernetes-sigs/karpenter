@@ -19,6 +19,7 @@ package scheduling
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -211,9 +212,9 @@ func (r Results) ReservedOfferingErrors() map[*corev1.Pod]error {
 	})
 }
 
-func (r Results) ContextErrors() map[*corev1.Pod]error {
+func (r Results) ContextDeadlineExceededErrors() map[*corev1.Pod]error {
 	return lo.PickBy(r.PodErrors, func(_ *corev1.Pod, err error) bool {
-		return err != nil && err != context.DeadlineExceeded
+		return errors.Is(err, context.DeadlineExceeded)
 	})
 }
 
@@ -362,10 +363,6 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 
 //nolint:gocyclo
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
-	// Check if context has been canceled or deadline exceeded
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
 	// first try to schedule against an in-flight real node
 	for _, node := range s.existingNodes {
 		if err := node.Add(ctx, s.kubeClient, pod, s.cachedPodData[pod.UID]); err == nil {

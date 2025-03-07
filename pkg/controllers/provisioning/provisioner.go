@@ -241,6 +241,7 @@ func (p *Provisioner) NewScheduler(
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	for _, np := range nodePools {
+		// stop looping through nodepools if context has been canceled to avoid spurious errors from GetInstanceTypes
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("context error while getting instance types, %w", ctx.Err())
 		}
@@ -329,7 +330,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 			}), 5),
 		).Info("deferring scheduling decision for provisionable pod(s) to future simulation due to limited reserved offering capacity")
 	}
-	contextErrors := results.ContextErrors()
+	contextErrors := results.ContextDeadlineExceededErrors()
 	if len(contextErrors) != 0 {
 		log.FromContext(ctx).V(1).WithValues(
 			"Pods", pretty.Slice(lo.Map(lo.Keys(contextErrors), func(p *corev1.Pod, _ int) string {
