@@ -1256,7 +1256,7 @@ var _ = Describe("Cluster State Sync", func() {
 		wg.Wait()
 		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
 		Expect(cluster.Synced(ctx)).To(BeTrue())
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			wg.Add(1)
 			go func(index int) {
 				defer wg.Done()
