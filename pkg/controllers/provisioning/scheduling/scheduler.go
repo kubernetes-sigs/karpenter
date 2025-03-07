@@ -19,7 +19,6 @@ package scheduling
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -209,12 +208,6 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 func (r Results) ReservedOfferingErrors() map[*corev1.Pod]error {
 	return lo.PickBy(r.PodErrors, func(_ *corev1.Pod, err error) bool {
 		return IsReservedOfferingError(err)
-	})
-}
-
-func (r Results) ContextDeadlineExceededErrors() map[*corev1.Pod]error {
-	return lo.PickBy(r.PodErrors, func(_ *corev1.Pod, err error) bool {
-		return errors.Is(err, context.DeadlineExceeded)
 	})
 }
 
