@@ -69,7 +69,7 @@ type NodeClaimSpec struct {
 	// is useful to implement features like eventually consistent node upgrade,
 	// memory leak protection, and disruption testing.
 	// +kubebuilder:default:="720h"
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +optional
