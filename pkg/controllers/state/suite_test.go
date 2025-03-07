@@ -99,6 +99,54 @@ var _ = AfterEach(func() {
 	cluster.Reset()
 	cloudProvider.Reset()
 })
+var _ = Describe("Pod Healthy NodePool", func() {
+	It("should not store pod schedulable time if the nodePool that pod is scheduled to does not have NodeRegistrationHealthy=true", func() {
+		pod := test.Pod()
+		ExpectApplied(ctx, env.Client, pod, nodePool)
+
+		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
+		Expect(setTime.IsZero()).To(BeTrue())
+	})
+	It("should store pod schedulable time if the nodePool that pod is scheduled to has NodeRegistrationHealthy=true", func() {
+		pod := test.Pod()
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
+		ExpectApplied(ctx, env.Client, pod, nodePool)
+
+		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
+		Expect(setTime.IsZero()).To(BeFalse())
+	})
+	It("should not update the pod schedulable time if it is already stored for a pod", func() {
+		pod := test.Pod()
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
+		ExpectApplied(ctx, env.Client, pod, nodePool)
+
+		// This will store the pod schedulable time
+		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
+		Expect(setTime.IsZero()).To(BeFalse())
+
+		fakeClock.Step(time.Minute)
+		// We try to update pod schedulable time, but it should not change as we have already stored it
+		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))).To(Equal(setTime))
+	})
+	It("should delete the pod schedulable time if the pod is deleted", func() {
+		pod := test.Pod()
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
+		ExpectApplied(ctx, env.Client, pod, nodePool)
+
+		// This will store the pod schedulable time
+		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
+		Expect(setTime.IsZero()).To(BeFalse())
+
+		// Delete the pod
+		cluster.DeletePod(client.ObjectKeyFromObject(pod))
+		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod)).IsZero()).To(BeTrue())
+	})
+})
 
 var _ = Describe("Pod Ack", func() {
 	It("should only mark pods as schedulable once", func() {
