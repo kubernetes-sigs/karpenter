@@ -1368,7 +1368,6 @@ var _ = Describe("Cluster State Sync", func() {
 		var wg sync.WaitGroup
 		for i := range 1000 {
 			wg.Add(1)
-			i := i // Capture loop variable
 			go func(index int) {
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
