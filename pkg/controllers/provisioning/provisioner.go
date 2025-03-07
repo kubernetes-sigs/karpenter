@@ -213,7 +213,12 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 var ErrNodePoolsNotFound = errors.New("no nodepools found")
 
 //nolint:gocyclo
-func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stateNodes []*state.StateNode) (*scheduler.Scheduler, error) {
+func (p *Provisioner) NewScheduler(
+	ctx context.Context,
+	pods []*corev1.Pod,
+	stateNodes []*state.StateNode,
+	opts ...scheduler.Options,
+) (*scheduler.Scheduler, error) {
 	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
 	if err != nil {
 		return nil, fmt.Errorf("listing nodepools, %w", err)
@@ -264,7 +269,7 @@ func (p *Provisioner) NewScheduler(ctx context.Context, pods []*corev1.Pod, stat
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, opts...), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -302,7 +307,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, nil
 	}
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
-	s, err := p.NewScheduler(ctx, pods, nodes.Active())
+	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.DisableReservedCapacityFallback)
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			log.FromContext(ctx).Info("no nodepools found")
@@ -314,15 +319,49 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
+
 	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
-	scheduler.UnschedulablePodsCount.Set(float64(len(results.PodErrors)), map[string]string{scheduler.ControllerLabel: injection.GetControllerName(ctx)})
+	reservedOfferingErrors := results.ReservedOfferingErrors()
+	if len(reservedOfferingErrors) != 0 {
+		log.FromContext(ctx).V(1).WithValues(
+			"Pods", pretty.Slice(lo.Map(lo.Keys(reservedOfferingErrors), func(p *corev1.Pod, _ int) string {
+				return klog.KRef(p.Namespace, p.Name).String()
+			}), 5),
+		).Info("deferring scheduling decision for provisionable pod(s) to future simulation due to limited reserved offering capacity")
+	}
+	scheduler.UnschedulablePodsCount.Set(
+		// A reserved offering error doesn't indicate a pod is unschedulable, just that the scheduling decision was deferred.
+		float64(len(results.PodErrors)-len(reservedOfferingErrors)),
+		map[string]string{
+			scheduler.ControllerLabel: injection.GetControllerName(ctx),
+		},
+	)
 	if len(results.NewNodeClaims) > 0 {
-		log.FromContext(ctx).WithValues("Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string { return klog.KObj(p).String() }), 5), "duration", time.Since(start)).Info("found provisionable pod(s)")
+		log.FromContext(ctx).WithValues(
+			"Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string {
+				return klog.KObj(p).String()
+			}), 5),
+			"duration", time.Since(start),
+		).Info("found provisionable pod(s)")
 	}
 	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
 	p.cluster.MarkPodSchedulingDecisions(results.PodErrors, pendingPods...)
+	p.MarkPodSchedulingDecisionsNodeRegistrationHealthy(ctx, results)
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
+}
+
+// MarkPodSchedulingDecisionsNodeRegistrationHealthy iterates through the nodeClaims
+// and existing nodes and marks podHealthyNodePoolScheduledTime time for pods
+func (p *Provisioner) MarkPodSchedulingDecisionsNodeRegistrationHealthy(ctx context.Context, results scheduler.Results) {
+	for _, n := range results.NewNodeClaims {
+		p.cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, n.Labels[v1.NodePoolLabelKey], n.Pods...)
+	}
+	for _, n := range results.ExistingNodes {
+		if nodePoolName, ok := n.Labels()[v1.NodePoolLabelKey]; ok {
+			p.cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePoolName, n.Pods...)
+		}
+	}
 }
 
 func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts ...option.Function[LaunchOptions]) (string, error) {

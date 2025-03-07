@@ -17,15 +17,20 @@ limitations under the License.
 package scheduling
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
 
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	opts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -35,36 +40,75 @@ import (
 type NodeClaim struct {
 	NodeClaimTemplate
 
-	Pods            []*v1.Pod
-	topology        *Topology
-	hostPortUsage   *scheduling.HostPortUsage
-	daemonResources v1.ResourceList
-	hostname        string
+	Pods               []*corev1.Pod
+	reservationManager *ReservationManager
+	topology           *Topology
+	hostPortUsage      *scheduling.HostPortUsage
+	daemonResources    corev1.ResourceList
+	hostname           string
+
+	// We store the reserved offerings rather than appending reservation ID labels for two reasons:
+	// - We need to release any reservations that were made in previous iterations and are no longer compatible with the
+	//   NodeClaim.
+	// - Since other NodeClaims may have released reservations which are compatible with this NodeClaim since the last
+	//   time a pod was scheduled, it's possible for the set of reserved offerings to expand as well as contract over
+	//   multiple iterations. This has the benefit of maximizing the flexibility of an in-flight NodeClaim, maximizing
+	//   the scheduler's binpacking efficiency. Tightening the NodeClaim's requirements before finalization would prevent
+	//   this expansion.
+	reservedOfferings    cloudprovider.Offerings
+	reservedOfferingMode ReservedOfferingMode
+}
+
+// ReservedOfferingError indicates a NodeClaim couldn't be created or a pod couldn't be added to an exxisting NodeClaim
+// due to
+type ReservedOfferingError struct {
+	error
+}
+
+func NewReservedOfferingError(err error) ReservedOfferingError {
+	return ReservedOfferingError{error: err}
+}
+
+func IsReservedOfferingError(err error) bool {
+	roe := &ReservedOfferingError{}
+	return errors.As(err, roe)
+}
+
+func (e ReservedOfferingError) Unwrap() error {
+	return e.error
 }
 
 var nodeID int64
 
-func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daemonResources v1.ResourceList, instanceTypes []*cloudprovider.InstanceType) *NodeClaim {
-	// Copy the template, and add hostname
+func NewNodeClaim(
+	nodeClaimTemplate *NodeClaimTemplate,
+	topology *Topology,
+	daemonResources corev1.ResourceList,
+	instanceTypes []*cloudprovider.InstanceType,
+	reservationManager *ReservationManager,
+	reservedOfferingMode ReservedOfferingMode,
+) *NodeClaim {
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
-	topology.Register(v1.LabelHostname, hostname)
+	topology.Register(corev1.LabelHostname, hostname)
 	template := *nodeClaimTemplate
 	template.Requirements = scheduling.NewRequirements()
 	template.Requirements.Add(nodeClaimTemplate.Requirements.Values()...)
-	template.Requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, hostname))
+	template.Requirements.Add(scheduling.NewRequirement(corev1.LabelHostname, corev1.NodeSelectorOpIn, hostname))
 	template.InstanceTypeOptions = instanceTypes
 	template.Spec.Resources.Requests = daemonResources
-
 	return &NodeClaim{
-		NodeClaimTemplate: template,
-		hostPortUsage:     scheduling.NewHostPortUsage(),
-		topology:          topology,
-		daemonResources:   daemonResources,
-		hostname:          hostname,
+		NodeClaimTemplate:    template,
+		hostPortUsage:        scheduling.NewHostPortUsage(),
+		topology:             topology,
+		daemonResources:      daemonResources,
+		hostname:             hostname,
+		reservedOfferings:    cloudprovider.Offerings{},
+		reservationManager:   reservationManager,
+		reservedOfferingMode: reservedOfferingMode,
 	}
 }
 
-func (n *NodeClaim) Add(pod *v1.Pod, podData *PodData) error {
+func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData) error {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
 		return err
@@ -103,6 +147,11 @@ func (n *NodeClaim) Add(pod *v1.Pod, podData *PodData) error {
 		return err
 	}
 
+	reservedOfferings, err := n.reserveOfferings(ctx, remaining, nodeClaimRequirements)
+	if err != nil {
+		return err
+	}
+
 	// Update node
 	n.Pods = append(n.Pods, pod)
 	n.InstanceTypeOptions = remaining
@@ -110,11 +159,82 @@ func (n *NodeClaim) Add(pod *v1.Pod, podData *PodData) error {
 	n.Requirements = nodeClaimRequirements
 	n.topology.Record(pod, n.NodeClaim.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, hostPorts)
+	n.releaseReservedOfferings(n.reservedOfferings, reservedOfferings)
+	n.reservedOfferings = reservedOfferings
 	return nil
 }
 
+// releaseReservedOfferings releases all offerings which are present in the current reserved offerings, but are not
+// present in the updated reserved offerings.
+func (n *NodeClaim) releaseReservedOfferings(current, updated cloudprovider.Offerings) {
+	updatedIDs := sets.New[string]()
+	for _, o := range updated {
+		updatedIDs.Insert(o.ReservationID())
+	}
+	for _, o := range current {
+		if !updatedIDs.Has(o.ReservationID()) {
+			n.reservationManager.Release(n.hostname, o)
+		}
+	}
+}
+
+// reserveOfferings handles the reservation of `karpenter.sh/capacity-type: reserved` offerings, returning the set of
+// reserved offerings. If the ReservedOfferingMode is set to strict, this function may also return an error if it failed
+// to reserve compatible offerings when some were available.
+//
+//nolint:gocyclo
+func (n *NodeClaim) reserveOfferings(
+	ctx context.Context,
+	instanceTypes []*cloudprovider.InstanceType,
+	nodeClaimRequirements scheduling.Requirements,
+) (cloudprovider.Offerings, error) {
+	if !opts.FromContext(ctx).FeatureGates.ReservedCapacity {
+		return nil, nil
+	}
+
+	hasCompatibleOffering := false
+	var reservedOfferings cloudprovider.Offerings
+	for _, it := range instanceTypes {
+		for _, o := range it.Offerings {
+			if o.CapacityType() != v1.CapacityTypeReserved || !o.Available {
+				continue
+			}
+			// Track every incompatible reserved offering for release. Since releasing a reservation is a no-op when there is no
+			// reservation for the given host, there's no need to check that a reservation actually exists for the offering.
+			if !nodeClaimRequirements.IsCompatible(o.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
+				continue
+			}
+			hasCompatibleOffering = true
+			// Note that reservation is an idempotent operation - if we have previously successfully reserved an offering for
+			// this host, this operation is guaranteed to succeed. We may also succeed to make reservations for offerings which
+			// failed in previous iterations if other NodeClaims have released them since the last attempt.
+			if n.reservationManager.Reserve(n.hostname, o) {
+				reservedOfferings = append(reservedOfferings, o)
+			}
+		}
+	}
+
+	if n.reservedOfferingMode == ReservedOfferingModeStrict {
+		// If an instance type with a compatible reserved offering exists, but we failed to make any reservations, we should
+		// fail. This could occur when all of the capacity for compatible instances has been reserved by previously created
+		// nodeclaims. Since we reserve offering pessimistically, i.e. we will reserve any offering that the instance could
+		// be launched with, we should fall back and attempt to schedule this pod in a subsequent scheduling simulation once
+		// reservation capacity is available again.
+		if hasCompatibleOffering && len(reservedOfferings) == 0 {
+			return nil, NewReservedOfferingError(fmt.Errorf("one or more instance types with compatible reserved offerings are available, but could not be reserved"))
+		}
+		// If the nodeclaim previously had compatible reserved offerings, but the additional requirements filtered those out,
+		// we should fail to add the pod to this nodeclaim.
+		if len(n.reservedOfferings) != 0 && len(reservedOfferings) == 0 {
+			return nil, NewReservedOfferingError(fmt.Errorf("satisfying updated nodeclaim constraints would remove all compatible reserved offering options"))
+		}
+	}
+	return reservedOfferings, nil
+}
+
 func (n *NodeClaim) Destroy() {
-	n.topology.Unregister(v1.LabelHostname, n.hostname)
+	n.topology.Unregister(corev1.LabelHostname, n.hostname)
+	n.reservationManager.Release(n.hostname, n.reservedOfferings...)
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
@@ -122,7 +242,19 @@ func (n *NodeClaim) Destroy() {
 func (n *NodeClaim) FinalizeScheduling() {
 	// We need nodes to have hostnames for topology purposes, but we don't want to pass that node name on to consumers
 	// of the node as it will be displayed in error messages
-	delete(n.Requirements, v1.LabelHostname)
+	delete(n.Requirements, corev1.LabelHostname)
+	// If there are any reserved offerings tracked, inject those requirements onto the NodeClaim. This ensures that if
+	// there are multiple reserved offerings for an instance type, we don't attempt to overlaunch into a single offering.
+	if len(n.reservedOfferings) != 0 {
+		// Tightening constraint to reserved ensures that we get automatic drift handling when the Node / NodeClaim's capacity
+		// type label is dynamically updated by the cloudprovider.
+		n.Requirements[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved)
+		n.Requirements.Add(scheduling.NewRequirement(
+			cloudprovider.ReservationIDLabel,
+			corev1.NodeSelectorOpIn,
+			lo.Map(n.reservedOfferings, func(o *cloudprovider.Offering, _ int) string { return o.ReservationID() })...,
+		))
+	}
 }
 
 func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling.Requirements, maxPrice float64) (*NodeClaim, error) {
@@ -169,9 +301,9 @@ type InstanceTypeFilterError struct {
 	requirements scheduling.Requirements
 	// We capture podRequests here since when a pod can't schedule due to requests, it's because the pod
 	// was on its own on the simulated Node and exceeded the available resources for any instance type for this NodePool
-	podRequests v1.ResourceList
+	podRequests corev1.ResourceList
 	// We capture daemonRequests since this contributes to the resources that are required to schedule to this NodePool
-	daemonRequests v1.ResourceList
+	daemonRequests corev1.ResourceList
 }
 
 //nolint:gocyclo
@@ -228,7 +360,7 @@ func (e InstanceTypeFilterError) Error() string {
 }
 
 //nolint:gocyclo
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, podRequests, daemonRequests, totalRequests v1.ResourceList) (cloudprovider.InstanceTypes, error) {
+func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, podRequests, daemonRequests, totalRequests corev1.ResourceList) (cloudprovider.InstanceTypes, error) {
 	// We hold the results of our scheduling simulation inside of this InstanceTypeFilterError struct
 	// to reduce the CPU load of having to generate the error string for a failed scheduling simulation
 	err := InstanceTypeFilterError{
@@ -296,6 +428,6 @@ func compatible(instanceType *cloudprovider.InstanceType, requirements schedulin
 	return instanceType.Requirements.Intersects(requirements) == nil
 }
 
-func fits(instanceType *cloudprovider.InstanceType, requests v1.ResourceList) bool {
+func fits(instanceType *cloudprovider.InstanceType, requests corev1.ResourceList) bool {
 	return resources.Fits(requests, instanceType.Allocatable())
 }
