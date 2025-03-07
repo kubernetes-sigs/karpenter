@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/rest"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -71,7 +72,9 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithConfigOptions(func(config *rest.Config) {
+		config.QPS = -1
+	}))
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
@@ -1179,14 +1182,19 @@ var _ = Describe("Pod Anti-Affinity", func() {
 var _ = Describe("Cluster State Sync", func() {
 	It("should consider the cluster state synced when all nodes are tracked", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
-		for i := 0; i < 1000; i++ {
-			node := test.Node(test.NodeOptions{
-				ProviderID: test.RandomProviderID(),
-			})
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectMetricGaugeValue(state.ClusterStateNodesCount, float64(i+1), nil)
+		var wg sync.WaitGroup
+		for range 1000 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				node := test.Node(test.NodeOptions{
+					ProviderID: test.RandomProviderID(),
+				})
+				ExpectApplied(ctx, env.Client, node)
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			}()
 		}
+		wg.Wait()
 
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 1.0, nil)
@@ -1215,12 +1223,17 @@ var _ = Describe("Cluster State Sync", func() {
 	})
 	It("should consider the cluster state synced when nodes don't have provider id", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
-		for i := 0; i < 1000; i++ {
-			node := test.Node()
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectMetricGaugeValue(state.ClusterStateNodesCount, float64(i+1), nil)
+		var wg sync.WaitGroup
+		for range 1000 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				node := test.Node()
+				ExpectApplied(ctx, env.Client, node)
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			}()
 		}
+		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 1.0, nil)
 		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
@@ -1229,135 +1242,193 @@ var _ = Describe("Cluster State Sync", func() {
 	It("should consider the cluster state synced when nodes register provider id", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
 		var nodes []*corev1.Node
-		for i := 0; i < 1000; i++ {
-			nodes = append(nodes, test.Node())
-			ExpectApplied(ctx, env.Client, nodes[i])
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
-			ExpectMetricGaugeValue(state.ClusterStateNodesCount, float64(i+1), make(map[string]string))
+		var wg sync.WaitGroup
+		for range 1000 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				node := test.Node()
+				ExpectApplied(ctx, env.Client, node)
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+				nodes = append(nodes, node)
+			}()
 		}
+		wg.Wait()
+		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		for i := 0; i < 1000; i++ {
-			nodes[i].Spec.ProviderID = test.RandomProviderID()
-			ExpectApplied(ctx, env.Client, nodes[i])
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				nodes[i].Spec.ProviderID = test.RandomProviderID()
+				ExpectApplied(ctx, env.Client, nodes[i])
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[i]))
+			}()
 		}
+		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 1.0, nil)
 		ExpectMetricGaugeValue(state.ClusterStateNodesCount, 1000.0, nil)
 	})
 	It("should consider the cluster state synced when all nodeclaims are tracked", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
-		for i := 0; i < 1000; i++ {
-			nodeClaim := test.NodeClaim(v1.NodeClaim{
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		var wg sync.WaitGroup
+		for range 1000 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			}()
 		}
+		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 	})
 	It("should consider the cluster state synced when a combination of nodeclaims and node are tracked", func() {
 		// Deploy 250 nodes to the cluster that also have nodeclaims
-		for i := 0; i < 250; i++ {
-			node := test.Node(test.NodeOptions{
-				ProviderID: test.RandomProviderID(),
-			})
-			nodeClaim := test.NodeClaim(v1.NodeClaim{
-				Status: v1.NodeClaimStatus{
-					ProviderID: node.Spec.ProviderID,
-				},
-			})
-			ExpectApplied(ctx, env.Client, node, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		}
-		// Deploy 250 nodes to the cluster
-		for i := 0; i < 250; i++ {
-			node := test.Node(test.NodeOptions{
-				ProviderID: test.RandomProviderID(),
-			})
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		}
-		// Deploy 500 nodeclaims and sync them all with the cluster
-		for i := 0; i < 500; i++ {
-			nodeClaim := test.NodeClaim(v1.NodeClaim{
-				Status: v1.NodeClaimStatus{
+		var wg sync.WaitGroup
+		for range 250 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+				})
+				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					Status: v1.NodeClaimStatus{
+						ProviderID: node.Spec.ProviderID,
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodeClaim, node)
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			}()
 		}
+		wg.Wait()
+		// Deploy 250 nodes to the cluster
+		for range 250 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				node := test.Node(test.NodeOptions{
+					ProviderID: test.RandomProviderID(),
+				})
+				ExpectApplied(ctx, env.Client, node)
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			}()
+		}
+		wg.Wait()
+		// Deploy 500 nodeclaims and sync them all with the cluster
+		for range 500 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			}()
+		}
+		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 	})
 	It("should consider the cluster state synced when the representation of nodes is the same", func() {
 		// Deploy 500 nodeClaims to the cluster, apply the linked nodes, but don't sync them
-		for i := 0; i < 500; i++ {
-			nodeClaim := test.NodeClaim(v1.NodeClaim{
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-				},
-			})
-			node := test.Node(test.NodeOptions{
-				ProviderID: nodeClaim.Status.ProviderID,
-			})
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		var wg sync.WaitGroup
+		for range 500 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+				node := test.Node(test.NodeOptions{
+					ProviderID: nodeClaim.Status.ProviderID,
+				})
+				ExpectApplied(ctx, env.Client, nodeClaim, node)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			}()
 		}
+		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 	})
 	It("shouldn't consider the cluster state synced if a nodeclaim hasn't resolved its provider id", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
-		for i := 0; i < 1000; i++ {
-			nodeClaim := test.NodeClaim(v1.NodeClaim{
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-				},
-			})
-			// One of them doesn't have its providerID
-			if i == 900 {
-				nodeClaim.Status.ProviderID = ""
-			}
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		var wg sync.WaitGroup
+		for i := range 1000 {
+			wg.Add(1)
+			i := i // Capture loop variable
+			go func(index int) {
+				defer wg.Done()
+				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+				// One of them doesn't have its providerID
+				if index == 900 {
+					nodeClaim.Status.ProviderID = ""
+				}
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			}(i)
 		}
+		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
 	It("shouldn't consider the cluster state synced if a nodeclaim isn't tracked", func() {
 		// Deploy 1000 nodeClaims and sync them all with the cluster
-		for i := 0; i < 1000; i++ {
-			nodeClaim := test.NodeClaim(v1.NodeClaim{
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodeClaim)
+		var wg sync.WaitGroup
+		for i := range 1000 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodeClaim)
 
-			// One of them doesn't get synced with the reconciliation
-			if i != 900 {
-				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			}
+				// One of them doesn't get synced with the reconciliation
+				if i != 900 {
+					ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+				}
+			}()
 		}
+		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
 	It("shouldn't consider the cluster state synced if a node isn't tracked", func() {
 		// Deploy 1000 nodes and sync them all with the cluster
-		for i := 0; i < 1000; i++ {
-			node := test.Node(test.NodeOptions{
-				ProviderID: test.RandomProviderID(),
-			})
-			ExpectApplied(ctx, env.Client, node)
+		var wg sync.WaitGroup
+		for i := range 1000 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				node := test.Node(test.NodeOptions{
+					ProviderID: test.RandomProviderID(),
+				})
+				ExpectApplied(ctx, env.Client, node)
 
-			// One of them doesn't get synced with the reconciliation
-			if i != 900 {
-				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			}
+				// One of them doesn't get synced with the reconciliation
+				if i != 900 {
+					ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+				}
+			}()
 		}
+		wg.Wait()
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 0, nil)
 	})
@@ -1386,28 +1457,37 @@ var _ = Describe("Cluster State Sync", func() {
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 1, nil)
 	})
+	// also this test takes a while still
 	It("should consider the cluster state synced when a new node is added after the initial sync", func() {
 		// Deploy 250 nodes to the cluster that also have nodeclaims
-		for i := 0; i < 250; i++ {
-			node := test.Node(test.NodeOptions{
-				ProviderID: test.RandomProviderID(),
-			})
-			nodeClaim := test.NodeClaim(v1.NodeClaim{
-				Status: v1.NodeClaimStatus{
-					ProviderID: node.Spec.ProviderID,
-				},
-			})
-			ExpectApplied(ctx, env.Client, node, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		var wg sync.WaitGroup
+		for range 250 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				node := test.Node(test.NodeOptions{
+					ProviderID: test.RandomProviderID(),
+				})
+				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					Status: v1.NodeClaimStatus{
+						ProviderID: node.Spec.ProviderID,
+					},
+				})
+				ExpectApplied(ctx, env.Client, node, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			}()
 		}
+		wg.Wait()
 		// Deploy 250 nodes to the cluster
-		for i := 0; i < 250; i++ {
+		for range 250 {
+			wg.Add(1)
 			node := test.Node(test.NodeOptions{
 				ProviderID: test.RandomProviderID(),
 			})
 			ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+			wg.Done()
 		}
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 
