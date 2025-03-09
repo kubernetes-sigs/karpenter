@@ -477,7 +477,7 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
 			// return because we can't consider any other pod schedulable
 			if errors.Is(err, context.Canceled) {
-				return nil, fmt.Errorf("context canceled while injecting volume topology requirements, %w", err)
+				return nil, err
 			}
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
 		} else {
