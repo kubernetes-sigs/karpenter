@@ -12,7 +12,6 @@ aliases:
     - bwagner5
     - njtran
   karpenter-reviewers:
-    - jackfrancis
     - tallaxes
     - engedaam
     - jmdeal
