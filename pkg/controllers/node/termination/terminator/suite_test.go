@@ -96,6 +96,7 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		node = test.Node(test.NodeOptions{ProviderID: "123456789"})
 		terminator.NodesEvictionRequestsTotal.Reset()
+		terminator.PodsDrainedTotal.Reset()
 	})
 
 	Context("Eviction API", func() {
@@ -163,6 +164,13 @@ var _ = Describe("Eviction/Queue", func() {
 			for i := 0; i < 10000; i++ {
 				queue.Add(node, test.Pod())
 			}
+		})
+		It("should increment PodsDrainedTotal metric when a pod is evicted", func() {
+			ExpectApplied(ctx, env.Client, pod)
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
+			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: terminator.UnknownReason})
+			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
+			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 	})
 
