@@ -108,7 +108,7 @@ func NewNodeClaim(
 	}
 }
 
-func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData) error {
+func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, volumeRequirements []corev1.NodeSelectorRequirement) error {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
 		return err
@@ -136,6 +136,13 @@ func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData) 
 		return err
 	}
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
+
+	podVolumeRequirements := scheduling.NewNodeSelectorRequirements(volumeRequirements...)
+	// Check Pod Volume Requirements
+	if err = nodeClaimRequirements.Compatible(podVolumeRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
+		return err
+	}
+	nodeClaimRequirements.Add(podVolumeRequirements.Values()...)
 
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)

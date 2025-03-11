@@ -60,6 +60,9 @@ type Topology struct {
 	excludedPods sets.Set[string]
 	cluster      *state.Cluster
 	stateNodes   []*state.StateNode
+	// podVolumeRequirements links volume requirements to pods. This is used so we
+	// can track the volume requirements in simulate scheduler
+	podVolumeRequirements map[*corev1.Pod][]corev1.NodeSelectorRequirement
 }
 
 func NewTopology(
@@ -70,6 +73,9 @@ func NewTopology(
 	nodePools []*v1.NodePool,
 	instanceTypes map[string][]*cloudprovider.InstanceType,
 	pods []*corev1.Pod,
+	// podVolumeRequirements links volume requirements to pods. This is used so we
+	// can track the volume requirements in simulate scheduler
+	podsVolumeRequirements map[*corev1.Pod][]corev1.NodeSelectorRequirement,
 ) (*Topology, error) {
 	t := &Topology{
 		kubeClient:            kubeClient,
@@ -79,17 +85,18 @@ func NewTopology(
 		topologyGroups:        map[uint64]*TopologyGroup{},
 		inverseTopologyGroups: map[uint64]*TopologyGroup{},
 		excludedPods:          sets.New[string](),
+		podVolumeRequirements: podsVolumeRequirements,
 	}
 
 	// these are the pods that we intend to schedule, so if they are currently in the cluster we shouldn't count them for
 	// topology purposes
-	for _, p := range pods {
+	for p := range podsVolumeRequirements {
 		t.excludedPods.Insert(string(p.UID))
 	}
 
 	errs := t.updateInverseAffinities(ctx)
-	for i := range pods {
-		errs = multierr.Append(errs, t.Update(ctx, pods[i]))
+	for p := range podsVolumeRequirements {
+		errs = multierr.Append(errs, t.Update(ctx, p))
 	}
 	if errs != nil {
 		return nil, errs
@@ -228,7 +235,7 @@ func (t *Topology) AddRequirements(p *corev1.Pod, taints []corev1.Taint, podRequ
 		if nodeRequirements.Has(topology.Key) {
 			nodeDomains = nodeRequirements.Get(topology.Key)
 		}
-		domains := topology.Get(p, podDomains, nodeDomains)
+		domains := topology.Get(p, podDomains, nodeDomains, len(t.podVolumeRequirements[p]) != 0)
 		if domains.Len() == 0 {
 			return nil, topologyError{
 				topology:    topology,
@@ -299,7 +306,7 @@ func (t *Topology) updateInverseAntiAffinity(ctx context.Context, pod *corev1.Po
 			return err
 		}
 
-		tg := NewTopologyGroup(TopologyTypePodAntiAffinity, term.TopologyKey, pod, namespaces, term.LabelSelector, math.MaxInt32, nil, nil, nil, t.domainGroups[term.TopologyKey])
+		tg := NewTopologyGroup(TopologyTypePodAntiAffinity, term.TopologyKey, pod, namespaces, term.LabelSelector, math.MaxInt32, nil, nil, nil, t.domainGroups[term.TopologyKey], t.cluster)
 
 		hash := tg.Hash()
 		if existing, ok := t.inverseTopologyGroups[hash]; !ok {
@@ -442,6 +449,7 @@ func (t *Topology) newForTopologies(p *corev1.Pod) []*TopologyGroup {
 			tsc.NodeTaintsPolicy,
 			tsc.NodeAffinityPolicy,
 			t.domainGroups[tsc.TopologyKey],
+			t.cluster,
 		))
 	}
 	return topologyGroups
@@ -479,7 +487,7 @@ func (t *Topology) newForAffinities(ctx context.Context, p *corev1.Pod) ([]*Topo
 			if err != nil {
 				return nil, err
 			}
-			topologyGroups = append(topologyGroups, NewTopologyGroup(topologyType, term.TopologyKey, p, namespaces, term.LabelSelector, math.MaxInt32, nil, nil, nil, t.domainGroups[term.TopologyKey]))
+			topologyGroups = append(topologyGroups, NewTopologyGroup(topologyType, term.TopologyKey, p, namespaces, term.LabelSelector, math.MaxInt32, nil, nil, nil, t.domainGroups[term.TopologyKey], t.cluster))
 		}
 	}
 	return topologyGroups, nil
