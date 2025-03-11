@@ -17,12 +17,17 @@ limitations under the License.
 package lifecycle_test
 
 import (
+	"time"
+
+	"github.com/awslabs/operatorpkg/status"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -66,6 +71,10 @@ var _ = Describe("Registration", func() {
 			if isManagedNodeClaim {
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 				Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+				operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
+					Type:   v1.ConditionTypeNodeRegistrationHealthy,
+					Status: metav1.ConditionTrue,
+				})
 			} else {
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsUnknown()).To(BeTrue())
 				Expect(nodeClaim.Status.NodeName).To(Equal(""))
@@ -112,7 +121,7 @@ var _ = Describe("Registration", func() {
 		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeRegisteredLabelKey, "true"))
 		Expect(node.Spec.Taints).To(Not(ContainElement(v1.UnregisteredNoExecuteTaint)))
 	})
-	It("should fail registration if the karpenter.sh/unregistered taint is not present on the node and the node isn't labeled as registered", func() {
+	It("should succeed registration if the karpenter.sh/unregistered taint is not present and emit an event", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -124,12 +133,23 @@ var _ = Describe("Registration", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
+		// Create a node without the unregistered taint
 		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID})
 		ExpectApplied(ctx, env.Client, node)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+		// Verify the NodeClaim is registered
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+
+		// Verify the node is registered
+		node = ExpectExists(ctx, env.Client, node)
+		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeRegisteredLabelKey, "true"))
+
+		Expect(recorder.Calls(events.UnregisteredTaintMissing)).To(Equal(1))
 	})
+
 	It("should sync the labels to the Node when the Node comes online", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -367,5 +387,45 @@ var _ = Describe("Registration", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).To(HaveLen(0))
+	})
+	It("should add NodeRegistrationHealthy=true on the nodePool if registration succeeds and if it was previously false", func() {
+		nodeClaimOpts := []v1.NodeClaim{{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		}}
+		nodeClaim := test.NodeClaim(nodeClaimOpts...)
+		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "unhealthy", "unhealthy")
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
+		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
+			Type:   v1.ConditionTypeNodeRegistrationHealthy,
+			Status: metav1.ConditionTrue,
+		})
+	})
+	It("should not block on updating NodeRegistrationHealthy status condition if nodeClaim is not owned by a nodePool", func() {
+		nodeClaim := test.NodeClaim()
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
 	})
 })

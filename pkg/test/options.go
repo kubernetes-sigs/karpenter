@@ -48,6 +48,7 @@ type OptionsFields struct {
 
 type FeatureGates struct {
 	NodeRepair              *bool
+	ReservedCapacity        *bool
 	SpotToSpotConsolidation *bool
 }
 
@@ -75,6 +76,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		BatchIdleDuration:     lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
 		FeatureGates: options.FeatureGates{
 			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
+			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, false),
 			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
 		},
 	}

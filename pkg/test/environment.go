@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -51,6 +52,7 @@ type Environment struct {
 type EnvironmentOptions struct {
 	crds          []*apiextensionsv1.CustomResourceDefinition
 	fieldIndexers []func(cache.Cache) error
+	configOptions []func(*rest.Config)
 }
 
 // WithCRDs registers the specified CRDs to the apiserver for use in testing
@@ -67,6 +69,13 @@ func WithCRDs(crds ...*apiextensionsv1.CustomResourceDefinition) option.Function
 func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) option.Function[EnvironmentOptions] {
 	return func(o *EnvironmentOptions) {
 		o.fieldIndexers = append(o.fieldIndexers, fieldIndexers...)
+	}
+}
+
+// WithConfigOptions allows customization of the rest.Config before client creation
+func WithConfigOptions(options ...func(*rest.Config)) option.Function[EnvironmentOptions] {
+	return func(o *EnvironmentOptions) {
+		o.configOptions = append(o.configOptions, options...)
 	}
 }
 
@@ -132,6 +141,11 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 	}
 
 	_ = lo.Must(environment.Start())
+
+	// Apply any config overrides
+	for _, option := range opts.configOptions {
+		option(environment.Config)
+	}
 
 	// We use a modified client if we need field indexers
 	var c client.Client

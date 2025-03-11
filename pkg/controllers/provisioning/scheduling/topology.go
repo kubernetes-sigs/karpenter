@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
@@ -354,6 +355,13 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		}
 	}
 
+	// sort our pods by the node they are scheduled to
+	sort.Slice(pods, func(i, j int) bool {
+		return pods[i].Spec.NodeName < pods[j].Spec.NodeName
+	})
+	var previousNode *corev1.Node
+	var previousNodeRequirements scheduling.Requirements
+
 	for i, p := range pods {
 		if IgnoredForTopology(&pods[i]) {
 			continue
@@ -362,18 +370,32 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		if t.excludedPods.Has(string(p.UID)) {
 			continue
 		}
-		node := &corev1.Node{}
-		if err := t.kubeClient.Get(ctx, types.NamespacedName{Name: p.Spec.NodeName}, node); err != nil {
-			// Pods that cannot be evicted can be leaked in the API Server after
-			// a Node is removed. Since pod bindings are immutable, these pods
-			// cannot be recovered, and will be deleted by the pod lifecycle
-			// garbage collector. These pods are not running, and should not
-			// impact future topology calculations.
-			if errors.IsNotFound(err) {
-				continue
+		var node *corev1.Node
+		var nodeRequirements scheduling.Requirements
+		if previousNode != nil && previousNode.Name == p.Spec.NodeName {
+			// no need to look up the node since we already have it
+			node = previousNode
+			nodeRequirements = previousNodeRequirements
+		} else {
+			node = &corev1.Node{}
+			if err := t.kubeClient.Get(ctx, types.NamespacedName{Name: p.Spec.NodeName}, node); err != nil {
+				// Pods that cannot be evicted can be leaked in the API Server after
+				// a Node is removed. Since pod bindings are immutable, these pods
+				// cannot be recovered, and will be deleted by the pod lifecycle
+				// garbage collector. These pods are not running, and should not
+				// impact future topology calculations.
+				if errors.IsNotFound(err) {
+					continue
+				}
+				return fmt.Errorf("getting node %s, %w", p.Spec.NodeName, err)
 			}
-			return fmt.Errorf("getting node %s, %w", p.Spec.NodeName, err)
+			nodeRequirements = scheduling.NewLabelRequirements(node.Labels)
+
+			// assign back to previous node so we can hopefully re-use these in the next iteration
+			previousNode = node
+			previousNodeRequirements = nodeRequirements
 		}
+
 		domain, ok := node.Labels[tg.Key]
 		// Kubelet sets the hostname label, but the node may not be ready yet so there is no label.  We fall back and just
 		// treat the node name as the label.  It probably is in most cases, but even if not we at least count the existence
@@ -386,9 +408,10 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 		if !ok {
 			continue // Don't include pods if node doesn't contain domain https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/#conventions
 		}
+
 		// nodes may or may not be considered for counting purposes for topology spread constraints depending on if they
 		// are selected by the pod's node selectors and required node affinities.  If these are unset, the node always counts.
-		if !tg.nodeFilter.Matches(node.Spec.Taints, scheduling.NewLabelRequirements(node.Labels)) {
+		if !tg.nodeFilter.Matches(node.Spec.Taints, nodeRequirements) {
 			continue
 		}
 		tg.Record(domain)

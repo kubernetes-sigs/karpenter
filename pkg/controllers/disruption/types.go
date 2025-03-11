@@ -17,12 +17,12 @@ limitations under the License.
 package disruption
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -140,46 +140,38 @@ func (c Command) Decision() Decision {
 	}
 }
 
-func (c Command) String() string {
-	var buf bytes.Buffer
+func (c Command) LogValues() []any {
 	podCount := lo.Reduce(c.candidates, func(_ int, cd *Candidate, _ int) int { return len(cd.reschedulablePods) }, 0)
-	fmt.Fprintf(&buf, "%s, terminating %d nodes (%d pods) ", c.Decision(), len(c.candidates), podCount)
-	for i, old := range c.candidates {
-		if i != 0 {
-			fmt.Fprint(&buf, ", ")
+
+	candidateNodes := lo.Map(c.candidates, func(candidate *Candidate, _ int) interface{} {
+		return map[string]interface{}{
+			"Node":          klog.KObj(candidate.Node),
+			"NodeClaim":     klog.KObj(candidate.NodeClaim),
+			"instance-type": candidate.Labels()[corev1.LabelInstanceTypeStable],
+			"capacity-type": candidate.Labels()[v1.CapacityTypeLabelKey],
 		}
-		fmt.Fprintf(&buf, "%s", old.Name())
-		fmt.Fprintf(&buf, "/%s", old.Labels()[corev1.LabelInstanceTypeStable])
-		fmt.Fprintf(&buf, "/%s", old.Labels()[v1.CapacityTypeLabelKey])
-	}
-	if len(c.replacements) == 0 {
-		return buf.String()
-	}
-	odNodeClaims := 0
-	spotNodeClaims := 0
-	for _, nodeClaim := range c.replacements {
-		ct := nodeClaim.Requirements.Get(v1.CapacityTypeLabelKey)
-		if ct.Has(v1.CapacityTypeOnDemand) {
-			odNodeClaims++
+	})
+	replacementNodes := lo.Map(c.replacements, func(replacement *scheduling.NodeClaim, _ int) interface{} {
+		ct := replacement.Requirements.Get(v1.CapacityTypeLabelKey)
+		m := map[string]interface{}{
+			"capacity-type": lo.If(
+				ct.Has(v1.CapacityTypeReserved), v1.CapacityTypeReserved,
+			).ElseIf(
+				ct.Has(v1.CapacityTypeSpot), v1.CapacityTypeSpot,
+			).Else(v1.CapacityTypeOnDemand),
 		}
-		if ct.Has(v1.CapacityTypeSpot) {
-			spotNodeClaims++
+		if len(c.replacements) == 1 {
+			m["instance-types"] = scheduling.InstanceTypeList(replacement.InstanceTypeOptions)
 		}
+		return m
+	})
+
+	return []any{
+		"decision", c.Decision(),
+		"disrupted-node-count", len(candidateNodes),
+		"replacement-node-count", len(replacementNodes),
+		"pod-count", podCount,
+		"disrupted-nodes", candidateNodes,
+		"replacement-nodes", replacementNodes,
 	}
-	// Print list of instance types for the first replacements.
-	if len(c.replacements) > 1 {
-		fmt.Fprintf(&buf, " and replacing with %d spot and %d on-demand, from types %s",
-			spotNodeClaims, odNodeClaims,
-			scheduling.InstanceTypeList(c.replacements[0].InstanceTypeOptions))
-		return buf.String()
-	}
-	ct := c.replacements[0].Requirements.Get(v1.CapacityTypeLabelKey)
-	nodeDesc := "node"
-	if ct.Len() == 1 {
-		nodeDesc = fmt.Sprintf("%s node", ct.Any())
-	}
-	fmt.Fprintf(&buf, " and replacing with %s from types %s",
-		nodeDesc,
-		scheduling.InstanceTypeList(c.replacements[0].InstanceTypeOptions))
-	return buf.String()
 }

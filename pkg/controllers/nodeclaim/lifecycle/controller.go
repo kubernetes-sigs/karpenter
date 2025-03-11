@@ -52,10 +52,6 @@ import (
 	terminationutil "sigs.k8s.io/karpenter/pkg/utils/termination"
 )
 
-type nodeClaimReconciler interface {
-	Reconcile(context.Context, *v1.NodeClaim) (reconcile.Result, error)
-}
-
 // Controller is a NodeClaim Lifecycle controller that manages the lifecycle of the NodeClaim up until its termination
 // The controller is responsible for ensuring that new Nodes get launched, that they have properly registered with
 // the cluster as nodes and that they are properly initialized, ensuring that nodeclaims that do not have matching nodes
@@ -78,7 +74,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		recorder:      recorder,
 
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10), recorder: recorder},
-		registration:   &Registration{kubeClient: kubeClient},
+		registration:   &Registration{kubeClient: kubeClient, recorder: recorder},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
 	}
@@ -108,9 +104,15 @@ func (c *Controller) Name() string {
 	return "nodeclaim.lifecycle"
 }
 
+// nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
-
+	if nodeClaim.Status.ProviderID != "" {
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("provider-id", nodeClaim.Status.ProviderID))
+	}
+	if nodeClaim.Status.NodeName != "" {
+		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName)))
+	}
 	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
@@ -137,7 +139,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	stored = nodeClaim.DeepCopy()
 	var results []reconcile.Result
 	var errs error
-	for _, reconciler := range []nodeClaimReconciler{
+	for _, reconciler := range []reconcile.TypedReconciler[*v1.NodeClaim]{
 		c.launch,
 		c.registration,
 		c.initialization,
@@ -169,7 +171,24 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 //nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName), "provider-id", nodeClaim.Status.ProviderID))
+	// setting the deletion timestamp will bump the generation, so we need to
+	// perform a no-op for whatever the status condition is currently set to
+	// so that we bump the observed generation to the latest and prevent the nodeclaim
+	// root status from entering an `Unknown` state
+	stored := nodeClaim.DeepCopy()
+	for _, condition := range nodeClaim.Status.Conditions {
+		if nodeClaim.StatusConditions().IsDependentCondition(condition.Type) {
+			nodeClaim.StatusConditions().Set(condition)
+		}
+	}
+	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, err
+		}
+	}
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
@@ -225,7 +244,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		})
 	}
-	stored := nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
+	stored = nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
 	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch

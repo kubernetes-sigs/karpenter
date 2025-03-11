@@ -70,7 +70,7 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) erro
 		}
 		return fmt.Errorf("deleting node, %w", err)
 	}
-	return nil
+	return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance terminated"))
 }
 
 func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1.NodeClaim, error) {
@@ -164,10 +164,10 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 
 		availableOfferings := it.Offerings.Available().Compatible(requirements)
 
-		offeringsByPrice := lo.GroupBy(availableOfferings, func(of cloudprovider.Offering) float64 { return of.Price })
+		offeringsByPrice := lo.GroupBy(availableOfferings, func(of *cloudprovider.Offering) float64 { return of.Price })
 		minOfferingPrice := lo.Min(lo.Keys(offeringsByPrice))
 		if cheapestOffering == nil || minOfferingPrice < cheapestOffering.Price {
-			cheapestOffering = lo.ToPtr(lo.Sample(offeringsByPrice[minOfferingPrice]))
+			cheapestOffering = lo.Sample(offeringsByPrice[minOfferingPrice])
 			instanceType = it
 		}
 	}

@@ -50,6 +50,7 @@ import (
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
+	nodepoolregistrationhealth "sigs.k8s.io/karpenter/pkg/controllers/nodepool/registrationhealth"
 	nodepoolvalidation "sigs.k8s.io/karpenter/pkg/controllers/nodepool/validation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -88,6 +89,7 @@ func NewControllers(
 		metricsnodepool.NewController(kubeClient, cloudProvider),
 		metricsnode.NewController(cluster),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
+		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
 		nodepoolvalidation.NewController(kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
