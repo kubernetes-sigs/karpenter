@@ -41,6 +41,16 @@ spec:
             type: string
           metadata:
             type: object
+          spec:
+            properties:
+              nodeRegistrationDelay:
+                description: |-
+                  NodeRegistrationDelay is a delay for KWOK nodes to register to the cluster.
+                  This is meant to model instance startup time that can happen when hardware
+                  needs to start on providers that are backed by real instances.
+                pattern: ^([0-9]+(s|m|h))+$
+                type: string
+            type: object
           status:
             default:
               conditions:
