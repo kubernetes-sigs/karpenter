@@ -38,7 +38,7 @@ jobs:
             path: ${{ matrix.path }}
             runName: before-${{ strategy.job-index }}
             githubToken: ${{ secrets.GITHUB_TOKEN }}
-            prNumber: ${{ pr_number }}
+            prNumber: ${{ inputs.pr_number }}
   after:
     name: After PR
     runs-on: ubuntu-latest
@@ -58,5 +58,5 @@ jobs:
             path: ${{ matrix.path }}
             runName: after-${{ strategy.job-index }}
             githubToken: ${{ secrets.GITHUB_TOKEN }}
-            prNumber: ${{ pr_number }}
+            prNumber: ${{ inputs.pr_number }}
   

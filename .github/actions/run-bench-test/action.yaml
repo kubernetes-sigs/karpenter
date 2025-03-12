@@ -41,7 +41,7 @@ runs:
         github-token: ${{ inputs.githubToken }}
         script: |
             github.rest.issues.createComment({
-              issue_number: ${{ prNumber }}
+              issue_number: ${{ inputs.prNumber }}
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: `# :mag: ${{ inputs.runName }} :mag:\nResults of benchmarking testing in \`${{ inputs.path }}\`: \n\`\`\`${process.env.RESULTS}\n\`\`\`\n${process.env.UPLOAD}`
