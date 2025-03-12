@@ -118,8 +118,8 @@ function buildCommand(uuid, payload, name, args) {
     switch (name) {
         case "echo":
             return new EchoCommand(uuid, payload, args);
-        case "ci":
-            return new CICommand(uuid, payload, args);
+        case "benchmark":
+            return new BenchmarkCommand(uuid, payload, args);
         default:
             console.log(`Unknown command: ${name}`);
             return null;
