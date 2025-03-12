@@ -13,11 +13,12 @@ async function bot(core, github, context, uuid) {
     // user's alias must be found in OWNERS_ALIASES
     const author = payload.comment.user.login;
     ////(?:- )(\w+)/g
-    console.log(github.rest.repos.getContent({
+    const owners = await github.rest.repos.getContent({
         owner: payload.repository.owner.login,
         repo: payload.repository.name,
         path: "OWNERS_ALIASES"
-    }));
+    });
+    console.log(owners);
     const authorized = re.exec(github.rest.repos.getContent({
         owner: payload.repository.owner.login,
         repo: payload.repository.name,
