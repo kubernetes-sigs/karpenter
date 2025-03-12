@@ -13,19 +13,17 @@ async function bot(core, github, context, uuid) {
     // user's alias must be found in OWNERS_ALIASES
     const author = payload.comment.user.login;
     ///
-    const owners = await github.rest.repos.getContent({
+    const owners_response = await github.rest.repos.getContent({
         owner: payload.repository.owner.login,
         repo: payload.repository.name,
         path: "OWNERS_ALIASES"
     });
-    console.log(owners);
-    console.log(atob(owners.data.content));
+    const owners = atob(owners.data.content)
     const regex = /(?:- )(\w+)/g
-    console.log(atob(owners.data.content).match(regex));
-    const authorized = atob(owners.data.content).match(regex).includes("- "+payload.comment.author);
+    const authorized = owners.match(regex).includes("- "+payload.comment.author);
     if (!authorized) {
         console.log(`Comment author is not authorized: ${author}`);
-        return;
+        //return;
     }
     console.log(`Comment author is authorized: ${author}`);
 
