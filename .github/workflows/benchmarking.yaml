@@ -20,7 +20,6 @@ on:
         type: string
 jobs:
   before:
-    if: github.event.workflow_run.conclusion == 'success'
     name: Before PR
     runs-on: ubuntu-latest
     permissions:
@@ -40,7 +39,6 @@ jobs:
             runName: before-${{ strategy.job-index }}
             githubToken: ${{ secrets.GITHUB_TOKEN }}
   after:
-    if: github.event.workflow_run.conclusion == 'success'
     name: After PR
     runs-on: ubuntu-latest
     permissions:
