@@ -181,30 +181,31 @@ func (in *StateNode) Pods(ctx context.Context, kubeClient client.Client) ([]*cor
 //
 //nolint:gocyclo
 func (in *StateNode) ValidateNodeDisruptable() error {
+	var errs error
 	if in.NodeClaim == nil {
-		return fmt.Errorf("node isn't managed by karpenter")
+		errs = multierr.Append(errs, fmt.Errorf("node isn't managed by karpenter"))
 	}
 	if in.Node == nil {
-		return fmt.Errorf("nodeclaim does not have an associated node")
+		errs = multierr.Append(errs, fmt.Errorf("nodeclaim does not have an associated node"))
 	}
 	if !in.Initialized() {
-		return fmt.Errorf("node isn't initialized")
+		errs = multierr.Append(errs, fmt.Errorf("node isn't initialized"))
 	}
 	if in.MarkedForDeletion() {
-		return fmt.Errorf("node is deleting or marked for deletion")
+		errs = multierr.Append(errs, fmt.Errorf("node is deleting or marked for deletion"))
 	}
 	// skip the node if it is nominated by a recent provisioning pass to be the target of a pending pod.
 	if in.Nominated() {
-		return fmt.Errorf("node is nominated for a pending pod")
+		errs = multierr.Append(errs, fmt.Errorf("node is nominated for a pending pod"))
 	}
 	if in.Annotations()[v1.DoNotDisruptAnnotationKey] == "true" {
-		return fmt.Errorf("disruption is blocked through the %q annotation", v1.DoNotDisruptAnnotationKey)
+		errs = multierr.Append(errs, fmt.Errorf("disruption is blocked through the %q annotation", v1.DoNotDisruptAnnotationKey))
 	}
 	// check whether the node has the NodePool label
 	if _, ok := in.Labels()[v1.NodePoolLabelKey]; !ok {
-		return fmt.Errorf("node doesn't have required label %q", v1.NodePoolLabelKey)
+		errs = multierr.Append(errs, fmt.Errorf("node doesn't have required label %q", v1.NodePoolLabelKey))
 	}
-	return nil
+	return errs
 }
 
 // ValidatePodDisruptable returns an error if the StateNode contains a pod that cannot be disrupted
@@ -217,18 +218,22 @@ func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient cli
 	if err != nil {
 		return nil, fmt.Errorf("getting pods from node, %w", err)
 	}
+	var errs error
 	for _, po := range pods {
 		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
 		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
 		if !podutils.IsDisruptable(po) {
-			return pods, NewPodBlockEvictionError(fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po)))
+			errs = multierr.Append(errs, NewPodBlockEvictionError(fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po))))
 		}
 	}
-	if pdbKey, ok := pdbs.CanEvictPods(pods); !ok {
-		return pods, NewPodBlockEvictionError(fmt.Errorf("pdb %q prevents pod evictions", pdbKey))
+	if pdbKeys, ok := pdbs.CanEvictPods(pods); !ok {
+		pdbNames := lo.Map(pdbKeys, func(pdb client.ObjectKey, _ int) string { return pdb.String() })
+		for _, name := range lo.Uniq(pdbNames) {
+			errs = multierr.Append(errs, NewPodBlockEvictionError(fmt.Errorf("pdb %q prevents pod evictions", name)))
+		}
 	}
 
-	return pods, nil
+	return pods, errs
 }
 
 // ReschedulablePods gets the pods assigned to the Node that are reschedulable based on the kubernetes api-server bindings

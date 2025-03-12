@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
@@ -77,6 +78,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		if node.NodeClaim != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 		}
+		log.FromContext(ctx).V(1).Info(fmt.Sprintf("single and multi-node consolidation blocked for node %s due to %s", node.Name(), pretty.Sentence(err.Error())))
 		return nil, err
 	}
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
@@ -101,6 +103,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		eventualDisruptionCandidate := node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass
 		if lo.Ternary(eventualDisruptionCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("single and multi-node consolidation blocked for node %s due to %s", node.Name(), pretty.Sentence(err.Error())))
 			return nil, err
 		}
 	}
