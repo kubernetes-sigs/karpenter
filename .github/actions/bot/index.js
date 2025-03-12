@@ -166,19 +166,16 @@ class BenchmarkCommand {
     }
 
     async run(author, github) {
-        console.log(`running command`);
         const pr = await github.rest.pulls.get({
             owner: this.repository_owner,
             repo: this.repository_name,
             pull_number: this.pr_number
         });
-        console.log(`Got PR: ${pr}`);
         const merge_commit = await github.rest.repos.getCommit({
             owner: this.repository_owner,
             repo: this.repository_name,
             ref: pr.data.merge_commit_sha
         });
-        console.log(`Got Merge Commit: ${merge_commit}`);
         if (new Date(this.comment_created_at) < new Date(merge_commit.data.commit.committer.date)) {
             return `@${author} this PR has been updated since your request, you'll need to review the changes.`;
         }
@@ -189,7 +186,6 @@ class BenchmarkCommand {
             requester: author,
             comment_url: this.comment_url
         };
-        console.log(`Got Inputs: ${inputs}`);
 
         console.log(`Dispatching workflow with inputs: ${JSON.stringify(inputs)}`);
         await github.rest.actions.createWorkflowDispatch({

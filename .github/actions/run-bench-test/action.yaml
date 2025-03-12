@@ -10,6 +10,9 @@ inputs:
   githubToken:
     descriptuon: Github secret token to use for commenting on PR
     default: ""
+  prNumber:
+    descriptuon: Number of the PR being benchmarked
+    default: ""
 runs:
   using: "composite"
   steps:
@@ -38,7 +41,7 @@ runs:
         github-token: ${{ inputs.githubToken }}
         script: |
             github.rest.issues.createComment({
-              issue_number: context.issue.number,
+              issue_number: ${{ prNumber }}
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: `# :mag: ${{ inputs.runName }} :mag:\nResults of benchmarking testing in \`${{ inputs.path }}\`: \n\`\`\`${process.env.RESULTS}\n\`\`\`\n${process.env.UPLOAD}`
