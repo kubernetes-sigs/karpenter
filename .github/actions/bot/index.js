@@ -24,7 +24,8 @@ async function bot(core, github, context, uuid) {
     if (!authorized) {
         console.log(`Comment author is not authorized: ${author}`);
         console.log(`Owners: ${owners}`);
-        console.log(`matches: ${owners.match(regex)}`)
+        console.log(`matches: ${owners.match(regex)[0].length}`)
+        console.log(`matches: ${owners.match(regex)[0].slice(2)}`)
         return;
     }
     console.log(`Comment author is authorized: ${author}`);
