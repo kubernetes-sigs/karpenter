@@ -20,13 +20,9 @@ async function bot(core, github, context, uuid) {
     });
     const owners = atob(owners_response.data.content)
     const regex = /(?:- )(\w+)/g
-    const authorized = owners.match(regex).map(function(o) {return o.slice(2).trim()}).includes(payload.comment.user.login);
+    const authorized = owners.match(regex).map(function(o) {return o.slice(2).trim()}).includes(author);
     if (!authorized) {
         console.log(`Comment author is not authorized: ${author}`);
-        console.log(`Owners: ${owners}`);
-        console.log(`matches: ${owners.match(regex)[0].length}`)
-        console.log(`matches: ${owners.match(regex)[0].slice(2)}`)
-        console.log(`matches: ${author.length}`)
         return;
     }
     console.log(`Comment author is authorized: ${author}`);
@@ -174,16 +170,19 @@ class BenchmarkCommand {
     }
 
     async run(author, github) {
+        console.log(`running command`);
         const pr = await github.rest.pulls.get({
             owner: this.repository_owner,
             repo: this.repository_name,
             pull_number: this.pr_number
         });
+        console.log(`Got PR: ${pr}`);
         const merge_commit = await github.rest.repos.getCommit({
             owner: this.repository_owner,
             repo: this.repository_name,
             ref: pr.data.merge_commit_sha
         });
+        console.log(`Got Merge Commit: ${merge_commit}`);
         if (new Date(this.comment_created_at) < new Date(merge_commit.data.commit.committer.date)) {
             return `@${author} this PR has been updated since your request, you'll need to review the changes.`;
         }
@@ -194,6 +193,8 @@ class BenchmarkCommand {
             requester: author,
             comment_url: this.comment_url
         };
+        console.log(`Got Inputs: ${inputs}`);
+
         for (const [goal, args] of Object.entries(this.goal_args)) {
             if (goal.startsWith(this.workflow_goal_prefix)) {
                 inputs[goal.substring(this.workflow_goal_prefix.length)] = args;
