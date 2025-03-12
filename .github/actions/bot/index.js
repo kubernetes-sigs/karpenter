@@ -165,10 +165,6 @@ class BenchmarkCommand {
         this.uuid = uuid;
     }
 
-    addNamedArguments(goal, args) {
-        this.goal_args[goal] = args;
-    }
-
     async run(author, github) {
         console.log(`running command`);
         const pr = await github.rest.pulls.get({
@@ -195,13 +191,6 @@ class BenchmarkCommand {
         };
         console.log(`Got Inputs: ${inputs}`);
 
-        for (const [goal, args] of Object.entries(this.goal_args)) {
-            if (goal.startsWith(this.workflow_goal_prefix)) {
-                inputs[goal.substring(this.workflow_goal_prefix.length)] = args;
-            } else {
-                inputs[`${goal}_arguments`] = args;
-            }
-        }
         console.log(`Dispatching workflow with inputs: ${JSON.stringify(inputs)}`);
         await github.rest.actions.createWorkflowDispatch({
             owner: this.repository_owner,
