@@ -20,7 +20,7 @@ async function bot(core, github, context, uuid) {
     });
     const owners = atob(owners_response.data.content)
     const regex = /(?:- )(\w+)/g
-    const authorized = owners.match(regex).map(function(o) {return o.slice(2).trim()}).includes(payload.comment.author);
+    const authorized = owners.match(regex).map(function(o) {return o.slice(2).trim()}).includes(payload.comment.user.login);
     if (!authorized) {
         console.log(`Comment author is not authorized: ${author}`);
         console.log(`Owners: ${owners}`);
