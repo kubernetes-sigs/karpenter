@@ -23,6 +23,8 @@ async function bot(core, github, context, uuid) {
     const authorized = owners.match(regex).includes("- "+payload.comment.author);
     if (!authorized) {
         console.log(`Comment author is not authorized: ${author}`);
+        console.log(`Owners: ${owners}`);
+        console.log(`matches: ${owners.match(regex)}`)
         return;
     }
     console.log(`Comment author is authorized: ${author}`);
