@@ -1,23 +1,30 @@
-name: "Scheduling Benchmarking"
-
+name: "Benchmarking"
+run-name: "#${{ inputs.pr_number }} - ${{ inputs.uuid }}"
 on:
-  pull_request:
-    types:
-      - opened
-      - edited
-      - synchronize
-      - reopened
-    paths:
-      - "**.go"
-    branches:
-      - main
-
+  workflow_dispatch:
+    inputs:
+      requester:
+        required: true
+        type: string
+      comment_url:
+        required: true
+        type: string
+      uuid:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      git_sha:
+        required: true
+        type: string
 jobs:
   before:
+    if: github.event.workflow_run.conclusion == 'success'
     name: Before PR
     runs-on: ubuntu-latest
     permissions:
-        pull-requests: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +40,7 @@ jobs:
             runName: before-${{ strategy.job-index }}
             githubToken: ${{ secrets.GITHUB_TOKEN }}
   after:
+    if: github.event.workflow_run.conclusion == 'success'
     name: After PR
     runs-on: ubuntu-latest
     permissions:
@@ -45,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ inputs.git_sha }}
       - uses: ./.github/actions/run-bench-test
         with:
             path: ${{ matrix.path }}
