@@ -3682,7 +3682,7 @@ var _ = Context("Scheduling", func() {
 					g.Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically(">", 0))
 				}, time.Second).Should(Succeed())
 			}()
-			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
+			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, provisioning.Timeout)
 			wg.Wait()
 		})
 		It("should surface the UnschedulablePodsCount metric while executing the scheduling loop", func() {
@@ -3742,7 +3742,7 @@ var _ = Context("Scheduling", func() {
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
 			s, err := prov.NewScheduler(ctx, pods, nil, scheduling.DisableReservedCapacityFallback)
 			Expect(err).To(BeNil())
-			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
+			s.Solve(injection.WithControllerName(ctx, "provisioner"), pods, provisioning.Timeout)
 
 			m, ok := FindMetricWithLabelValues("karpenter_scheduler_scheduling_duration_seconds", map[string]string{"controller": "provisioner"})
 			Expect(ok).To(BeTrue())

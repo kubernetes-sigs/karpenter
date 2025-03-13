@@ -50,6 +50,7 @@ import (
 
 const MinPodsPerSec = 100.0
 const PrintStats = false
+const timeout = 5 * time.Minute
 
 //nolint:gosec
 var r = rand.New(rand.NewSource(42))
@@ -182,7 +183,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	podsScheduledInRound1 := 0
 	nodesInRound1 := 0
 	for i := 0; i < b.N; i++ {
-		results := scheduler.Solve(ctx, pods)
+		results := scheduler.Solve(ctx, pods, timeout)
 		if len(results.PodErrors) > 0 {
 			b.Fatalf("expected all pods to schedule, got %d pods that didn't", len(results.PodErrors))
 		}
