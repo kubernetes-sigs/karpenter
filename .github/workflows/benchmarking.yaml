@@ -1,0 +1,62 @@
+name: "Benchmarking"
+run-name: "#${{ inputs.pr_number }} - ${{ inputs.uuid }}"
+on:
+  workflow_dispatch:
+    inputs:
+      requester:
+        required: true
+        type: string
+      comment_url:
+        required: true
+        type: string
+      uuid:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      git_sha:
+        required: true
+        type: string
+jobs:
+  before:
+    name: Before PR
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        path: ["pkg/controllers/provisioning/scheduling"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: ./.github/actions/run-bench-test
+        with:
+            path: ${{ matrix.path }}
+            runName: before-${{ strategy.job-index }}
+            githubToken: ${{ secrets.GITHUB_TOKEN }}
+            prNumber: ${{ inputs.pr_number }}
+  after:
+    name: After PR
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        path: ["pkg/controllers/provisioning/scheduling"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.git_sha }}
+      - uses: ./.github/actions/run-bench-test
+        with:
+            path: ${{ matrix.path }}
+            runName: after-${{ strategy.job-index }}
+            githubToken: ${{ secrets.GITHUB_TOKEN }}
+            prNumber: ${{ inputs.pr_number }}
+  
