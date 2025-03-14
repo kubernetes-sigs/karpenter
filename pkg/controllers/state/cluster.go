@@ -58,9 +58,10 @@ type Cluster struct {
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
-	podAcks                 sync.Map // pod namespaced name -> time when Karpenter first saw the pod as pending
-	podsSchedulingAttempted sync.Map // pod namespaced name -> time when Karpenter tried to schedule a pod
-	podsSchedulableTimes    sync.Map // pod namespaced name -> time when it was first marked as able to fit to a node
+	podAcks                         sync.Map // pod namespaced name -> time when Karpenter first saw the pod as pending
+	podsSchedulingAttempted         sync.Map // pod namespaced name -> time when Karpenter tried to schedule a pod
+	podsSchedulableTimes            sync.Map // pod namespaced name -> time when it was first marked as able to fit to a node
+	podHealthyNodePoolScheduledTime sync.Map // pod namespaced name -> time when pod scheduled to a nodePool that has NodeRegistrationHealthy=true, is marked as able to fit to a node
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
@@ -83,9 +84,11 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		daemonSetPods:             sync.Map{},
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
-		podAcks:                   sync.Map{},
-		podsSchedulableTimes:      sync.Map{},
-		podsSchedulingAttempted:   sync.Map{},
+
+		podAcks:                         sync.Map{},
+		podsSchedulableTimes:            sync.Map{},
+		podsSchedulingAttempted:         sync.Map{},
+		podHealthyNodePoolScheduledTime: sync.Map{},
 	}
 }
 
@@ -384,6 +387,26 @@ func (c *Cluster) MarkPodSchedulingDecisions(podErrors map[*corev1.Pod]error, po
 	}
 }
 
+// UpdatePodHealthyNodePoolScheduledTime updates podHealthyNodePoolScheduledTime
+// for pods scheduled against nodePool that have NodeRegistrationHealthy=true
+func (c *Cluster) UpdatePodHealthyNodePoolScheduledTime(ctx context.Context, nodePoolName string, pods ...*corev1.Pod) {
+	nodePool := &v1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err == nil {
+		for _, p := range pods {
+			nn := client.ObjectKeyFromObject(p)
+			// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
+			// then mark the time when we thought it can schedule to now.
+			if nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+				c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
+			} else {
+				// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
+				// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
+				c.podHealthyNodePoolScheduledTime.Delete(nn)
+			}
+		}
+	}
+}
+
 // PodSchedulingDecisionTime returns when Karpenter first decided if a pod could schedule a pod in scheduling simulations.
 // This returns 0, false if Karpenter never made a decision on the pod.
 func (c *Cluster) PodSchedulingDecisionTime(podKey types.NamespacedName) time.Time {
@@ -397,6 +420,15 @@ func (c *Cluster) PodSchedulingDecisionTime(podKey types.NamespacedName) time.Ti
 // This returns 0, false if the pod was never considered in scheduling as a pending pod.
 func (c *Cluster) PodSchedulingSuccessTime(podKey types.NamespacedName) time.Time {
 	if val, found := c.podsSchedulableTimes.Load(podKey); found {
+		return val.(time.Time)
+	}
+	return time.Time{}
+}
+
+// PodSchedulingSuccessTimeRegistrationHealthyCheck returns when Karpenter first thought it could schedule a pod in its scheduling simulation.
+// This returns 0, false if the pod was never considered in scheduling as a pending pod.
+func (c *Cluster) PodSchedulingSuccessTimeRegistrationHealthyCheck(podKey types.NamespacedName) time.Time {
+	if val, found := c.podHealthyNodePoolScheduledTime.Load(podKey); found {
 		return val.(time.Time)
 	}
 	return time.Time{}
@@ -416,6 +448,7 @@ func (c *Cluster) ClearPodSchedulingMappings(podKey types.NamespacedName) {
 	c.podAcks.Delete(podKey)
 	c.podsSchedulableTimes.Delete(podKey)
 	c.podsSchedulingAttempted.Delete(podKey)
+	c.podHealthyNodePoolScheduledTime.Delete(podKey)
 }
 
 // MarkUnconsolidated marks the cluster state as being unconsolidated.  This should be called in any situation where

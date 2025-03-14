@@ -9,10 +9,10 @@ aliases:
     - ellistarn
     - jonathan-innis
     - tzneal
-    - bwagner5
     - njtran
     - jmdeal
   karpenter-reviewers:
-    - jackfrancis
     - tallaxes
     - engedaam
+  emeritus-karpenter-maintainers:
+    - bwagner5
