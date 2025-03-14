@@ -286,6 +286,10 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	lastLogTime := s.clock.Now()
 	batchSize := len(q.pods)
 	for {
+		if ctx.Err() != nil {
+			log.FromContext(ctx).V(1).WithValues("duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("scheduling simulation timed out")
+			break
+		}
 		UnfinishedWorkSeconds.Set(s.clock.Since(startTime).Seconds(), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 
@@ -297,12 +301,6 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		pod, ok := q.Pop()
 		if !ok {
 			break
-		}
-
-		// if a context error is encountered, stop attempting to schedule pods and add error to remaining pods
-		if ctx.Err() != nil {
-			errors[pod] = ctx.Err()
-			continue
 		}
 
 		// Schedule to existing nodes or create a new node
