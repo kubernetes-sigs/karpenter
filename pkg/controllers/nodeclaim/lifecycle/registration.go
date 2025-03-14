@@ -123,9 +123,8 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 	node = nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
 	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels)
 	node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
-	// Sync all taints inside NodeClaim into the Node taints
-	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.Taints)
-	node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.StartupTaints)
+	// We do not sync the taints from the nodeclaim as we assume that the karpenter provider code
+	// is managing taints.
 	// Remove karpenter.sh/unregistered taint
 	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
 		return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
