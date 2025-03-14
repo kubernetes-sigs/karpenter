@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -47,8 +46,8 @@ import (
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 //nolint:gocyclo
-func SimulateScheduling(ctx context.Context, timeout time.Duration, kubeClient client.Client, cluster *state.Cluster,
-	provisioner *provisioning.Provisioner, candidates ...*Candidate,
+func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
+	candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
@@ -89,7 +88,7 @@ func SimulateScheduling(ctx context.Context, timeout time.Duration, kubeClient c
 		return client.ObjectKeyFromObject(p), nil
 	})
 
-	results := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods, timeout).TruncateInstanceTypes(scheduling.MaxInstanceTypes)
+	results := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods).TruncateInstanceTypes(scheduling.MaxInstanceTypes)
 	for _, n := range results.ExistingNodes {
 		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them

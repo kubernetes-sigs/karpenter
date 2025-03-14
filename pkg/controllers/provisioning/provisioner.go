@@ -53,10 +53,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
-const (
-	Timeout = 5 * time.Minute
-)
-
 // LaunchOptions are the set of options that can be used to trigger certain
 // actions and configuration during scheduling
 type LaunchOptions struct {
@@ -245,6 +241,10 @@ func (p *Provisioner) NewScheduler(
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	for _, np := range nodePools {
+		// stop looping through nodepools if context has been canceled to avoid spurious errors from GetInstanceTypes
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("context error while getting instance types, %w", ctx.Err())
+		}
 		// Get instance type options
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
@@ -324,7 +324,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	results := s.Solve(ctx, pods, Timeout).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
+	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	reservedOfferingErrors := results.ReservedOfferingErrors()
 	if len(reservedOfferingErrors) != 0 {
 		log.FromContext(ctx).V(1).WithValues(
