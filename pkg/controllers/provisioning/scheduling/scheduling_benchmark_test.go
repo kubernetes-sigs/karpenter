@@ -155,9 +155,10 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	pods := makeDiversePods(podCount)
 	clock := &clock.RealClock{}
 	cluster = state.NewCluster(clock, client, cloudProvider)
+	podsVolumeRequirements := make(map[*corev1.Pod][]corev1.NodeSelectorRequirement)
 	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, []*v1.NodePool{nodePool}, map[string][]*cloudprovider.InstanceType{
 		nodePool.Name: instanceTypes,
-	}, pods)
+	}, pods, podsVolumeRequirements)
 	if err != nil {
 		b.Fatalf("creating topology, %s", err)
 	}
