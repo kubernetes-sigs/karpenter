@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/util/workqueue"
 	clockiface "k8s.io/utils/clock"
 
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -39,7 +40,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/util/workqueue"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
