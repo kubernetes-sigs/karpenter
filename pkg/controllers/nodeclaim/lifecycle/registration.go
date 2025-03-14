@@ -121,7 +121,6 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 	controllerutil.AddFinalizer(node, v1.TerminationFinalizer)
 
 	node = nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
-	node.Labels = lo.Assign(node.Labels, nodeClaim.Labels)
 	node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
 	// We do not sync the taints from the nodeclaim as we assume that the karpenter provider code
 	// is managing taints.
