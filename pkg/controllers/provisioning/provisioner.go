@@ -241,11 +241,6 @@ func (p *Provisioner) NewScheduler(
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	for _, np := range nodePools {
-		// stop looping through nodepools if context has been canceled to avoid spurious errors from GetInstanceTypes
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("context error while getting instance types, %w", ctx.Err())
-		}
-		// Get instance type options
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
