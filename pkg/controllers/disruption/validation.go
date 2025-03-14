@@ -139,17 +139,17 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 		if v.cluster.IsNodeNominated(vc.ProviderID()) {
 			return nil, NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
 		}
-		if disruptionBudgetMapping[vc.nodePool.Name] == 0 {
+		if disruptionBudgetMapping[vc.NodePool.Name] == 0 {
 			return nil, NewValidationError(fmt.Errorf("a candidate can no longer be disrupted without violating budgets"))
 		}
-		disruptionBudgetMapping[vc.nodePool.Name]--
+		disruptionBudgetMapping[vc.NodePool.Name]--
 	}
 	return validatedCandidates, nil
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (v *Validation) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	return c.nodePool.Spec.Disruption.ConsolidateAfter.Duration != nil && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
+	return c.NodePool.Spec.Disruption.ConsolidateAfter.Duration != nil && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
 // ValidateCommand validates a command for a Method

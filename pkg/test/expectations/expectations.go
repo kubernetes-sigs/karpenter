@@ -48,8 +48,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/util/workqueue"
-	clockiface "k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -58,13 +56,11 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -737,11 +733,4 @@ func ConsistentlyExpectNotTerminating(ctx context.Context, c client.Client, objs
 			g.Expect(obj.GetDeletionTimestamp().IsZero()).To(BeTrue())
 		}
 	}, time.Second).Should(Succeed())
-}
-
-func ExpectNewTestingQueue(c client.Client, recorder events.Recorder, cluster *state.Cluster, clock clockiface.Clock, provisioner *provisioning.Provisioner) *orchestration.Queue {
-	GinkgoHelper()
-	queue := orchestration.NewQueue(c, recorder, cluster, clock, provisioner)
-	queue.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface(workqueue.TypedQueueConfig[*orchestration.Command]{Name: "disruption.workqueue"})
-	return queue
 }

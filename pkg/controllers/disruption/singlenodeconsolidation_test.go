@@ -17,10 +17,12 @@ limitations under the License.
 package disruption_test
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -104,12 +106,12 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			candidates, err := createCandidates(1.0, 3)
 			Expect(err).To(BeNil())
 
-			sortedCandidates := consolidation.SortCandidates(candidates)
+			sortedCandidates := consolidation.SortCandidates(ctx, candidates)
 
 			// Verify candidates are sorted by disruption cost
 			Expect(sortedCandidates).To(HaveLen(9))
 			for i := 0; i < len(sortedCandidates)-1; i++ {
-				Expect(sortedCandidates[i].DisruptionCost()).To(BeNumerically("<=", sortedCandidates[i+1].DisruptionCost()))
+				Expect(sortedCandidates[i].DisruptionCost).To(BeNumerically("<=", sortedCandidates[i+1].DisruptionCost))
 			}
 		})
 
@@ -117,12 +119,13 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			candidates, err := createCandidates(1.0, 3)
 			Expect(err).To(BeNil())
 
-			consolidation.MarkNodePoolTimedOut(nodePool2.Name)
+			consolidation.PreviouslyUnseenNodePools.Insert(nodePool2.Name)
+			fmt.Println("consolidation.PreviouslyUnseenNodePools", consolidation.PreviouslyUnseenNodePools)
 
-			sortedCandidates := consolidation.SortCandidates(candidates)
+			sortedCandidates := consolidation.SortCandidates(ctx, candidates)
 
 			Expect(sortedCandidates).To(HaveLen(9))
-			Expect(sortedCandidates[0].NodePool().Name).To(Equal(nodePool2.Name))
+			Expect(sortedCandidates[0].NodePool.Name).To(Equal(nodePool2.Name))
 		})
 
 		It("should interweave candidates from different nodepools", func() {
@@ -142,7 +145,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			allCandidates := append(candidates3, append(candidates2, candidates1...)...)
 
 			// Sort candidates
-			sortedCandidates := consolidation.SortCandidates(allCandidates)
+			sortedCandidates := consolidation.SortCandidates(ctx, allCandidates)
 
 			// Verify candidates are interweaved from different nodepools
 			// First we should have all candidates with disruption cost 1, then 2, then 3
@@ -151,35 +154,35 @@ var _ = Describe("SingleNodeConsolidation", func() {
 
 			// Check first three candidates (all with cost 1)
 			nodePoolsInFirstGroup := []string{
-				sortedCandidates[0].NodePool().Name,
-				sortedCandidates[1].NodePool().Name,
-				sortedCandidates[2].NodePool().Name,
+				sortedCandidates[0].NodePool.Name,
+				sortedCandidates[1].NodePool.Name,
+				sortedCandidates[2].NodePool.Name,
 			}
 			Expect(nodePoolsInFirstGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
 			for i := 0; i < 3; i++ {
-				Expect(sortedCandidates[i].DisruptionCost()).To(Equal(1.0))
+				Expect(sortedCandidates[i].DisruptionCost).To(Equal(1.0))
 			}
 
 			// Check next three candidates (all with cost 2)
 			nodePoolsInSecondGroup := []string{
-				sortedCandidates[3].NodePool().Name,
-				sortedCandidates[4].NodePool().Name,
-				sortedCandidates[5].NodePool().Name,
+				sortedCandidates[3].NodePool.Name,
+				sortedCandidates[4].NodePool.Name,
+				sortedCandidates[5].NodePool.Name,
 			}
 			Expect(nodePoolsInSecondGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
 			for i := 3; i < 6; i++ {
-				Expect(sortedCandidates[i].DisruptionCost()).To(Equal(2.0))
+				Expect(sortedCandidates[i].DisruptionCost).To(Equal(2.0))
 			}
 
 			// Check last three candidates (all with cost 3)
 			nodePoolsInThirdGroup := []string{
-				sortedCandidates[6].NodePool().Name,
-				sortedCandidates[7].NodePool().Name,
-				sortedCandidates[8].NodePool().Name,
+				sortedCandidates[6].NodePool.Name,
+				sortedCandidates[7].NodePool.Name,
+				sortedCandidates[8].NodePool.Name,
 			}
 			Expect(nodePoolsInThirdGroup).To(ConsistOf(nodePool1.Name, nodePool2.Name, nodePool3.Name))
 			for i := 6; i < 9; i++ {
-				Expect(sortedCandidates[i].DisruptionCost()).To(Equal(3.0))
+				Expect(sortedCandidates[i].DisruptionCost).To(Equal(3.0))
 			}
 		})
 
@@ -189,8 +192,8 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			Expect(err).To(BeNil())
 
 			// Mark nodePool2 as timed out
-			consolidation.MarkNodePoolTimedOut(nodePool2.Name)
-			Expect(consolidation.IsNodePoolTimedOut(nodePool2.Name)).To(BeTrue())
+			consolidation.PreviouslyUnseenNodePools.Insert(nodePool2.Name)
+			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeTrue())
 
 			// Create a budget mapping that allows all disruptions
 			budgetMapping := map[string]int{
@@ -203,7 +206,8 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			_, _, _ = consolidation.ComputeCommand(ctx, budgetMapping, candidates...)
 
 			// Verify nodePool2 is no longer marked as timed out
-			Expect(consolidation.IsNodePoolTimedOut(nodePool2.Name)).To(BeFalse())
+			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeFalse())
+			Expect(consolidation.IsConsolidated()).To(BeTrue())
 		})
 
 		It("should mark nodepools as timed out when timeout occurs", func() {
@@ -223,9 +227,9 @@ var _ = Describe("SingleNodeConsolidation", func() {
 
 			// Verify all nodepools are marked as timed out
 			// since we timed out before processing any candidates
-			Expect(consolidation.IsNodePoolTimedOut(nodePool1.Name)).To(BeTrue())
-			Expect(consolidation.IsNodePoolTimedOut(nodePool2.Name)).To(BeTrue())
-			Expect(consolidation.IsNodePoolTimedOut(nodePool3.Name)).To(BeTrue())
+			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool1.Name)).To(BeTrue())
+			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeTrue())
+			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool3.Name)).To(BeTrue())
 		})
 	})
 })
@@ -276,8 +280,7 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 		return nil, err
 	}
 
-	candidates := []*disruption.Candidate{}
-	for _, nodeClaim := range nodeClaims {
+	return lo.Map(nodeClaims, func(nodeClaim *v1.NodeClaim, _ int) *disruption.Candidate {
 		stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
 		candidate, err := disruption.NewCandidate(
 			ctx,
@@ -292,11 +295,9 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 			disruption.GracefulDisruptionClass,
 		)
 		if err != nil {
-			return nil, err
+			return nil
 		}
-		candidate.SetDisruptionCost(disruptionCost)
-		candidates = append(candidates, candidate)
-	}
-
-	return candidates, nil
+		candidate.DisruptionCost = disruptionCost
+		return candidate
+	}), nil
 }

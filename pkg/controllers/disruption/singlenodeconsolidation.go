@@ -20,8 +20,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -35,14 +38,13 @@ const SingleNodeConsolidationType = "single"
 // SingleNodeConsolidation is the consolidation controller that performs single-node consolidation.
 type SingleNodeConsolidation struct {
 	consolidation
-	// nodePoolsTimedOut tracks which nodepools were not considered due to the timeout
-	nodePoolsTimedOut map[string]bool
+	PreviouslyUnseenNodePools sets.Set[string]
 }
 
 func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolidation {
 	return &SingleNodeConsolidation{
-		consolidation:     consolidation,
-		nodePoolsTimedOut: make(map[string]bool),
+		consolidation:             consolidation,
+		PreviouslyUnseenNodePools: sets.New[string](),
 	}
 }
 
@@ -52,7 +54,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	if s.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
-	candidates = s.sortCandidates(candidates)
+	candidates = s.SortCandidates(ctx, candidates)
 
 	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, s.Reason())
 
@@ -60,18 +62,13 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
 	constrainedByBudgets := false
 
-	nodePoolsSeen := make(map[string]bool)
-
-	allNodePools := make(map[string]bool)
-	for _, candidate := range candidates {
-		allNodePools[candidate.nodePool.Name] = true
-	}
+	unseenNodePools := sets.New(lo.Map(candidates, func(c *Candidate, _ int) string { return c.NodePool.Name })...)
 
 	for i, candidate := range candidates {
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.
-		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 			constrainedByBudgets = true
 			continue
 		}
@@ -85,18 +82,13 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: s.ConsolidationType()})
 			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
 
-			// Mark all nodepools that we haven't seen yet as timed out
-			for _, c := range candidates[i:] {
-				if !nodePoolsSeen[c.nodePool.Name] {
-					s.nodePoolsTimedOut[c.nodePool.Name] = true
-				}
-			}
+			s.PreviouslyUnseenNodePools = unseenNodePools
 
 			return Command{}, scheduling.Results{}, nil
 		}
 
-		// Track that we've considered this nodepool
-		nodePoolsSeen[candidate.nodePool.Name] = true
+		// Track that we've seen this nodepool
+		unseenNodePools.Delete(candidate.NodePool.Name)
 
 		// compute a possible consolidation option
 		cmd, results, err := s.computeConsolidation(ctx, candidate)
@@ -117,26 +109,15 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		return cmd, results, nil
 	}
 
-	// Check if we've considered all nodepools
-	allNodePoolsConsidered := true
-	for nodePool := range allNodePools {
-		if !nodePoolsSeen[nodePool] {
-			allNodePoolsConsidered = false
-			break
-		}
-	}
-
-	// If we've considered all nodepools, reset the timed out nodepools
-	if allNodePoolsConsidered {
-		s.nodePoolsTimedOut = make(map[string]bool)
-	}
-
 	if !constrainedByBudgets {
 		// if there are no candidates because of a budget, don't mark
 		// as consolidated, as it's possible it should be consolidatable
 		// the next time we try to disrupt.
 		s.markConsolidated()
 	}
+
+	s.PreviouslyUnseenNodePools = unseenNodePools
+
 	return Command{}, scheduling.Results{}, nil
 }
 
@@ -152,60 +133,37 @@ func (s *SingleNodeConsolidation) ConsolidationType() string {
 	return SingleNodeConsolidationType
 }
 
-func (s *SingleNodeConsolidation) groupCandidatesByNodePool(candidates []*Candidate) (map[string][]*Candidate, []string) {
-	nodePoolCandidates := make(map[string][]*Candidate)
-	nodePoolNames := []string{}
+// sortCandidates interweaves candidates from different nodepools and prioritizes nodepools
+// that timed out in previous runs
+func (s *SingleNodeConsolidation) SortCandidates(ctx context.Context, candidates []*Candidate) []*Candidate {
 
-	for _, candidate := range candidates {
-		nodePoolName := candidate.nodePool.Name
-		if _, exists := nodePoolCandidates[nodePoolName]; !exists {
-			nodePoolNames = append(nodePoolNames, nodePoolName)
-		}
-		nodePoolCandidates[nodePoolName] = append(nodePoolCandidates[nodePoolName], candidate)
-	}
-	return nodePoolCandidates, nodePoolNames
-}
-
-func (s *SingleNodeConsolidation) sortNodePoolsByTimeout(ctx context.Context, nodePoolNames []string) {
-	if len(s.nodePoolsTimedOut) == 0 {
-		return
-	}
-	// Log the timed out nodepools that we're prioritizing
-	timedOutNodePools := []string{}
-	for np := range s.nodePoolsTimedOut {
-		timedOutNodePools = append(timedOutNodePools, np)
-	}
-	log.FromContext(ctx).V(1).Info("prioritizing nodepools that have not yet been considered due to timeouts in previous runs: %v", timedOutNodePools)
-
-	// Prioritize nodepools that timed out in previous runs
-	sort.Slice(nodePoolNames, func(i, j int) bool {
-		// If nodepool i timed out but j didn't, i comes first
-		if s.nodePoolsTimedOut[nodePoolNames[i]] && !s.nodePoolsTimedOut[nodePoolNames[j]] {
-			return true
-		}
-		// If nodepool j timed out but i didn't, j comes first
-		if !s.nodePoolsTimedOut[nodePoolNames[i]] && s.nodePoolsTimedOut[nodePoolNames[j]] {
-			return false
-		}
-		// If both or neither timed out, keep original order
-		return i < j
+	// First sort by disruption cost as the base ordering
+	sort.Slice(candidates, func(i int, j int) bool {
+		return candidates[i].DisruptionCost < candidates[j].DisruptionCost
 	})
+
+	return s.shuffleCandidates(ctx, lo.GroupBy(candidates, func(c *Candidate) string { return c.NodePool.Name }))
 }
 
-func (s *SingleNodeConsolidation) shuffleCandidates(nodePoolCandidates map[string][]*Candidate, nodePoolNames []string) []*Candidate {
-	result := make([]*Candidate, 0)
-	maxCandidatesPerNodePool := 0
+func (s *SingleNodeConsolidation) shuffleCandidates(ctx context.Context, nodePoolCandidates map[string][]*Candidate) []*Candidate {
+	var result []*Candidate
+	// Log any timed out nodepools that we're prioritizing
+	if s.PreviouslyUnseenNodePools.Len() != 0 {
+		log.FromContext(ctx).V(1).Info(fmt.Sprintf("prioritizing nodepools that have not yet been considered due to timeouts in previous runs: %s", strings.Join(s.PreviouslyUnseenNodePools.UnsortedList(), ", ")))
+	}
+	sortedNodePools := s.PreviouslyUnseenNodePools.UnsortedList()
+	sortedNodePools = append(sortedNodePools, lo.Filter(lo.Keys(nodePoolCandidates), func(nodePoolName string, _ int) bool {
+		return !s.PreviouslyUnseenNodePools.Has(nodePoolName)
+	})...)
 
 	// Find the maximum number of candidates in any nodepool
-	for _, nodePoolName := range nodePoolNames {
-		if len(nodePoolCandidates[nodePoolName]) > maxCandidatesPerNodePool {
-			maxCandidatesPerNodePool = len(nodePoolCandidates[nodePoolName])
-		}
-	}
+	maxCandidatesPerNodePool := lo.MaxBy(lo.Values(nodePoolCandidates), func(a, b []*Candidate) bool {
+		return len(a) > len(b)
+	})
 
 	// Interweave candidates from different nodepools
 	for i := range maxCandidatesPerNodePool {
-		for _, nodePoolName := range nodePoolNames {
+		for _, nodePoolName := range sortedNodePools {
 			if i < len(nodePoolCandidates[nodePoolName]) {
 				result = append(result, nodePoolCandidates[nodePoolName][i])
 			}
@@ -213,36 +171,4 @@ func (s *SingleNodeConsolidation) shuffleCandidates(nodePoolCandidates map[strin
 	}
 
 	return result
-}
-
-// sortCandidates interweaves candidates from different nodepools and prioritizes nodepools
-// that timed out in previous runs
-func (s *SingleNodeConsolidation) sortCandidates(candidates []*Candidate) []*Candidate {
-	ctx := context.Background()
-
-	// First sort by disruption cost as the base ordering
-	sort.Slice(candidates, func(i int, j int) bool {
-		return candidates[i].disruptionCost < candidates[j].disruptionCost
-	})
-
-	nodePoolCandidates, nodePoolNames := s.groupCandidatesByNodePool(candidates)
-
-	s.sortNodePoolsByTimeout(ctx, nodePoolNames)
-
-	return s.shuffleCandidates(nodePoolCandidates, nodePoolNames)
-}
-
-// SortCandidates is a public wrapper around sortCandidates for testing
-func (s *SingleNodeConsolidation) SortCandidates(candidates []*Candidate) []*Candidate {
-	return s.sortCandidates(candidates)
-}
-
-// MarkNodePoolTimedOut marks a nodepool as timed out for testing
-func (s *SingleNodeConsolidation) MarkNodePoolTimedOut(nodePoolName string) {
-	s.nodePoolsTimedOut[nodePoolName] = true
-}
-
-// IsNodePoolTimedOut checks if a nodepool is marked as timed out for testing
-func (s *SingleNodeConsolidation) IsNodePoolTimedOut(nodePoolName string) bool {
-	return s.nodePoolsTimedOut[nodePoolName]
 }
