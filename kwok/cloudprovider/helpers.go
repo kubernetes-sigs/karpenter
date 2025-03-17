@@ -169,6 +169,15 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		return req.Values
 	})))
 
+	for _, offering := range options.Offerings {
+		for _, requirement := range offering.Requirements {
+			v1.WellKnownLabels = v1.WellKnownLabels.Insert(requirement.Key)
+		}
+		for _, requirement := range offering.Offering.Requirements {
+			v1.WellKnownLabels = v1.WellKnownLabels.Insert(requirement.Key)
+		}
+	}
+
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, options.Architecture),

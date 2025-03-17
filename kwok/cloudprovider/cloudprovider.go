@@ -236,14 +236,17 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 			ret[r.Key] = r.Values()[0]
 		}
 	}
+	for _, r := range offering.Requirements {
+		if r.Len() == 1 && r.Operator() == corev1.NodeSelectorOpIn {
+			ret[r.Key] = r.Values()[0]
+		}
+	}
 	// add in github.com/awslabs/eks-node-viewer label so that it shows up.
 	ret[v1alpha1.NodeViewerLabelKey] = fmt.Sprintf("%f", offering.Price)
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.
 
 	ret[v1alpha1.KwokPartitionLabelKey] = lo.Sample(kwokPartitions)
-	ret[v1.CapacityTypeLabelKey] = offering.Requirements.Get(v1.CapacityTypeLabelKey).Any()
-	ret[corev1.LabelTopologyZone] = offering.Requirements.Get(corev1.LabelTopologyZone).Any()
 	ret[corev1.LabelHostname] = nodeClaim.Name
 
 	ret[v1alpha1.KwokLabelKey] = v1alpha1.KwokLabelValue
