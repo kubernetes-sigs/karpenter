@@ -17,7 +17,6 @@ limitations under the License.
 package disruption_test
 
 import (
-	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
