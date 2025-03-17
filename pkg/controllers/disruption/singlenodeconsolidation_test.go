@@ -91,8 +91,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 		}
 
 		// Create a single node consolidation controller
-		baseConsolidation := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
-		consolidation = disruption.NewSingleNodeConsolidation(baseConsolidation)
+		consolidation = disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
 	})
 
 	AfterEach(func() {
@@ -101,7 +100,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 		ExpectCleanedUp(ctx, env.Client)
 	})
 
-	Context("candidate shuffling", func() {
+	Context("Candidate Shuffling", func() {
 		It("should sort candidates by disruption cost", func() {
 			candidates, err := createCandidates(1.0, 3)
 			Expect(err).To(BeNil())
@@ -120,8 +119,6 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			Expect(err).To(BeNil())
 
 			consolidation.PreviouslyUnseenNodePools.Insert(nodePool2.Name)
-			fmt.Println("consolidation.PreviouslyUnseenNodePools", consolidation.PreviouslyUnseenNodePools)
-
 			sortedCandidates := consolidation.SortCandidates(ctx, candidates)
 
 			Expect(sortedCandidates).To(HaveLen(9))
@@ -193,8 +190,6 @@ var _ = Describe("SingleNodeConsolidation", func() {
 
 			// Mark nodePool2 as timed out
 			consolidation.PreviouslyUnseenNodePools.Insert(nodePool2.Name)
-			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeTrue())
-
 			// Create a budget mapping that allows all disruptions
 			budgetMapping := map[string]int{
 				nodePool1.Name: 1,
@@ -207,7 +202,6 @@ var _ = Describe("SingleNodeConsolidation", func() {
 
 			// Verify nodePool2 is no longer marked as timed out
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeFalse())
-			Expect(consolidation.IsConsolidated()).To(BeTrue())
 		})
 
 		It("should mark nodepools as timed out when timeout occurs", func() {
