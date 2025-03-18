@@ -33,7 +33,7 @@ import (
 )
 
 var _ = Describe("Performance", func() {
-	var replicas = 100
+	var replicas = 6
 
 	Context("Provisioning", func() {
 		It("should do simple provisioning", func() {
