@@ -266,7 +266,7 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 }
 
 //nolint:gocyclo
-func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
+func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
@@ -286,6 +286,10 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	lastLogTime := s.clock.Now()
 	batchSize := len(q.pods)
 	for {
+		if ctx.Err() != nil {
+			log.FromContext(ctx).V(1).WithValues("duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("scheduling simulation timed out")
+			break
+		}
 		UnfinishedWorkSeconds.Set(s.clock.Since(startTime).Seconds(), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 
@@ -297,12 +301,6 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		pod, ok := q.Pop()
 		if !ok {
 			break
-		}
-
-		if ctx.Err() != nil {
-			log.FromContext(ctx).V(1).WithValues("duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("scheduling simulation timed out")
-			errors[pod] = fmt.Errorf("scheduling simulation timed out: %w", ctx.Err())
-			continue
 		}
 
 		// Schedule to existing nodes or create a new node
@@ -328,6 +326,13 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		q.Push(pod, relaxed)
 	}
 	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
+	if ctx.Err() != nil {
+		return Results{
+			NewNodeClaims: s.newNodeClaims,
+			ExistingNodes: s.existingNodes,
+			PodErrors:     errors,
+		}, fmt.Errorf("scheduling simulation timed out: %w", ctx.Err())
+	}
 	for _, m := range s.newNodeClaims {
 		m.FinalizeScheduling()
 	}
@@ -336,7 +341,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
 		PodErrors:     errors,
-	}
+	}, nil
 }
 
 func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {

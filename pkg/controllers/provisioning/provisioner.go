@@ -319,7 +319,11 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
+	results, err := s.Solve(ctx, pods)
+	if err != nil {
+		return scheduler.Results{}, err
+	}
+	results = results.TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	reservedOfferingErrors := results.ReservedOfferingErrors()
 	if len(reservedOfferingErrors) != 0 {
 		log.FromContext(ctx).V(1).WithValues(
