@@ -155,7 +155,6 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		}
 
 		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
-
 		if replacementHasValidInstanceTypes || cmd.Decision() == DeleteDecision {
 			// We can consolidate NodeClaims [0,mid]
 			lastSavedCommand = cmd
