@@ -372,6 +372,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		requirementsAndOffering: false,
 		fitsAndOffering:         false,
 
+		requirements:   requirements,
 		podRequests:    podRequests,
 		daemonRequests: daemonRequests,
 	}

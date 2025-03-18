@@ -4,7 +4,7 @@ This document’s goal is to define clear, scalable, and transparent criteria to
 
 Ultimately, the criteria in this doc is aspirational. No set of written requirements can encapsulate the full criteria when determining if someone meets the bar to be a reviewer or approver, as some of the criteria are subjective and relies on the trust that each nominee has established with the community. To help guide readers, this document outlines ways to demonstrate expertise of the code base, sound judgement on decision tradeoffs, end user advocacy, care for community, and ability to work as a distributed team.
 
-Much of this document uses the [SIG-Node Contributor Ladder](https://github.com/kubernetes/community/blob/master/sig-node/sig-node-contributor-ladder.md) as prior art. The goal is to mold these requirements to fit the Karpenter’s community. These requirements also lean on the established Kubernetes[membership documentation](https://github.com/kubernetes/community/blob/master/community-membership.md) for terminology.
+Much of this document uses the [SIG-Node Contributor Ladder](https://github.com/kubernetes/community/blob/master/sig-node/sig-node-contributor-ladder.md) as prior art. The goal is to mold these requirements to fit the Karpenter’s community. These requirements also lean on the established Kubernetes [membership documentation](https://github.com/kubernetes/community/blob/master/community-membership.md) for terminology.
 
 As a final precursor, to become a reviewer or approver, users must nominate themselves. They are responsible for cutting a PR to the upstream repository, providing evidence in-line with the suggested requirements. Users should feel free to reach out to an existing approver to understand what how they land in respect to the criteria. The following sections are guiding criteria and guidelines, where the final decision lies with the maintainers. 
 
@@ -93,3 +93,7 @@ In addition to the formal requirements for the [approver role](https://github.co
 * Be a primary PR reviewer for numerous PRs in multiple areas listed as a requirement for a reviewer.
 * Actively triage issues and PRs, provide support to contributors to drive their PRs to completion.
 * Be present, and participate in Karpenter meetings by speaking about features or improvements driven, or find some other way to prove the identity behind GitHub handle.
+
+### Cleanup and Emeritus
+
+The `kubernetes-sigs/karpenter` sub-project abides by the same cleanup process prescribed in https://github.com/kubernetes/community/blob/master/contributors/guide/owners.md#cleanup. It is generally recommended that reviewers or approvers who know that they are no longer going to be actively invovled _remove themselves_ from the OWNERS_ALIASES file; however, approvers may also initate a PR and reachout to the relevant reviewer/approver if they recognize that the user is no longer actively involved in the project (as defined in the community contributors doc linked above).
