@@ -245,6 +245,34 @@ var _ = Describe("Provisioning", func() {
 		Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeFalse())
 		ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 1, nil)
 	})
+	It("should mark podHealthyNodePoolScheduledTime if it is scheduled against a nodePool with NodeRegistrationHealthy=true", func() {
+		nodePool := test.NodePool()
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+		ExpectApplied(ctx, env.Client, nodePool)
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		nodes := &corev1.NodeList{}
+		Expect(env.Client.List(ctx, nodes)).To(Succeed())
+		Expect(len(nodes.Items)).To(Equal(1))
+		ExpectScheduled(ctx, env.Client, pod)
+		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod)).IsZero()).To(BeFalse())
+	})
+	It("should not mark podHealthyNodePoolScheduledTime if it is scheduled against a nodePool with NodeRegistrationHealthy=False", func() {
+		nodePool := test.NodePool()
+		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "unhealthy", "unhealthy")
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+		ExpectApplied(ctx, env.Client, nodePool)
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		nodes := &corev1.NodeList{}
+		Expect(env.Client.List(ctx, nodes)).To(Succeed())
+		Expect(len(nodes.Items)).To(Equal(1))
+		ExpectScheduled(ctx, env.Client, pod)
+		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod)).IsZero()).To(BeTrue())
+	})
 	It("should provision nodes for pods with supported node selectors", func() {
 		nodePool := test.NodePool()
 		schedulable := []*corev1.Pod{
@@ -2257,14 +2285,14 @@ func AddInstanceResources(instanceTypes []*cloudprovider.InstanceType, resources
 		OperatingSystems: sets.New(string(corev1.Linux)),
 	}
 	price := fake.PriceFromResources(opts.Resources)
-	opts.Offerings = []cloudprovider.Offering{
+	opts.Offerings = []*cloudprovider.Offering{
 		{
+			Available: true,
 			Requirements: scheduling.NewLabelRequirements(map[string]string{
 				v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
 				corev1.LabelTopologyZone: "test-zone-1",
 			}),
-			Price:     price,
-			Available: true,
+			Price: price,
 		},
 	}
 

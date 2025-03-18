@@ -33,7 +33,7 @@ import (
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
-	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -48,7 +48,7 @@ var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 //nolint:gocyclo
 func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	candidates ...*Candidate,
-) (pscheduling.Results, error) {
+) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
 	nodes := cluster.Nodes()
 	deletingNodes := nodes.Deleting()
@@ -62,18 +62,18 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if _, ok := lo.Find(deletingNodes, func(n *state.StateNode) bool {
 		return candidateNames.Has(n.Name())
 	}); ok {
-		return pscheduling.Results{}, errCandidateDeleting
+		return scheduling.Results{}, errCandidateDeleting
 	}
 
 	// We get the pods that are on nodes that are deleting
 	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
 	if err != nil {
-		return pscheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
+		return scheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
 	}
 	// start by getting all pending pods
 	pods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
-		return pscheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
+		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
 	for _, n := range candidates {
 		pods = append(pods, n.reschedulablePods...)
@@ -81,14 +81,14 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	pods = append(pods, deletingNodePods...)
 	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, stateNodes)
 	if err != nil {
-		return pscheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
+		return scheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 
 	deletingNodePodKeys := lo.SliceToMap(deletingNodePods, func(p *corev1.Pod) (client.ObjectKey, interface{}) {
 		return client.ObjectKeyFromObject(p), nil
 	})
 
-	results := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods).TruncateInstanceTypes(pscheduling.MaxInstanceTypes)
+	results := scheduler.Solve(log.IntoContext(ctx, operatorlogging.NopLogger), pods).TruncateInstanceTypes(scheduling.MaxInstanceTypes)
 	for _, n := range results.ExistingNodes {
 		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them
@@ -115,10 +115,10 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 // UninitializedNodeError tracks a special pod error for disruption where pods schedule to a node
 // that hasn't been initialized yet, meaning that we can't be confident to make a disruption decision based off of it
 type UninitializedNodeError struct {
-	*pscheduling.ExistingNode
+	*scheduling.ExistingNode
 }
 
-func NewUninitializedNodeError(node *pscheduling.ExistingNode) *UninitializedNodeError {
+func NewUninitializedNodeError(node *scheduling.ExistingNode) *UninitializedNodeError {
 	return &UninitializedNodeError{ExistingNode: node}
 }
 

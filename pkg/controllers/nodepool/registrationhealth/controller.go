@@ -14,14 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package readiness
+package registrationhealth
 
 import (
 	"context"
 
-	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,7 +33,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
@@ -41,7 +42,7 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 }
 
-// NewController is a constructor
+// NewController will create a controller to reset NodePool's registration health when there is an update to NodePool/NodeClass spec
 func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
@@ -50,31 +51,30 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "nodepool.readiness")
-	stored := nodePool.DeepCopy()
+	ctx = injection.WithControllerName(ctx, "nodepool.registrationhealth")
 
 	nodeClass, err := nodepoolutils.GetNodeClass(ctx, c.kubeClient, nodePool, c.cloudProvider)
-	if client.IgnoreNotFound(err) != nil {
-		return reconcile.Result{}, err
+	if err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	// Ignore NodePools which aren't using a supported NodeClass
 	if nodeClass == nil {
 		return reconcile.Result{}, nil
 	}
-	switch {
-	case errors.IsNotFound(err):
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassNotFound", "NodeClass not found on cluster")
-	case !nodeClass.GetDeletionTimestamp().IsZero():
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassTerminating", "NodeClass is Terminating")
-	default:
-		c.setReadyCondition(nodePool, nodeClass)
-	}
+	stored := nodePool.DeepCopy()
 
+	// If NodeClass/NodePool have been updated then NodeRegistrationHealthy = Unknown
+	if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy) == nil ||
+		nodePool.Status.NodeClassObservedGeneration != nodeClass.GetGeneration() ||
+		nodePool.Generation != nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).ObservedGeneration {
+		nodePool.StatusConditions().SetUnknown(v1.ConditionTypeNodeRegistrationHealthy)
+	}
+	nodePool.Status.NodeClassObservedGeneration = nodeClass.GetGeneration()
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
 		// Here, we are updating the status condition list
-		if err = c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
+		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
@@ -84,20 +84,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.Object) {
-	ready := nodeClass.StatusConditions().Get(status.ConditionReady)
-	if ready.IsUnknown() {
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassReadinessUnknown", "Node Class Readiness Unknown")
-	} else if ready.IsFalse() {
-		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, ready.Reason, ready.Message)
-	} else {
-		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
-	}
-}
-
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	b := controllerruntime.NewControllerManagedBy(m).
-		Named("nodepool.readiness").
+		Named("nodepool.registrationhealth").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
 	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
