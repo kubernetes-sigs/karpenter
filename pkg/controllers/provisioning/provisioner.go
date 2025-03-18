@@ -470,11 +470,8 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 	var schedulablePods []*corev1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
-			// return because we can't consider any other pod schedulable
-			if errors.Is(err, context.Canceled) {
-				return nil, err
-			}
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
+			return nil, err
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}
