@@ -44,5 +44,6 @@ const (
 
 	// nodeclaim/lifecycle
 	InsufficientCapacityError = "InsufficientCapacityError"
+	UnregisteredTaintMissing  = "UnregisteredTaintMissing"
 	NodeClassNotReady         = "NodeClassNotReady"
 )

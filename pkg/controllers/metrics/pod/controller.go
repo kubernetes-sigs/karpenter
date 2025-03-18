@@ -160,7 +160,7 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: metrics.PodSubsystem,
-			Name:      "scheduling_undecided_time_seconds",
+			Name:      "provisioning_scheduling_undecided_time_seconds",
 			Help:      "The time from when Karpenter has seen a pod without making a scheduling decision for the pod. Note: this calculated from a point in memory, not by the pod creation timestamp.",
 		},
 		[]string{podName, podNamespace},

@@ -77,22 +77,22 @@ var _ = BeforeEach(func() {
 		Architecture:     "arch",
 		Resources:        resources,
 		OperatingSystems: sets.New(string(corev1.Linux)),
-		Offerings: []cloudprovider.Offering{
+		Offerings: []*cloudprovider.Offering{
 			{
+				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
 					corev1.LabelTopologyZone: "test-zone-1a",
 				}),
-				Price:     fake.PriceFromResources(resources),
-				Available: true,
+				Price: fake.PriceFromResources(resources),
 			},
 			{
+				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
 					corev1.LabelTopologyZone: "test-zone-1a",
 				}),
-				Price:     fake.PriceFromResources(resources),
-				Available: true,
+				Price: fake.PriceFromResources(resources),
 			},
 		},
 	})
@@ -142,7 +142,6 @@ var _ = Describe("Disruption", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
 	It("should remove multiple disruption conditions simultaneously", func() {
-		cp.Drifted = ""
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)

@@ -19,7 +19,6 @@ package v1_test
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Pallinder/go-randomdata"
 	"github.com/awslabs/operatorpkg/object"
@@ -28,6 +27,8 @@ import (
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -60,6 +61,7 @@ var _ = Describe("Validation", func() {
 				},
 			},
 		}
+		nodeClaim.SetGroupVersionKind(object.GVK(nodeClaim)) // This is needed so that the GVK is set on the unstructured object
 	})
 
 	Context("Taints", func() {
@@ -244,13 +246,55 @@ var _ = Describe("Validation", func() {
 		})
 	})
 	Context("TerminationGracePeriod", func() {
-		It("should succeed on a positive terminationGracePeriod duration", func() {
-			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
-			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
-		})
-		It("should fail on a negative terminationGracePeriod duration", func() {
-			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * -30}
-			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-		})
+		DescribeTable("should succeed on a valid terminationGracePeriod", func(value string) {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodeClaim))
+			lo.Must0(unstructured.SetNestedField(u, value, "spec", "terminationGracePeriod"))
+			obj := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Succeed())
+		},
+			Entry("single unit", "30s"),
+			Entry("multiple units", "1h30m5s"),
+		)
+		DescribeTable("should fail on an invalid terminationGracePeriod", func(value string) {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodeClaim))
+			lo.Must0(unstructured.SetNestedField(u, value, "spec", "terminationGracePeriod"))
+			obj := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Not(Succeed()))
+		},
+			Entry("negative", "-1s"),
+			Entry("invalid unit", "1hr"),
+			Entry("never", "Never"),
+			Entry("partial match", "FooNever"),
+		)
+	})
+	Context("ExpireAfter", func() {
+		DescribeTable("should succeed on a valid expireAfter", func(value string) {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodeClaim))
+			lo.Must0(unstructured.SetNestedField(u, value, "spec", "expireAfter"))
+			obj := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Succeed())
+		},
+			Entry("single unit", "30s"),
+			Entry("multiple units", "1h30m5s"),
+			Entry("never", "Never"),
+		)
+		DescribeTable("should fail on an invalid expireAfter", func(value string) {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodeClaim))
+			lo.Must0(unstructured.SetNestedField(u, value, "spec", "expireAfter"))
+			obj := &unstructured.Unstructured{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Not(Succeed()))
+		},
+			Entry("negative", "-1s"),
+			Entry("invalid unit", "1hr"),
+			Entry("partial match", "FooNever"),
+		)
 	})
 })

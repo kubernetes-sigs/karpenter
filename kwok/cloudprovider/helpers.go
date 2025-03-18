@@ -169,6 +169,15 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		return req.Values
 	})))
 
+	for _, offering := range options.Offerings {
+		for _, requirement := range offering.Requirements {
+			v1.WellKnownLabels = v1.WellKnownLabels.Insert(requirement.Key)
+		}
+		for _, requirement := range offering.Offering.Requirements {
+			v1.WellKnownLabels = v1.WellKnownLabels.Insert(requirement.Key)
+		}
+	}
+
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, options.Architecture),
@@ -184,13 +193,14 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	return &cloudprovider.InstanceType{
 		Name:         options.Name,
 		Requirements: requirements,
-		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) cloudprovider.Offering {
-			return cloudprovider.Offering{
+		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) *cloudprovider.Offering {
+			return &cloudprovider.Offering{
+				ReservationCapacity: off.ReservationCapacity,
 				Requirements: scheduling.NewRequirements(lo.Map(off.Requirements, func(req corev1.NodeSelectorRequirement, _ int) *scheduling.Requirement {
 					return scheduling.NewRequirement(req.Key, req.Operator, req.Values...)
 				})...),
 				Price:     off.Offering.Price,
-				Available: off.Offering.Available,
+				Available: off.Available,
 			}
 		}),
 		Capacity: options.Resources,

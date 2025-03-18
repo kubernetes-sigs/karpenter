@@ -2,7 +2,7 @@
 set -euo pipefail
 
 K8S_VERSION="${K8S_VERSION:="1.32.x"}"
-KUBEBUILDER_ASSETS="/usr/local/kubebuilder/bin"
+KUBEBUILDER_ASSETS="${KUBEBUILDER_ASSETS:=/usr/local/kubebuilder/bin}"
 
 main() {
     tools

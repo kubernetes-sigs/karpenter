@@ -115,9 +115,20 @@ func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeC
 	it, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool {
 		return it.Name == nodeClaim.Labels[corev1.LabelInstanceTypeStable]
 	})
-	// Offerings should in most cases only have zone and capacity type. This likely shouldn't differ
-	// across cloud providers.
-	if !ok || !it.Offerings.HasCompatible(scheduling.NewLabelRequirements(nodeClaim.Labels)) {
+	if !ok {
+		return InstanceTypeNotFound
+	}
+	reqs := scheduling.NewLabelRequirements(nodeClaim.Labels)
+	// The reserved capacity type is special because a NodeClaim can be demoted from reserved to on-demand after creation.
+	// For this reason, when evaluating drift due to unavailable offerings, we should check both reserved and on-demand for
+	// reserved nodeclaims. This ensures we don't drift a nodeclaim whoes label hasn't been updated yet. If the NodePool
+	// isn't compatible with on-demand, this will be caught in subsequent iterations by requirements drift. For a similar
+	// reason we don't compare against the reservation ID and leave that to the provider to implement.
+	if nodeClaim.Labels[v1.CapacityTypeLabelKey] == v1.CapacityTypeReserved {
+		reqs[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
+		delete(reqs, cloudprovider.ReservationIDLabel)
+	}
+	if !it.Offerings.HasCompatible(reqs) {
 		return InstanceTypeNotFound
 	}
 	return ""

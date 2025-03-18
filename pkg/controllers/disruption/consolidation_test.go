@@ -47,6 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 var _ = Describe("Consolidation", func() {
@@ -2048,31 +2049,31 @@ var _ = Describe("Consolidation", func() {
 		It("won't replace node if any spot replacement is more expensive", func() {
 			currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "current-on-demand",
-				Offerings: []cloudprovider.Offering{
+				Offerings: []*cloudprovider.Offering{
 					{
+						Available:    false,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.5,
-						Available:    false,
 					},
 				},
 			})
 			replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "potential-spot-replacement",
-				Offerings: []cloudprovider.Offering{
+				Offerings: []*cloudprovider.Offering{
 					{
+						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        1.0,
-						Available:    true,
 					},
 					{
+						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
-						Available:    true,
 					},
 					{
+						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.4,
-						Available:    true,
 					},
 				},
 			})
@@ -2132,36 +2133,36 @@ var _ = Describe("Consolidation", func() {
 		It("won't replace on-demand node if on-demand replacement is more expensive", func() {
 			currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "current-on-demand",
-				Offerings: []cloudprovider.Offering{
+				Offerings: []*cloudprovider.Offering{
 					{
+						Available:    false,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.5,
-						Available:    false,
 					},
 				},
 			})
 			replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
 				Name: "on-demand-replacement",
-				Offerings: []cloudprovider.Offering{
+				Offerings: []*cloudprovider.Offering{
 					{
+						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.6,
-						Available:    true,
 					},
 					{
+						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.6,
-						Available:    true,
 					},
 					{
+						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
-						Available:    true,
 					},
 					{
+						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.3,
-						Available:    true,
 					},
 				},
 			})
@@ -4378,5 +4379,187 @@ var _ = Describe("Consolidation", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 		})
+	})
+	Context("Reserved Capacity", func() {
+		var reservedNodeClaim *v1.NodeClaim
+		var reservedNode *corev1.Node
+		var mostExpensiveReservationID string
+
+		BeforeEach(func() {
+			mostExpensiveReservationID = fmt.Sprintf("r-%s", mostExpensiveInstance.Name)
+			mostExpensiveInstance.Requirements.Add(scheduling.NewRequirement(
+				cloudprovider.ReservationIDLabel,
+				corev1.NodeSelectorOpIn,
+				mostExpensiveReservationID,
+			))
+			mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+			mostExpensiveInstance.Offerings = append(mostExpensiveInstance.Offerings, &cloudprovider.Offering{
+				Price:               mostExpensiveOffering.Price / 1_000_000.0,
+				Available:           true,
+				ReservationCapacity: 10,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
+					corev1.LabelTopologyZone:    mostExpensiveOffering.Zone(),
+					v1alpha1.LabelReservationID: mostExpensiveReservationID,
+				}),
+			})
+			reservedNodeClaim, reservedNode = test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:              nodePool.Name,
+						corev1.LabelInstanceTypeStable:   mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:          v1.CapacityTypeReserved,
+						corev1.LabelTopologyZone:         mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+						cloudprovider.ReservationIDLabel: mostExpensiveReservationID,
+					},
+				},
+			})
+			reservedNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true)}}))
+		})
+		It("can consolidate from one reserved offering to another", func() {
+			leastExpensiveReservationID := fmt.Sprintf("r-%s", leastExpensiveInstance.Name)
+			leastExpensiveInstance.Requirements.Add(scheduling.NewRequirement(
+				cloudprovider.ReservationIDLabel,
+				corev1.NodeSelectorOpIn,
+				leastExpensiveReservationID,
+			))
+			leastExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
+			leastExpensiveInstance.Offerings = append(leastExpensiveInstance.Offerings, &cloudprovider.Offering{
+				Price:               leastExpensiveOffering.Price / 1_000_000.0,
+				Available:           true,
+				ReservationCapacity: 10,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:     v1.CapacityTypeReserved,
+					corev1.LabelTopologyZone:    leastExpensiveOffering.Zone(),
+					v1alpha1.LabelReservationID: leastExpensiveReservationID,
+				}),
+			})
+
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
+				},
+			}})
+			ExpectApplied(ctx, env.Client, rs, pod, reservedNode, reservedNodeClaim, nodePool)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pod, reservedNode)
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{reservedNode}, []*v1.NodeClaim{reservedNodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
+			var wg sync.WaitGroup
+			ExpectToWait(fakeClock, &wg)
+			ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
+			// Process the item so that the nodes can be deleted.
+			ExpectSingletonReconciled(ctx, queue)
+
+			// Cascade any deletion of the nodeclaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, reservedNodeClaim)
+
+			// should create a new nodeclaim as there is a cheaper one that can hold the pod
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			nodes := ExpectNodes(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(nodes).To(HaveLen(1))
+
+			Expect(nodeClaims[0].Name).ToNot(Equal(reservedNodeClaim.Name))
+
+			// We should have consolidated into the same instance type, just into reserved.
+			Expect(nodes[0].Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, leastExpensiveInstance.Name))
+			Expect(nodes[0].Labels).To(HaveKeyWithValue(v1.CapacityTypeLabelKey, v1.CapacityTypeReserved))
+			Expect(nodes[0].Labels).To(HaveKeyWithValue(cloudprovider.ReservationIDLabel, leastExpensiveReservationID))
+
+			// and delete the old one
+			ExpectNotFound(ctx, env.Client, reservedNodeClaim, reservedNode)
+		})
+		DescribeTable(
+			"can consolidate into reserved capacity for the same instance pool",
+			func(initialCapacityType string) {
+				if initialCapacityType == v1.CapacityTypeSpot {
+					nodeClaim = spotNodeClaim
+					node = spotNode
+				}
+
+				// create our RS so we can link a pod to it
+				rs := test.ReplicaSet()
+				ExpectApplied(ctx, env.Client, rs)
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+				pod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					},
+				}})
+				ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool)
+
+				// bind pods to node
+				ExpectManualBinding(ctx, env.Client, pod, node)
+
+				// inform cluster state about nodes and nodeClaims
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				fakeClock.Step(10 * time.Minute)
+
+				// consolidation won't delete the old nodeclaim until the new nodeclaim is ready
+				var wg sync.WaitGroup
+				ExpectToWait(fakeClock, &wg)
+				ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
+				ExpectSingletonReconciled(ctx, disruptionController)
+				wg.Wait()
+
+				// Process the item so that the nodes can be deleted.
+				ExpectSingletonReconciled(ctx, queue)
+
+				// Cascade any deletion of the nodeclaim to the node
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+				// should create a new nodeclaim as there is a cheaper one that can hold the pod
+				nodeClaims := ExpectNodeClaims(ctx, env.Client)
+				nodes := ExpectNodes(ctx, env.Client)
+				Expect(nodeClaims).To(HaveLen(1))
+				Expect(nodes).To(HaveLen(1))
+
+				Expect(nodeClaims[0].Name).ToNot(Equal(nodeClaim.Name))
+
+				// We should have consolidated into the same instance type, just into reserved.
+				Expect(nodes[0].Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, mostExpensiveInstance.Name))
+				Expect(nodes[0].Labels).To(HaveKeyWithValue(v1.CapacityTypeLabelKey, v1.CapacityTypeReserved))
+				Expect(nodes[0].Labels).To(HaveKeyWithValue(cloudprovider.ReservationIDLabel, mostExpensiveReservationID))
+
+				// and delete the old one
+				ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			},
+			Entry("from on-demand", v1.CapacityTypeOnDemand),
+			Entry("from spot", v1.CapacityTypeSpot),
+		)
 	})
 })
