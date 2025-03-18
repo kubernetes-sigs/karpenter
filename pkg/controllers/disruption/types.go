@@ -58,10 +58,10 @@ type CandidateFilter func(context.Context, *Candidate) bool
 type Candidate struct {
 	*state.StateNode
 	instanceType      *cloudprovider.InstanceType
-	nodePool          *v1.NodePool
+	NodePool          *v1.NodePool
 	zone              string
 	capacityType      string
-	disruptionCost    float64
+	DisruptionCost    float64
 	reschedulablePods []*corev1.Pod
 }
 
@@ -103,12 +103,12 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	return &Candidate{
 		StateNode:         node.DeepCopy(),
 		instanceType:      instanceType,
-		nodePool:          nodePool,
+		NodePool:          nodePool,
 		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],
 		zone:              node.Labels()[corev1.LabelTopologyZone],
 		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
-		disruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
+		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 	}, nil
 }
 
