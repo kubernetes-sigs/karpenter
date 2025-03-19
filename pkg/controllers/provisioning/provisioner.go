@@ -258,7 +258,7 @@ func (p *Provisioner) NewScheduler(
 
 	// inject topology constraints
 	pods, err = p.injectVolumeTopologyRequirements(ctx, pods)
-	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+	if err != nil {
 		return nil, fmt.Errorf("injecting volume topology requirements, %w", err)
 	}
 
@@ -323,7 +323,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	}
 
 	results, err := s.Solve(ctx, pods)
-	// TODO: @rschalo: add handling for results where not all pods have scheduled but the timeout has been reached
+	// context errors are ignored because we want to finish provisioning for what has already been scheduled
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return scheduler.Results{}, err
 	}
@@ -478,7 +478,9 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 	var schedulablePods []*corev1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
-			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
+			if !errors.Is(err, context.DeadlineExceeded) {
+				log.FromContext(ctx).V(1).WithValues("Pod", klog.KObj(pod)).Info("encountered an error while injecting volume topology requirements: %w", err)
+			}
 			return nil, err
 		} else {
 			schedulablePods = append(schedulablePods, pod)
