@@ -125,14 +125,6 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
 	for min <= max {
-		if timeoutCtx.Err() != nil {
-			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
-			if lastSavedCommand.candidates == nil {
-				return Command{}, scheduling.Results{}, fmt.Errorf("multi-node consolidation timed out while considering %d nodes without finding a valid command", (min+max)/2)
-			}
-			log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("stopping multi-node consolidation after timeout, returning last valid command")
-			return lastSavedCommand, lastSavedResults, nil
-		}
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
@@ -141,7 +133,14 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				continue
+				ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
+				if lastSavedCommand.candidates == nil {
+					log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
+					return Command{}, scheduling.Results{}, nil
+				}
+				log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("stopping multi-node consolidation after timeout, returning last valid command")
+				return lastSavedCommand, lastSavedResults, nil
+
 			}
 			return Command{}, scheduling.Results{}, err
 		}

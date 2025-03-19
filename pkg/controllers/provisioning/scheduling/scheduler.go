@@ -19,6 +19,7 @@ package scheduling
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -273,7 +274,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
 	// had 5xA pods and 5xB pods were they have a zonal topology spread, but A can only go in one zone and B in another.
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
-	errors := map[*corev1.Pod]error{}
+	podErrors := map[*corev1.Pod]error{}
 	// Reset the metric for the controller, so we don't keep old ids around
 	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	QueueDepth.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
@@ -304,8 +305,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		}
 
 		// Schedule to existing nodes or create a new node
-		if errors[pod] = s.add(ctx, pod); errors[pod] == nil {
-			delete(errors, pod)
+		if podErrors[pod] = s.add(ctx, pod); podErrors[pod] == nil {
+			delete(podErrors, pod)
 			continue
 		}
 
@@ -314,9 +315,9 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		// release the required reservations when constrained, or in subsequent runs. For an example, reference the following
 		// test: "shouldn't relax preferences when a pod fails to schedule due to a reserved offering error".
 		var relaxed bool
-		if !IsReservedOfferingError(errors[pod]) {
+		if !IsReservedOfferingError(podErrors[pod]) {
 			if relaxed = s.preferences.Relax(ctx, pod); relaxed {
-				if err := s.topology.Update(ctx, pod); err != nil {
+				if err := s.topology.Update(ctx, pod); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 					log.FromContext(ctx).Error(err, "failed updating topology")
 				}
 				// Update the cached podData since the pod was relaxed and it could have changed its requirement set
@@ -326,13 +327,6 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		q.Push(pod, relaxed)
 	}
 	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
-	if ctx.Err() != nil {
-		return Results{
-			NewNodeClaims: s.newNodeClaims,
-			ExistingNodes: s.existingNodes,
-			PodErrors:     errors,
-		}, fmt.Errorf("scheduling simulation timed out: %w", ctx.Err())
-	}
 	for _, m := range s.newNodeClaims {
 		m.FinalizeScheduling()
 	}
@@ -340,8 +334,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	return Results{
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
-		PodErrors:     errors,
-	}, nil
+		PodErrors:     podErrors,
+	}, ctx.Err()
 }
 
 func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {

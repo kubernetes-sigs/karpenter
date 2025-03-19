@@ -243,6 +243,9 @@ func (p *Provisioner) NewScheduler(
 	for _, np := range nodePools {
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("getting instance types, %w", err)
+			}
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
 			continue
 		}
@@ -255,7 +258,7 @@ func (p *Provisioner) NewScheduler(
 
 	// inject topology constraints
 	pods, err = p.injectVolumeTopologyRequirements(ctx, pods)
-	if err != nil {
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
 		return nil, fmt.Errorf("injecting volume topology requirements, %w", err)
 	}
 
@@ -321,7 +324,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 
 	results, err := s.Solve(ctx, pods)
 	// TODO: @rschalo: add handling for results where not all pods have scheduled but the timeout has been reached
-	if err != nil {
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return scheduler.Results{}, err
 	}
 	results = results.TruncateInstanceTypes(scheduler.MaxInstanceTypes)
