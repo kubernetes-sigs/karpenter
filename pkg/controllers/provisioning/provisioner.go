@@ -241,9 +241,11 @@ func (p *Provisioner) NewScheduler(
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	for _, np := range nodePools {
-		// Get instance type options
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("getting instance types, %w", err)
+			}
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, unable to resolve instance types")
 			continue
 		}
@@ -255,9 +257,12 @@ func (p *Provisioner) NewScheduler(
 	}
 
 	// inject topology constraints
-	pods = p.injectVolumeTopologyRequirements(ctx, pods)
+	pods, err = p.injectVolumeTopologyRequirements(ctx, pods)
+	if err != nil {
+		return nil, fmt.Errorf("injecting volume topology requirements, %w", err)
+	}
 
-	// Calculate cluster topology
+	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
 	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
@@ -317,7 +322,12 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}
 
-	results := s.Solve(ctx, pods).TruncateInstanceTypes(scheduler.MaxInstanceTypes)
+	results, err := s.Solve(ctx, pods)
+	// context errors are ignored because we want to finish provisioning for what has already been scheduled
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		return scheduler.Results{}, err
+	}
+	results = results.TruncateInstanceTypes(scheduler.MaxInstanceTypes)
 	reservedOfferingErrors := results.ReservedOfferingErrors()
 	if len(reservedOfferingErrors) != 0 {
 		log.FromContext(ctx).V(1).WithValues(
@@ -464,16 +474,19 @@ func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 	return nil
 }
 
-func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) []*corev1.Pod {
+func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods []*corev1.Pod) ([]*corev1.Pod, error) {
 	var schedulablePods []*corev1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}
 	}
-	return schedulablePods
+	return schedulablePods, nil
 }
 
 func validateNodeSelector(p *corev1.Pod) (errs error) {
