@@ -85,9 +85,8 @@ func NewQueueKey(pod *corev1.Pod, providerID string) QueueKey {
 type Queue struct {
 	workqueue.TypedRateLimitingInterface[QueueKey]
 
-	mu            sync.Mutex
-	set           sets.Set[QueueKey]
-	evictionError map[types.UID]error
+	mu  sync.Mutex
+	set sets.Set[QueueKey]
 
 	kubeClient client.Client
 	recorder   events.Recorder
@@ -100,10 +99,9 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 			workqueue.TypedRateLimitingQueueConfig[QueueKey]{
 				Name: "eviction.workqueue",
 			}),
-		set:           sets.New[QueueKey](),
-		evictionError: map[types.UID]error{},
-		kubeClient:    kubeClient,
-		recorder:      recorder,
+		set:        sets.New[QueueKey](),
+		kubeClient: kubeClient,
+		recorder:   recorder,
 	}
 }
 
@@ -111,7 +109,6 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder) *Queue 
 	return &Queue{
 		TypedRateLimitingInterface: &controllertest.TypedQueue[QueueKey]{TypedInterface: workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[QueueKey]{Name: "eviction.workqueue"})},
 		set:                        sets.New[QueueKey](),
-		evictionError:              map[types.UID]error{},
 		kubeClient:                 kubeClient,
 		recorder:                   recorder,
 	}
@@ -138,35 +135,6 @@ func (q *Queue) Add(node *corev1.Node, pods ...*corev1.Pod) {
 	}
 }
 
-// Delete key from the Queue
-func (q *Queue) Delete(key QueueKey) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	q.TypedRateLimitingInterface.Forget(key)
-	q.set.Delete(key)
-	delete(q.evictionError, key.UID)
-}
-
-// Requeue key in the Queue
-func (q *Queue) Requeue(key QueueKey, err error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if err != nil {
-		q.evictionError[key.UID] = err
-	}
-	q.TypedRateLimitingInterface.AddRateLimited(key)
-}
-
-// Get eviction error for a pod.
-func (q *Queue) EvictionError(pod *corev1.Pod) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	return q.evictionError[pod.UID]
-}
-
 func (q *Queue) Has(node *corev1.Node, pod *corev1.Pod) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -191,18 +159,21 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	defer q.TypedRateLimitingInterface.Done(item)
 
 	// Evict the pod
-	if evicted, evictionError := q.Evict(ctx, item); evicted {
-		q.Delete(item)
-		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
-	} else {
-		// Requeue pod if eviction failed
-		q.Requeue(item, evictionError)
+	if q.Evict(ctx, item) {
+		q.TypedRateLimitingInterface.Forget(item)
+		q.mu.Lock()
+		q.set.Delete(item)
+		q.mu.Unlock()
 		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
+
+	// Requeue pod if eviction failed
+	q.TypedRateLimitingInterface.AddRateLimited(item)
+	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
 // Evict returns true if successful eviction call, and false if there was an eviction-related error
-func (q *Queue) Evict(ctx context.Context, key QueueKey) (bool, error) {
+func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(key.Namespace, key.Name)))
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}},
@@ -225,17 +196,17 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) (bool, error) {
 			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L160
 			// 409 - The pod exists, but it is not the same pod that we initiated the eviction on
 			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L318
-			return true, nil
+			return true
 		}
 		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
 			q.recorder.Publish(terminatorevents.NodeFailedToDrain(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name:      key.Name,
 				Namespace: key.Namespace,
 			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", key.Namespace, key.Name)))
-			return false, err
+			return false
 		}
 		log.FromContext(ctx).Error(err, "failed evicting pod")
-		return false, err
+		return false
 	}
 	NodesEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
 	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}, evictionReason(ctx, key, q.kubeClient)))

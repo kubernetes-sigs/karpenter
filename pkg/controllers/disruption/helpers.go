@@ -46,7 +46,7 @@ import (
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 //nolint:gocyclo
-func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
+func SimulateScheduling(ctx context.Context, clock clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
@@ -78,6 +78,18 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	for _, n := range candidates {
 		pods = append(pods, n.reschedulablePods...)
 	}
+
+	// Don't provision capacity for pods which aren't getting evicted due to PDB violation.
+	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
+	// these pods are evicted is wasteful.
+	pdbs, err := pdb.NewLimits(ctx, clock, kubeClient)
+	if err != nil {
+		return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+	}
+	deletingNodePods = lo.Filter(deletingNodePods, func(pod *corev1.Pod, _ int) bool {
+		_, evictable := pdbs.CanEvictPods([]*corev1.Pod{pod})
+		return evictable
+	})
 	pods = append(pods, deletingNodePods...)
 	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, stateNodes)
 	if err != nil {
