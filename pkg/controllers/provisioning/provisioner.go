@@ -478,10 +478,10 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 	var schedulablePods []*corev1.Pod
 	for _, pod := range pods {
 		if err := p.volumeTopology.Inject(ctx, pod); err != nil {
-			if !errors.Is(err, context.DeadlineExceeded) {
-				log.FromContext(ctx).V(1).WithValues("Pod", klog.KObj(pod)).Info("encountered an error while injecting volume topology requirements: %w", err)
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
 			}
-			return nil, err
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(pod)).Error(err, "failed getting volume topology requirements")
 		} else {
 			schedulablePods = append(schedulablePods, pod)
 		}
