@@ -320,6 +320,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	}
 
 	results, err := s.Solve(ctx, pods)
+	// TODO: @rschalo: add handling for results where not all pods have scheduled but the timeout has been reached
 	if err != nil {
 		return scheduler.Results{}, err
 	}
