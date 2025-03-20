@@ -39,13 +39,11 @@ import (
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
-// Controller for tracking drift on NodePools
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 }
 
-// NewController is a constructor
 func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
@@ -61,13 +59,11 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 		return reconcile.Result{}, nil
 	}
 
-	// Get all NodeClaims managed by this NodePool
 	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider, nodeclaimutils.ForNodePool(nodePool.Name))
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing nodeclaims: %w", err)
 	}
 
-	// Check and count drifted NodeClaims
 	driftedNodeClaimCount := lo.CountBy(nodeClaims, func(nodeClaim *v1.NodeClaim) bool {
 		driftedCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)
 		return driftedCondition != nil && driftedCondition.IsTrue()
@@ -122,7 +118,6 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 			oldDrifted := oldNodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)
 			newDrifted := newNodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)
 
-			// If both are nil or both have the same status, don't trigger
 			if (oldDrifted == nil && newDrifted == nil) ||
 				(oldDrifted != nil && newDrifted != nil && oldDrifted.Status == newDrifted.Status) {
 				return false
