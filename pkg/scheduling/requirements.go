@@ -190,11 +190,14 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
 			continue
 		}
 
-		// If we reach this point, the label is missing and not allowed
-		return fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined))
+		if !r.Has(key) {
+			// break early so we only report the first error
+			return fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined))
+		}
 	}
 
-	// Finally, check if well-known labels intersect
+	// Finally, check that well-known labels have valid intersections
+	// Well Known Labels must intersect, but if not defined, are allowed.
 	return r.Intersects(requirements)
 }
 
