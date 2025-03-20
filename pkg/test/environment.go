@@ -111,6 +111,22 @@ func NodeClaimNodeClassRefFieldIndexer(ctx context.Context) func(cache.Cache) er
 	}
 }
 
+func NodePoolNodeClassRefFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		var err error
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.group", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Group}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.kind", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Kind}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
+		}))
+		return err
+	}
+}
+
 func VolumeAttachmentFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &storagev1.VolumeAttachment{}, "spec.nodeName", func(obj client.Object) []string {
