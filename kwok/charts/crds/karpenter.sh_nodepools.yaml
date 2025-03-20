@@ -141,7 +141,7 @@ spec:
                       maxItems: 50
                       type: array
                       x-kubernetes-validations:
-                        - message: "'schedule' must be set with 'duration'"
+                        - message: '''schedule'' must be set with ''duration'''
                           rule: self.all(x, has(x.schedule) == has(x.duration))
                     consolidateAfter:
                       description: |-
@@ -243,7 +243,7 @@ spec:
                                 - message: kind may not be empty
                                   rule: self != ''
                             name:
-                              description: "Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names"
+                              description: 'Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names'
                               type: string
                               x-kubernetes-validations:
                                 - message: name may not be empty
@@ -323,11 +323,11 @@ spec:
                           type: array
                           x-kubernetes-validations:
                             - message: requirements with operator 'In' must have a value defined
-                              rule: "self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
+                              rule: 'self.all(x, x.operator == ''In'' ? x.values.size() != 0 : true)'
                             - message: requirements operator 'Gt' or 'Lt' must have a single positive integer value
-                              rule: "self.all(x, (x.operator == 'Gt' || x.operator == 'Lt') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
+                              rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt'') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
                             - message: requirements with 'minValues' must have at least that many values specified in the 'values' field
-                              rule: "self.all(x, (x.operator == 'In' && has(x.minValues)) ? x.values.size() >= x.minValues : true)"
+                              rule: 'self.all(x, (x.operator == ''In'' && has(x.minValues)) ? x.values.size() >= x.minValues : true)'
                         startupTaints:
                           description: |-
                             StartupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
