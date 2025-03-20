@@ -29,6 +29,10 @@ const (
 	ConditionTypeNodeClassReady = "NodeClassReady"
 	// ConditionTypeNodeRegistrationHealthy = "NodeRegistrationHealthy" condition indicates if a misconfiguration exists that is preventing successful node launch/registrations that requires manual investigation
 	ConditionTypeNodeRegistrationHealthy = "NodeRegistrationHealthy"
+	// ConditionTypeNodeClaimsDrifted = "Drifted" condition indicates if any NodeClaims belonging to the NodePool have drifted
+	// from their expected configuration based on the NodePool and/or NodeClass hash
+	// Just named with the prefix NodeClaims to avoid a duplication with the NodeClaim's condition
+	ConditionTypeNodeClaimsDrifted = "Drifted"
 )
 
 // NodePoolStatus defines the observed state of NodePool
@@ -40,6 +44,9 @@ type NodePoolStatus struct {
 	// the actual NodeClass Generation, NodeRegistrationHealthy status condition on the NodePool will be reset
 	// +optional
 	NodeClassObservedGeneration int64 `json:"nodeClassObservedGeneration,omitempty"`
+	// DriftedNodeClaimCount represents the count of NodeClaims that have drifted from the NodePool/NodeClass configuration
+	// +optional
+	DriftedNodeClaimCount int `json:"driftedNodeClaimCount,omitempty"`
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
