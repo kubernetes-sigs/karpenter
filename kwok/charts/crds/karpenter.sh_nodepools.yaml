@@ -43,8 +43,8 @@ spec:
           type: string
         - jsonPath: .status.driftedNodeClaimCount
           name: DriftedNodeClaims
-          type: integer
           priority: 1
+          type: integer
       name: v1
       schema:
         openAPIV3Schema:
