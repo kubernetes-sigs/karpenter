@@ -48,6 +48,7 @@ import (
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/podevents"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
+	nodepooldrift "sigs.k8s.io/karpenter/pkg/controllers/nodepool/drift"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
 	nodepoolregistrationhealth "sigs.k8s.io/karpenter/pkg/controllers/nodepool/registrationhealth"
@@ -92,6 +93,7 @@ func NewControllers(
 		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
 		nodepoolvalidation.NewController(kubeClient, cloudProvider),
+		nodepooldrift.NewController(kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
