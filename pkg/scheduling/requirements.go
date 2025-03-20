@@ -177,16 +177,26 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
 
 	// Custom Labels must intersect, but if not defined are denied.
 	for key := range requirements {
+		incomingReq := requirements.Get(key)
+		operator := incomingReq.Operator()
+
+		// Enforce negative operators strictly, even if AllowUndefined is set
+		if (operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist) && r.Has(key) {
+			return fmt.Errorf("label %q exists but should not%s", key, labelHint(r, key, opts.AllowUndefined))
+		}
+
+		// Skip undefined keys only for positive constraints
 		if opts.AllowUndefined.Has(key) {
 			continue
 		}
-		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
-			continue
+
+		// If a required key is missing, return an error
+		if !r.Has(key) {
+			return fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined))
 		}
-		// break early so we only report the first error
-		return fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined))
 	}
-	// Well Known Labels must intersect, but if not defined, are allowed.
+
+	// Finally, check if well-known labels intersect
 	return r.Intersects(requirements)
 }
 
