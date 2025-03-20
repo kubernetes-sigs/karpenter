@@ -196,7 +196,6 @@ func (r Requirements) Compatible(requirements Requirements, options ...option.Fu
 		}
 	}
 
-	// Finally, check that well-known labels have valid intersections
 	// Well Known Labels must intersect, but if not defined, are allowed.
 	return r.Intersects(requirements)
 }
