@@ -114,7 +114,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	}
 	min := 0
 	max := 2
-	// max limit and candidates should be the same but candidates can be larger
+	// maxLimit is the min of 100 and len(candidates)
 	if len(candidates) > maxLimit {
 		candidates = candidates[0:maxLimit]
 	}
