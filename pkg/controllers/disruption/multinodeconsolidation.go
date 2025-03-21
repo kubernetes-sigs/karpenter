@@ -163,7 +163,8 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	}
 
 	log.FromContext(ctx).Info(fmt.Sprintf("multi-node consolidation, moving on to binary search: %v", lastSavedResults))
-	for min <= max {
+
+  for min <= max {
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
@@ -179,7 +180,6 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 				}
 				log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("stopping multi-node consolidation after timeout, returning last valid command")
 				return lastSavedCommand, lastSavedResults, nil
-
 			}
 			return Command{}, scheduling.Results{}, err
 		}
