@@ -35,7 +35,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -123,7 +122,7 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 	node = nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
 	node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
 	// We do not sync the taints from the nodeclaim as we assume that the karpenter provider code
-	// is managing taints.
+	// is managing taints. We do handle the unregistered taint to signal the end of syncing.
 	// Remove karpenter.sh/unregistered taint
 	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
 		return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)
@@ -134,7 +133,6 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 	if !equality.Semantic.DeepEqual(stored, node) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
-		// Here, we are updating the taint list
 		if err := r.kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return fmt.Errorf("syncing node, %w", err)
 		}
