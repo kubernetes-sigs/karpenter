@@ -122,10 +122,9 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	}
 	lastSavedCommand := Command{}
 	lastSavedResults := scheduling.Results{}
-	// Set a timeout
+	boundaryFound := false
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
-	boundaryFound := false
 
 	for !boundaryFound {
 		if max > len(candidates) {
