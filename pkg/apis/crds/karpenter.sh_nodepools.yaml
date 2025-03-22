@@ -127,9 +127,14 @@ spec:
                             description: |-
                               Schedule specifies when a budget begins being active, following
                               the upstream cronjob syntax. If omitted, the budget is always active.
-                              Timezones are not supported.
                               This field is required if Duration is set.
                             pattern: ^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$
+                            type: string
+                          timeZone:
+                            description: |-
+                              TimeZone specifies the timezone the Schedule is evaluated against.
+                              If not specified, this will default to the UTC.
+                              See https://en.wikipedia.org/wiki/List_of_tz_database_time_zones for valid time zones.
                             type: string
                         required:
                           - nodes
@@ -139,6 +144,8 @@ spec:
                       x-kubernetes-validations:
                         - message: '''schedule'' must be set with ''duration'''
                           rule: self.all(x, has(x.schedule) == has(x.duration))
+                        - message: '''timeZone'' can only be set when ''schedule'' is set'
+                          rule: self.all(x, !has(x.timeZone) || has(x.schedule))
                     consolidateAfter:
                       description: |-
                         ConsolidateAfter is the duration the controller will wait
