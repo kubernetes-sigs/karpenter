@@ -365,6 +365,21 @@ func (in *StateNode) Available() corev1.ResourceList {
 	return resources.Subtract(in.Allocatable(), in.PodRequests())
 }
 
+// Utilization is the ratio of requested resources to allocatable resources
+func (in *StateNode) Utilization() float64 {
+	requested := in.PodRequests()
+	if len(requested) == 0 {
+		return 0
+	}
+	alloc := in.Allocatable()
+	utilization := 0.0
+	for resource, request := range requested {
+		allocResource := alloc[resource]
+		utilization += float64(request.MilliValue()) / float64(allocResource.MilliValue())
+	}
+	return utilization / float64(len(requested))
+}
+
 func (in *StateNode) DaemonSetRequests() corev1.ResourceList {
 	return resources.Merge(lo.Values(in.daemonSetRequests)...)
 }
