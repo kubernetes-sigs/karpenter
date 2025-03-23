@@ -35,6 +35,12 @@ import (
 // types are slices and maps, this type should not be used as a pointer.
 type Requirements map[string]*Requirement
 
+// RequirementsReadOnly is an interface that should be accepted by consumers that only need to evaluate requirements and
+// will not be changing them. This allows reuse of requirements safely.
+type RequirementsReadOnly interface {
+	Compatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) (errs error)
+}
+
 func NewRequirements(requirements ...*Requirement) Requirements {
 	r := Requirements{}
 	for _, requirement := range requirements {

@@ -60,6 +60,7 @@ type Topology struct {
 	excludedPods sets.Set[string]
 	cluster      *state.Cluster
 	stateNodes   []*state.StateNode
+	cache        *SimulationCache
 }
 
 func NewTopology(
@@ -70,6 +71,7 @@ func NewTopology(
 	nodePools []*v1.NodePool,
 	instanceTypes map[string][]*cloudprovider.InstanceType,
 	pods []*corev1.Pod,
+	cache *SimulationCache,
 ) (*Topology, error) {
 	t := &Topology{
 		kubeClient:            kubeClient,
@@ -79,6 +81,7 @@ func NewTopology(
 		topologyGroups:        map[uint64]*TopologyGroup{},
 		inverseTopologyGroups: map[uint64]*TopologyGroup{},
 		excludedPods:          sets.New[string](),
+		cache:                 cache,
 	}
 
 	// these are the pods that we intend to schedule, so if they are currently in the cluster we shouldn't count them for
@@ -342,7 +345,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 			continue
 		}
 		// ignore the node if it doesn't match the topology group
-		if !tg.nodeFilter.Matches(n.Node.Spec.Taints, scheduling.NewLabelRequirements(n.Node.Labels)) {
+		if !tg.nodeFilter.Matches(n.Node.Spec.Taints, t.cache.StateNodeLabelRequirements(n)) {
 			continue
 		}
 		domain, exists := n.Labels()[tg.Key]

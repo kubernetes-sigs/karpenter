@@ -84,6 +84,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		}, scheduling.Results{}, nil
 	}
 
+	cache := scheduling.NewSimulationCache()
 	for _, candidate := range candidates {
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
@@ -92,7 +93,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			continue
 		}
 		// Check if we need to create any NodeClaims.
-		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
+		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, cache, candidate)
 		if err != nil {
 			// if a candidate is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {

@@ -217,6 +217,7 @@ func (p *Provisioner) NewScheduler(
 	ctx context.Context,
 	pods []*corev1.Pod,
 	stateNodes []*state.StateNode,
+	cache *scheduler.SimulationCache,
 	opts ...scheduler.Options,
 ) (*scheduler.Scheduler, error) {
 	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
@@ -263,7 +264,7 @@ func (p *Provisioner) NewScheduler(
 	}
 
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
-	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods)
+	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, cache)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}
@@ -271,7 +272,7 @@ func (p *Provisioner) NewScheduler(
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, opts...), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, cache, opts...), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -309,7 +310,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, nil
 	}
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
-	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.DisableReservedCapacityFallback)
+	s, err := p.NewScheduler(ctx, pods, nodes.Active(), nil, scheduler.DisableReservedCapacityFallback)
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			log.FromContext(ctx).Info("no nodepools found")

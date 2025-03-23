@@ -88,6 +88,7 @@ func NewScheduler(
 	daemonSetPods []*corev1.Pod,
 	recorder events.Recorder,
 	clock clock.Clock,
+	cache *SimulationCache,
 	opts ...Options,
 ) *Scheduler {
 
@@ -126,6 +127,7 @@ func NewScheduler(
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
 		}),
 		clock:                clock,
+		cache:                cache,
 		reservationManager:   NewReservationManager(instanceTypes),
 		reservedOfferingMode: option.Resolve(opts...).reservedOfferingMode,
 	}
@@ -153,6 +155,7 @@ type Scheduler struct {
 	recorder             events.Recorder
 	kubeClient           client.Client
 	clock                clock.Clock
+	cache                *SimulationCache
 	reservationManager   *ReservationManager
 	reservedOfferingMode ReservedOfferingMode
 }
@@ -434,7 +437,7 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 			if err := scheduling.Taints(taints).ToleratesPod(p); err != nil {
 				continue
 			}
-			if err := scheduling.NewLabelRequirements(node.Labels()).Compatible(scheduling.NewPodRequirements(p)); err != nil {
+			if err := s.cache.StateNodeLabelRequirements(node).Compatible(scheduling.NewPodRequirements(p)); err != nil {
 				continue
 			}
 			daemons = append(daemons, p)

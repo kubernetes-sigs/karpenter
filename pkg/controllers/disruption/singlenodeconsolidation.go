@@ -64,6 +64,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 
 	unseenNodePools := sets.New(lo.Map(candidates, func(c *Candidate, _ int) string { return c.NodePool.Name })...)
 
+	cache := scheduling.NewSimulationCache()
 	for i, candidate := range candidates {
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
@@ -91,7 +92,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		unseenNodePools.Delete(candidate.NodePool.Name)
 
 		// compute a possible consolidation option
-		cmd, results, err := s.computeConsolidation(ctx, candidate)
+		cmd, results, err := s.computeConsolidation(ctx, cache, candidate)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed computing consolidation")
 			continue
