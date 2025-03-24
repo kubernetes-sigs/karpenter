@@ -98,6 +98,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	state.PodSchedulingDecisionSeconds.Reset()
+	pscheduling.DefaultTerminationGracePeriod = nil
 })
 
 var _ = AfterSuite(func() {
@@ -219,6 +220,42 @@ var _ = Describe("Provisioning", func() {
 		Expect(env.Client.List(ctx, nodes)).To(Succeed())
 		Expect(len(nodes.Items)).To(Equal(1))
 		ExpectScheduled(ctx, env.Client, pod)
+	})
+	It("should expect nodeclaim terminationGracePeriod to be the global value when the nodepool terminationGracePeriod is not set", func() {
+		nodePool := test.NodePool()
+		pscheduling.DefaultTerminationGracePeriod = &metav1.Duration{Duration: 98 * time.Hour}
+		ExpectApplied(ctx, env.Client, nodePool)
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectScheduled(ctx, env.Client, pod)
+		nodeClaims := &v1.NodeClaimList{}
+		Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+		Expect(len(nodeClaims.Items)).To(Equal(1))
+		Expect(nodeClaims.Items[0].Spec.TerminationGracePeriod.Duration).To(BeNumerically("==", 98*time.Hour))
+	})
+	It("should expect nodeclaim terminationGracePeriod to be the nil when the nodepool terminationGracePeriod and global terminationGracePeriod is not set", func() {
+		nodePool := test.NodePool()
+		ExpectApplied(ctx, env.Client, nodePool)
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectScheduled(ctx, env.Client, pod)
+		nodeClaims := &v1.NodeClaimList{}
+		Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+		Expect(len(nodeClaims.Items)).To(Equal(1))
+		Expect(nodeClaims.Items[0].Spec.TerminationGracePeriod).To(BeNil())
+	})
+	It("should respect terminationGracePeriod value set on the nodePool over global terminationGracePeriod", func() {
+		nodePool := test.NodePool()
+		nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 223 * time.Hour}
+		pscheduling.DefaultTerminationGracePeriod = &metav1.Duration{Duration: 47 * time.Hour}
+		ExpectApplied(ctx, env.Client, nodePool)
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectScheduled(ctx, env.Client, pod)
+		nodeClaims := &v1.NodeClaimList{}
+		Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+		Expect(len(nodeClaims.Items)).To(Equal(1))
+		Expect(nodeClaims.Items[0].Spec.TerminationGracePeriod.Duration).To(BeNumerically("==", 223*time.Hour))
 	})
 	It("should ignore NodePools that are deleting", func() {
 		nodePool := test.NodePool()

@@ -30,6 +30,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
+// DefaultTerminationGracePeriod is used as runtime defaulting for TerminationGracePeriod on the NodeClaim
+// This would be a mechanism to allow cloud providers to enforce a TerminationGracePeriod on all node
+// provisioned by Karpenter
+var DefaultTerminationGracePeriod *metav1.Duration = nil
+
 // MaxInstanceTypes is a constant that restricts the number of instance types to be sent for launch. Note that this
 // is intentionally changed to var just to help in testing the code.
 var MaxInstanceTypes = 60
@@ -93,5 +98,9 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 		Spec: i.Spec,
 	}
 	nc.Spec.Requirements = i.Requirements.NodeSelectorRequirements()
+	if nc.Spec.TerminationGracePeriod == nil {
+		nc.Spec.TerminationGracePeriod = DefaultTerminationGracePeriod
+	}
+
 	return nc
 }
