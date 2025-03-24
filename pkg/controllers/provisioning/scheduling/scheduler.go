@@ -19,6 +19,7 @@ package scheduling
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -266,14 +267,14 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 }
 
 //nolint:gocyclo
-func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
+func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
 	// solve the problem of scheduling pods where a particular order is needed to prevent a max-skew violation. E.g. if we
 	// had 5xA pods and 5xB pods were they have a zonal topology spread, but A can only go in one zone and B in another.
 	// We need to schedule them alternating, A, B, A, B, .... and this solution also solves that as well.
-	errors := map[*corev1.Pod]error{}
+	podErrors := map[*corev1.Pod]error{}
 	// Reset the metric for the controller, so we don't keep old ids around
 	UnschedulablePodsCount.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
 	QueueDepth.DeletePartialMatch(map[string]string{ControllerLabel: injection.GetControllerName(ctx)})
@@ -286,6 +287,10 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	lastLogTime := s.clock.Now()
 	batchSize := len(q.pods)
 	for {
+		if ctx.Err() != nil {
+			log.FromContext(ctx).V(1).WithValues("duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("scheduling simulation timed out")
+			break
+		}
 		UnfinishedWorkSeconds.Set(s.clock.Since(startTime).Seconds(), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 
@@ -300,8 +305,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		}
 
 		// Schedule to existing nodes or create a new node
-		if errors[pod] = s.add(ctx, pod); errors[pod] == nil {
-			delete(errors, pod)
+		if podErrors[pod] = s.add(ctx, pod); podErrors[pod] == nil {
+			delete(podErrors, pod)
 			continue
 		}
 
@@ -310,9 +315,9 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 		// release the required reservations when constrained, or in subsequent runs. For an example, reference the following
 		// test: "shouldn't relax preferences when a pod fails to schedule due to a reserved offering error".
 		var relaxed bool
-		if !IsReservedOfferingError(errors[pod]) {
+		if !IsReservedOfferingError(podErrors[pod]) {
 			if relaxed = s.preferences.Relax(ctx, pod); relaxed {
-				if err := s.topology.Update(ctx, pod); err != nil {
+				if err := s.topology.Update(ctx, pod); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 					log.FromContext(ctx).Error(err, "failed updating topology")
 				}
 				// Update the cached podData since the pod was relaxed and it could have changed its requirement set
@@ -329,8 +334,8 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) Results {
 	return Results{
 		NewNodeClaims: s.newNodeClaims,
 		ExistingNodes: s.existingNodes,
-		PodErrors:     errors,
-	}
+		PodErrors:     podErrors,
+	}, ctx.Err()
 }
 
 func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
