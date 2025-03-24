@@ -157,7 +157,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	cluster = state.NewCluster(clock, client, cloudProvider)
 	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, []*v1.NodePool{nodePool}, map[string][]*cloudprovider.InstanceType{
 		nodePool.Name: instanceTypes,
-	}, pods)
+	}, pods, nil)
 	if err != nil {
 		b.Fatalf("creating topology, %s", err)
 	}
@@ -173,6 +173,7 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 		nil,
 		events.NewRecorder(&record.FakeRecorder{}),
 		clock,
+		nil,
 		scheduling.DisableReservedCapacityFallback,
 	)
 
