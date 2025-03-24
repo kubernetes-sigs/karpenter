@@ -53,6 +53,9 @@ also feel free to reach out to discuss.
 
 See also our [contributor guide](CONTRIBUTING.md) and the Kubernetes [community page](https://kubernetes.io/community) for more details on how to get involved.
 
+### Karpenter Ecosystem
+- [Spot Insights](https://spot.cloudpilot.ai/): A free tool to track real-time spot instance prices, interruptions, and historical trends, making it easier to monitor and manage your Karpenter setup.
+
 ### Code of conduct
 
 Participation in the Kubernetes community is governed by the [Kubernetes Code of Conduct](code-of-conduct.md).
