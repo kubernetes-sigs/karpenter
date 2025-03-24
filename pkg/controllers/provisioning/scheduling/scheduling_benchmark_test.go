@@ -182,7 +182,10 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	podsScheduledInRound1 := 0
 	nodesInRound1 := 0
 	for i := 0; i < b.N; i++ {
-		results := scheduler.Solve(ctx, pods)
+		results, err := scheduler.Solve(ctx, pods)
+		if err != nil {
+			b.Fatalf("expected scheduler to schedule all pods without error, got %s", err)
+		}
 		if len(results.PodErrors) > 0 {
 			b.Fatalf("expected all pods to schedule, got %d pods that didn't", len(results.PodErrors))
 		}
