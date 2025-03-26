@@ -471,12 +471,12 @@ func getDaemonOverhead(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []
 	})
 }
 
-// getDaemonHostPortUsage tracks requested host ports for daemonsets, given a nodeclaimtemplate
+// getDaemonHostPortUsage determines requested host ports for DaemonSet pods, given a NodeClaimTemplate
 func getDaemonHostPortUsage(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]*scheduling.HostPortUsage {
 	nctToOccupiedPorts := map[*NodeClaimTemplate]*scheduling.HostPortUsage{}
 	for _, nct := range nodeClaimTemplates {
 		hostPortUsage := scheduling.NewHostPortUsage()
-		// gather compatible daemon sets for the NodeClaimTemplate of a NodePool
+		// gather compatible DaemonSet pods for the NodeClaimTemplate
 		for _, pod := range lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool { return isDaemonPodCompatible(nct, p) }) {
 			hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
 		}
