@@ -826,6 +826,24 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
+		It("should account for daemonset hostports", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
+					HostPorts:            []int32{8080},
+				}},
+			))
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+					HostPorts:            []int32{8080},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			// Expect that the host port will be blocked by a compatible daemonset
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		})
 		It("should account for daemonsets (with startup taint)", func() {
 			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
