@@ -113,15 +113,16 @@ func NewScheduler(
 		return nct, true
 	})
 	s := &Scheduler{
-		uuid:               uuid.NewUUID(),
-		kubeClient:         kubeClient,
-		nodeClaimTemplates: templates,
-		topology:           topology,
-		cluster:            cluster,
-		daemonOverhead:     getDaemonOverhead(templates, daemonSetPods),
-		cachedPodData:      map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
-		recorder:           recorder,
-		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
+		uuid:                uuid.NewUUID(),
+		kubeClient:          kubeClient,
+		nodeClaimTemplates:  templates,
+		topology:            topology,
+		cluster:             cluster,
+		daemonOverhead:      getDaemonOverhead(templates, daemonSetPods),
+		daemonHostPortUsage: getDaemonHostPortUsage(templates, daemonSetPods),
+		cachedPodData:       map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
+		recorder:            recorder,
+		preferences:         &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
 		}),
@@ -146,6 +147,7 @@ type Scheduler struct {
 	nodeClaimTemplates   []*NodeClaimTemplate
 	remainingResources   map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead       map[*NodeClaimTemplate]corev1.ResourceList
+	daemonHostPortUsage  map[*NodeClaimTemplate]*scheduling.HostPortUsage
 	cachedPodData        map[types.UID]*PodData // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
 	preferences          *Preferences
 	topology             *Topology
@@ -393,7 +395,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 			}
 		}
 
-		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes, s.reservationManager, s.reservedOfferingMode)
+		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], s.daemonHostPortUsage[nodeClaimTemplate], instanceTypes, s.reservationManager, s.reservedOfferingMode)
 		if err := nodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID]); err != nil {
 			nodeClaim.Destroy()
 			if IsReservedOfferingError(err) {
@@ -467,6 +469,22 @@ func getDaemonOverhead(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []
 	return lo.SliceToMap(nodeClaimTemplates, func(nct *NodeClaimTemplate) (*NodeClaimTemplate, corev1.ResourceList) {
 		return nct, resources.RequestsForPods(lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool { return isDaemonPodCompatible(nct, p) })...)
 	})
+}
+
+// getDaemonHostPortUsage tracks requested host ports for daemonsets, given a nodeclaimtemplate
+func getDaemonHostPortUsage(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]*scheduling.HostPortUsage {
+	nctToOccupiedPorts := map[*NodeClaimTemplate]*scheduling.HostPortUsage{}
+	for _, nct := range nodeClaimTemplates {
+		hostPortUsage := scheduling.NewHostPortUsage()
+		// gather compatible daemon sets for the NodeClaimTemplate of a NodePool
+		for _, pod := range lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool { return isDaemonPodCompatible(nct, p) }) {
+			hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
+		}
+		if _, ok := nctToOccupiedPorts[nct]; !ok {
+			nctToOccupiedPorts[nct] = hostPortUsage
+		}
+	}
+	return nctToOccupiedPorts
 }
 
 // isDaemonPodCompatible determines if the daemon pod is compatible with the NodeClaimTemplate for daemon scheduling
