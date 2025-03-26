@@ -480,9 +480,7 @@ func getDaemonHostPortUsage(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPo
 		for _, pod := range lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool { return isDaemonPodCompatible(nct, p) }) {
 			hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
 		}
-		if _, ok := nctToOccupiedPorts[nct]; !ok {
-			nctToOccupiedPorts[nct] = hostPortUsage
-		}
+		nctToOccupiedPorts[nct] = hostPortUsage
 	}
 	return nctToOccupiedPorts
 }
