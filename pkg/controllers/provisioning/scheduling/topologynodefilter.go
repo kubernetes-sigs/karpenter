@@ -65,7 +65,7 @@ func MakeTopologyNodeFilter(p *corev1.Pod, taintPolicy corev1.NodeInclusionPolic
 }
 
 // Matches returns true if the TopologyNodeFilter doesn't prohibit node from the participating in the topology
-func (t TopologyNodeFilter) Matches(taints []corev1.Taint, requirements scheduling.Requirements, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
+func (t TopologyNodeFilter) Matches(taints []corev1.Taint, requirements scheduling.RequirementsReadOnly, compatibilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
 	matchesAffinity := true
 	if t.AffinityPolicy == corev1.NodeInclusionPolicyHonor {
 		matchesAffinity = t.matchesRequirements(requirements)
@@ -82,7 +82,7 @@ func (t TopologyNodeFilter) Matches(taints []corev1.Taint, requirements scheduli
 // MatchesRequirements returns true if the TopologyNodeFilter doesn't prohibit a node with the requirements from
 // participating in the topology. This method allows checking the requirements from a scheduling.NodeClaim to see if the
 // node we will soon create participates in this topology.
-func (t TopologyNodeFilter) matchesRequirements(requirements scheduling.Requirements, compatabilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
+func (t TopologyNodeFilter) matchesRequirements(requirements scheduling.RequirementsReadOnly, compatabilityOptions ...option.Function[scheduling.CompatibilityOptions]) bool {
 	// no requirements, so it always matches
 	if len(t.Requirements) == 0 || t.AffinityPolicy == corev1.NodeInclusionPolicyIgnore {
 		return true

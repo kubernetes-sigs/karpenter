@@ -124,12 +124,13 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	// Set a timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
+	cache := scheduling.NewSimulationCache()
 	for min <= max {
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
 		// Pass the timeout context to ensure sub-operations can be canceled
-		cmd, results, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
+		cmd, results, err := m.computeConsolidation(timeoutCtx, cache, candidatesToConsolidate...)
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
