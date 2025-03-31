@@ -1,6 +1,7 @@
 module sigs.k8s.io/karpenter
 
 go 1.24.0
+
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
