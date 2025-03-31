@@ -38,6 +38,7 @@ type OptionsFields struct {
 	LeaderElectionName      *string
 	LeaderElectionNamespace *string
 	MemoryLimit             *int64
+	CPURequestsMillicores   *int64
 	LogLevel                *string
 	LogOutputPaths          *string
 	LogErrorOutputPaths     *string
@@ -69,6 +70,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		EnableProfiling:       lo.FromPtrOr(opts.EnableProfiling, false),
 		DisableLeaderElection: lo.FromPtrOr(opts.DisableLeaderElection, false),
 		MemoryLimit:           lo.FromPtrOr(opts.MemoryLimit, -1),
+		CPURequestsMillicores: lo.FromPtrOr(opts.CPURequestsMillicores, 1000),
 		LogLevel:              lo.FromPtrOr(opts.LogLevel, ""),
 		LogOutputPaths:        lo.FromPtrOr(opts.LogOutputPaths, "stdout"),
 		LogErrorOutputPaths:   lo.FromPtrOr(opts.LogErrorOutputPaths, "stderr"),
