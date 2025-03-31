@@ -19,6 +19,7 @@ package scheduling
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/mitchellh/hashstructure/v2"
@@ -54,6 +55,8 @@ func (t TopologyType) String() string {
 
 // TopologyGroup is used to track pod counts that match a selector by the topology domain (e.g. SELECT COUNT(*) FROM pods GROUP BY(topology_ke
 type TopologyGroup struct {
+	mu sync.RWMutex
+
 	// Hashed Fields
 	Key         string
 	Type        TopologyType
@@ -136,6 +139,9 @@ func (t *TopologyGroup) Get(pod *corev1.Pod, podDomains, nodeDomains *scheduling
 }
 
 func (t *TopologyGroup) Record(domains ...string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	for _, domain := range domains {
 		t.domains[domain]++
 		t.emptyDomains.Delete(domain)
@@ -150,6 +156,9 @@ func (t *TopologyGroup) Counts(pod *corev1.Pod, taints []corev1.Taint, requireme
 
 // Register ensures that the topology is aware of the given domain names.
 func (t *TopologyGroup) Register(domains ...string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	for _, domain := range domains {
 		if _, ok := t.domains[domain]; !ok {
 			t.domains[domain] = 0
@@ -159,6 +168,9 @@ func (t *TopologyGroup) Register(domains ...string) {
 }
 
 func (t *TopologyGroup) Unregister(domains ...string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	for _, domain := range domains {
 		delete(t.domains, domain)
 		t.emptyDomains.Delete(domain)
@@ -166,14 +178,23 @@ func (t *TopologyGroup) Unregister(domains ...string) {
 }
 
 func (t *TopologyGroup) AddOwner(key types.UID) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	t.owners[key] = struct{}{}
 }
 
 func (t *TopologyGroup) RemoveOwner(key types.UID) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	delete(t.owners, key)
 }
 
 func (t *TopologyGroup) IsOwnedBy(key types.UID) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	_, ok := t.owners[key]
 	return ok
 }
@@ -203,6 +224,9 @@ func (t *TopologyGroup) Hash() uint64 {
 // If there are no eligible domains, we return a `DoesNotExist` requirement, implying that we could not satisfy the topologySpread requirement.
 // nolint:gocyclo
 func (t *TopologyGroup) nextDomainTopologySpread(pod *corev1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	// min count is calculated across all domains
 	min := t.domainMinCount(podDomains)
 	selfSelecting := t.selects(pod)
@@ -275,6 +299,9 @@ func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
 
 // nolint:gocyclo
 func (t *TopologyGroup) nextDomainAffinity(pod *corev1.Pod, podDomains *scheduling.Requirement, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	options := scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpDoesNotExist)
 
 	// If we are explicitly selecting on specific node domains ("In" requirement),
@@ -338,6 +365,9 @@ func (t *TopologyGroup) anyCompatiblePodDomain(podDomains *scheduling.Requiremen
 
 // nolint:gocyclo
 func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	options := scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpDoesNotExist)
 	// pods with anti-affinity must schedule to a domain where there are currently none of those pods (an empty
 	// domain). If there are none of those domains, then the pod can't schedule and we don't need to walk this
