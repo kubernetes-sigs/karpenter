@@ -66,6 +66,7 @@ type Options struct {
 	LeaderElectionName      string
 	LeaderElectionNamespace string
 	MemoryLimit             int64
+	CPURequests             int64
 	LogLevel                string
 	LogOutputPaths          string
 	LogErrorOutputPaths     string
@@ -104,6 +105,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.LeaderElectionName, "leader-election-name", env.WithDefaultString("LEADER_ELECTION_NAME", "karpenter-leader-election"), "Leader election name to create and monitor the lease if running outside the cluster")
 	fs.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", env.WithDefaultString("LEADER_ELECTION_NAMESPACE", ""), "Leader election namespace to create and monitor the lease if running outside the cluster")
 	fs.Int64Var(&o.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
+	fs.Int64Var(&o.CPURequests, "cpu-requests", env.WithDefaultInt64("CPU_REQUESTS", 1000), "CPU requests in millicores on the container running the controller.")
 	fs.StringVar(&o.LogLevel, "log-level", env.WithDefaultString("LOG_LEVEL", "info"), "Log verbosity level. Can be one of 'debug', 'info', or 'error'")
 	fs.StringVar(&o.LogOutputPaths, "log-output-paths", env.WithDefaultString("LOG_OUTPUT_PATHS", "stdout"), "Optional comma separated paths for directing log output")
 	fs.StringVar(&o.LogErrorOutputPaths, "log-error-output-paths", env.WithDefaultString("LOG_ERROR_OUTPUT_PATHS", "stderr"), "Optional comma separated paths for logging error output")
@@ -125,6 +127,9 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	}
 	if !lo.Contains(validPreferencePolicies, PreferencePolicy(o.preferencePolicyRaw)) {
 		return fmt.Errorf("validating cli flags / env vars, invalid PREFERENCE_POLICY %q", o.preferencePolicyRaw)
+	}
+	if o.CPURequests <= 0 {
+		return fmt.Errorf("validating cli flags / env vars, invalid CPU_REQUESTS %d, must be positive", o.CPURequests)
 	}
 	gates, err := ParseFeatureGates(o.FeatureGates.inputStr)
 	if err != nil {
