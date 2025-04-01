@@ -724,6 +724,23 @@ func (c *Cluster) updateNodePoolResources(oldNode, newNode *StateNode) {
 			c.nodePoolResources[newNodePoolName][resourceName] = current
 		}
 	}
+	// Scan all NodeClaim to check be drifted
+	for _, nodePoolName := range []string{oldNodePoolName, newNodePoolName} {
+		if nodePoolName == "" {
+			continue
+		}
+		driftedCount := 0
+		for _, n := range c.nodes {
+			if n.Labels()[v1.NodePoolLabelKey] == nodePoolName {
+				if n.NodeClaim != nil && n.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue() {
+					driftedCount++
+				}
+			}
+		}
+		if _, ok := c.nodePoolResources[nodePoolName]; ok {
+			c.nodePoolResources[nodePoolName][resources.DriftedNodeClaim] = resource.MustParse(fmt.Sprintf("%d", driftedCount))
+		}
+	}
 	// Garbage collect any NodePool keys that no longer have any resources assigned to them.
 	// We do this when there are no longer any NodeClaims that map to this NodePool
 	// so that we don't leak NodePool keys in our nodePoolResources map
