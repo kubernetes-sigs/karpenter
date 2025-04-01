@@ -41,7 +41,7 @@ spec:
           name: Memory
           priority: 1
           type: string
-        - jsonPath: .status.driftedNodeClaimCount
+        - jsonPath: .status.resources.driftedNodeClaims
           name: DriftedNodeClaims
           priority: 1
           type: integer
@@ -500,9 +500,6 @@ spec:
                       - type
                     type: object
                   type: array
-                driftedNodeClaimCount:
-                  description: DriftedNodeClaimCount represents the count of NodeClaims that have drifted from the NodePool/NodeClass configuration
-                  type: integer
                 nodeClassObservedGeneration:
                   description: |-
                     NodeClassObservedGeneration represents the observed nodeClass generation for referenced nodeClass. If this does not match

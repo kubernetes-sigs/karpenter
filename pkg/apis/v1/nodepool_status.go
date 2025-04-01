@@ -44,9 +44,6 @@ type NodePoolStatus struct {
 	// the actual NodeClass Generation, NodeRegistrationHealthy status condition on the NodePool will be reset
 	// +optional
 	NodeClassObservedGeneration int64 `json:"nodeClassObservedGeneration,omitempty"`
-	// DriftedNodeClaimCount represents the count of NodeClaims that have drifted from the NodePool/NodeClass configuration
-	// +optional
-	DriftedNodeClaimCount int `json:"driftedNodeClaimCount,omitempty"`
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
