@@ -18,9 +18,9 @@ package counter
 
 import (
 	"context"
-	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -47,14 +47,12 @@ type Controller struct {
 	cluster       *state.Cluster
 }
 
-var ResourceNode = corev1.ResourceName("nodes")
-
 var BaseResources = corev1.ResourceList{
 	corev1.ResourceCPU:              resource.MustParse("0"),
 	corev1.ResourceMemory:           resource.MustParse("0"),
 	corev1.ResourcePods:             resource.MustParse("0"),
 	corev1.ResourceEphemeralStorage: resource.MustParse("0"),
-	ResourceNode:                    resource.MustParse("0"),
+	resources.Node:                  resource.MustParse("0"),
 }
 
 // NewController is a constructor
@@ -81,48 +79,19 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	}
 	stored := nodePool.DeepCopy()
 	// Determine resource usage and update nodepool.status.resources
-	nodePool.Status.Resources = c.resourceCountsFor(v1.NodePoolLabelKey, nodePool.Name)
+	nodePool.Status.Resources = lo.Assign(BaseResources, c.cluster.NodePoolResourcesFor(nodePool.Name))
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
-	return reconcile.Result{}, nil
-}
-
-func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) corev1.ResourceList {
-	res := BaseResources.DeepCopy()
-	nodeCount := 0
-	// Record all resources provisioned by the nodepools, we look at the cluster state nodes as their capacity
-	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our nodepool
-	// status immediately upon node creation instead of waiting for the node to become ready.
-	c.cluster.ForEachNode(func(n *state.StateNode) bool {
-		// Don't count nodes that we are planning to delete. This is to ensure that we are consistent throughout
-		// our provisioning and deprovisioning loops
-		if n.MarkedForDeletion() {
-			return true
-		}
-		if n.Labels()[ownerLabel] == ownerName {
-			res = resources.MergeInto(res, n.Capacity())
-			nodeCount += 1
-		}
-		return true
-	})
-	res[ResourceNode] = resource.MustParse(fmt.Sprintf("%d", nodeCount))
-	return res
+	return reconcile.Result{RequeueAfter: time.Second * 5}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.counter").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
-		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(), builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
-			// Add a predicate here to filter out NodeClaims triggering reconciliation if they haven't resolved their
-			// providerID (and therefore, their resources)
-			nc := o.(*v1.NodeClaim)
-			return nc.Status.ProviderID != ""
-		}))).
-		Watches(&corev1.Node{}, nodepoolutils.NodeEventHandler()).
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.GenerationChangedPredicate{})).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 

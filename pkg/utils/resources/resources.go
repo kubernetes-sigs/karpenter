@@ -24,6 +24,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
+var Node = v1.ResourceName("nodes")
+
 // RequestsForPods returns the total resources of a variadic list of podspecs.
 func RequestsForPods(pods ...*v1.Pod) v1.ResourceList {
 	var resources []v1.ResourceList

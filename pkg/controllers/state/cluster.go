@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -42,6 +43,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // Cluster maintains cluster state that is often needed but expensive to compute.
@@ -56,6 +58,7 @@ type Cluster struct {
 	bindings                  map[types.NamespacedName]string // pod namespaced named -> node name
 	nodeNameToProviderID      map[string]string               // node name -> provider id
 	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
+	nodePoolResources         map[string]corev1.ResourceList  // node pool name -> resource list
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
 	podAcks                         sync.Map // pod namespaced name -> time when Karpenter first saw the pod as pending
@@ -84,6 +87,7 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		daemonSetPods:             sync.Map{},
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
+		nodePoolResources:         map[string]corev1.ResourceList{},
 
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
@@ -255,6 +259,7 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 
 	for _, id := range providerIDs {
 		if n, ok := c.nodes[id]; ok {
+			c.updateNodePoolResources(nil, c.nodes[id])
 			n.markedForDeletion = false
 		}
 	}
@@ -269,6 +274,7 @@ func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 
 	for _, id := range providerIDs {
 		if n, ok := c.nodes[id]; ok {
+			c.updateNodePoolResources(c.nodes[id], nil)
 			n.markedForDeletion = true
 		}
 	}
@@ -482,6 +488,13 @@ func (c *Cluster) ConsolidationState() time.Time {
 	return c.MarkUnconsolidated()
 }
 
+func (c *Cluster) NodePoolResourcesFor(nodePoolName string) corev1.ResourceList {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return lo.Assign(c.nodePoolResources[nodePoolName])
+}
+
 // Reset the cluster state for unit testing
 func (c *Cluster) Reset() {
 	c.mu.Lock()
@@ -492,6 +505,7 @@ func (c *Cluster) Reset() {
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
+	c.nodePoolResources = map[string]corev1.ResourceList{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
 	c.daemonSetPods = sync.Map{}
@@ -562,6 +576,7 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1.NodeClaim, oldNode *StateN
 	if id, ok := c.nodeClaimNameToProviderID[nodeClaim.Name]; ok && id != nodeClaim.Status.ProviderID {
 		c.cleanupNodeClaim(nodeClaim.Name)
 	}
+	c.updateNodePoolResources(oldNode, n)
 	c.triggerConsolidationOnChange(oldNode, n)
 	return n
 }
@@ -569,9 +584,12 @@ func (c *Cluster) newStateFromNodeClaim(nodeClaim *v1.NodeClaim, oldNode *StateN
 func (c *Cluster) cleanupNodeClaim(name string) {
 	if id := c.nodeClaimNameToProviderID[name]; id != "" {
 		if c.nodes[id].Node == nil {
+			c.updateNodePoolResources(c.nodes[id], nil)
 			delete(c.nodes, id)
 		} else {
+			oldNode := c.nodes[id].ShallowCopy()
 			c.nodes[id].NodeClaim = nil
+			c.updateNodePoolResources(oldNode, c.nodes[id])
 		}
 		c.MarkUnconsolidated()
 	}
@@ -609,6 +627,7 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNo
 	if id, ok := c.nodeNameToProviderID[node.Name]; ok && id != node.Spec.ProviderID {
 		c.cleanupNode(node.Name)
 	}
+	c.updateNodePoolResources(oldNode, n)
 	c.triggerConsolidationOnChange(oldNode, n)
 	return n, nil
 }
@@ -616,12 +635,64 @@ func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNo
 func (c *Cluster) cleanupNode(name string) {
 	if id := c.nodeNameToProviderID[name]; id != "" {
 		if c.nodes[id].NodeClaim == nil {
+			c.updateNodePoolResources(c.nodes[id], nil)
 			delete(c.nodes, id)
 		} else {
+			oldNode := c.nodes[id].ShallowCopy()
 			c.nodes[id].Node = nil
+			c.updateNodePoolResources(oldNode, c.nodes[id])
 		}
 		delete(c.nodeNameToProviderID, name)
 		c.MarkUnconsolidated()
+	}
+}
+
+// nolint:gocyclo
+func (c *Cluster) updateNodePoolResources(oldNode, newNode *StateNode) {
+	var oldNodePoolName, newNodePoolName string
+	var oldResources, newResources corev1.ResourceList
+	if oldNode != nil && (oldNode.Node != nil || oldNode.NodeClaim != nil) {
+		oldNodePoolName = oldNode.Labels()[v1.NodePoolLabelKey]
+		oldResources = lo.Ternary(oldNode.MarkedForDeletion(), corev1.ResourceList{}, oldNode.Capacity())
+	}
+	if newNode != nil && (newNode.Node != nil || newNode.NodeClaim != nil) {
+		newNodePoolName = newNode.Labels()[v1.NodePoolLabelKey]
+		newResources = lo.Ternary(newNode.MarkedForDeletion(), corev1.ResourceList{}, newNode.Capacity())
+	}
+	if len(oldResources) != 0 {
+		oldResources[resources.Node] = resource.MustParse("1")
+	}
+	if len(newResources) != 0 {
+		newResources[resources.Node] = resource.MustParse("1")
+	}
+	if _, ok := c.nodePoolResources[newNodePoolName]; !ok && newNodePoolName != "" {
+		c.nodePoolResources[newNodePoolName] = corev1.ResourceList{}
+	}
+	if oldNodePoolName != "" {
+		for resourceName, quantity := range oldResources {
+			current := c.nodePoolResources[oldNodePoolName][resourceName]
+			current.Sub(quantity)
+			c.nodePoolResources[oldNodePoolName][resourceName] = current
+		}
+	}
+	if newNodePoolName != "" {
+		for resourceName, quantity := range newResources {
+			current := c.nodePoolResources[newNodePoolName][resourceName]
+			current.Add(quantity)
+			c.nodePoolResources[newNodePoolName][resourceName] = current
+		}
+	}
+	for _, name := range []string{oldNodePoolName, newNodePoolName} {
+		allZero := true
+		for _, v := range c.nodePoolResources[name] {
+			if !v.IsZero() {
+				allZero = false
+				break
+			}
+		}
+		if allZero {
+			delete(c.nodePoolResources, name)
+		}
 	}
 }
 
