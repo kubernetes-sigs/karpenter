@@ -48,6 +48,7 @@ type Controller struct {
 }
 
 var ResourceNode = corev1.ResourceName("nodes")
+var ResourceDriftedNodeClaim = corev1.ResourceName("driftedNodeClaims")
 
 var BaseResources = corev1.ResourceList{
 	corev1.ResourceCPU:              resource.MustParse("0"),
@@ -55,6 +56,7 @@ var BaseResources = corev1.ResourceList{
 	corev1.ResourcePods:             resource.MustParse("0"),
 	corev1.ResourceEphemeralStorage: resource.MustParse("0"),
 	ResourceNode:                    resource.MustParse("0"),
+	ResourceDriftedNodeClaim:        resource.MustParse("0"),
 }
 
 // NewController is a constructor
@@ -82,6 +84,22 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	stored := nodePool.DeepCopy()
 	// Determine resource usage and update nodepool.status.resources
 	nodePool.Status.Resources = c.resourceCountsFor(v1.NodePoolLabelKey, nodePool.Name)
+	// Set condition Drifted
+	driftedNodeClaimCount := nodePool.Status.Resources[ResourceDriftedNodeClaim]
+	if !driftedNodeClaimCount.IsZero() {
+		nodePool.StatusConditions().SetTrueWithReason(
+			v1.ConditionTypeNodeClaimsDrifted,
+			"NodeClaimsDriftedExist",
+			fmt.Sprintf("%d NodeClaim(s) managed by this NodePool have drifted", driftedNodeClaimCount.Value()),
+		)
+	} else {
+		nodePool.StatusConditions().SetFalse(
+			v1.ConditionTypeNodeClaimsDrifted,
+			"ZeroNodeClaimsDrifted",
+			"All NodeClaims are in sync with the NodePool configuration",
+		)
+	}
+
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -93,6 +111,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) corev1.ResourceList {
 	res := BaseResources.DeepCopy()
 	nodeCount := 0
+	driftedNodeClaimCount := 0
 	// Record all resources provisioned by the nodepools, we look at the cluster state nodes as their capacity
 	// is accurately reported even for nodes that haven't fully started yet. This allows us to update our nodepool
 	// status immediately upon node creation instead of waiting for the node to become ready.
@@ -105,10 +124,16 @@ func (c *Controller) resourceCountsFor(ownerLabel string, ownerName string) core
 		if n.Labels()[ownerLabel] == ownerName {
 			res = resources.MergeInto(res, n.Capacity())
 			nodeCount += 1
+			if n.NodeClaim != nil && n.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue() {
+				driftedNodeClaimCount += 1
+			}
 		}
+
 		return true
 	})
 	res[ResourceNode] = resource.MustParse(fmt.Sprintf("%d", nodeCount))
+	res[ResourceDriftedNodeClaim] = resource.MustParse(fmt.Sprintf("%d", driftedNodeClaimCount))
+
 	return res
 }
 
