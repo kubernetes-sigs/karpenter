@@ -183,10 +183,11 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 // currently bound to a node. The pod returned may not be up-to-date with respect to status, however since the
 // anti-affinity terms can't be modified, they will be correct.
 func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *corev1.Pod, n *corev1.Node) bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	c.antiAffinityPods.Range(func(key, value interface{}) bool {
 		pod := value.(*corev1.Pod)
-		c.mu.RLock()
-		defer c.mu.RUnlock()
 		nodeName, ok := c.bindings[client.ObjectKeyFromObject(pod)]
 		if !ok {
 			return true
