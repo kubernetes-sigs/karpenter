@@ -10,8 +10,6 @@ on:
 jobs:
   before:
     name: Before PR
-    permissions:
-        pull-requests: write
     strategy:
       fail-fast: false
       matrix:
