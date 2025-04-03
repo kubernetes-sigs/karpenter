@@ -663,12 +663,20 @@ var _ = Describe("Provisioning", func() {
 
 	Context("Resource Limits", func() {
 		It("should not schedule when limits are exceeded", func() {
-			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Limits: v1.Limits(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("20")}),
 				},
-				Status: v1.NodePoolStatus{
-					Resources: corev1.ResourceList{
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			cluster.UpdateNodeClaim(test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
 						corev1.ResourceCPU: resource.MustParse("100"),
 					},
 				},
