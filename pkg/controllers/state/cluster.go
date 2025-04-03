@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -492,7 +493,7 @@ func (c *Cluster) NodePoolResourcesFor(nodePoolName string) corev1.ResourceList 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return lo.Assign(c.nodePoolResources[nodePoolName])
+	return maps.Clone(c.nodePoolResources[nodePoolName])
 }
 
 // Reset the cluster state for unit testing
@@ -682,6 +683,9 @@ func (c *Cluster) updateNodePoolResources(oldNode, newNode *StateNode) {
 			c.nodePoolResources[newNodePoolName][resourceName] = current
 		}
 	}
+	// Garbage collect any NodePool keys that no longer have any resources assigned to them.
+	// We do this when there are no longer any NodeClaims that map to this NodePool
+	// so that we don't leak NodePool keys in our nodePoolResources map
 	for _, name := range []string{oldNodePoolName, newNodePoolName} {
 		allZero := true
 		for _, v := range c.nodePoolResources[name] {
