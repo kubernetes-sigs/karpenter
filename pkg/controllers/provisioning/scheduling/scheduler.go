@@ -67,14 +67,31 @@ const (
 	ReservedOfferingModeStrict
 )
 
+type PreferencePolicy string
+
+const (
+	PreferencePolicyIgnore  PreferencePolicy = "Ignore"
+	PreferencePolicyRespect PreferencePolicy = "Respect"
+)
+
 type options struct {
 	reservedOfferingMode ReservedOfferingMode
+	preferencePolicy     PreferencePolicy
 }
 
 type Options = option.Function[options]
 
+var defaultOptions = func(opts *options) {
+	opts.reservedOfferingMode = ReservedOfferingModeFallback
+	opts.preferencePolicy = PreferencePolicyRespect
+}
+
 var DisableReservedCapacityFallback = func(opts *options) {
 	opts.reservedOfferingMode = ReservedOfferingModeStrict
+}
+
+var IgnorePreferences = func(opts *options) {
+	opts.preferencePolicy = PreferencePolicyIgnore
 }
 
 func NewScheduler(
@@ -128,7 +145,8 @@ func NewScheduler(
 		}),
 		clock:                clock,
 		reservationManager:   NewReservationManager(instanceTypes),
-		reservedOfferingMode: option.Resolve(opts...).reservedOfferingMode,
+		reservedOfferingMode: option.Resolve(append([]Options{defaultOptions}, opts...)...).reservedOfferingMode,
+		preferencePolicy:     option.Resolve(append([]Options{defaultOptions}, opts...)...).preferencePolicy,
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
 	return s
@@ -157,6 +175,7 @@ type Scheduler struct {
 	clock                clock.Clock
 	reservationManager   *ReservationManager
 	reservedOfferingMode ReservedOfferingMode
+	preferencePolicy     PreferencePolicy
 }
 
 // Results contains the results of the scheduling operation
@@ -357,7 +376,12 @@ func (s *Scheduler) trySchedule(ctx context.Context, p *corev1.Pod) error {
 }
 
 func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
-	requirements := scheduling.NewPodRequirements(p)
+	var requirements scheduling.Requirements
+	if s.preferencePolicy == PreferencePolicyIgnore {
+		requirements = scheduling.NewStrictPodRequirements(p)
+	} else {
+		requirements = scheduling.NewPodRequirements(p)
+	}
 	strictRequirements := requirements
 	if scheduling.HasPreferredNodeAffinity(p) {
 		// strictPodRequirements is important as it ensures we don't inadvertently restrict the possible pod domains by a
@@ -452,7 +476,7 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 			if err := scheduling.Taints(taints).ToleratesPod(p); err != nil {
 				continue
 			}
-			if err := scheduling.NewLabelRequirements(node.Labels()).Compatible(scheduling.NewPodRequirements(p)); err != nil {
+			if err := scheduling.NewLabelRequirements(node.Labels()).Compatible(scheduling.NewStrictPodRequirements(p)); err != nil {
 				continue
 			}
 			daemons = append(daemons, p)
