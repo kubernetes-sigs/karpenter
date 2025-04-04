@@ -285,20 +285,10 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	q := NewQueue(pods, s.cachedPodData)
 
 	startTime := s.clock.Now()
-	lastLogTime := s.clock.Now()
-	batchSize := len(q.pods)
 	for {
-		if ctx.Err() != nil {
-			log.FromContext(ctx).V(1).WithValues("duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("scheduling simulation timed out")
-			break
-		}
 		UnfinishedWorkSeconds.Set(s.clock.Since(startTime).Seconds(), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 
-		if s.clock.Since(lastLogTime) > time.Minute {
-			log.FromContext(ctx).WithValues("pods-scheduled", batchSize-len(q.pods), "pods-remaining", len(q.pods), "existing-nodes", len(s.existingNodes), "simulated-nodes", len(s.newNodeClaims), "duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("computing pod scheduling...")
-			lastLogTime = s.clock.Now()
-		}
 		// Try the next pod
 		pod, ok := q.Pop()
 		if !ok {
@@ -308,6 +298,10 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		// If we don't schedule it, we store the original pod (with preferences)
 		// in the queue and give ourselves another chance to schedule it later
 		if err := s.trySchedule(ctx, pod.DeepCopy()); err != nil {
+			if errors.Is(err, context.Canceled) {
+				log.FromContext(ctx).V(1).WithValues("duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("scheduling simulation timed out")
+				break
+			}
 			podErrors[pod] = err
 			if e := s.topology.Update(ctx, pod); e != nil && !errors.Is(e, context.DeadlineExceeded) {
 				log.FromContext(ctx).Error(e, "failed updating topology")
@@ -333,6 +327,9 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 
 func (s *Scheduler) trySchedule(ctx context.Context, p *corev1.Pod) error {
 	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		err := s.add(ctx, p)
 		if err == nil {
 			return nil
