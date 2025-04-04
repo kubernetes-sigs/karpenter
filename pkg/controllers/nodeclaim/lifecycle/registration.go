@@ -19,22 +19,20 @@ package lifecycle
 import (
 	"context"
 	"fmt"
-
-	"k8s.io/apimachinery/pkg/types"
-
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -120,9 +118,17 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 	controllerutil.AddFinalizer(node, v1.TerminationFinalizer)
 
 	node = nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
+
+	if _, ok := nodeClaim.Annotations[v1.NodeClaimSyncTaintsAnnotationKey]; ok {
+		// Sync all taints inside NodeClaim into the Node taints
+		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.Taints)
+		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.StartupTaints)
+	}
+
 	node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
-	// We do not sync the taints from the nodeclaim as we assume that the karpenter provider code
-	// is managing taints. We do handle the unregistered taint to signal the end of syncing.
+	// We do not sync the taints, unless the feature flag is enabled, from the nodeclaim as
+	// we assume that the karpenter provider code is managing taints. We do handle the
+	// unregistered taint to signal the end of syncing.
 	// Remove karpenter.sh/unregistered taint
 	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
 		return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)

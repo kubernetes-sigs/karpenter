@@ -51,6 +51,7 @@ const (
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
+	NodeClaimSyncTaintsAnnotationKey           = apis.Group + "/nodeclaim-sync-taints"
 )
 
 // Karpenter specific finalizers
