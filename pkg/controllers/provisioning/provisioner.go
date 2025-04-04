@@ -40,6 +40,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
@@ -178,12 +180,13 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 
 // consolidationWarnings potentially writes logs warning about possible unexpected interactions
 // between scheduling constraints and consolidation
+// nolint:gocyclo
 func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.Pod) {
 	// We have pending pods that have preferred anti-affinity or topology spread constraints.  These can interact
 	// unexpectedly with consolidation, so we warn once per hour when we see these pods.
 	antiAffinityPods := lo.FilterMap(pods, func(po *corev1.Pod, _ int) (client.ObjectKey, bool) {
 		if po.Spec.Affinity != nil && po.Spec.Affinity.PodAntiAffinity != nil {
-			if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 {
+			if len(po.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0 && options.FromContext(ctx).PreferencePolicy != options.PreferencePolicyIgnore {
 				if p.cm.HasChanged(string(po.UID), "pod-antiaffinity") {
 					return client.ObjectKeyFromObject(po), true
 				}
@@ -193,7 +196,7 @@ func (p *Provisioner) consolidationWarnings(ctx context.Context, pods []*corev1.
 	})
 	topologySpreadPods := lo.FilterMap(pods, func(po *corev1.Pod, _ int) (client.ObjectKey, bool) {
 		for _, tsc := range po.Spec.TopologySpreadConstraints {
-			if tsc.WhenUnsatisfiable == corev1.ScheduleAnyway {
+			if tsc.WhenUnsatisfiable == corev1.ScheduleAnyway && options.FromContext(ctx).PreferencePolicy != options.PreferencePolicyIgnore {
 				if p.cm.HasChanged(string(po.UID), "pod-topology-spread") {
 					return client.ObjectKeyFromObject(po), true
 				}
@@ -263,7 +266,7 @@ func (p *Provisioner) NewScheduler(
 	}
 
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
-	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods)
+	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}
@@ -310,7 +313,17 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, nil
 	}
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
-	s, err := p.NewScheduler(ctx, pods, nodes.Active(), scheduler.DisableReservedCapacityFallback)
+
+	opts := []scheduler.Options{scheduler.DisableReservedCapacityFallback}
+	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
+		opts = append(opts, scheduler.IgnorePreferences)
+	}
+	s, err := p.NewScheduler(
+		ctx,
+		pods,
+		nodes.Active(),
+		opts...,
+	)
 	if err != nil {
 		if errors.Is(err, ErrNodePoolsNotFound) {
 			log.FromContext(ctx).Info("no nodepools found")
