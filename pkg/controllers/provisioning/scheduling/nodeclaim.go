@@ -84,6 +84,7 @@ func NewNodeClaim(
 	nodeClaimTemplate *NodeClaimTemplate,
 	topology *Topology,
 	daemonResources corev1.ResourceList,
+	hostPortUsage *scheduling.HostPortUsage,
 	instanceTypes []*cloudprovider.InstanceType,
 	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
@@ -98,7 +99,7 @@ func NewNodeClaim(
 	template.Spec.Resources.Requests = daemonResources
 	return &NodeClaim{
 		NodeClaimTemplate:    template,
-		hostPortUsage:        scheduling.NewHostPortUsage(),
+		hostPortUsage:        hostPortUsage,
 		topology:             topology,
 		daemonResources:      daemonResources,
 		hostname:             hostname,

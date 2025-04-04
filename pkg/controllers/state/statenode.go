@@ -144,6 +144,21 @@ func NewNode() *StateNode {
 	}
 }
 
+func (in *StateNode) ShallowCopy() *StateNode {
+	return &StateNode{
+		Node:              in.Node,
+		NodeClaim:         in.NodeClaim,
+		daemonSetRequests: in.daemonSetRequests,
+		daemonSetLimits:   in.daemonSetLimits,
+		podRequests:       in.podRequests,
+		podLimits:         in.podLimits,
+		hostPortUsage:     in.hostPortUsage,
+		volumeUsage:       in.volumeUsage,
+		markedForDeletion: in.markedForDeletion,
+		nominatedUntil:    in.nominatedUntil,
+	}
+}
+
 func (in *StateNode) Name() string {
 	if in.Node == nil {
 		return in.NodeClaim.Name

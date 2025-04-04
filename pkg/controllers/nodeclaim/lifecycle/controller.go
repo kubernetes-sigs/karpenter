@@ -181,7 +181,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		return reconcile.Result{}, fmt.Errorf("adding nodeclaim terminationGracePeriod annotation, %w", err)
 	}
 
-	// Only delete Nodes if the NodeClaim has not been registered. Deleting Node's without the termination finalizer
+	// Only delete Nodes if the NodeClaim has been registered. Deleting Nodes without the termination finalizer
 	// may result in leaked leases due to a kubelet bug until k8s 1.29. The Node should be garbage collected after the
 	// instance is terminated by CCM.
 	// Upstream Kubelet Fix: https://github.com/kubernetes/kubernetes/pull/119661

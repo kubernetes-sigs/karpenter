@@ -1871,6 +1871,432 @@ var _ = Describe("Taints", func() {
 	})
 })
 
+var _ = Describe("NodePool Resources", func() {
+	It("should calculate nodepool resources for multiple nodepools", func() {
+		nodePool1NodeClaims, nodePool1Nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("2Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+				},
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("1"),
+					corev1.ResourceMemory:           resource.MustParse("1Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+				},
+			},
+		})
+		nodePool2NodeClaims, nodePool2Nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("4"),
+					corev1.ResourceMemory:           resource.MustParse("4Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("4Gi"),
+				},
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("3"),
+					corev1.ResourceMemory:           resource.MustParse("3Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("3Gi"),
+				},
+			},
+		})
+		nodePool3NodeClaims, nodePool3Nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("6"),
+					corev1.ResourceMemory:           resource.MustParse("6Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("6Gi"),
+				},
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("5"),
+					corev1.ResourceMemory:           resource.MustParse("5Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("5Gi"),
+				},
+			},
+		})
+		for _, n := range lo.Flatten([][]*v1.NodeClaim{nodePool1NodeClaims, nodePool2NodeClaims, nodePool3NodeClaims}) {
+			cluster.UpdateNodeClaim(n.DeepCopy())
+		}
+		for _, n := range lo.Flatten([][]*corev1.Node{nodePool1Nodes, nodePool2Nodes, nodePool3Nodes}) {
+			Expect(cluster.UpdateNode(ctx, n.DeepCopy())).To(Succeed())
+		}
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("6"),
+			corev1.ResourceMemory:           resource.MustParse("6Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("6Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool1NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("12"),
+			corev1.ResourceMemory:           resource.MustParse("12Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("12Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool2NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("18"),
+			corev1.ResourceMemory:           resource.MustParse("18Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool3NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+
+		// Now delete the Nodes and ensure that we keep the resources up-to-date
+		cluster.DeleteNode(nodePool1Nodes[len(nodePool1Nodes)-1].Name)
+		cluster.DeleteNode(nodePool2Nodes[len(nodePool2Nodes)-1].Name)
+		cluster.DeleteNode(nodePool3Nodes[len(nodePool3Nodes)-1].Name)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("6"),
+			corev1.ResourceMemory:           resource.MustParse("6Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("6Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool1NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("12"),
+			corev1.ResourceMemory:           resource.MustParse("12Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("12Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool2NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("18"),
+			corev1.ResourceMemory:           resource.MustParse("18Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("18Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool3NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+
+		// Now delete the NodeClaims to fully delete the state node
+		cluster.DeleteNodeClaim(nodePool1NodeClaims[len(nodePool1NodeClaims)-1].Name)
+		cluster.DeleteNodeClaim(nodePool2NodeClaims[len(nodePool2NodeClaims)-1].Name)
+		cluster.DeleteNodeClaim(nodePool3NodeClaims[len(nodePool3NodeClaims)-1].Name)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("4"),
+			corev1.ResourceMemory:           resource.MustParse("4Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("4Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool1NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("8"),
+			corev1.ResourceMemory:           resource.MustParse("8Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("8Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool2NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("12"),
+			corev1.ResourceMemory:           resource.MustParse("12Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("12Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool3NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+
+		// Now delete all nodes and expect resources across all NodePools is zero
+		for _, n := range lo.Flatten([][]*v1.NodeClaim{nodePool1NodeClaims, nodePool2NodeClaims, nodePool3NodeClaims}) {
+			cluster.DeleteNodeClaim(n.Name)
+		}
+		for _, n := range lo.Flatten([][]*corev1.Node{nodePool1Nodes, nodePool2Nodes, nodePool3Nodes}) {
+			cluster.DeleteNode(n.Name)
+		}
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool1NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool2NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodePool3NodeClaims[0].Labels[v1.NodePoolLabelKey]))
+	})
+	It("should update nodepool resources when a node switches from one nodepool to another", func() {
+		oldNodePoolName := test.RandomName()
+		nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            oldNodePoolName,
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("2Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+				},
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("1"),
+					corev1.ResourceMemory:           resource.MustParse("1Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+				},
+			},
+		})
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(oldNodePoolName))
+
+		newNodePoolName := test.RandomName()
+		nodeClaim1.Labels[v1.NodePoolLabelKey] = newNodePoolName
+
+		// Update the NodeClaim to change the NodePool that it's assigned to
+		// Since the NodeClaim NodePool label
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(oldNodePoolName))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(newNodePoolName))
+
+		node1.Labels[v1.NodePoolLabelKey] = newNodePoolName
+
+		// Update the Node to change the NodePool that it's assigned to
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(oldNodePoolName))
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(newNodePoolName))
+	})
+	It("should update nodepool resources when the node changes providerID", func() {
+		nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("2Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+				},
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("1"),
+					corev1.ResourceMemory:           resource.MustParse("1Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+				},
+			},
+		})
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		// NodeClaim changes providerID for some reason
+		nodeClaim1.Status.ProviderID = test.RandomProviderID()
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("4"),
+			corev1.ResourceMemory:           resource.MustParse("4Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("4Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		// Node changes providerID and now matches
+		node1.Spec.ProviderID = nodeClaim1.Status.ProviderID
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+	})
+	It("should handle nodepool resources when node inside of the state node is removed", func() {
+		nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("2Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+				},
+			},
+		})
+		node1.Status.Capacity = corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("1"),
+			corev1.ResourceMemory:           resource.MustParse("1Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+		}
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("1"),
+			corev1.ResourceMemory:           resource.MustParse("1Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		cluster.DeleteNode(node1.Name)
+
+		// Should flip to use the NodeClaim capacity once we delete the Node
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+	})
+	It("should handle nodepool resources when node inside of the state node is removed", func() {
+		nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("2Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+				},
+			},
+		})
+		node1.Status.Capacity = corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("1"),
+			corev1.ResourceMemory:           resource.MustParse("1Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+		}
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("1"),
+			corev1.ResourceMemory:           resource.MustParse("1Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		cluster.DeleteNodeClaim(nodeClaim1.Name)
+
+		// Should continue to use the Node capacity once we delete the Node
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("1"),
+			corev1.ResourceMemory:           resource.MustParse("1Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+	})
+	It("should update nodepool resources when node is terminating (deletionTimestamp set)", func() {
+		nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("2Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+				},
+			},
+		})
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		// Set the deletionTimestamp
+		nodeClaim1.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+	})
+	It("should update nodepool resources when node is marked/unmarked for deletion", func() {
+		nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("2Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+				},
+			},
+		})
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		// MarkForDeletion and expect the count of resources to reduce
+		cluster.MarkForDeletion(nodeClaim1.Status.ProviderID)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		// UnmarkForDeletion and expect the count of resources to be restored
+		cluster.UnmarkForDeletion(nodeClaim1.Status.ProviderID)
+	})
+})
+
 func ExpectStateNodeCount(comparator string, count int) int {
 	GinkgoHelper()
 	c := 0

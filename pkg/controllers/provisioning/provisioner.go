@@ -378,7 +378,7 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	if err := p.kubeClient.Get(ctx, types.NamespacedName{Name: n.NodePoolName}, latest); err != nil {
 		return "", fmt.Errorf("getting current resource usage, %w", err)
 	}
-	if err := latest.Spec.Limits.ExceededBy(latest.Status.Resources); err != nil {
+	if err := latest.Spec.Limits.ExceededBy(p.cluster.NodePoolResourcesFor(n.NodePoolName)); err != nil {
 		return "", err
 	}
 	nodeClaim := n.ToNodeClaim()
