@@ -28,6 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/karpenter/pkg/operator/options"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
@@ -79,7 +81,12 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		pods = append(pods, n.reschedulablePods...)
 	}
 	pods = append(pods, deletingNodePods...)
-	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, stateNodes)
+	scheduler, err := provisioner.NewScheduler(
+		log.IntoContext(ctx, operatorlogging.NopLogger),
+		pods,
+		stateNodes,
+		lo.Ternary(options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore, scheduling.IgnorePreferences, nil),
+	)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
 	}

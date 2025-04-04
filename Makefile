@@ -60,6 +60,7 @@ apply: verify build ## Deploy the kwok controller from the current state of your
 		--set controller.image.repository=$(IMG_REPOSITORY) \
 		--set controller.image.tag=$(IMG_TAG) \
 		--set controller.image.digest=$(IMG_DIGEST) \
+		--set settings.preferencePolicy=Ignore \
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true
 
