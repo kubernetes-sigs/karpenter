@@ -268,7 +268,6 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 	return r
 }
 
-//nolint:gocyclo
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
@@ -305,28 +304,20 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		if !ok {
 			break
 		}
-
-		// Schedule to existing nodes or create a new node
-		if podErrors[pod] = s.add(ctx, pod); podErrors[pod] == nil {
-			delete(podErrors, pod)
-			continue
-		}
-
-		// We should only relax the pod's requirements when the error is not a reserved offering error because the pod may be
-		// able to schedule later without relaxing constraints. This could occur in this scheduling run, if other NodeClaims
-		// release the required reservations when constrained, or in subsequent runs. For an example, reference the following
-		// test: "shouldn't relax preferences when a pod fails to schedule due to a reserved offering error".
-		var relaxed bool
-		if !IsReservedOfferingError(podErrors[pod]) {
-			if relaxed = s.preferences.Relax(ctx, pod); relaxed {
-				if err := s.topology.Update(ctx, pod); err != nil && !errors.Is(err, context.DeadlineExceeded) {
-					log.FromContext(ctx).Error(err, "failed updating topology")
-				}
-				// Update the cached podData since the pod was relaxed and it could have changed its requirement set
-				s.updateCachedPodData(pod)
+		// We relax the pod all the way the first time we see it
+		// If we don't schedule it, we store the original pod (with preferences)
+		// in the queue and give ourselves another chance to schedule it later
+		if err := s.trySchedule(ctx, pod.DeepCopy()); err != nil {
+			podErrors[pod] = err
+			if e := s.topology.Update(ctx, pod); e != nil && !errors.Is(e, context.DeadlineExceeded) {
+				log.FromContext(ctx).Error(e, "failed updating topology")
 			}
+			// Update the cached podData since the pod was relaxed, and it could have changed its requirement set
+			s.updateCachedPodData(pod)
+			q.Push(pod)
+		} else {
+			delete(podErrors, pod)
 		}
-		q.Push(pod, relaxed)
 	}
 	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 	for _, m := range s.newNodeClaims {
@@ -338,6 +329,31 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		ExistingNodes: s.existingNodes,
 		PodErrors:     podErrors,
 	}, ctx.Err()
+}
+
+func (s *Scheduler) trySchedule(ctx context.Context, p *corev1.Pod) error {
+	for {
+		err := s.add(ctx, p)
+		if err == nil {
+			return nil
+		}
+		// We should only relax the pod's requirements when the error is not a reserved offering error because the pod may be
+		// able to schedule later without relaxing constraints. This could occur in this scheduling run, if other NodeClaims
+		// release the required reservations when constrained, or in subsequent runs. For an example, reference the following
+		// test: "shouldn't relax preferences when a pod fails to schedule due to a reserved offering error".
+		if IsReservedOfferingError(err) {
+			return err
+		}
+		// Eventually we won't be able to relax anymore and this while loop will exit
+		if relaxed := s.preferences.Relax(ctx, p); !relaxed {
+			return err
+		}
+		if e := s.topology.Update(ctx, p); e != nil && !errors.Is(e, context.DeadlineExceeded) {
+			log.FromContext(ctx).Error(e, "failed updating topology")
+		}
+		// Update the cached podData since the pod was relaxed, and it could have changed its requirement set
+		s.updateCachedPodData(p)
+	}
 }
 
 func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
