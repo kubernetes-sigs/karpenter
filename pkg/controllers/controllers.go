@@ -67,6 +67,7 @@ func NewControllers(
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
+	wellKnownLabels map[string]string,
 ) []controller.Controller {
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
@@ -87,7 +88,7 @@ func NewControllers(
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		metricspod.NewController(kubeClient, cluster),
 		metricsnodepool.NewController(kubeClient, cloudProvider),
-		metricsnode.NewController(cluster),
+		metricsnode.NewController(cluster, wellKnownLabels),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),

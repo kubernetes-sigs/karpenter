@@ -26,7 +26,9 @@ import (
 	"strings"
 	"unicode"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
+
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 func Concise(o interface{}) string {
@@ -81,7 +83,7 @@ func Map[K cmp.Ordered, V any](values map[K]V, maxItems int) string {
 	return buf.String()
 }
 
-func Taint(t v1.Taint) string {
+func Taint(t corev1.Taint) string {
 	if t.Value == "" {
 		return fmt.Sprintf("%s:%s", t.Key, t.Effect)
 	}
@@ -99,4 +101,17 @@ func ToSnakeCase(str string) string {
 
 func Sentence(str string) string {
 	return string(unicode.ToUpper(rune(str[0]))) + str[1:]
+}
+
+func GetWellKnownLabels() map[string]string {
+	labels := make(map[string]string)
+	for wellKnownLabel := range v1.WellKnownLabels {
+		if parts := strings.Split(wellKnownLabel, "/"); len(parts) == 2 {
+			label := parts[1]
+			// Reformat label names to be consistent with Prometheus naming conventions (snake_case)
+			label = strings.ReplaceAll(strings.ToLower(label), "-", "_")
+			labels[wellKnownLabel] = label
+		}
+	}
+	return labels
 }
