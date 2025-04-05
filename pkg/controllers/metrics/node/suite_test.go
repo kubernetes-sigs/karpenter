@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
@@ -63,7 +64,7 @@ var _ = BeforeSuite(func() {
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
-	metricsStateController = node.NewController(cluster)
+	metricsStateController = node.NewController(cluster, pretty.GetWellKnownLabels())
 })
 
 var _ = AfterSuite(func() {

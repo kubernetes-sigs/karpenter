@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 func main() {
@@ -43,5 +44,6 @@ func main() {
 			op.EventRecorder,
 			cloudProvider,
 			clusterState,
+			pretty.GetWellKnownLabels(),
 		)...).Start(ctx)
 }

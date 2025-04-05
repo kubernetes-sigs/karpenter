@@ -33,7 +33,6 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -46,98 +45,116 @@ const (
 	nodePhase    = "phase"
 )
 
-var (
-	Allocatable = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodeSubsystem,
-			Name:      "allocatable",
-			Help:      "Node allocatable are the resources allocatable by nodes.",
-		},
-		nodeLabelNamesWithResourceType(),
-	)
-	TotalPodRequests = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodeSubsystem,
-			Name:      "total_pod_requests",
-			Help:      "Node total pod requests are the resources requested by pods bound to nodes, including the DaemonSet pods.",
-		},
-		nodeLabelNamesWithResourceType(),
-	)
-	TotalPodLimits = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodeSubsystem,
-			Name:      "total_pod_limits",
-			Help:      "Node total pod limits are the resources specified by pod limits, including the DaemonSet pods.",
-		},
-		nodeLabelNamesWithResourceType(),
-	)
-	TotalDaemonRequests = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodeSubsystem,
-			Name:      "total_daemon_requests",
-			Help:      "Node total daemon requests are the resource requested by DaemonSet pods bound to nodes.",
-		},
-		nodeLabelNamesWithResourceType(),
-	)
-	TotalDaemonLimits = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodeSubsystem,
-			Name:      "total_daemon_limits",
-			Help:      "Node total daemon limits are the resources specified by DaemonSet pod limits.",
-		},
-		nodeLabelNamesWithResourceType(),
-	)
-	SystemOverhead = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodeSubsystem,
-			Name:      "system_overhead",
-			Help:      "Node system daemon overhead are the resources reserved for system overhead, the difference between the node's capacity and allocatable values are reported by the status.",
-		},
-		nodeLabelNamesWithResourceType(),
-	)
-	Lifetime = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: metrics.NodeSubsystem,
-			Name:      "current_lifetime_seconds",
-			Help:      "Node age in seconds",
-		},
-		nodeLabelNames(),
-	)
-	ClusterUtilization = opmetrics.NewPrometheusGauge(
-		crmetrics.Registry,
-		prometheus.GaugeOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: "cluster",
-			Name:      "utilization_percent",
-			Help:      "Utilization of allocatable resources by pod requests",
-		},
-		[]string{resourceType},
-	)
-	wellKnownLabels = getWellKnownLabels()
-)
+type Controller struct {
+	cluster             *state.Cluster
+	metricStore         *metrics.Store
+	wellKnownLabels     map[string]string
+	allocatable         opmetrics.GaugeMetric
+	totalPodRequests    opmetrics.GaugeMetric
+	totalPodLimits      opmetrics.GaugeMetric
+	totalDaemonRequests opmetrics.GaugeMetric
+	totalDaemonLimits   opmetrics.GaugeMetric
+	systemOverhead      opmetrics.GaugeMetric
+	lifetime            opmetrics.GaugeMetric
+	clusterUtilization  opmetrics.GaugeMetric
+}
 
-func nodeLabelNamesWithResourceType() []string {
+func NewController(cluster *state.Cluster, wellKnownLabels map[string]string) *Controller {
+	return &Controller{
+		cluster:         cluster,
+		metricStore:     metrics.NewStore(),
+		wellKnownLabels: wellKnownLabels,
+		allocatable: opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: metrics.NodeSubsystem,
+				Name:      "allocatable",
+				Help:      "Node allocatable are the resources allocatable by nodes.",
+			},
+			nodeLabelNamesWithResourceType(wellKnownLabels),
+		),
+		totalPodRequests: opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: metrics.NodeSubsystem,
+				Name:      "total_pod_requests",
+				Help:      "Node total pod requests are the resources requested by pods bound to nodes, including the DaemonSet pods.",
+			},
+			nodeLabelNamesWithResourceType(wellKnownLabels),
+		),
+		totalPodLimits: opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: metrics.NodeSubsystem,
+				Name:      "total_pod_limits",
+				Help:      "Node total pod limits are the resources specified by pod limits, including the DaemonSet pods.",
+			},
+			nodeLabelNamesWithResourceType(wellKnownLabels),
+		),
+		totalDaemonRequests: opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: metrics.NodeSubsystem,
+				Name:      "total_daemon_requests",
+				Help:      "Node total daemon requests are the resource requested by DaemonSet pods bound to nodes.",
+			},
+			nodeLabelNamesWithResourceType(wellKnownLabels),
+		),
+		totalDaemonLimits: opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: metrics.NodeSubsystem,
+				Name:      "total_daemon_limits",
+				Help:      "Node total daemon limits are the resources specified by DaemonSet pod limits.",
+			},
+			nodeLabelNamesWithResourceType(wellKnownLabels),
+		),
+		systemOverhead: opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: metrics.NodeSubsystem,
+				Name:      "system_overhead",
+				Help:      "Node system daemon overhead are the resources reserved for system overhead, the difference between the node's capacity and allocatable values are reported by the status.",
+			},
+			nodeLabelNamesWithResourceType(wellKnownLabels),
+		),
+		lifetime: opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: metrics.NodeSubsystem,
+				Name:      "current_lifetime_seconds",
+				Help:      "Node age in seconds",
+			},
+			nodeLabelNames(wellKnownLabels),
+		),
+		clusterUtilization: opmetrics.NewPrometheusGauge(
+			crmetrics.Registry,
+			prometheus.GaugeOpts{
+				Namespace: metrics.Namespace,
+				Subsystem: "cluster",
+				Name:      "utilization_percent",
+				Help:      "Utilization of allocatable resources by pod requests",
+			},
+			[]string{resourceType},
+		),
+	}
+}
+
+func nodeLabelNamesWithResourceType(wellKnownLabels map[string]string) []string {
 	return append(
-		nodeLabelNames(),
+		nodeLabelNames(wellKnownLabels),
 		resourceType,
 	)
 }
 
-func nodeLabelNames() []string {
+func nodeLabelNames(wellKnownLabels map[string]string) []string {
 	return append(
 		// WellKnownLabels includes the nodepool label, so we don't need to add it as its own item here.
 		// If we do, prometheus will panic since there would be duplicate labels.
@@ -145,18 +162,6 @@ func nodeLabelNames() []string {
 		nodeName,
 		nodePhase,
 	)
-}
-
-type Controller struct {
-	cluster     *state.Cluster
-	metricStore *metrics.Store
-}
-
-func NewController(cluster *state.Cluster) *Controller {
-	return &Controller{
-		cluster:     cluster,
-		metricStore: metrics.NewStore(),
-	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
@@ -168,11 +173,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 	// Build per-node metrics
 	metricsMap := lo.SliceToMap(nodes, func(n *state.StateNode) (string, []*metrics.StoreMetric) {
-		return client.ObjectKeyFromObject(n.Node).String(), buildMetrics(n)
+		return client.ObjectKeyFromObject(n.Node).String(), c.buildMetrics(n)
 	})
 
 	// Build cluster level metric
-	metricsMap["clusterUtilization"] = buildClusterUtilizationMetric(nodes)
+	metricsMap["clusterUtilization"] = c.buildClusterUtilizationMetric(nodes)
 
 	c.metricStore.ReplaceAll(metricsMap)
 
@@ -186,7 +191,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(c))
 }
 
-func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetric {
+func (c *Controller) buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetric {
 
 	// Aggregate resources allocated/utilized for all the nodes and pods inside the nodes
 	allocatableAggregate, utilizedAggregate := corev1.ResourceList{}, corev1.ResourceList{}
@@ -214,7 +219,7 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 			float64(utilizedResource.Value())/float64(allocatableResource.Value()))
 
 		res = append(res, &metrics.StoreMetric{
-			GaugeMetric: ClusterUtilization,
+			GaugeMetric: c.clusterUtilization,
 			Value:       utilizationPercentage,
 			Labels:      map[string]string{resourceType: resourceNameToString(resourceName)},
 		})
@@ -223,60 +228,47 @@ func buildClusterUtilizationMetric(nodes state.StateNodes) []*metrics.StoreMetri
 	return res
 }
 
-func buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
+func (c *Controller) buildMetrics(n *state.StateNode) (res []*metrics.StoreMetric) {
 	for gaugeMetric, resourceList := range map[opmetrics.GaugeMetric]corev1.ResourceList{
-		SystemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
-		TotalPodRequests:    n.PodRequests(),
-		TotalPodLimits:      n.PodLimits(),
-		TotalDaemonRequests: n.DaemonSetRequests(),
-		TotalDaemonLimits:   n.DaemonSetLimits(),
-		Allocatable:         n.Node.Status.Allocatable,
+		c.systemOverhead:      resources.Subtract(n.Node.Status.Capacity, n.Node.Status.Allocatable),
+		c.totalPodRequests:    n.PodRequests(),
+		c.totalPodLimits:      n.PodLimits(),
+		c.totalDaemonRequests: n.DaemonSetRequests(),
+		c.totalDaemonLimits:   n.DaemonSetLimits(),
+		c.allocatable:         n.Node.Status.Allocatable,
 	} {
 		for resourceName, quantity := range resourceList {
 			res = append(res, &metrics.StoreMetric{
 				GaugeMetric: gaugeMetric,
 				Value:       lo.Ternary(resourceName == corev1.ResourceCPU, float64(quantity.MilliValue())/float64(1000), float64(quantity.Value())),
-				Labels:      getNodeLabelsWithResourceType(n.Node, resourceNameToString(resourceName)),
+				Labels:      c.getNodeLabelsWithResourceType(n.Node, resourceNameToString(resourceName)),
 			})
 		}
 	}
 	return append(res,
 		&metrics.StoreMetric{
-			GaugeMetric: Lifetime,
+			GaugeMetric: c.lifetime,
 			Value:       time.Since(n.Node.GetCreationTimestamp().Time).Seconds(),
-			Labels:      getNodeLabels(n.Node),
+			Labels:      c.getNodeLabels(n.Node),
 		})
 }
 
-func getNodeLabelsWithResourceType(node *corev1.Node, resourceTypeName string) prometheus.Labels {
-	metricLabels := getNodeLabels(node)
+func (c *Controller) getNodeLabelsWithResourceType(node *corev1.Node, resourceTypeName string) prometheus.Labels {
+	metricLabels := c.getNodeLabels(node)
 	metricLabels[resourceType] = resourceTypeName
 	return metricLabels
 }
 
-func getNodeLabels(node *corev1.Node) prometheus.Labels {
+func (c *Controller) getNodeLabels(node *corev1.Node) prometheus.Labels {
 	metricLabels := map[string]string{}
 	metricLabels[nodeName] = node.Name
 	metricLabels[nodePhase] = string(node.Status.Phase)
 
 	// Populate well known labels
-	for wellKnownLabel, label := range wellKnownLabels {
+	for wellKnownLabel, label := range c.wellKnownLabels {
 		metricLabels[label] = node.Labels[wellKnownLabel]
 	}
 	return metricLabels
-}
-
-func getWellKnownLabels() map[string]string {
-	labels := make(map[string]string)
-	for wellKnownLabel := range v1.WellKnownLabels {
-		if parts := strings.Split(wellKnownLabel, "/"); len(parts) == 2 {
-			label := parts[1]
-			// Reformat label names to be consistent with Prometheus naming conventions (snake_case)
-			label = strings.ReplaceAll(strings.ToLower(label), "-", "_")
-			labels[wellKnownLabel] = label
-		}
-	}
-	return labels
 }
 
 func resourceNameToString(resourceName corev1.ResourceName) string {
