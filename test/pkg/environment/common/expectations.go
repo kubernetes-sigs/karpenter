@@ -151,36 +151,16 @@ func (env *Environment) ExpectParsedProviderID(providerID string) string {
 	return providerIDSplit[len(providerIDSplit)-1]
 }
 
-// ExpectCreatedOrUpdated can update objects in the cluster to match the inputs.
-// WARNING: ExpectUpdated ignores the resource version check, which can result in
-// overwriting changes made by other controllers in the cluster.
-// This is useful in ensuring that we can clean up resources by patching
-// out finalizers.
-// Grab the object before making the updates to reduce the chance of this race.
-func (env *Environment) ExpectCreatedOrUpdated(objects ...client.Object) {
+func (env *Environment) EventuallyExpectLaunchedNodeClaimCount(comparator string, count int) []*v1.NodeClaim {
 	GinkgoHelper()
-	for _, o := range objects {
-		current := o.DeepCopyObject().(client.Object)
-		err := env.Client.Get(env, client.ObjectKeyFromObject(current), current)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				env.ExpectCreated(o)
-			} else {
-				Fail(fmt.Sprintf("Getting object %s, %v", client.ObjectKeyFromObject(o), err))
-			}
-		} else {
-			env.ExpectUpdated(o)
-		}
-	}
-}
-
-func (env *Environment) ReplaceNodeConditions(node *corev1.Node, conds ...corev1.NodeCondition) *corev1.Node {
-	keys := sets.New[string](lo.Map(conds, func(c corev1.NodeCondition, _ int) string { return string(c.Type) })...)
-	node.Status.Conditions = lo.Reject(node.Status.Conditions, func(c corev1.NodeCondition, _ int) bool {
-		return keys.Has(string(c.Type))
-	})
-	node.Status.Conditions = append(node.Status.Conditions, conds...)
-	return node
+	By(fmt.Sprintf("waiting for nodes to be %s to %d", comparator, count))
+	nodeClaimList := &v1.NodeClaimList{}
+	Eventually(func(g Gomega) {
+		g.Expect(env.Client.List(env, nodeClaimList, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
+		g.Expect(lo.CountBy(nodeClaimList.Items, func(nc v1.NodeClaim) bool { return nc.StatusConditions().IsTrue(v1.ConditionTypeLaunched) })).To(BeNumerically(comparator, count),
+			fmt.Sprintf("expected %d nodeclaims, had %d (%v)", count, len(nodeClaimList.Items), NodeClaimNames(lo.ToSlicePtr(nodeClaimList.Items))))
+	}).Should(Succeed())
+	return lo.ToSlicePtr(nodeClaimList.Items)
 }
 
 // ConsistentlyExpectDisruptionsUntilNoneLeft consistently ensures a max on number of concurrently disrupting and non-terminating nodes.
@@ -233,6 +213,38 @@ func (env *Environment) ConsistentlyExpectDisruptionsUntilNoneLeft(nodesAtStart,
 
 		g.Expect(nodes).To(HaveLen(0))
 	}).WithTimeout(timeout).WithPolling(5 * time.Second).Should(Succeed())
+}
+
+// ExpectCreatedOrUpdated can update objects in the cluster to match the inputs.
+// WARNING: ExpectUpdated ignores the resource version check, which can result in
+// overwriting changes made by other controllers in the cluster.
+// This is useful in ensuring that we can clean up resources by patching
+// out finalizers.
+// Grab the object before making the updates to reduce the chance of this race.
+func (env *Environment) ExpectCreatedOrUpdated(objects ...client.Object) {
+	GinkgoHelper()
+	for _, o := range objects {
+		current := o.DeepCopyObject().(client.Object)
+		err := env.Client.Get(env, client.ObjectKeyFromObject(current), current)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				env.ExpectCreated(o)
+			} else {
+				Fail(fmt.Sprintf("Getting object %s, %v", client.ObjectKeyFromObject(o), err))
+			}
+		} else {
+			env.ExpectUpdated(o)
+		}
+	}
+}
+
+func (env *Environment) ReplaceNodeConditions(node *corev1.Node, conds ...corev1.NodeCondition) *corev1.Node {
+	keys := sets.New[string](lo.Map(conds, func(c corev1.NodeCondition, _ int) string { return string(c.Type) })...)
+	node.Status.Conditions = lo.Reject(node.Status.Conditions, func(c corev1.NodeCondition, _ int) bool {
+		return keys.Has(string(c.Type))
+	})
+	node.Status.Conditions = append(node.Status.Conditions, conds...)
+	return node
 }
 
 func (env *Environment) ExpectSettings() (res []corev1.EnvVar) {
