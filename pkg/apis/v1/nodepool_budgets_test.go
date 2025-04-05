@@ -149,7 +149,6 @@ var _ = Describe("Budgets", func() {
 		})
 
 		It("should get the minimum budget for each reason", func() {
-
 			nodePool.Spec.Disruption.Budgets = append(nodePool.Spec.Disruption.Budgets,
 				[]Budget{
 					{
@@ -173,7 +172,6 @@ var _ = Describe("Budgets", func() {
 			Expect(err).To(BeNil())
 			Expect(underutilizedAllowedDisruption).To(Equal(10))
 		})
-
 	})
 
 	Context("AllowedDisruptions", func() {
@@ -209,7 +207,7 @@ var _ = Describe("Budgets", func() {
 	})
 
 	Context("IsActive", func() {
-		It("should always consider a schedule and time in UTC", func() {
+		It("should consider a schedule and time in UTC when no timezone is specified", func() {
 			// Set the time to start of June 2000 in a time zone 1 hour ahead of UTC
 			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 0, 0, 0, 0, 0, time.FixedZone("fake-zone", 3600)))
 			budgets[0].Schedule = lo.ToPtr("@daily")
@@ -236,6 +234,29 @@ var _ = Describe("Budgets", func() {
 			active, err := budgets[0].IsActive(fakeClock)
 			Expect(err).To(Succeed())
 			Expect(active).To(BeFalse())
+		})
+		It("should reutn that a schedule is active with a timezone", func() {
+			// Set the time to the middle of the year of 2000 as KST, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 12, 30, 30, 0, time.FixedZone("Asia/Seoul", 9*3600)))
+			budgets[0].TimeZone = lo.ToPtr("Asia/Seoul")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeTrue())
+		})
+		It("should return that a schedule is inactive with a timezone", func() {
+			// Set the time to the middle of the year of 2000 as KST, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2000, time.June, 15, 12, 30, 30, 0, time.FixedZone("Asia/Seoul", 9*3600)))
+			budgets[0].Schedule = lo.ToPtr("@yearly")
+			budgets[0].TimeZone = lo.ToPtr("Asia/Seoul")
+			active, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(Succeed())
+			Expect(active).To(BeFalse())
+		})
+		It("should return an error if the timezone is invalid", func() {
+			budgets[0].TimeZone = lo.ToPtr("Invalid/Timezone")
+			_, err := budgets[0].IsActive(fakeClock)
+			Expect(err).ToNot(Succeed())
+			Expect(err.Error()).To(ContainSubstring("invalid time zone"))
 		})
 		It("should return that a schedule is active when the schedule hit is in the middle of the duration", func() {
 			// Set the date to the start of the year 1000, the best year ever
