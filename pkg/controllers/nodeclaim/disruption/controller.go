@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -110,6 +111,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 			}
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
+		// We sleep here after a patch operation since we want to ensure that we are able to read our own writes
+		// so that we avoid duplicating metrics and log lines due to quick re-queues from our node watcher
+		// USE CAUTION when determining whether to increase this timeout or remove this line
+		time.Sleep(time.Second)
 	}
 	if errs != nil {
 		return reconcile.Result{}, errs
