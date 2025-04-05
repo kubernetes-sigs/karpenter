@@ -50,6 +50,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
@@ -303,6 +304,18 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if err != nil {
 		return scheduler.Results{}, err
 	}
+
+	// Don't provision capacity for pods which aren't getting evicted due to PDB violation.
+	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
+	// these pods are evicted is wasteful.
+	pdbs, err := pdb.NewLimits(ctx, p.clock, p.kubeClient)
+	if err != nil {
+		return scheduler.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+	}
+	deletingNodePods = lo.Filter(deletingNodePods, func(pod *corev1.Pod, _ int) bool {
+		_, evictable := pdbs.CanEvictPods([]*corev1.Pod{pod})
+		return evictable
+	})
 	pods := append(pendingPods, deletingNodePods...)
 	// nothing to schedule, so just return success
 	if len(pods) == 0 {
