@@ -93,11 +93,6 @@ type options struct {
 
 type Options = option.Function[options]
 
-var defaultOptions = func(opts *options) {
-	opts.reservedOfferingMode = ReservedOfferingModeFallback
-	opts.numConcurrentReconciles = 1
-}
-
 var DisableReservedCapacityFallback = func(opts *options) {
 	opts.reservedOfferingMode = ReservedOfferingModeStrict
 }
@@ -165,7 +160,7 @@ func NewScheduler(
 		reservationManager:      NewReservationManager(instanceTypes),
 		reservedOfferingMode:    option.Resolve(opts...).reservedOfferingMode,
 		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
-		numConcurrentReconciles: option.Resolve(append([]Options{defaultOptions}, opts...)...).numConcurrentReconciles,
+		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
 	return s
@@ -334,6 +329,7 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 }
 
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
+	fmt.Printf("Scheduling using %d workers\n", s.numConcurrentReconciles)
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't

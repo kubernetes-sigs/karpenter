@@ -84,7 +84,7 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 		--randomize-all \
 		--until-it-fails \
 		-v \
-		./pkg/controllers/disruption
+		./pkg/...
 
 vulncheck: ## Verify code vulnerabilities
 	@govulncheck ./pkg/...
