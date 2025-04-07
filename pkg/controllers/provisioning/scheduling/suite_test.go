@@ -33,6 +33,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -75,6 +76,8 @@ var podController *provisioning.PodController
 
 const csiProvider = "fake.csi.provider"
 const isDefaultStorageClassAnnotation = "storageclass.kubernetes.io/is-default-class"
+
+var podLabels = map[string]string{"pdb-test": "value"}
 
 func TestScheduling(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -3648,38 +3651,47 @@ var _ = Context("Scheduling", func() {
 				Expect(n.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 			}
 		})
-		It("should not reschedule pods from a deleting node when pods are failing to evict due to PDB", func() {
-			ExpectApplied(ctx, env.Client, nodePool)
-			podLabels := map[string]string{"test": "value"}
-			pod := test.UnschedulablePod(
-				test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: podLabels,
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: map[corev1.ResourceName]resource.Quantity{
-							corev1.ResourceMemory: resource.MustParse("100M"),
+		DescribeTable("should not reschedule pods from a deleting node when pods are blocked due to fully blocking PDBs",
+			func(pdb *policyv1.PodDisruptionBudget) {
+				ExpectApplied(ctx, env.Client, nodePool)
+				pod := test.UnschedulablePod(
+					test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: podLabels,
 						},
-					}})
-			pdb := test.PodDisruptionBudget(test.PDBOptions{
+						ResourceRequirements: corev1.ResourceRequirements{
+							Requests: map[corev1.ResourceName]resource.Quantity{
+								corev1.ResourceMemory: resource.MustParse("100M"),
+							},
+						}})
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectApplied(ctx, env.Client, pdb)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
+
+				// Mark for deletion so that we consider all pods on this node for reschedulability
+				cluster.MarkForDeletion(node.Spec.ProviderID)
+
+				// Trigger a provisioning loop and expect that we don't create more nodes
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
+
+				// We shouldn't create an additional node here because this pod's eviction is blocked due to PDB
+				nodes := ExpectNodes(ctx, env.Client)
+				Expect(nodes).To(HaveLen(1))
+			},
+			Entry("0 max unavailable", test.PodDisruptionBudget(test.PDBOptions{
 				Labels:         podLabels,
 				MaxUnavailable: lo.ToPtr(intstr.FromInt(0)),
-			})
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			ExpectApplied(ctx, env.Client, pdb)
-			node := ExpectScheduled(ctx, env.Client, pod)
-			Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
-
-			// Mark for deletion so that we consider all pods on this node for reschedulability
-			cluster.MarkForDeletion(node.Spec.ProviderID)
-
-			// Trigger a provisioning loop and expect that we don't create more nodes
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov)
-
-			// We shouldn't create an additional node here because this pod's eviction is blocked due to PDB
-			nodes := ExpectNodes(ctx, env.Client)
-			Expect(nodes).To(HaveLen(1))
-		})
+			})),
+			Entry("0% max unavailable", test.PodDisruptionBudget(test.PDBOptions{
+				Labels:         podLabels,
+				MaxUnavailable: lo.ToPtr(intstr.FromString("0%")),
+			})),
+			Entry("100% min available", test.PodDisruptionBudget(test.PDBOptions{
+				Labels:       podLabels,
+				MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+			})),
+		)
 	})
 
 	Describe("Metrics", func() {

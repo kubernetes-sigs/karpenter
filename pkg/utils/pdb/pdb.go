@@ -23,6 +23,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -86,13 +87,45 @@ func (l Limits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	return client.ObjectKey{}, true
 }
 
+// IsFullyBlocked returns true if the given pod is fully blocked by a PDB.
+func (l Limits) IsFullyBlocked(pod *v1.Pod) (client.ObjectKey, bool) {
+	// If the pod isn't eligible for being evicted, then a fully blocking PDB doesn't matter
+	// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
+	if !podutil.IsEvictable(pod) {
+		return client.ObjectKey{}, false
+	}
+	for _, pdb := range l {
+		if pdb.key.Namespace == pod.ObjectMeta.Namespace {
+			if pdb.selector.Matches(labels.Set(pod.Labels)) {
+
+				// if the PDB policy is set to allow evicting unhealthy pods, then it won't stop us from
+				// evicting unhealthy pods
+				if pdb.canAlwaysEvictUnhealthyPods {
+					for _, c := range pod.Status.Conditions {
+						if c.Type == v1.PodReady && c.Status == v1.ConditionFalse {
+							return client.ObjectKey{}, false
+						}
+					}
+				}
+
+				if pdb.isFullyBlocking {
+					return pdb.key, true
+				}
+			}
+		}
+	}
+	return client.ObjectKey{}, false
+}
+
 type pdbItem struct {
 	key                         client.ObjectKey
 	selector                    labels.Selector
 	disruptionsAllowed          int32
+	isFullyBlocking             bool
 	canAlwaysEvictUnhealthyPods bool
 }
 
+// nolint:gocyclo
 func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 	selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
 	if err != nil {
@@ -103,10 +136,14 @@ func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 	if pdb.Spec.UnhealthyPodEvictionPolicy != nil && *pdb.Spec.UnhealthyPodEvictionPolicy == policyv1.AlwaysAllow {
 		canAlwaysEvictUnhealthyPods = true
 	}
+
 	return &pdbItem{
-		key:                         client.ObjectKeyFromObject(&pdb),
-		selector:                    selector,
-		disruptionsAllowed:          pdb.Status.DisruptionsAllowed,
+		key:                client.ObjectKeyFromObject(&pdb),
+		selector:           selector,
+		disruptionsAllowed: pdb.Status.DisruptionsAllowed,
+		isFullyBlocking: (pdb.Spec.MaxUnavailable != nil && pdb.Spec.MaxUnavailable.Type == intstr.Int && pdb.Spec.MaxUnavailable.IntVal == 0) ||
+			(pdb.Spec.MaxUnavailable != nil && pdb.Spec.MaxUnavailable.Type == intstr.String && pdb.Spec.MaxUnavailable.StrVal == "0%") ||
+			(pdb.Spec.MinAvailable != nil && pdb.Spec.MinAvailable.Type == intstr.String && pdb.Spec.MinAvailable.StrVal == "100%"),
 		canAlwaysEvictUnhealthyPods: canAlwaysEvictUnhealthyPods,
 	}, nil
 }

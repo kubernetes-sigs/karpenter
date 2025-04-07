@@ -79,7 +79,7 @@ func SimulateScheduling(ctx context.Context, clock clock.Clock, kubeClient clien
 		pods = append(pods, n.reschedulablePods...)
 	}
 
-	// Don't provision capacity for pods which aren't getting evicted due to PDB violation.
+	// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
 	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
 	// these pods are evicted is wasteful.
 	pdbs, err := pdb.NewLimits(ctx, clock, kubeClient)
@@ -87,8 +87,8 @@ func SimulateScheduling(ctx context.Context, clock clock.Clock, kubeClient clien
 		return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
 	deletingNodePods = lo.Filter(deletingNodePods, func(pod *corev1.Pod, _ int) bool {
-		_, evictable := pdbs.CanEvictPods([]*corev1.Pod{pod})
-		return evictable
+		_, isFullyBlocked := pdbs.IsFullyBlocked(pod)
+		return !isFullyBlocked
 	})
 	pods = append(pods, deletingNodePods...)
 	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, stateNodes)
