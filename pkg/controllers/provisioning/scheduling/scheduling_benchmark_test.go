@@ -161,8 +161,7 @@ func TestSchedulingProfile(t *testing.T) {
 
 func benchmarkScheduler(b *testing.B, pods []*corev1.Pod, opts ...scheduling.Options) {
 	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"), test.Options())
-	opts = append(opts, scheduling.NumConcurrentReconciles(5))
-	scheduler, err := setupScheduler(ctx, pods, opts...)
+	scheduler, err := setupScheduler(ctx, pods, append(opts, scheduling.NumConcurrentReconciles(5))...)
 	if err != nil {
 		b.Fatalf("creating scheduler, %s", err)
 	}
