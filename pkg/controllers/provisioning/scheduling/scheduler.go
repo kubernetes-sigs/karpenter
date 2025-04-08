@@ -113,15 +113,16 @@ func NewScheduler(
 		return nct, true
 	})
 	s := &Scheduler{
-		uuid:               uuid.NewUUID(),
-		kubeClient:         kubeClient,
-		nodeClaimTemplates: templates,
-		topology:           topology,
-		cluster:            cluster,
-		daemonOverhead:     getDaemonOverhead(templates, daemonSetPods),
-		cachedPodData:      map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
-		recorder:           recorder,
-		preferences:        &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
+		uuid:                uuid.NewUUID(),
+		kubeClient:          kubeClient,
+		nodeClaimTemplates:  templates,
+		topology:            topology,
+		cluster:             cluster,
+		daemonOverhead:      getDaemonOverhead(templates, daemonSetPods),
+		daemonHostPortUsage: getDaemonHostPortUsage(templates, daemonSetPods),
+		cachedPodData:       map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
+		recorder:            recorder,
+		preferences:         &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
 		remainingResources: lo.SliceToMap(nodePools, func(np *v1.NodePool) (string, corev1.ResourceList) {
 			return np.Name, corev1.ResourceList(np.Spec.Limits)
 		}),
@@ -146,6 +147,7 @@ type Scheduler struct {
 	nodeClaimTemplates   []*NodeClaimTemplate
 	remainingResources   map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
 	daemonOverhead       map[*NodeClaimTemplate]corev1.ResourceList
+	daemonHostPortUsage  map[*NodeClaimTemplate]*scheduling.HostPortUsage
 	cachedPodData        map[types.UID]*PodData // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
 	preferences          *Preferences
 	topology             *Topology
@@ -266,7 +268,6 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 	return r
 }
 
-//nolint:gocyclo
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
@@ -284,47 +285,33 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 	q := NewQueue(pods, s.cachedPodData)
 
 	startTime := s.clock.Now()
-	lastLogTime := s.clock.Now()
-	batchSize := len(q.pods)
 	for {
-		if ctx.Err() != nil {
-			log.FromContext(ctx).V(1).WithValues("duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("scheduling simulation timed out")
-			break
-		}
 		UnfinishedWorkSeconds.Set(s.clock.Since(startTime).Seconds(), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 		QueueDepth.Set(float64(len(q.pods)), map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 
-		if s.clock.Since(lastLogTime) > time.Minute {
-			log.FromContext(ctx).WithValues("pods-scheduled", batchSize-len(q.pods), "pods-remaining", len(q.pods), "existing-nodes", len(s.existingNodes), "simulated-nodes", len(s.newNodeClaims), "duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("computing pod scheduling...")
-			lastLogTime = s.clock.Now()
-		}
 		// Try the next pod
 		pod, ok := q.Pop()
 		if !ok {
 			break
 		}
-
-		// Schedule to existing nodes or create a new node
-		if podErrors[pod] = s.add(ctx, pod); podErrors[pod] == nil {
-			delete(podErrors, pod)
-			continue
-		}
-
-		// We should only relax the pod's requirements when the error is not a reserved offering error because the pod may be
-		// able to schedule later without relaxing constraints. This could occur in this scheduling run, if other NodeClaims
-		// release the required reservations when constrained, or in subsequent runs. For an example, reference the following
-		// test: "shouldn't relax preferences when a pod fails to schedule due to a reserved offering error".
-		var relaxed bool
-		if !IsReservedOfferingError(podErrors[pod]) {
-			if relaxed = s.preferences.Relax(ctx, pod); relaxed {
-				if err := s.topology.Update(ctx, pod); err != nil && !errors.Is(err, context.DeadlineExceeded) {
-					log.FromContext(ctx).Error(err, "failed updating topology")
-				}
-				// Update the cached podData since the pod was relaxed and it could have changed its requirement set
-				s.updateCachedPodData(pod)
+		// We relax the pod all the way the first time we see it
+		// If we don't schedule it, we store the original pod (with preferences)
+		// in the queue and give ourselves another chance to schedule it later
+		if err := s.trySchedule(ctx, pod.DeepCopy()); err != nil {
+			if errors.Is(err, context.Canceled) {
+				log.FromContext(ctx).V(1).WithValues("duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("scheduling simulation timed out")
+				break
 			}
+			podErrors[pod] = err
+			if e := s.topology.Update(ctx, pod); e != nil && !errors.Is(e, context.DeadlineExceeded) {
+				log.FromContext(ctx).Error(e, "failed updating topology")
+			}
+			// Update the cached podData since the pod was relaxed, and it could have changed its requirement set
+			s.updateCachedPodData(pod)
+			q.Push(pod)
+		} else {
+			delete(podErrors, pod)
 		}
-		q.Push(pod, relaxed)
 	}
 	UnfinishedWorkSeconds.Delete(map[string]string{ControllerLabel: injection.GetControllerName(ctx), schedulingIDLabel: string(s.uuid)})
 	for _, m := range s.newNodeClaims {
@@ -336,6 +323,34 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		ExistingNodes: s.existingNodes,
 		PodErrors:     podErrors,
 	}, ctx.Err()
+}
+
+func (s *Scheduler) trySchedule(ctx context.Context, p *corev1.Pod) error {
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		err := s.add(ctx, p)
+		if err == nil {
+			return nil
+		}
+		// We should only relax the pod's requirements when the error is not a reserved offering error because the pod may be
+		// able to schedule later without relaxing constraints. This could occur in this scheduling run, if other NodeClaims
+		// release the required reservations when constrained, or in subsequent runs. For an example, reference the following
+		// test: "shouldn't relax preferences when a pod fails to schedule due to a reserved offering error".
+		if IsReservedOfferingError(err) {
+			return err
+		}
+		// Eventually we won't be able to relax anymore and this while loop will exit
+		if relaxed := s.preferences.Relax(ctx, p); !relaxed {
+			return err
+		}
+		if e := s.topology.Update(ctx, p); e != nil && !errors.Is(e, context.DeadlineExceeded) {
+			log.FromContext(ctx).Error(e, "failed updating topology")
+		}
+		// Update the cached podData since the pod was relaxed, and it could have changed its requirement set
+		s.updateCachedPodData(p)
+	}
 }
 
 func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
@@ -393,7 +408,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 			}
 		}
 
-		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], instanceTypes, s.reservationManager, s.reservedOfferingMode)
+		nodeClaim := NewNodeClaim(nodeClaimTemplate, s.topology, s.daemonOverhead[nodeClaimTemplate], s.daemonHostPortUsage[nodeClaimTemplate], instanceTypes, s.reservationManager, s.reservedOfferingMode)
 		if err := nodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID]); err != nil {
 			nodeClaim.Destroy()
 			if IsReservedOfferingError(err) {
@@ -467,6 +482,20 @@ func getDaemonOverhead(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []
 	return lo.SliceToMap(nodeClaimTemplates, func(nct *NodeClaimTemplate) (*NodeClaimTemplate, corev1.ResourceList) {
 		return nct, resources.RequestsForPods(lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool { return isDaemonPodCompatible(nct, p) })...)
 	})
+}
+
+// getDaemonHostPortUsage determines requested host ports for DaemonSet pods, given a NodeClaimTemplate
+func getDaemonHostPortUsage(nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]*scheduling.HostPortUsage {
+	nctToOccupiedPorts := map[*NodeClaimTemplate]*scheduling.HostPortUsage{}
+	for _, nct := range nodeClaimTemplates {
+		hostPortUsage := scheduling.NewHostPortUsage()
+		// gather compatible DaemonSet pods for the NodeClaimTemplate
+		for _, pod := range lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool { return isDaemonPodCompatible(nct, p) }) {
+			hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
+		}
+		nctToOccupiedPorts[nct] = hostPortUsage
+	}
+	return nctToOccupiedPorts
 }
 
 // isDaemonPodCompatible determines if the daemon pod is compatible with the NodeClaimTemplate for daemon scheduling
