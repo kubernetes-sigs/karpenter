@@ -67,6 +67,9 @@ var _ = AfterEach(func() {
 
 var _ = Describe("CanEvictPods", func() {
 	It("can evict unhealthy pods when UnhealthyPodEvictionPolicy is set to always allow", func() {
+		if env.Version.Minor() < 27 {
+			Skip("PDB UnhealthyPodEvictionPolicy is only supported in 1.27+")
+		}
 		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
 			Labels:                     podLabels,
 			MinAvailable:               lo.ToPtr(intstr.FromString("100%")),
