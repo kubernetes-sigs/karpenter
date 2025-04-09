@@ -24,7 +24,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -33,7 +32,7 @@ import (
 // Limits is used to evaluate if evicting a list of pods is possible.
 type Limits []*pdbItem
 
-func NewLimits(ctx context.Context, clk clock.Clock, kubeClient client.Client) (Limits, error) {
+func NewLimits(ctx context.Context, kubeClient client.Client) (Limits, error) {
 	pdbs := []*pdbItem{}
 
 	var pdbList policyv1.PodDisruptionBudgetList
@@ -56,43 +55,34 @@ func NewLimits(ctx context.Context, clk clock.Clock, kubeClient client.Client) (
 // nolint:gocyclo
 func (l Limits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	for _, pod := range pods {
-		// If the pod isn't eligible for being evicted, then a fully blocking PDB doesn't matter
-		// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
-		if !podutil.IsEvictable(pod) {
-			continue
-		}
-		for _, pdb := range l {
-			if pdb.key.Namespace == pod.ObjectMeta.Namespace {
-				if pdb.selector.Matches(labels.Set(pod.Labels)) {
+		pdb, evictable := l.isEvictable(pod, func(pdb *pdbItem) bool {
+			return pdb.disruptionsAllowed == 0
+		})
 
-					// if the PDB policy is set to allow evicting unhealthy pods, then it won't stop us from
-					// evicting unhealthy pods
-					ignorePod := false
-					if pdb.canAlwaysEvictUnhealthyPods {
-						for _, c := range pod.Status.Conditions {
-							if c.Type == v1.PodReady && c.Status == v1.ConditionFalse {
-								ignorePod = true
-								continue
-							}
-						}
-					}
-
-					if !ignorePod && pdb.disruptionsAllowed == 0 {
-						return pdb.key, false
-					}
-				}
-			}
+		if !evictable {
+			return pdb, false
 		}
 	}
 	return client.ObjectKey{}, true
 }
 
-// IsFullyBlocked returns true if the given pod is fully blocked by a PDB.
-func (l Limits) IsFullyBlocked(pod *v1.Pod) (client.ObjectKey, bool) {
-	// If the pod isn't eligible for being evicted, then a fully blocking PDB doesn't matter
+// isFullyBlocked returns true if the given pod is fully blocked by a PDB.
+func (l Limits) isFullyBlocked(pod *v1.Pod) (client.ObjectKey, bool) {
+	pdb, evictable := l.isEvictable(pod, func(pdb *pdbItem) bool {
+		return pdb.isFullyBlocking
+	})
+
+	if !evictable {
+		return pdb, true
+	}
+	return client.ObjectKey{}, false
+}
+
+func (l Limits) isEvictable(pod *v1.Pod, blockingPredicate func(pdb *pdbItem) bool) (client.ObjectKey, bool) {
+	// If the pod isn't eligible for being evicted, then the predicate doesn't matter
 	// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
 	if !podutil.IsEvictable(pod) {
-		return client.ObjectKey{}, false
+		return client.ObjectKey{}, true
 	}
 	for _, pdb := range l {
 		if pdb.key.Namespace == pod.ObjectMeta.Namespace {
@@ -103,18 +93,34 @@ func (l Limits) IsFullyBlocked(pod *v1.Pod) (client.ObjectKey, bool) {
 				if pdb.canAlwaysEvictUnhealthyPods {
 					for _, c := range pod.Status.Conditions {
 						if c.Type == v1.PodReady && c.Status == v1.ConditionFalse {
-							return client.ObjectKey{}, false
+							return client.ObjectKey{}, true
 						}
 					}
 				}
 
-				if pdb.isFullyBlocking {
-					return pdb.key, true
+				if blockingPredicate(pdb) {
+					return pdb.key, false
 				}
 			}
 		}
 	}
-	return client.ObjectKey{}, false
+	return client.ObjectKey{}, true
+}
+
+// IsCurrentlyReschedulable checks if a Karpenter should consider this pod when re-scheduling to new capacity by ensuring that the pod:
+// - Is reschedulable as per the checks in IsReschedulable(...)
+// - Does not have the "karpenter.sh/do-not-disrupt=true" annotation (https://karpenter.sh/docs/concepts/disruption/#pod-level-controls)
+// - Does not have fully blocking PDBs which would prevent the pod from being evicted
+// The way this is different from IsReschedulable is that this also considers non-permanent conditions which prevent a pod from being rescheduled
+// to a different node like the "do-not-disrupt" annotation or fully blocking PDBs.
+func (l Limits) IsCurrentlyReschedulable(pod *v1.Pod) bool {
+	// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
+	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until these pods are evicted is wasteful.
+	_, isFullyBlocked := l.isFullyBlocked(pod)
+
+	return podutil.IsReschedulable(pod) &&
+		!podutil.HasDoNotDisrupt(pod) &&
+		!isFullyBlocked
 }
 
 type pdbItem struct {

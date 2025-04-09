@@ -65,32 +65,33 @@ func SimulateScheduling(ctx context.Context, clock clock.Clock, kubeClient clien
 		return scheduling.Results{}, errCandidateDeleting
 	}
 
-	// We get the pods that are on nodes that are deleting
-	deletingNodePods, err := deletingNodes.ReschedulablePods(ctx, kubeClient)
-	if err != nil {
-		return scheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
-	}
 	// start by getting all pending pods
 	pods, err := provisioner.GetPendingPods(ctx)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
-	for _, n := range candidates {
-		pods = append(pods, n.reschedulablePods...)
-	}
 
 	// Don't provision capacity for pods which will not get evicted due to fully blocking PDBs.
 	// Since Karpenter doesn't know when these pods will be successfully evicted, spinning up capacity until
 	// these pods are evicted is wasteful.
-	pdbs, err := pdb.NewLimits(ctx, clock, kubeClient)
+	pdbs, err := pdb.NewLimits(ctx, kubeClient)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	deletingNodePods = lo.Filter(deletingNodePods, func(pod *corev1.Pod, _ int) bool {
-		_, isFullyBlocked := pdbs.IsFullyBlocked(pod)
-		return !isFullyBlocked
-	})
+	for _, n := range candidates {
+		currentlyReschedulablePods := lo.Filter(n.reschedulablePods, func(p *corev1.Pod, _ int) bool {
+			return pdbs.IsCurrentlyReschedulable(p)
+		})
+		pods = append(pods, currentlyReschedulablePods...)
+	}
+
+	// We get the pods that are on nodes that are deleting
+	deletingNodePods, err := deletingNodes.CurrentlyReschedulablePods(ctx, kubeClient)
+	if err != nil {
+		return scheduling.Results{}, fmt.Errorf("failed to get pods from deleting nodes, %w", err)
+	}
 	pods = append(pods, deletingNodePods...)
+
 	scheduler, err := provisioner.NewScheduler(log.IntoContext(ctx, operatorlogging.NopLogger), pods, stateNodes)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("creating scheduler, %w", err)
@@ -164,7 +165,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, err
 	}
-	pdbs, err := pdb.NewLimits(ctx, clk, kubeClient)
+	pdbs, err := pdb.NewLimits(ctx, kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}

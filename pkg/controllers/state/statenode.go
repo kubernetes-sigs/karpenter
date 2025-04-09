@@ -95,10 +95,10 @@ func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*core
 	return pods, nil
 }
 
-func (n StateNodes) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+func (n StateNodes) CurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
 	var pods []*corev1.Pod
 	for _, node := range n {
-		p, err := node.ReschedulablePods(ctx, kubeClient)
+		p, err := node.CurrentlyReschedulablePods(ctx, kubeClient)
 		if err != nil {
 			return nil, err
 		}
@@ -246,12 +246,12 @@ func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient cli
 	return pods, nil
 }
 
-// ReschedulablePods gets the pods assigned to the Node that are reschedulable based on the kubernetes api-server bindings
-func (in *StateNode) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+// CurrentlyReschedulablePods gets the pods assigned to the Node that are currently reschedulable based on the kubernetes api-server bindings
+func (in *StateNode) CurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetReschedulablePods(ctx, kubeClient, in.Node)
+	return nodeutils.GetCurrentlyReschedulablePods(ctx, kubeClient, in.Node)
 }
 
 func (in *StateNode) HostName() string {
