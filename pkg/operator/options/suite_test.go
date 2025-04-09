@@ -114,6 +114,7 @@ var _ = Describe("Options", func() {
 					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(false),
 					SpotToSpotConsolidation: lo.ToPtr(false),
+					SyncNodeclaimTaints:     lo.ToPtr(true),
 				},
 			}))
 		})
@@ -138,7 +139,7 @@ var _ = Describe("Options", func() {
 				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
-				"--feature-gates", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true",
+				"--feature-gates", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true,SyncNodeclaimTaints=false",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -161,6 +162,7 @@ var _ = Describe("Options", func() {
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
+					SyncNodeclaimTaints:     lo.ToPtr(false),
 				},
 			}))
 		})
@@ -181,7 +183,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true,SyncNodeclaimTaints=false")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -208,6 +210,7 @@ var _ = Describe("Options", func() {
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
+					SyncNodeclaimTaints:     lo.ToPtr(false),
 				},
 			}))
 		})
@@ -223,7 +226,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true,SyncNodeclaimTaints=false")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -255,6 +258,7 @@ var _ = Describe("Options", func() {
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
+					SyncNodeclaimTaints:     lo.ToPtr(false),
 				},
 			}))
 		})
@@ -311,4 +315,5 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.ReservedCapacity).To(Equal(optsB.FeatureGates.ReservedCapacity))
 	Expect(optsA.FeatureGates.NodeRepair).To(Equal(optsB.FeatureGates.NodeRepair))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
+	Expect(optsA.FeatureGates.SyncNodeclaimTaints).To(Equal(optsB.FeatureGates.SyncNodeclaimTaints))
 }
