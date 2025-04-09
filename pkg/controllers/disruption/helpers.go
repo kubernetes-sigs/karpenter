@@ -46,7 +46,7 @@ import (
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 //nolint:gocyclo
-func SimulateScheduling(ctx context.Context, clock clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
+func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
 	candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)

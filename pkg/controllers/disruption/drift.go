@@ -21,7 +21,6 @@ import (
 	"errors"
 	"sort"
 
-	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -40,16 +39,14 @@ type Drift struct {
 	cluster     *state.Cluster
 	provisioner *provisioning.Provisioner
 	recorder    events.Recorder
-	clock       clock.Clock
 }
 
-func NewDrift(clock clock.Clock, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
+func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
 	return &Drift{
 		kubeClient:  kubeClient,
 		cluster:     cluster,
 		provisioner: provisioner,
 		recorder:    recorder,
-		clock:       clock,
 	}
 }
 
@@ -95,7 +92,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			continue
 		}
 		// Check if we need to create any NodeClaims.
-		results, err := SimulateScheduling(ctx, d.clock, d.kubeClient, d.cluster, d.provisioner, candidate)
+		results, err := SimulateScheduling(ctx, d.kubeClient, d.cluster, d.provisioner, candidate)
 		if err != nil {
 			// if a candidate is now deleting, just retry
 			if errors.Is(err, errCandidateDeleting) {
