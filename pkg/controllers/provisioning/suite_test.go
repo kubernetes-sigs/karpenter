@@ -2241,6 +2241,215 @@ var _ = Describe("Provisioning", func() {
 				Expect(node.Spec.Taints).To(ContainElement(corev1.Taint{Key: "foo", Value: "bar", Effect: corev1.TaintEffectPreferNoSchedule}))
 			})
 		})
+		Context("Ignore Preferences", func() {
+			BeforeEach(func() {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{PreferencePolicy: lo.ToPtr(options.PreferencePolicyIgnore)}))
+			})
+			It("should ignore node affinity preferences", func() {
+				zone1Pod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "foo",
+						},
+					},
+					NodeSelector: map[string]string{
+						corev1.LabelTopologyZone: "test-zone-1",
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("2"),
+						},
+					},
+				})
+				zone2Pods := test.UnschedulablePods(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "bar",
+						},
+					},
+					NodeSelector: map[string]string{
+						corev1.LabelTopologyZone: "test-zone-2",
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("3"),
+						},
+					},
+				}, 2)
+				// Create an affinity pod that has a preference to schedule in the zone2Pod
+				// Without considering the preference, we would schedule the pod to the zone1Pod's node
+				// because the number of pods on that node should be lower than the zone2Pod's
+				nodeAffinityPod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "baz",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+					NodePreferences: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-2"},
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], nodeAffinityPod)
+
+				zone1Node := ExpectScheduled(ctx, env.Client, zone1Pod)
+				zone2Node := ExpectScheduled(ctx, env.Client, zone2Pods[0])
+				ExpectScheduled(ctx, env.Client, zone2Pods[1])
+				nodeAffinityPodNode := ExpectScheduled(ctx, env.Client, nodeAffinityPod)
+
+				Expect(nodeAffinityPodNode.Name).To(Equal(zone1Node.Name))
+				Expect(nodeAffinityPodNode.Name).ToNot(Equal(zone2Node.Name))
+			})
+			DescribeTable("should ignore topologySpreadConstraint preferences", func(topologyKey string) {
+				opts := test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "foo"},
+					},
+					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+						{
+							MaxSkew:           1,
+							TopologyKey:       topologyKey,
+							WhenUnsatisfiable: corev1.ScheduleAnyway,
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app": "foo",
+								},
+							},
+						},
+					},
+				}
+				pods := test.UnschedulablePods(opts, 5)
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+				// If we were respecting preferences, we would add these pods on separate nodes
+				// Because we are ignoring them, we will schedule them all on the same node
+				nodeNames := sets.New[string]()
+				for _, p := range pods {
+					nodeNames.Insert(ExpectScheduled(ctx, env.Client, p).Name)
+				}
+				Expect(nodeNames).To(HaveLen(1))
+			},
+				Entry(corev1.LabelTopologyZone, corev1.LabelTopologyZone),
+				Entry(corev1.LabelTopologyZone, corev1.LabelHostname),
+			)
+			DescribeTable("should ignore pod anti-affinity preferences", func(topologyKey string) {
+				opts := test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "foo"},
+					},
+					PodAntiPreferences: []corev1.WeightedPodAffinityTerm{
+						{
+							Weight: 1,
+							PodAffinityTerm: corev1.PodAffinityTerm{
+								TopologyKey: topologyKey,
+								LabelSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"app": "foo",
+									},
+								},
+							},
+						},
+					},
+				}
+				pods := test.UnschedulablePods(opts, 5)
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+				// If we were respecting preferences, we would add these pods on separate nodes
+				// Because we are ignoring them, we will schedule them all on the same node
+				nodeNames := sets.New[string]()
+				for _, p := range pods {
+					nodeNames.Insert(ExpectScheduled(ctx, env.Client, p).Name)
+				}
+				Expect(nodeNames).To(HaveLen(1))
+			},
+				Entry(corev1.LabelTopologyZone, corev1.LabelTopologyZone),
+				Entry(corev1.LabelTopologyZone, corev1.LabelHostname),
+			)
+			DescribeTable("should ignore pod affinity preferences", func(topologyKey string) {
+				zone1Pod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "foo",
+						},
+					},
+					NodeSelector: map[string]string{
+						corev1.LabelTopologyZone: "test-zone-1",
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("2"),
+						},
+					},
+				})
+				zone2Pods := test.UnschedulablePods(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "bar",
+						},
+					},
+					NodeSelector: map[string]string{
+						corev1.LabelTopologyZone: "test-zone-2",
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("3"),
+						},
+					},
+				}, 2)
+				// Create an affinity pod that has a preference to schedule in the zone2Pod
+				// Without considering the preference, we would schedule the pod to the zone1Pod's node
+				// because the number of pods on that node should be lower than the zone2Pod's
+				affinityPod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "baz",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+					PodPreferences: []corev1.WeightedPodAffinityTerm{
+						{
+							Weight: 1,
+							PodAffinityTerm: corev1.PodAffinityTerm{
+								TopologyKey: topologyKey,
+								LabelSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"app": "bar",
+									},
+								},
+							},
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], affinityPod)
+
+				zone1Node := ExpectScheduled(ctx, env.Client, zone1Pod)
+				zone2Node := ExpectScheduled(ctx, env.Client, zone2Pods[0])
+				ExpectScheduled(ctx, env.Client, zone2Pods[0])
+				affinityPodNode := ExpectScheduled(ctx, env.Client, affinityPod)
+
+				Expect(affinityPodNode.Name).To(Equal(zone1Node.Name))
+				Expect(affinityPodNode.Name).ToNot(Equal(zone2Node.Name))
+			},
+				Entry(corev1.LabelTopologyZone, corev1.LabelTopologyZone),
+				Entry(corev1.LabelTopologyZone, corev1.LabelHostname),
+			)
+		})
 	})
 	Context("Multiple NodePools", func() {
 		It("should schedule to an explicitly selected NodePool", func() {
