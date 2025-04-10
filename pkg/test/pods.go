@@ -62,10 +62,11 @@ type PodOptions struct {
 
 type PDBOptions struct {
 	metav1.ObjectMeta
-	Labels         map[string]string
-	MinAvailable   *intstr.IntOrString
-	MaxUnavailable *intstr.IntOrString
-	Status         *policyv1.PodDisruptionBudgetStatus
+	Labels                     map[string]string
+	MinAvailable               *intstr.IntOrString
+	MaxUnavailable             *intstr.IntOrString
+	UnhealthyPodEvictionPolicy *policyv1.UnhealthyPodEvictionPolicyType
+	Status                     *policyv1.PodDisruptionBudgetStatus
 }
 
 type EphemeralVolumeTemplateOptions struct {
@@ -248,7 +249,8 @@ func PodDisruptionBudget(overrides ...PDBOptions) *policyv1.PodDisruptionBudget 
 			Selector: &metav1.LabelSelector{
 				MatchLabels: options.Labels,
 			},
-			MaxUnavailable: options.MaxUnavailable,
+			MaxUnavailable:             options.MaxUnavailable,
+			UnhealthyPodEvictionPolicy: options.UnhealthyPodEvictionPolicy,
 		},
 		Status: status,
 	}
