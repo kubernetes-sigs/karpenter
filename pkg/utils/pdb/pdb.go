@@ -29,6 +29,13 @@ import (
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
+type evictionBlocker int
+
+const (
+	zeroDisruptions evictionBlocker = iota
+	fullyBlockingPDBs
+)
+
 // Limits is used to evaluate if evicting a list of pods is possible.
 type Limits []*pdbItem
 
@@ -55,9 +62,7 @@ func NewLimits(ctx context.Context, kubeClient client.Client) (Limits, error) {
 // nolint:gocyclo
 func (l Limits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 	for _, pod := range pods {
-		pdb, evictable := l.isEvictable(pod, func(pdb *pdbItem) bool {
-			return pdb.disruptionsAllowed == 0
-		})
+		pdb, evictable := l.isEvictable(pod, zeroDisruptions)
 
 		if !evictable {
 			return pdb, false
@@ -68,9 +73,7 @@ func (l Limits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
 
 // isFullyBlocked returns true if the given pod is fully blocked by a PDB.
 func (l Limits) isFullyBlocked(pod *v1.Pod) (client.ObjectKey, bool) {
-	pdb, evictable := l.isEvictable(pod, func(pdb *pdbItem) bool {
-		return pdb.isFullyBlocking
-	})
+	pdb, evictable := l.isEvictable(pod, fullyBlockingPDBs)
 
 	if !evictable {
 		return pdb, true
@@ -78,7 +81,8 @@ func (l Limits) isFullyBlocked(pod *v1.Pod) (client.ObjectKey, bool) {
 	return client.ObjectKey{}, false
 }
 
-func (l Limits) isEvictable(pod *v1.Pod, blockingPredicate func(pdb *pdbItem) bool) (client.ObjectKey, bool) {
+// nolint:gocyclo
+func (l Limits) isEvictable(pod *v1.Pod, evictionBlocker evictionBlocker) (client.ObjectKey, bool) {
 	// If the pod isn't eligible for being evicted, then the predicate doesn't matter
 	// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
 	if !podutil.IsEvictable(pod) {
@@ -98,8 +102,15 @@ func (l Limits) isEvictable(pod *v1.Pod, blockingPredicate func(pdb *pdbItem) bo
 					}
 				}
 
-				if blockingPredicate(pdb) {
-					return pdb.key, false
+				switch evictionBlocker {
+				case zeroDisruptions:
+					if pdb.disruptionsAllowed == 0 {
+						return pdb.key, false
+					}
+				case fullyBlockingPDBs:
+					if pdb.isFullyBlocking {
+						return pdb.key, false
+					}
 				}
 			}
 		}
