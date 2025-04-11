@@ -19,7 +19,6 @@ package scheduling
 import (
 	"fmt"
 	"math"
-	"sync"
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/mitchellh/hashstructure/v2"
@@ -55,8 +54,6 @@ func (t TopologyType) String() string {
 
 // TopologyGroup is used to track pod counts that match a selector by the topology domain (e.g. SELECT COUNT(*) FROM pods GROUP BY(topology_ke
 type TopologyGroup struct {
-	mu sync.RWMutex
-
 	// Hashed Fields
 	Key         string
 	Type        TopologyType
@@ -139,9 +136,6 @@ func (t *TopologyGroup) Get(pod *corev1.Pod, podDomains, nodeDomains *scheduling
 }
 
 func (t *TopologyGroup) Record(domains ...string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	for _, domain := range domains {
 		t.domains[domain]++
 		t.emptyDomains.Delete(domain)
@@ -156,9 +150,6 @@ func (t *TopologyGroup) Counts(pod *corev1.Pod, taints []corev1.Taint, requireme
 
 // Register ensures that the topology is aware of the given domain names.
 func (t *TopologyGroup) Register(domains ...string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	for _, domain := range domains {
 		if _, ok := t.domains[domain]; !ok {
 			t.domains[domain] = 0
@@ -168,9 +159,6 @@ func (t *TopologyGroup) Register(domains ...string) {
 }
 
 func (t *TopologyGroup) Unregister(domains ...string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	for _, domain := range domains {
 		delete(t.domains, domain)
 		t.emptyDomains.Delete(domain)
@@ -178,23 +166,14 @@ func (t *TopologyGroup) Unregister(domains ...string) {
 }
 
 func (t *TopologyGroup) AddOwner(key types.UID) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	t.owners[key] = struct{}{}
 }
 
 func (t *TopologyGroup) RemoveOwner(key types.UID) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	delete(t.owners, key)
 }
 
 func (t *TopologyGroup) IsOwnedBy(key types.UID) bool {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
 	_, ok := t.owners[key]
 	return ok
 }
@@ -224,15 +203,25 @@ func (t *TopologyGroup) Hash() uint64 {
 // If there are no eligible domains, we return a `DoesNotExist` requirement, implying that we could not satisfy the topologySpread requirement.
 // nolint:gocyclo
 func (t *TopologyGroup) nextDomainTopologySpread(pod *corev1.Pod, podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
 	// min count is calculated across all domains
 	min := t.domainMinCount(podDomains)
 	selfSelecting := t.selects(pod)
 
 	minDomain := ""
 	minCount := int32(math.MaxInt32)
+
+	// We special-case kubernetes.io/hostname primarily for new NodeClaims since their domain won't be registered until we Add() them
+	if t.Key == corev1.LabelHostname && len(nodeDomains.Values()) == 1 {
+		hostName := nodeDomains.Values()[0]
+		count := t.domains[hostName] // t.domains[hostName] produces a 0 value for new NodeClaims
+		if selfSelecting {
+			count++
+		}
+		if count <= t.maxSkew {
+			return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpIn, hostName)
+		}
+		return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist)
+	}
 
 	// If we are explicitly selecting on specific node domains ("In" requirement),
 	// this is going to be more efficient to iterate through
@@ -269,9 +258,9 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *corev1.Pod, podDomains, no
 	}
 	if minDomain == "" {
 		// avoids an error message about 'zone in [""]', preferring 'zone in []'
-		return scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpDoesNotExist)
+		return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist)
 	}
-	return scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpIn, minDomain)
+	return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpIn, minDomain)
 }
 
 func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
@@ -299,10 +288,24 @@ func (t *TopologyGroup) domainMinCount(domains *scheduling.Requirement) int32 {
 
 // nolint:gocyclo
 func (t *TopologyGroup) nextDomainAffinity(pod *corev1.Pod, podDomains *scheduling.Requirement, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
+	options := scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist)
 
-	options := scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpDoesNotExist)
+	// We special-case kubernetes.io/hostname primarily for new NodeClaims since their domain won't be registered until we Add() them
+	if t.Key == corev1.LabelHostname && len(nodeDomains.Values()) == 1 {
+		hostName := nodeDomains.Values()[0]
+		if !podDomains.Has(hostName) {
+			return options
+		}
+		if t.domains[hostName] > 0 { // t.domains[hostName] produces a 0 value for new NodeClaims
+			options.Insert(hostName)
+			return options
+		}
+		if t.selects(pod) && (len(t.domains) == len(t.emptyDomains) || !t.anyCompatiblePodDomain(podDomains)) {
+			options.Insert(hostName)
+			return options
+		}
+		return options
+	}
 
 	// If we are explicitly selecting on specific node domains ("In" requirement),
 	// this is going to be more efficient to iterate through
@@ -365,15 +368,21 @@ func (t *TopologyGroup) anyCompatiblePodDomain(podDomains *scheduling.Requiremen
 
 // nolint:gocyclo
 func (t *TopologyGroup) nextDomainAntiAffinity(podDomains, nodeDomains *scheduling.Requirement) *scheduling.Requirement {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	options := scheduling.NewRequirement(podDomains.Key, corev1.NodeSelectorOpDoesNotExist)
+	options := scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpDoesNotExist)
 	// pods with anti-affinity must schedule to a domain where there are currently none of those pods (an empty
 	// domain). If there are none of those domains, then the pod can't schedule and we don't need to walk this
 	// list of domains.  The use case where this optimization is really great is when we are launching nodes for
 	// a deployment of pods with self anti-affinity.  The domains map here continues to grow, and we continue to
 	// fully scan it each iteration.
+
+	// We special-case kubernetes.io/hostname primarily for new NodeClaims since their domain won't be registered until we Add() them
+	if t.Key == corev1.LabelHostname && len(nodeDomains.Values()) == 1 {
+		hostName := nodeDomains.Values()[0]
+		if t.domains[hostName] == 0 { // t.domains[hostName] produces a 0 value for new NodeClaims
+			options.Insert(hostName)
+		}
+		return options
+	}
 
 	// If we are explicitly selecting on specific node domains ("In" requirement) and the number of node domains
 	// is less than our empty domains, this is going to be more efficient to iterate through

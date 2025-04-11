@@ -301,7 +301,6 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 }
 
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
-	fmt.Printf("Scheduling using %d workers\n", s.numConcurrentReconciles)
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
@@ -527,7 +526,6 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		r, it, ofs, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID])
 		if err != nil {
 			errs[i] = err
-			nodeClaim.Destroy() // Ensure that we Destroy() the nodeclaim that we created to cleanup any topology that we generated during construction
 
 			// If the pod is compatible with a NodePool with reserved offerings available, we shouldn't fall back to a NodePool
 			// with a lower weight. We could consider allowing "fallback" to NodePools with equal weight if they also have
@@ -554,12 +552,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 
 		// Ensure that we always take an earlier successful schedule to keep consistent ordering
 		if i >= idx {
-			nodeClaim.Destroy() // Ensure that we Destroy() the nodeclaim that we created to cleanup any topology that we generated during construction
 			return
-		}
-		// Ensure that if we override a previous NodeClaim that we destroy the old one
-		if newNodeClaim != nil {
-			newNodeClaim.Destroy()
 		}
 		newNodeClaim = nodeClaim
 		requirements = r
