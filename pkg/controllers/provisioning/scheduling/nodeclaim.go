@@ -90,7 +90,6 @@ func NewNodeClaim(
 	reservedOfferingMode ReservedOfferingMode,
 ) *NodeClaim {
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
-	topology.Register(corev1.LabelHostname, hostname)
 	template := *nodeClaimTemplate
 	template.Requirements = scheduling.NewRequirements()
 	template.Requirements.Add(nodeClaimTemplate.Requirements.Values()...)
@@ -166,6 +165,7 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements
 	n.InstanceTypeOptions = instanceTypes
 	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 	n.Requirements = nodeClaimRequirements
+	n.topology.Register(corev1.LabelHostname, n.hostname)
 	n.topology.Record(pod, n.NodeClaim.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
 	n.reservationManager.Reserve(n.hostname, offeringsToReserve...)
@@ -174,7 +174,7 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements
 }
 
 // releaseReservedOfferings releases all offerings which are present in the current reserved offerings, but are not
-// present in the updated reserved offerings
+// present in the updated reserved offerings.
 func (n *NodeClaim) releaseReservedOfferings(current, updated cloudprovider.Offerings) {
 	updatedIDs := sets.New[string]()
 	for _, o := range updated {
@@ -239,11 +239,6 @@ func (n *NodeClaim) offeringsToReserve(
 		}
 	}
 	return reservedOfferings, nil
-}
-
-func (n *NodeClaim) Destroy() {
-	n.topology.Unregister(corev1.LabelHostname, n.hostname)
-	n.reservationManager.Release(n.hostname, n.reservedOfferings...)
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup

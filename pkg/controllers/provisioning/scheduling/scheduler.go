@@ -329,7 +329,6 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 }
 
 func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, error) {
-	fmt.Printf("Scheduling using %d workers\n", s.numConcurrentReconciles)
 	defer metrics.Measure(DurationSeconds, map[string]string{ControllerLabel: injection.GetControllerName(ctx)})()
 	// We loop trying to schedule unschedulable pods as long as we are making progress.  This solves a few
 	// issues including pods with affinity to another pod in the batch. We could topo-sort to solve this, but it wouldn't
@@ -534,28 +533,27 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	workCtx, cancel := context.WithCancel(ctx)
 	errs := make([]error, len(s.nodeClaimTemplates))
 	workqueue.ParallelizeUntil(workCtx, s.numConcurrentReconciles, len(s.nodeClaimTemplates), func(i int) {
-		it := s.nodeClaimTemplates[i].InstanceTypeOptions
+		its := s.nodeClaimTemplates[i].InstanceTypeOptions
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
-			it = filterByRemainingResources(it, remaining)
-			if len(it) == 0 {
+			its = filterByRemainingResources(its, remaining)
+			if len(its) == 0 {
 				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 				return
-			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(it) {
+			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
 				log.FromContext(ctx).V(1).WithValues(
 					"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
 				).Info(fmt.Sprintf(
 					"%d out of %d instance types were excluded because they would breach limits",
-					len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(it),
+					len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
 					len(s.nodeClaimTemplates[i].InstanceTypeOptions),
 				))
 			}
 		}
-		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], it, s.reservationManager, s.reservedOfferingMode)
+		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
 		r, it, ofs, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID])
 		if err != nil {
 			errs[i] = err
-			nodeClaim.Destroy() // Ensure that we Destroy() the nodeclaim that we created to cleanup any topology that we generated during construction
 
 			// If the pod is compatible with a NodePool with reserved offerings available, we shouldn't fall back to a NodePool
 			// with a lower weight. We could consider allowing "fallback" to NodePools with equal weight if they also have
@@ -582,12 +580,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 
 		// Ensure that we always take an earlier successful schedule to keep consistent ordering
 		if i >= idx {
-			nodeClaim.Destroy() // Ensure that we Destroy() the nodeclaim that we created to cleanup any topology that we generated during construction
 			return
-		}
-		// Ensure that if we override a previous NodeClaim that we destroy the old one
-		if newNodeClaim != nil {
-			newNodeClaim.Destroy()
 		}
 		newNodeClaim = nodeClaim
 		requirements = r
