@@ -5,7 +5,7 @@ go 1.24.2
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
-	github.com/awslabs/operatorpkg v0.0.0-20250320000002-b05af0f15c68
+	github.com/awslabs/operatorpkg v0.0.0-20250415205441-a0c5d2f39e72
 	github.com/docker/docker v28.0.4+incompatible
 	github.com/go-logr/logr v1.4.2
 	github.com/imdario/mergo v0.3.16

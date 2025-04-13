@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -278,7 +279,7 @@ func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
 			// Check if the truncated InstanceTypeOptions in each NewNodeClaim from the results still satisfy the minimum requirements
 			// If number of InstanceTypes in the NodeClaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
 			for _, pod := range newNodeClaim.Pods {
-				r.PodErrors[pod] = fmt.Errorf("pod didn’t schedule because NodePool %q couldn’t meet minValues requirements, %w", newNodeClaim.NodeClaimTemplate.NodePoolName, err)
+				r.PodErrors[pod] = serrors.Wrap(fmt.Errorf("pod didn’t schedule because NodePool couldn’t meet minValues requirements, %w", err), "NodePool", klog.KRef("", newNodeClaim.NodeClaimTemplate.NodePoolName))
 			}
 		} else {
 			validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
@@ -420,7 +421,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 		if remaining, ok := s.remainingResources[nodeClaimTemplate.NodePoolName]; ok {
 			instanceTypes = filterByRemainingResources(instanceTypes, remaining)
 			if len(instanceTypes) == 0 {
-				errs = multierr.Append(errs, fmt.Errorf("all available instance types exceed limits for nodepool %q", nodeClaimTemplate.NodePoolName))
+				errs = multierr.Append(errs, serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", nodeClaimTemplate.NodePoolName)))
 				continue
 			} else if len(nodeClaimTemplate.InstanceTypeOptions) != len(instanceTypes) {
 				log.FromContext(ctx).V(1).WithValues(

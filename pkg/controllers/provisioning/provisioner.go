@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
@@ -485,8 +486,7 @@ func (p *Provisioner) Validate(ctx context.Context, pod *corev1.Pod) error {
 func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 	for _, req := range scheduling.NewPodRequirements(p) {
 		if req.Key == v1.NodePoolLabelKey && req.Operator() == corev1.NodeSelectorOpDoesNotExist {
-			return fmt.Errorf("configured to not run on a Karpenter provisioned node via the %s %s requirement",
-				v1.NodePoolLabelKey, corev1.NodeSelectorOpDoesNotExist)
+			return serrors.Wrap(fmt.Errorf("configured to not run on a Karpenter provisioned node"), "requirement", fmt.Sprintf("%s %s", v1.NodePoolLabelKey, corev1.NodeSelectorOpDoesNotExist))
 		}
 	}
 	return nil

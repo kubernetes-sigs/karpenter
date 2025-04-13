@@ -22,12 +22,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -217,7 +219,7 @@ func (in *StateNode) ValidateNodeDisruptable() error {
 	}
 	// check whether the node has the NodePool label
 	if _, ok := in.Labels()[v1.NodePoolLabelKey]; !ok {
-		return fmt.Errorf("node doesn't have required label %q", v1.NodePoolLabelKey)
+		return serrors.Wrap(fmt.Errorf("node doesn't have required label"), "label", v1.NodePoolLabelKey)
 	}
 	return nil
 }
@@ -236,11 +238,11 @@ func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient cli
 		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
 		// This means that we will allow Mirror Pods and DaemonSets to block disruption using this annotation
 		if !podutils.IsDisruptable(po) {
-			return pods, NewPodBlockEvictionError(fmt.Errorf(`pod %q has "karpenter.sh/do-not-disrupt" annotation`, client.ObjectKeyFromObject(po)))
+			return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf(`pod has "karpenter.sh/do-not-disrupt" annotation`), "Pod", klog.KObj(po)))
 		}
 	}
 	if pdbKey, ok := pdbs.CanEvictPods(pods); !ok {
-		return pods, NewPodBlockEvictionError(fmt.Errorf("pdb %q prevents pod evictions", pdbKey))
+		return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf("pdb prevents pod evictions"), "PodDisruptionBudget", klog.KRef(pdbKey.Namespace, pdbKey.Name)))
 	}
 
 	return pods, nil
@@ -514,7 +516,7 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 			// can cause races due to the fact that it fully replaces the list on a change
 			// Here, we are updating the taint list
 			if err := kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				multiErr = multierr.Append(multiErr, fmt.Errorf("patching node %s, %w", node.Name, err))
+				multiErr = multierr.Append(multiErr, serrors.Wrap(fmt.Errorf("patching node, %w", err), "Node", klog.KObj(node)))
 			}
 		}
 	}
