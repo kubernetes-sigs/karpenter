@@ -669,6 +669,9 @@ func (c *Cluster) updateNodePoolResources(oldNode, newNode *StateNode) {
 	if _, ok := c.nodePoolResources[newNodePoolName]; !ok && newNodePoolName != "" {
 		c.nodePoolResources[newNodePoolName] = corev1.ResourceList{}
 	}
+	if _, ok := c.nodePoolResources[oldNodePoolName]; !ok && oldNodePoolName != "" {
+		c.nodePoolResources[oldNodePoolName] = corev1.ResourceList{}
+	}
 	if oldNodePoolName != "" {
 		for resourceName, quantity := range oldResources {
 			current := c.nodePoolResources[oldNodePoolName][resourceName]
