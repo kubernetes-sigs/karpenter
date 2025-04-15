@@ -532,7 +532,7 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
-		It("should ignore nodes that have pods with the karpenter.sh/do-not-disrupt annotation", func() {
+		It("should not create replacements for drifted nodes that have pods with the karpenter.sh/do-not-disrupt annotation", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
@@ -553,8 +553,7 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
-		It("should drift nodes that have pods with the karpenter.sh/do-not-disrupt annotation when the NodePool's TerminationGracePeriod is not nil", func() {
-			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+		It("should not create replacements for drifted nodes that have pods with the karpenter.sh/do-not-disrupt annotation when the NodePool's TerminationGracePeriod is not nil", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
@@ -570,12 +569,13 @@ var _ = Describe("Drift", func() {
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			// Expect to create a replacement but not delete the old nodeclaim
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2)) // new nodeclaim is created for drift
+			// Pods with `karpenter.sh/do-not-disrupt` can't be evicted and hence can't be rescheduled on a new node.
+			// Expect no new nodeclaims to be created.
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
-		It("should drift nodes that have pods with the blocking PDBs when the NodePool's TerminationGracePeriod is not nil", func() {
+		It("should not create replacements for drifted nodes that have pods with the blocking PDBs when the NodePool's TerminationGracePeriod is not nil", func() {
 			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 			podLabels := map[string]string{"test": "value"}
 			pod := test.Pod(test.PodOptions{
@@ -595,8 +595,9 @@ var _ = Describe("Drift", func() {
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			// Expect to create a replacement but not delete the old nodeclaim
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2)) // new nodeclaim is created for drift
+			// Pods with blocking PDBs can't be evicted and hence can't be rescheduled on a new node.
+			// Expect no new nodeclaims to be created.
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})

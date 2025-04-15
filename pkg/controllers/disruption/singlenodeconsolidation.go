@@ -65,6 +65,17 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 	unseenNodePools := sets.New(lo.Map(candidates, func(c *Candidate, _ int) string { return c.NodePool.Name })...)
 
 	for i, candidate := range candidates {
+		if s.clock.Now().After(timeout) {
+			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: s.ConsolidationType()})
+			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
+
+			s.PreviouslyUnseenNodePools = unseenNodePools
+
+			return Command{}, scheduling.Results{}, nil
+		}
+		// Track that we've seen this nodepool
+		unseenNodePools.Delete(candidate.NodePool.Name)
+
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since single node consolidation commands can only have one candidate.
@@ -78,17 +89,6 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		if len(candidate.reschedulablePods) == 0 {
 			continue
 		}
-		if s.clock.Now().After(timeout) {
-			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: s.ConsolidationType()})
-			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
-
-			s.PreviouslyUnseenNodePools = unseenNodePools
-
-			return Command{}, scheduling.Results{}, nil
-		}
-
-		// Track that we've seen this nodepool
-		unseenNodePools.Delete(candidate.NodePool.Name)
 
 		// compute a possible consolidation option
 		cmd, results, err := s.computeConsolidation(ctx, candidate)

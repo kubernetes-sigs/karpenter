@@ -268,7 +268,7 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 		}
 	}
 
-	limits, err := pdb.NewLimits(ctx, fakeClock, env.Client)
+	limits, err := pdb.NewLimits(ctx, env.Client)
 	if err != nil {
 		return nil, err
 	}
