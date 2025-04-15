@@ -251,8 +251,6 @@ func (c *Cluster) NominateNodeForPod(ctx context.Context, providerID string) {
 	}
 }
 
-// TODO remove this when v1alpha5 APIs are deprecated. With v1 APIs Karpenter relies on the existence
-// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 // UnmarkForDeletion removes the marking on the node as a node the controller intends to delete
 func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 	c.mu.Lock()
@@ -260,14 +258,13 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 
 	for _, id := range providerIDs {
 		if n, ok := c.nodes[id]; ok {
-			c.updateNodePoolResources(nil, c.nodes[id])
+			oldNode := n.ShallowCopy()
 			n.markedForDeletion = false
+			c.updateNodePoolResources(oldNode, n)
 		}
 	}
 }
 
-// TODO remove this when v1alpha5 APIs are deprecated. With v1 APIs Karpenter relies on the existence
-// of the karpenter.sh/disruption taint to know when a node is marked for deletion.
 // MarkForDeletion marks the node as pending deletion in the internal cluster state
 func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 	c.mu.Lock()
@@ -275,8 +272,9 @@ func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 
 	for _, id := range providerIDs {
 		if n, ok := c.nodes[id]; ok {
-			c.updateNodePoolResources(c.nodes[id], nil)
+			oldNode := n.ShallowCopy()
 			n.markedForDeletion = true
+			c.updateNodePoolResources(oldNode, n)
 		}
 	}
 }
