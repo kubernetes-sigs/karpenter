@@ -64,8 +64,8 @@ func IgnoreNodeClaimNotFoundError(err error) error {
 
 // DuplicateNodeClaimError is an error returned when multiple v1.NodeClaims are found matching the passed providerID
 type DuplicateNodeClaimError struct {
-	ProviderID string
-	NodeClaims []string
+	ProviderID     string
+	NodeClaimNames []string
 }
 
 func (e *DuplicateNodeClaimError) Error() string {
@@ -123,7 +123,7 @@ func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (
 	if len(nodeClaims) > 1 {
 		return nil, &DuplicateNodeClaimError{
 			ProviderID: node.Spec.ProviderID,
-			NodeClaims: lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) string {
+			NodeClaimNames: lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) string {
 				return nc.Name
 			}),
 		}
