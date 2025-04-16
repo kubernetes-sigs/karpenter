@@ -382,6 +382,10 @@ func (c *Cluster) MarkPodSchedulingDecisions(podErrors map[*corev1.Pod]error, po
 		// If there's no error for the pod, then we mark it as schedulable
 		if err, ok := podErrors[p]; !ok || err == nil {
 			c.podsSchedulableTimes.LoadOrStore(nn, now)
+		} else {
+			// If a pod was simulated to get scheduled, but it did not and after running the scheduling simulation
+			// again for the same pod, we get errors, we should remove it's entry from podSchedulableTimes.
+			c.podsSchedulableTimes.Delete(nn)
 		}
 		_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, now)
 		// If we already attempted this, we don't need to emit another metric.
@@ -410,6 +414,16 @@ func (c *Cluster) UpdatePodHealthyNodePoolScheduledTime(ctx context.Context, nod
 				// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
 				c.podHealthyNodePoolScheduledTime.Delete(nn)
 			}
+		}
+	}
+}
+
+// DeletePodHealthyNodePoolScheduledTime deletes podHealthyNodePoolScheduledTime
+// for pods that have pod errors
+func (c *Cluster) DeletePodHealthyNodePoolScheduledTime(podErrors map[*corev1.Pod]error, pods ...*corev1.Pod) {
+	for _, p := range pods {
+		if err, ok := podErrors[p]; ok || err != nil {
+			c.podHealthyNodePoolScheduledTime.Delete(client.ObjectKeyFromObject(p))
 		}
 	}
 }

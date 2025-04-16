@@ -167,6 +167,23 @@ var _ = Describe("Pod Ack", func() {
 		newTime := cluster.PodSchedulingSuccessTime(nn)
 		Expect(newTime.Compare(setTime)).To(Equal(0))
 	})
+	It("should delete pod schedulable time if we get error for the pod", func() {
+		pod := test.Pod()
+		ExpectApplied(ctx, env.Client, pod)
+		nn := client.ObjectKeyFromObject(pod)
+
+		setTime := cluster.PodSchedulingSuccessTime(nn)
+		Expect(setTime.IsZero()).To(BeTrue())
+
+		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{}, pod)
+		setTime = cluster.PodSchedulingSuccessTime(nn)
+		Expect(setTime.IsZero()).To(BeFalse())
+
+		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{
+			pod: fmt.Errorf("ignoring pod"),
+		}, pod)
+		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
+	})
 })
 
 var _ = Describe("Volume Usage/Limits", func() {
