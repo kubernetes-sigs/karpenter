@@ -2294,6 +2294,81 @@ var _ = Describe("NodePool Resources", func() {
 
 		// UnmarkForDeletion and expect the count of resources to be restored
 		cluster.UnmarkForDeletion(nodeClaim1.Status.ProviderID)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+	})
+	It("should not double subtract resources when marking for deletion and then deleting", func() {
+		nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("2Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+				},
+			},
+		})
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		// MarkForDeletion and expect the count of resources to reduce
+		cluster.MarkForDeletion(nodeClaim1.Status.ProviderID)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		nodeClaim1.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		node1.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		cluster.DeleteNodeClaim(nodeClaim1.Name)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		cluster.DeleteNode(node1.Name)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
 	})
 })
 
