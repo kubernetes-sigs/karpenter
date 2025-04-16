@@ -160,6 +160,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	}
 	if !nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsTrue() {
 		stored := nodeClaim.DeepCopy()
+		// No need to check for modification since we've already verifyied it wasn't set to true
 		_ = nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrained)
 		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
