@@ -261,6 +261,17 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 func (c *Controller) recordPodSchedulingUndecidedMetric(pod *corev1.Pod) {
 	nn := client.ObjectKeyFromObject(pod)
+	_, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+		return c.Type == corev1.PodScheduled && c.Status == corev1.ConditionTrue
+	})
+	if ok {
+		PodSchedulingUndecidedTimeSeconds.Delete(map[string]string{
+			podName:      pod.Name,
+			podNamespace: pod.Namespace,
+		})
+		return
+	}
+
 	// If we've made a decision on this pod, delete the metric idempotently and return
 	if decisionTime := c.cluster.PodSchedulingDecisionTime(nn); !decisionTime.IsZero() {
 		PodSchedulingUndecidedTimeSeconds.Delete(map[string]string{
