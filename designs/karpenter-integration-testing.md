@@ -4,7 +4,7 @@ Note: This document serves as a living specification for Karpenter's integration
 
 ## Summary
 
-The AWS Karpenter Provider currently serves as the primary testing ground for Karpenter's core functionality, with comprehensive integration tests covering provisioning, scheduling, disruption handling, networking configurations, and AWS-specific feature implementations. In the kubernetes-sigs/karpenter (Core) repository, testing is more limited, primarily utilizing the KWOK (Kubernetes Without Kubelet) Provider with KWOKNodeClass for node simulation to validate basic provisioning and deprovisioning functionality. Each Karpenter Providers would currently need to need to maintain a set smiler set of integration tests to validate the functionality of any updates to the core project, creating testing duplication across the community. This is particularly painful as each cloud provider would need to be aware of functionality changes and create/update their integration tests 
+The AWS Karpenter Provider currently serves as the primary testing ground for Karpenter's core functionality, with comprehensive integration tests covering provisioning, scheduling, disruption handling, networking configurations, and AWS-specific feature implementations. In the kubernetes-sigs/karpenter (Core) repository, testing is more limited, primarily utilizing the KWOK (Kubernetes Without Kubelet) Provider with KWOKNodeClass for node simulation to validate basic provisioning and deprovisioning functionality. Each Karpenter Provider would currently need to need to maintain a similar set of integration tests to validate the functionality of any updates to the core project, creating testing duplication across the community. This is particularly painful as each cloud provider would need to be aware of functionality changes and create/update their integration tests.
 
 The testing framework for the AWS Karpenter Provider has several types of tests:
 
@@ -13,12 +13,11 @@ The testing framework for the AWS Karpenter Provider has several types of tests:
     * Part of the regular developer workflow
 
 * Integration Tests
-    * Create real clusters and interact with actual APIs
-    * Validate the cluster changes 
+    * Create EKS clusters and interact with a live API server and AWS APIs 
     * Run on every commit
 * Scale Tests
     * Will validate Karpenter's performance at large scales
-    * Focus on horizontal scaling workloads and resource management
+    * Focus on horizontal scaling workloads and resource provisioned by Karpenter
 * Soak Tests 
     * Designed to identify resource usage regressions
     * Will target memory leaks and long-running stability issues
@@ -27,11 +26,11 @@ The kubernetes-sigs/karpenter repository mainly utilizes unit tests to validate 
 
 ## Problem 
 
-The current testing architecture in the Karpenter ecosystem faces two critical challenges in its testing framework. The `kubernetes-sigs/karpenter` repository lacks comprehensive integration tests to validate core functionality across code changes, making it difficult to ensure that fundamental Karpenter behaviors remain intact as the codebase evolves. Additionally, cloud provider implementations of Karpenter lack a standardized conformance testing framework, meaning there's no systematic way to verify that provider-specific implementations maintain compatibility with `kubernetes-sigs/karpenter's` core requirements and expectations. This document aims to define the appropriate placement of different test types across repositories, establish clear testing responsibilities for both `kubernetes-sigs/karpenter` and cloud provider implementations, and create an conformance testing framework that cloud providers can use to validate their implementations against kubernetes-sigs/karpenter's requirements. By addressing these gaps, we can ensure better code quality, maintain consistency across implementations, and provide a clear path for new cloud providers to validate their Karpenter implementations. 
+The current testing architecture in the Karpenter ecosystem faces two critical challenges in its testing framework. The `kubernetes-sigs/karpenter` repository lacks comprehensive integration tests to validate core functionality across code changes, making it difficult to ensure that fundamental Karpenter behaviors remain intact as the codebase evolves. Additionally, cloud provider implementations of Karpenter lack a standardized conformance testing framework, meaning there's no systematic way to verify that provider-specific implementations maintain compatibility with `kubernetes-sigs/karpenter's` core requirements and expectations. It's worth noting that `kubernetes-sigs/karpenter` repository relayed tests running within the AWS Karpenter. This document aims to define the appropriate placement of different test types across repositories, establish clear testing responsibilities for both `kubernetes-sigs/karpenter` and cloud provider implementations, and create an conformance testing framework that cloud providers can use to validate their implementations against kubernetes-sigs/karpenter's requirements. By addressing these gaps, we can ensure better code quality, maintain consistency across implementations, and provide a clear path for new cloud providers to validate their Karpenter implementations. 
 
 ## Solution
 
-The Kubernetes-sigs/karpenter serves as the core repository, housing the majority of core functionality validation, including CEL validation for NodePool and NodeClaim. This repository also provides base integration tests that cloud providers can consume and adapt by injecting their own NodeClass implementations to verify compatibility with core functionality. Any additional validation rules introduced by cloud providers must be tested within their respective provider repositories. The responsibility boundary will be drawn as such: 
+`kubernetes-sigs/karpenter` serves as the core repository, housing the majority of core functionality validation, including CEL validation for NodePool and NodeClaim. This repository also provides base integration tests that cloud providers can consume and adapt by injecting their own NodeClass implementations to verify compatibility with core functionality. Any additional validation rules introduced by cloud providers must be tested within their respective provider repositories. The responsibility boundary will be drawn as such: 
 
 #### Kubernetes-sigs/karpenter
 
@@ -70,7 +69,7 @@ As part of the initial functionality integration testing, we plan to migrate the
 * High Level Description: Validate that karpenter does not have any runaway scaling during provisioning or consolidation
 * Source: https://github.com/aws/karpenter-provider-aws/tree/main/test/suites/chaos
 * Test Cases:
-    * Should not produce a runaway  scale-up when consolidation is enabled
+    * Should not produce a runaway scale-up when consolidation is enabled
     * Should not produce a runaway scale-up when emptiness is enabled 
 
 ##### Consolidation
@@ -182,32 +181,6 @@ As part of the initial functionality integration testing, we plan to migrate the
     * Garbage Collection 
         * should succeed to garbage collect an Instance that was launched by a NodeClaim but has no Instance mapping 
         * should succeed to garbage collect an Instance that was deleted without cluster’s knowledge 
-
-##### Scale
-
-* High Level Description: Scale test to see any regression with Karpenter performance. These are high level tests that only really validate the provisioning and speed of getting pods to a ready state.  
-* Source: https://github.com/aws/karpenter-provider-aws/tree/main/test/suites/scale
-* Test Cases: 
-    * Disruption  
-        * should run consolidation, emptiness, expiration, and drift simultaneously
-        * Consolidation
-            * should delete all empty nodes with consolidation
-            * should consolidate nodes to get a higher utilization (multi-consolidation delete)
-            * should consolidate nodes to get a higher utilization (single consolidation replace)
-        * Emptiness 
-            * should deprovision all nodes when empty
-        * Expiration  
-            * should expire all nodes
-        * Drift
-            * should drift all nodes
-        * Interruption 
-            * should interrupt all nodes due to scheduledChange
-    * Provisioning
-        * should scale successfully on a node-dense scale-up 
-        * should scale successfully on a node-dense scale-up with minValues in the NodePool requirement
-        * should scale successfully on a pod-dense scale-up
-        * should scale successfully on a pod-dense scale-up with minValues in the NodePool requirement
-
 
 ##### Scheduling
 
