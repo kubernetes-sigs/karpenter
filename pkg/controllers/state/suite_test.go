@@ -1186,6 +1186,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1227,6 +1228,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node()
 				ExpectApplied(ctx, env.Client, node)
@@ -1246,6 +1248,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func(index int) {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node()
 				ExpectApplied(ctx, env.Client, node)
@@ -1259,6 +1262,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func(index int) {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodes[index].Spec.ProviderID = test.RandomProviderID()
 				ExpectApplied(ctx, env.Client, nodes[index])
@@ -1276,6 +1280,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1295,6 +1300,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 250 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1314,6 +1320,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 250 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1327,6 +1334,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 500 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1346,6 +1354,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 500 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1369,6 +1378,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func(index int) {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1392,6 +1402,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1415,6 +1426,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1463,6 +1475,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 250 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1482,6 +1495,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 250 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1692,6 +1706,7 @@ var _ = Describe("Data Races", func() {
 		// Keep calling Synced for the entirety of this test
 		wg.Add(1)
 		go func() {
+			defer GinkgoRecover()
 			defer wg.Done()
 			for {
 				_ = cluster.Synced(ctx)
@@ -1714,6 +1729,7 @@ var _ = Describe("Data Races", func() {
 		// Keep calling Synced for the entirety of this test
 		wg.Add(1)
 		go func() {
+			defer GinkgoRecover()
 			defer wg.Done()
 			for {
 				_ = cluster.Synced(ctx)
