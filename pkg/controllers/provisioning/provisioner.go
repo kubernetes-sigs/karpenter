@@ -169,6 +169,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 		if err := p.Validate(ctx, po); err != nil {
 			// Mark in memory that this pod is unschedulable
 			p.cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, po)
+			p.cluster.DeletePodHealthyNodePoolScheduledTime(map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, po)
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
@@ -330,6 +331,9 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 			log.FromContext(ctx).Info("no nodepools found")
 			// Mark in memory that these pods are unschedulable
 			p.cluster.MarkPodSchedulingDecisions(lo.SliceToMap(pods, func(p *corev1.Pod) (*corev1.Pod, error) {
+				return p, fmt.Errorf("no nodepools found")
+			}), pods...)
+			p.cluster.DeletePodHealthyNodePoolScheduledTime(lo.SliceToMap(pods, func(p *corev1.Pod) (*corev1.Pod, error) {
 				return p, fmt.Errorf("no nodepools found")
 			}), pods...)
 			return scheduler.Results{}, nil

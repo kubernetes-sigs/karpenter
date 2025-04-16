@@ -294,6 +294,12 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
+		} else {
+			// Idempotently delete the unstarted_time_seconds metric if the schedulable time is zero
+			PodProvisioningUnstartedTimeSeconds.Delete(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			})
 		}
 		c.pendingPods.Insert(key)
 		return
@@ -309,6 +315,12 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 			})
 			if !schedulableTime.IsZero() {
 				PodProvisioningUnstartedTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
+					podName:      pod.Name,
+					podNamespace: pod.Namespace,
+				})
+			} else {
+				// Idempotently delete the unstarted_time_seconds metric if the schedulable time is zero
+				PodProvisioningUnstartedTimeSeconds.Delete(map[string]string{
 					podName:      pod.Name,
 					podNamespace: pod.Namespace,
 				})
@@ -347,6 +359,12 @@ func (c *Controller) recordPodBoundMetric(pod *corev1.Pod, schedulableTime time.
 			})
 			if !schedulableTime.IsZero() {
 				PodProvisioningUnboundTimeSeconds.Set(time.Since(schedulableTime).Seconds(), map[string]string{
+					podName:      pod.Name,
+					podNamespace: pod.Namespace,
+				})
+			} else {
+				// Idempotently delete the unbound_time_seconds metric if the schedulable time is zero
+				PodProvisioningUnboundTimeSeconds.Delete(map[string]string{
 					podName:      pod.Name,
 					podNamespace: pod.Namespace,
 				})
