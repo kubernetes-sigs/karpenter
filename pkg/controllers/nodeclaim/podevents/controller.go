@@ -32,18 +32,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/samber/lo"
+
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
-// dedupeTimeout is 10 seconds to reduce the number of writes to the APIServer, since pod scheduling and deletion events are very frequent.
-// The smaller this value is, the more writes Karpenter will make in a busy cluster. This timeout is intentionally smaller than the consolidation
-// 15 second validation period, so that we can ensure that we invalidate consolidation commands that are decided while we're de-duping pod events.
-const dedupeTimeout = 10 * time.Second
-
-// Podevents is a nodeclaim controller that deletes adds the lastPodEvent status onto the nodeclaim
+// Podevents is a nodeclaim controller that updates the lastPodEvent status based on PodScheduled condition
 type Controller struct {
 	clock         clock.Clock
 	kubeClient    client.Client
@@ -81,14 +78,28 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	// If we've set the lastPodEvent before and it hasn't been before the timeout, don't do anything
-	if !nc.Status.LastPodEventTime.Time.IsZero() && c.clock.Since(nc.Status.LastPodEventTime.Time) < dedupeTimeout {
+	var eventTime time.Time
+	// If pod is being removed (terminal or terminating), use current time
+	if podutils.IsTerminal(pod) || podutils.IsTerminating(pod) {
+		eventTime = c.clock.Now()
+	} else {
+		// Otherwise check for PodScheduled condition
+		if cond, ok := lo.Find(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+			return c.Type == corev1.PodScheduled && c.Status == corev1.ConditionTrue
+		}); ok {
+			eventTime = cond.LastTransitionTime.Time
+		}
+	}
+
+	// If we don't have a valid time, skip
+	if eventTime.IsZero() {
 		return reconcile.Result{}, nil
 	}
 
 	// otherwise, set the pod event time to now
 	stored := nc.DeepCopy()
-	nc.Status.LastPodEventTime.Time = c.clock.Now()
+
+	nc.Status.LastPodEventTime.Time = eventTime
 	if !equality.Semantic.DeepEqual(stored, nc) {
 		if err = c.kubeClient.Status().Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -97,23 +108,32 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 	return reconcile.Result{}, nil
 }
 
+//nolint:gocyclo
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.podevents").
 		For(&corev1.Pod{}).
 		WithEventFilter(predicate.TypedFuncs[client.Object]{
-			// If a pod is bound to a node or goes terminal
 			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
 				oldPod := (e.ObjectOld).(*corev1.Pod)
 				newPod := (e.ObjectNew).(*corev1.Pod)
-				// if this is a newly bound pod
-				bound := oldPod.Spec.NodeName == "" && newPod.Spec.NodeName != ""
+				// Check for pod scheduling changes
+				oldCond, oldOk := lo.Find(oldPod.Status.Conditions, func(c corev1.PodCondition) bool {
+					return c.Type == corev1.PodScheduled
+				})
+				newCond, newOk := lo.Find(newPod.Status.Conditions, func(c corev1.PodCondition) bool {
+					return c.Type == corev1.PodScheduled
+				})
+				// Trigger on PodScheduled condition changes
+				if (!oldOk && newOk) || (oldOk && newOk && (oldCond.Status != newCond.Status || !oldCond.LastTransitionTime.Equal(&newCond.LastTransitionTime))) {
+					return true
+				}
 				// if this is a newly terminal pod
 				terminal := (newPod.Spec.NodeName != "" && !podutils.IsTerminal(oldPod) && podutils.IsTerminal(newPod))
 				// if this is a newly terminating pod
 				terminating := (newPod.Spec.NodeName != "" && !podutils.IsTerminating(oldPod) && podutils.IsTerminating(newPod))
-				// return true if it was bound to a node, went terminal, or went terminating
-				return bound || terminal || terminating
+				// return true if it went terminal, or went terminating
+				return terminal || terminating
 			},
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
