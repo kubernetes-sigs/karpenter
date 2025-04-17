@@ -196,4 +196,18 @@ var _ = Describe("Expiration", func() {
 			"nodepool":          nodePool.Name,
 		})
 	})
+	It("should update status condition if the nodeClaim is expired", func() {
+		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
+		nodeClaim.ObjectMeta.Finalizers = append(nodeClaim.ObjectMeta.Finalizers, "test-finalizer")
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		fakeClock.Step(60 * time.Second)
+		ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		condition := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason)
+		Expect(condition).ToNot(BeNil())
+		Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+		Expect(condition.Reason).To(Equal(v1.DisruptionReasonExpired))
+	})
 })
