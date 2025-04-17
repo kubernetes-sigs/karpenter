@@ -121,16 +121,15 @@ func (r *Registration) syncNode(ctx context.Context, nodeClaim *v1.NodeClaim, no
 
 	node = nodeclaimutils.UpdateNodeOwnerReferences(nodeClaim, node)
 
-	if _, ok := nodeClaim.Annotations[v1.NodeClaimSyncTaintsAnnotationKey]; ok {
+	// We do not sync the taints if the feature flag is enabled. We instead assume that the karpenter provider
+	// is managing taints. We still manage/remove the unregistered taint to signal the end of syncing.
+	if _, ok := node.Annotations[v1.NodeDoNotSyncTaintsLabelKey]; !ok {
 		// Sync all taints inside NodeClaim into the Node taints
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.Taints)
 		node.Spec.Taints = scheduling.Taints(node.Spec.Taints).Merge(nodeClaim.Spec.StartupTaints)
 	}
 
 	node.Annotations = lo.Assign(node.Annotations, nodeClaim.Annotations)
-	// We do not sync the taints, unless the feature flag is enabled, from the nodeclaim as
-	// we assume that the karpenter provider code is managing taints. We do handle the
-	// unregistered taint to signal the end of syncing.
 	// Remove karpenter.sh/unregistered taint
 	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
 		return t.MatchTaint(&v1.UnregisteredNoExecuteTaint)

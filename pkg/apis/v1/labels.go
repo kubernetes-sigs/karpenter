@@ -38,10 +38,11 @@ const (
 
 // Karpenter specific domains and labels
 const (
-	NodePoolLabelKey        = apis.Group + "/nodepool"
-	NodeInitializedLabelKey = apis.Group + "/initialized"
-	NodeRegisteredLabelKey  = apis.Group + "/registered"
-	CapacityTypeLabelKey    = apis.Group + "/capacity-type"
+	NodePoolLabelKey            = apis.Group + "/nodepool"
+	NodeInitializedLabelKey     = apis.Group + "/initialized"
+	NodeRegisteredLabelKey      = apis.Group + "/registered"
+	NodeDoNotSyncTaintsLabelKey = apis.Group + "/nodeclaim-do-not-sync-taints"
+	CapacityTypeLabelKey        = apis.Group + "/capacity-type"
 )
 
 // Karpenter specific annotations
@@ -51,7 +52,6 @@ const (
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
-	NodeClaimSyncTaintsAnnotationKey           = apis.Group + "/nodeclaim-sync-taints"
 )
 
 // Karpenter specific finalizers
