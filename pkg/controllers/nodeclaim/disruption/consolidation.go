@@ -69,9 +69,9 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 		return reconcile.Result{RequeueAfter: consolidatableTime.Sub(c.clock.Now())}, nil
 	}
 
-	// 6. Otherwise, add the consolidatable status condition
-	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+	// 3. Otherwise, add the consolidatable status condition if not already set
 	if !hasConsolidatableCondition {
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		log.FromContext(ctx).V(1).Info("marking consolidatable")
 	}
 	return reconcile.Result{}, nil
