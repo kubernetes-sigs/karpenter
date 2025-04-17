@@ -33,6 +33,12 @@ const (
 	ConditionTypeDisruptionReason     = "DisruptionReason"
 )
 
+const (
+	DisruptionReasonExpired          = "Expired"
+	DisruptionReasonUnhealthy        = "Unhealthy"
+	DisruptionReasonGarbageCollected = "GarbageCollected"
+)
+
 // NodeClaimStatus defines the observed state of NodeClaim
 type NodeClaimStatus struct {
 	// NodeName is the name of the corresponding node object

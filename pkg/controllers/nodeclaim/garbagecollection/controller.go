@@ -95,7 +95,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		if node != nil && nodeutils.GetCondition(node, corev1.NodeReady).Status == corev1.ConditionTrue {
 			return
 		}
-		if err := c.kubeClient.Delete(ctx, nodeClaims[i]); err != nil {
+		if err := c.updateStatusAndDelete(ctx, nodeClaims[i]); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
@@ -114,6 +114,18 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil
+}
+
+func (c *Controller) updateStatusAndDelete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
+	stored := nodeClaim.DeepCopy()
+	nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, v1.DisruptionReasonGarbageCollected, "nodeClaim garbage collected")
+	if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
+		return err
+	}
+	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
