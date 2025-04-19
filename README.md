@@ -58,6 +58,7 @@ See also our [contributor guide](CONTRIBUTING.md) and the Kubernetes [community 
 Participation in the Kubernetes community is governed by the [Kubernetes Code of Conduct](code-of-conduct.md).
 
 ## Talks
+- 04/03/2025 [Automating Kubernetes Cluster Updates: Achieving Zero Downtime Effortlessly@KubeCon](https://youtu.be/rAIcQvKBuZA?si=UZhNqwjPCIybHCvW)
 - 09/08/2022 [Workload Consolidation with Karpenter](https://youtu.be/BnksdJ3oOEs)
 - 05/19/2022 [Scaling K8s Nodes Without Breaking the Bank or Your Sanity](https://www.youtube.com/watch?v=UBb8wbfSc34)
 - 03/25/2022 [Karpenter @ AWS Community Day 2022](https://youtu.be/sxDtmzbNHwE?t=3931)
