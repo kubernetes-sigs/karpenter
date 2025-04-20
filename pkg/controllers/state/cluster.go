@@ -373,20 +373,15 @@ func (c *Cluster) PodAckTime(podKey types.NamespacedName) time.Time {
 }
 
 // MarkPodSchedulingDecisions keeps track of when we first tried to schedule a pod to a node.
-// This also marks when the pod is first seen as schedulable for pod metrics.
+// It updates podHealthyNodePoolScheduledTime for pods scheduled against nodePool that have
+// NodeRegistrationHealthy=true. This also marks when the pod is first seen as schedulable for pod metrics.
 // We'll only emit a metric for a pod if we haven't done it before.
-func (c *Cluster) MarkPodSchedulingDecisions(podErrors map[*corev1.Pod]error, pods ...*corev1.Pod) {
+func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[*corev1.Pod]error, npPods map[string][]*corev1.Pod) {
 	now := c.clock.Now()
-	for _, p := range pods {
-		nn := client.ObjectKeyFromObject(p)
-		// If there's no error for the pod, then we mark it as schedulable
-		if err, ok := podErrors[p]; !ok || err == nil {
-			c.podsSchedulableTimes.LoadOrStore(nn, now)
-		} else {
-			// If a pod was simulated to get scheduled, but it did not and after running the scheduling simulation
-			// again for the same pod, we get errors, we should remove it's entry from podSchedulableTimes.
-			c.podsSchedulableTimes.Delete(nn)
-		}
+	for pod := range podErrors {
+		nn := client.ObjectKeyFromObject(pod)
+		// delete podsSchedulableTimes and podHealthyNodePoolScheduledTime for pods that have pod errors
+		c.podsSchedulableTimes.Delete(nn)
 		_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, now)
 		// If we already attempted this, we don't need to emit another metric.
 		if !alreadyExists {
@@ -395,35 +390,33 @@ func (c *Cluster) MarkPodSchedulingDecisions(podErrors map[*corev1.Pod]error, po
 				PodSchedulingDecisionSeconds.Observe(c.clock.Since(ackTime).Seconds(), nil)
 			}
 		}
+		c.podHealthyNodePoolScheduledTime.Delete(nn)
 	}
-}
-
-// UpdatePodHealthyNodePoolScheduledTime updates podHealthyNodePoolScheduledTime
-// for pods scheduled against nodePool that have NodeRegistrationHealthy=true
-func (c *Cluster) UpdatePodHealthyNodePoolScheduledTime(ctx context.Context, nodePoolName string, pods ...*corev1.Pod) {
-	nodePool := &v1.NodePool{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err == nil {
+	for nodePoolName, pods := range npPods {
+		nodePool := &v1.NodePool{}
+		err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool)
 		for _, p := range pods {
 			nn := client.ObjectKeyFromObject(p)
-			// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
-			// then mark the time when we thought it can schedule to now.
-			if nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
-				c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
-			} else {
-				// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
-				// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
-				c.podHealthyNodePoolScheduledTime.Delete(nn)
+			c.podsSchedulableTimes.LoadOrStore(nn, now)
+			_, alreadyExists := c.podsSchedulingAttempted.LoadOrStore(nn, now)
+			// If we already attempted this, we don't need to emit another metric.
+			if !alreadyExists {
+				// We should have ACK'd the pod.
+				if ackTime := c.PodAckTime(nn); !ackTime.IsZero() {
+					PodSchedulingDecisionSeconds.Observe(c.clock.Since(ackTime).Seconds(), nil)
+				}
 			}
-		}
-	}
-}
-
-// DeletePodHealthyNodePoolScheduledTime deletes podHealthyNodePoolScheduledTime
-// for pods that have pod errors
-func (c *Cluster) DeletePodHealthyNodePoolScheduledTime(podErrors map[*corev1.Pod]error, pods ...*corev1.Pod) {
-	for _, p := range pods {
-		if err, ok := podErrors[p]; ok || err != nil {
-			c.podHealthyNodePoolScheduledTime.Delete(client.ObjectKeyFromObject(p))
+			if err == nil {
+				// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
+				// then mark the time when we thought it can schedule to now.
+				if nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+					c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
+				} else {
+					// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
+					// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
+					c.podHealthyNodePoolScheduledTime.Delete(nn)
+				}
+			}
 		}
 	}
 }
