@@ -343,12 +343,8 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 	// Note: long term we should handle this when constructing the domain groups, but that would require domain groups
 	// to handle affinity in addition to taints / tolerations.
 	for _, n := range t.stateNodes {
-		// ignore state nodes which are tracking in-flight NodeClaims
-		if n.Node == nil {
-			continue
-		}
 		// ignore the node if it doesn't match the topology group
-		if !tg.nodeFilter.Matches(n.Node.Spec.Taints, scheduling.NewLabelRequirements(n.Node.Labels)) {
+		if !tg.nodeFilter.Matches(n.Taints(), scheduling.NewLabelRequirements(n.Labels())) {
 			continue
 		}
 		domain, exists := n.Labels()[tg.Key]
@@ -360,7 +356,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 			tg.emptyDomains.Insert(domain)
 		}
 	}
-
+	
 	// sort our pods by the node they are scheduled to
 	sort.Slice(pods, func(i, j int) bool {
 		return pods[i].Spec.NodeName < pods[j].Spec.NodeName
