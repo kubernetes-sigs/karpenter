@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -233,6 +234,32 @@ func (r Results) ReservedOfferingErrors() map[*corev1.Pod]error {
 	return lo.PickBy(r.PodErrors, func(_ *corev1.Pod, err error) bool {
 		return IsReservedOfferingError(err)
 	})
+}
+
+func (r Results) NodePoolToPodMapping() map[string][]*corev1.Pod {
+	result := make(map[string][]*corev1.Pod)
+
+	for k, v := range lo.SliceToMap(r.NewNodeClaims, func(n *NodeClaim) (string, []*corev1.Pod) {
+		return n.Labels[v1.NodePoolLabelKey], n.Pods
+	}) {
+		result[k] = v
+	}
+
+	for k, v := range lo.SliceToMap(lo.Filter(r.ExistingNodes, func(n *ExistingNode, _ int) bool {
+		// Filter out nodes that don't have the nodePool label
+		return n.Labels()[v1.NodePoolLabelKey] != ""
+	}), func(n *ExistingNode) (string, []*corev1.Pod) {
+		return n.Labels()[v1.NodePoolLabelKey], n.Pods
+	}) {
+		if existing, ok := result[k]; ok {
+			// If key exists, append the values
+			result[k] = append(slices.Clone(existing), v...)
+		} else {
+			// If key doesn't exist, add the new key-value pair
+			result[k] = v
+		}
+	}
+	return result
 }
 
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
