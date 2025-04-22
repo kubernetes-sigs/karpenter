@@ -238,14 +238,3 @@ func String(list v1.ResourceList) string {
 	}
 	return pretty.Concise(list)
 }
-
-// MergePodsMaps helps to merge maps of type map[string][]*v1.Pod
-func MergePodsMaps(maps ...map[string][]*v1.Pod) map[string][]*v1.Pod {
-	result := make(map[string][]*v1.Pod)
-	for _, m := range maps {
-		for k, v := range m {
-			result[k] = append(result[k], v...)
-		}
-	}
-	return result
-}

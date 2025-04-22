@@ -235,6 +235,32 @@ func (r Results) ReservedOfferingErrors() map[*corev1.Pod]error {
 	})
 }
 
+func (r Results) NodePoolToPodMapping() map[string][]*corev1.Pod {
+	result := make(map[string][]*corev1.Pod)
+
+	for key, value := range lo.SliceToMap(r.NewNodeClaims, func(n *NodeClaim) (string, []*corev1.Pod) {
+		return n.Labels[v1.NodePoolLabelKey], n.Pods
+	}) {
+		result[key] = value
+	}
+
+	for key, value := range lo.SliceToMap(lo.Filter(r.ExistingNodes, func(n *ExistingNode, _ int) bool {
+		// Filter out nodes that don't have the nodePool label
+		return n.Labels()[v1.NodePoolLabelKey] != ""
+	}), func(n *ExistingNode) (string, []*corev1.Pod) {
+		return n.Labels()[v1.NodePoolLabelKey], n.Pods
+	}) {
+		if existing, ok := result[key]; ok {
+			// If key exists, append the values
+			result[key] = append(existing, value...)
+		} else {
+			// If key doesn't exist, add the new key-value pair
+			result[key] = value
+		}
+	}
+	return result
+}
+
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
 // We don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we can't
 // schedule at all and don't want it to block consolidation.

@@ -23,8 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"sigs.k8s.io/karpenter/pkg/utils/resources"
-
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
@@ -170,7 +168,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	rejectedPods, pods := lo.FilterReject(pods, func(po *corev1.Pod, _ int) bool {
 		if err := p.Validate(ctx, po); err != nil {
 			// Mark in memory that this pod is unschedulable
-			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, map[string][]*corev1.Pod{})
+			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, nil)
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
@@ -332,7 +330,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 			log.FromContext(ctx).Info("no nodepools found")
 			p.cluster.MarkPodSchedulingDecisions(ctx, lo.SliceToMap(pods, func(p *corev1.Pod) (*corev1.Pod, error) {
 				return p, fmt.Errorf("no nodepools found")
-			}), map[string][]*corev1.Pod{})
+			}), nil)
 			return scheduler.Results{}, nil
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
@@ -372,18 +370,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		).Info("found provisionable pod(s)")
 	}
 	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
-	p.cluster.MarkPodSchedulingDecisions(ctx, results.PodErrors,
-		resources.MergePodsMaps(
-			lo.SliceToMap(results.NewNodeClaims, func(n *scheduler.NodeClaim) (string, []*corev1.Pod) {
-				return n.Labels[v1.NodePoolLabelKey], n.Pods
-			}),
-			lo.SliceToMap(lo.Filter(results.ExistingNodes, func(n *scheduler.ExistingNode, _ int) bool {
-				// Filter out nodes that don't have the nodePool label
-				return n.Labels()[v1.NodePoolLabelKey] != ""
-			}), func(n *scheduler.ExistingNode) (string, []*corev1.Pod) {
-				return n.Labels()[v1.NodePoolLabelKey], n.Pods
-			})),
-	)
+	p.cluster.MarkPodSchedulingDecisions(ctx, results.PodErrors, results.NodePoolToPodMapping())
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }
