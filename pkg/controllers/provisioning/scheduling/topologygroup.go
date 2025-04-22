@@ -217,6 +217,8 @@ func (t *TopologyGroup) nextDomainTopologySpread(pod *corev1.Pod, podDomains, no
 		if selfSelecting {
 			count++
 		}
+		// Because Karpenter can always create a new domain for hostname, we assume the global miniumum is always zero
+		// This means we can just check whether our current count is less than or equal to the skew to check if the domain is valid
 		if count <= t.maxSkew {
 			return scheduling.NewRequirement(t.Key, corev1.NodeSelectorOpIn, hostName)
 		}

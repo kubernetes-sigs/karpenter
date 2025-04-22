@@ -111,7 +111,7 @@ func NewNodeClaim(
 // CanAdd returns whether the pod can be added to the NodeClaim
 // based on the taints/tolerations, host port compatibility,
 // requirements, resources, reserved capacity reservations, and topology requirements
-func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData) (updateRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, err error) {
+func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
 		return nil, nil, nil, err

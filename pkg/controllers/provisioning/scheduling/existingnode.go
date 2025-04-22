@@ -17,11 +17,9 @@ limitations under the License.
 package scheduling
 
 import (
-	"context"
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -68,23 +66,18 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 // CanAdd returns whether the pod can be added to the ExistingNode
 // based on the taints/tolerations, volume requirements, host port compatibility,
 // requirements, resources, and topology requirements
-func (n *ExistingNode) CanAdd(ctx context.Context, kubeClient client.Client, pod *v1.Pod, podData *PodData) (updatedRequirements scheduling.Requirements, updatedVolumes scheduling.Volumes, err error) {
+func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.Volumes) (updatedRequirements scheduling.Requirements, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.cachedTaints).ToleratesPod(pod); err != nil {
-		return nil, nil, err
-	}
-	// determine the volumes that will be mounted if the pod schedules
-	volumes, err := scheduling.GetVolumes(ctx, kubeClient, pod)
-	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	// determine the host ports that will be used if the pod schedules
 	hostPorts := scheduling.GetHostPorts(pod)
 	if err = n.VolumeUsage().ExceedsLimits(volumes); err != nil {
-		return nil, nil, fmt.Errorf("checking volume usage, %w", err)
+		return nil, fmt.Errorf("checking volume usage, %w", err)
 	}
 	if err = n.HostPortUsage().Conflicts(pod, hostPorts); err != nil {
-		return nil, nil, fmt.Errorf("checking host port usage, %w", err)
+		return nil, fmt.Errorf("checking host port usage, %w", err)
 	}
 
 	// check resource requests first since that's a pretty likely reason the pod won't schedule on an in-flight
@@ -92,12 +85,12 @@ func (n *ExistingNode) CanAdd(ctx context.Context, kubeClient client.Client, pod
 	requests := resources.Merge(n.requests, podData.Requests)
 
 	if !resources.Fits(requests, n.cachedAvailable) {
-		return nil, nil, fmt.Errorf("exceeds node resources")
+		return nil, fmt.Errorf("exceeds node resources")
 	}
 
 	// Check NodeClaim Affinity Requirements
 	if err = n.requirements.Compatible(podData.Requirements); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	// avoid creating our temp set of requirements until after we've ensured that at least
 	// the pod is compatible
@@ -107,13 +100,13 @@ func (n *ExistingNode) CanAdd(ctx context.Context, kubeClient client.Client, pod
 	// Check Topology Requirements
 	topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err = nodeRequirements.Compatible(topologyRequirements); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	nodeRequirements.Add(topologyRequirements.Values()...)
-	return nodeRequirements, volumes, nil
+	return nodeRequirements, nil
 }
 
 // Add updates the ExistingNode to schedule the pod to this ExistingNode, updating

@@ -34,7 +34,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -458,25 +457,28 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) erro
 
 	var existingNode *ExistingNode
 	var requirements scheduling.Requirements
-	var volumes scheduling.Volumes
 
-	workCtx, cancel := context.WithCancel(ctx)
-	workqueue.ParallelizeUntil(workCtx, s.numConcurrentReconciles, len(s.existingNodes), func(i int) {
-		r, v, err := s.existingNodes[i].CanAdd(ctx, s.kubeClient, pod, s.cachedPodData[pod.UID])
+	// determine the volumes that will be mounted if the pod schedules
+	volumes, err := scheduling.GetVolumes(ctx, s.kubeClient, pod)
+	if err != nil {
+		return err
+	}
+	parallelizeUntil(s.numConcurrentReconciles, len(s.existingNodes), func(i int) bool {
+		r, err := s.existingNodes[i].CanAdd(pod, s.cachedPodData[pod.UID], volumes)
 		if err == nil {
 			mu.Lock()
 			defer mu.Unlock()
 
 			// Ensure that we always take an earlier successful schedule to keep consistent ordering
 			if i >= idx {
-				return
+				return false
 			}
 			existingNode = s.existingNodes[i]
 			requirements = r
-			volumes = v
 			idx = i
-			cancel() // Cancel the context to end the workqueue parallelization
+			return false
 		}
+		return true
 	})
 	// If we set the existingNode to something valid, this means that we successfully scheduled to one of these nodes
 	if existingNode != nil {
@@ -491,31 +493,30 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 	var mu sync.Mutex
 
 	var inflightNodeClaim *NodeClaim
-	var requirements scheduling.Requirements
-	var instanceTypes []*cloudprovider.InstanceType
+	var updatedRequirements scheduling.Requirements
+	var updatedInstanceTypes []*cloudprovider.InstanceType
 	var offeringsToReserve []*cloudprovider.Offering
-
-	workCtx, cancel := context.WithCancel(ctx)
-	workqueue.ParallelizeUntil(workCtx, s.numConcurrentReconciles, len(s.newNodeClaims), func(i int) {
-		r, it, ofr, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID])
+	parallelizeUntil(s.numConcurrentReconciles, len(s.newNodeClaims), func(i int) bool {
+		r, its, ofr, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID])
 		if err == nil {
 			mu.Lock()
 			defer mu.Unlock()
 
 			// Ensure that we always take an earlier successful schedule to keep consistent ordering
 			if i >= idx {
-				return
+				return false
 			}
 			inflightNodeClaim = s.newNodeClaims[i]
-			requirements = r
-			instanceTypes = it
+			updatedRequirements = r
+			updatedInstanceTypes = its
 			offeringsToReserve = ofr
 			idx = i
-			cancel() // Cancel the context to end the workqueue parallelization
+			return false
 		}
+		return true
 	})
 	if inflightNodeClaim != nil {
-		inflightNodeClaim.Add(pod, s.cachedPodData[pod.UID], requirements, instanceTypes, offeringsToReserve)
+		inflightNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to inflight nodes")
@@ -526,20 +527,19 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	var mu sync.Mutex
 
 	var newNodeClaim *NodeClaim
-	var requirements scheduling.Requirements
-	var instanceTypes []*cloudprovider.InstanceType
+	var updatedRequirements scheduling.Requirements
+	var updatedInstanceTypes []*cloudprovider.InstanceType
 	var offeringsToReserve []*cloudprovider.Offering
 
-	workCtx, cancel := context.WithCancel(ctx)
 	errs := make([]error, len(s.nodeClaimTemplates))
-	workqueue.ParallelizeUntil(workCtx, s.numConcurrentReconciles, len(s.nodeClaimTemplates), func(i int) {
+	parallelizeUntil(s.numConcurrentReconciles, len(s.nodeClaimTemplates), func(i int) bool {
 		its := s.nodeClaimTemplates[i].InstanceTypeOptions
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
 			its = filterByRemainingResources(its, remaining)
 			if len(its) == 0 {
 				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
-				return
+				return true
 			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
 				log.FromContext(ctx).V(1).WithValues(
 					"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
@@ -551,7 +551,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 			}
 		}
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
-		r, it, ofs, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID])
+		r, its, ofs, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID])
 		if err != nil {
 			errs[i] = err
 
@@ -564,34 +564,35 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 
 				// A reserved offering error means that any subsequent successful after this NodeClaimTemplate isn't valid
 				if i >= idx {
-					return
+					return false
 				}
 				newNodeClaim = nil
-				requirements = nil
-				instanceTypes = nil
+				updatedRequirements = nil
+				updatedInstanceTypes = nil
 				offeringsToReserve = nil
 				idx = i
-				cancel() // Cancel the context to end the workqueue parallelization
+				return false
 			}
-			return
+			return true
 		}
 		mu.Lock()
 		defer mu.Unlock()
 
 		// Ensure that we always take an earlier successful schedule to keep consistent ordering
+		// We care about this particularly with NewNodeClaims because NodeClaims should be evaluated by weight
 		if i >= idx {
-			return
+			return false
 		}
 		newNodeClaim = nodeClaim
-		requirements = r
-		instanceTypes = it
+		updatedRequirements = r
+		updatedInstanceTypes = its
 		offeringsToReserve = ofs
 		idx = i
-		cancel() // Cancel the context to end the workqueue parallelization
+		return false
 	})
 	if newNodeClaim != nil {
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
-		newNodeClaim.Add(pod, s.cachedPodData[pod.UID], requirements, instanceTypes, offeringsToReserve)
+		newNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve)
 		s.newNodeClaims = append(s.newNodeClaims, newNodeClaim)
 		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
 		return nil
@@ -635,6 +636,34 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 		}
 		return s.existingNodes[i].Name() < s.existingNodes[j].Name()
 	})
+}
+
+// parallelizeUntil is an implementation of workqueue.ParallelizeUntil that modifies the
+// doWorkPiece so that a worker always finishes its work when it pulls a piece off of pieces
+// The function returns a bool that represents whether the worker should continue doing work
+// or whether the worker should finish
+func parallelizeUntil(workers, pieces int, doWorkPiece func(int) bool) {
+	toProcess := make(chan int, pieces)
+	for i := range pieces {
+		toProcess <- i
+	}
+	close(toProcess)
+	if pieces < workers {
+		workers = pieces
+	}
+	wg := sync.WaitGroup{}
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for work := range toProcess {
+				if !doWorkPiece(work) {
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // getDaemonOverhead determines the overhead for each NodeClaimTemplate required for daemons to schedule for any node provisioned by the NodeClaimTemplate
