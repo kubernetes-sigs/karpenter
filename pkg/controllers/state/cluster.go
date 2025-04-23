@@ -68,6 +68,7 @@ type Cluster struct {
 	podsSchedulingAttempted         sync.Map // pod namespaced name -> time when Karpenter tried to schedule a pod
 	podsSchedulableTimes            sync.Map // pod namespaced name -> time when it was first marked as able to fit to a node
 	podHealthyNodePoolScheduledTime sync.Map // pod namespaced name -> time when pod scheduled to a nodePool that has NodeRegistrationHealthy=true, is marked as able to fit to a node
+	podToNodeClaim                  sync.Map // pod namespaced name -> nodeClaim name
 
 	clusterStateMu sync.RWMutex // Separate mutex as this is called in some places that mu is held
 	// A monotonically increasing timestamp representing the time state of the
@@ -96,6 +97,7 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		podsSchedulableTimes:            sync.Map{},
 		podsSchedulingAttempted:         sync.Map{},
 		podHealthyNodePoolScheduledTime: sync.Map{},
+		podToNodeClaim:                  sync.Map{},
 	}
 }
 
@@ -376,7 +378,7 @@ func (c *Cluster) PodAckTime(podKey types.NamespacedName) time.Time {
 // It updates podHealthyNodePoolScheduledTime for pods scheduled against nodePool that have
 // NodeRegistrationHealthy=true. This also marks when the pod is first seen as schedulable for pod metrics.
 // We'll only emit a metric for a pod if we haven't done it before.
-func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[*corev1.Pod]error, npPods map[string][]*corev1.Pod) {
+func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[*corev1.Pod]error, npPods map[string][]*corev1.Pod, ncPods map[string][]*corev1.Pod) {
 	now := c.clock.Now()
 	for pod := range podErrors {
 		nn := client.ObjectKeyFromObject(pod)
@@ -391,6 +393,7 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 			}
 		}
 		c.podHealthyNodePoolScheduledTime.Delete(nn)
+		c.podToNodeClaim.Delete(nn)
 	}
 	for nodePoolName, pods := range npPods {
 		nodePool := &v1.NodePool{}
@@ -419,6 +422,15 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 			}
 		}
 	}
+	c.UpdatePodToNodeClaimMapping(ncPods)
+}
+
+func (c *Cluster) UpdatePodToNodeClaimMapping(ncPods map[string][]*corev1.Pod) {
+	for ncName, pods := range ncPods {
+		for _, p := range pods {
+			c.podToNodeClaim.LoadOrStore(client.ObjectKeyFromObject(p), ncName)
+		}
+	}
 }
 
 // PodSchedulingDecisionTime returns when Karpenter first decided if a pod could schedule a pod in scheduling simulations.
@@ -437,6 +449,14 @@ func (c *Cluster) PodSchedulingSuccessTime(podKey types.NamespacedName) time.Tim
 		return val.(time.Time)
 	}
 	return time.Time{}
+}
+
+// PodNodeClaimMapping returns the nodeClaim against which the pod is simulated to get scheduled
+func (c *Cluster) PodNodeClaimMapping(podKey types.NamespacedName) string {
+	if val, found := c.podToNodeClaim.Load(podKey); found {
+		return val.(string)
+	}
+	return ""
 }
 
 // PodSchedulingSuccessTimeRegistrationHealthyCheck returns when Karpenter first thought it could schedule a pod in its scheduling simulation.

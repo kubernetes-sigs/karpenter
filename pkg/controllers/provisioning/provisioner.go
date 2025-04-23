@@ -169,7 +169,7 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 	rejectedPods, pods := lo.FilterReject(pods, func(po *corev1.Pod, _ int) bool {
 		if err := p.Validate(ctx, po); err != nil {
 			// Mark in memory that this pod is unschedulable
-			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, nil)
+			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, nil, nil)
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
 			return true
 		}
@@ -331,7 +331,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 			log.FromContext(ctx).Info("no nodepools found")
 			p.cluster.MarkPodSchedulingDecisions(ctx, lo.SliceToMap(pods, func(p *corev1.Pod) (*corev1.Pod, error) {
 				return p, fmt.Errorf("no nodepools found")
-			}), nil)
+			}), nil, nil)
 			return scheduler.Results{}, nil
 		}
 		return scheduler.Results{}, fmt.Errorf("creating scheduler, %w", err)
@@ -371,7 +371,15 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		).Info("found provisionable pod(s)")
 	}
 	// Mark in memory when these pods were marked as schedulable or when we made a decision on the pods
-	p.cluster.MarkPodSchedulingDecisions(ctx, results.PodErrors, results.NodePoolToPodMapping())
+	p.cluster.MarkPodSchedulingDecisions(ctx, results.PodErrors, results.NodePoolToPodMapping(),
+		// Only passing existing nodes here and not new nodeClaims because
+		// these nodeClaims don't have a name until they are created
+		lo.SliceToMap(lo.Filter(results.ExistingNodes, func(n *scheduler.ExistingNode, _ int) bool {
+			// Filter out nodes that are not managed
+			return n.Managed()
+		}), func(n *scheduler.ExistingNode) (string, []*corev1.Pod) {
+			return n.NodeClaim.Name, n.Pods
+		}))
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }
@@ -391,6 +399,11 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	if err := p.kubeClient.Create(ctx, nodeClaim); err != nil {
 		return "", err
 	}
+
+	// Update pod to nodeClaim mapping for newly created nodeClaims. We do
+	// this here because nodeClaim does not have a name until it is created.
+	p.cluster.UpdatePodToNodeClaimMapping(map[string][]*corev1.Pod{nodeClaim.Name: n.Pods})
+
 	instanceTypeRequirement, _ := lo.Find(nodeClaim.Spec.Requirements, func(req v1.NodeSelectorRequirementWithMinValues) bool {
 		return req.Key == corev1.LabelInstanceTypeStable
 	})
