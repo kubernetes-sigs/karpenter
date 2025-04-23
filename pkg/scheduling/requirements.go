@@ -167,6 +167,10 @@ var AllowUndefinedWellKnownLabels = func(options *CompatibilityOptions) {
 	options.AllowUndefined = v1.WellKnownLabels
 }
 
+var AllowUndefinedLabelsForDaemonset = func(options *CompatibilityOptions) {
+	options.AllowUndefined = v1.WellKnownLabels.Union(v1.AllowedDaemonsetLabels)
+}
+
 func (r Requirements) IsCompatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) bool {
 	return r.Compatible(requirements, options...) == nil
 }
