@@ -374,12 +374,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	p.cluster.MarkPodSchedulingDecisions(ctx, results.PodErrors, results.NodePoolToPodMapping(),
 		// Only passing existing nodes here and not new nodeClaims because
 		// these nodeClaims don't have a name until they are created
-		lo.SliceToMap(lo.Filter(results.ExistingNodes, func(n *scheduler.ExistingNode, _ int) bool {
-			// Filter out nodes that are not managed
-			return n.Managed()
-		}), func(n *scheduler.ExistingNode) (string, []*corev1.Pod) {
-			return n.NodeClaim.Name, n.Pods
-		}))
+		results.ExistingNodeToPodMapping())
 	results.Record(ctx, p.recorder, p.cluster)
 	return results, nil
 }

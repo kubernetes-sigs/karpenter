@@ -428,7 +428,7 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 func (c *Cluster) UpdatePodToNodeClaimMapping(ncPods map[string][]*corev1.Pod) {
 	for ncName, pods := range ncPods {
 		for _, p := range pods {
-			c.podToNodeClaim.LoadOrStore(client.ObjectKeyFromObject(p), ncName)
+			c.podToNodeClaim.Store(client.ObjectKeyFromObject(p), ncName)
 		}
 	}
 }
@@ -483,6 +483,7 @@ func (c *Cluster) ClearPodSchedulingMappings(podKey types.NamespacedName) {
 	c.podsSchedulableTimes.Delete(podKey)
 	c.podsSchedulingAttempted.Delete(podKey)
 	c.podHealthyNodePoolScheduledTime.Delete(podKey)
+	c.podToNodeClaim.Delete(podKey)
 }
 
 // MarkUnconsolidated marks the cluster state as being unconsolidated.  This should be called in any situation where

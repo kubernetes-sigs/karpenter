@@ -184,6 +184,24 @@ var _ = Describe("Pod Ack", func() {
 		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
 		Expect(cluster.PodNodeClaimMapping(nn)).To(BeEquivalentTo(""))
 	})
+	It("should delete the pod mappings from memory when the pod is deleted", func() {
+		pod := test.Pod()
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
+		ExpectApplied(ctx, env.Client, pod, nodePool)
+
+		nn := client.ObjectKeyFromObject(pod)
+		// This will store the pod mappings
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{"np1": {pod}}, map[string][]*corev1.Pod{"nc1": {pod}})
+		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeFalse())
+		Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeFalse())
+		Expect(cluster.PodNodeClaimMapping(nn)).To(BeEquivalentTo("nc1"))
+
+		// Delete the pod
+		cluster.DeletePod(client.ObjectKeyFromObject(pod))
+		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
+		Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeTrue())
+		Expect(cluster.PodNodeClaimMapping(nn)).To(BeEquivalentTo(""))
+	})
 })
 
 var _ = Describe("Volume Usage/Limits", func() {

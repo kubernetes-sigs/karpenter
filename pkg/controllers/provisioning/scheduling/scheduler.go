@@ -273,6 +273,15 @@ func (r Results) NodePoolToPodMapping() map[string][]*corev1.Pod {
 	return result
 }
 
+func (r Results) ExistingNodeToPodMapping() map[string][]*corev1.Pod {
+	return lo.SliceToMap(lo.Filter(r.ExistingNodes, func(n *ExistingNode, _ int) bool {
+		// Filter out nodes that are not managed
+		return n.Managed()
+	}), func(n *ExistingNode) (string, []*corev1.Pod) {
+		return n.NodeClaim.Name, n.Pods
+	})
+}
+
 // AllNonPendingPodsScheduled returns true if all pods scheduled.
 // We don't care if a pod was pending before consolidation and will still be pending after. It may be a pod that we can't
 // schedule at all and don't want it to block consolidation.
