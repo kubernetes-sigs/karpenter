@@ -474,7 +474,8 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should allow well known label exceptions", func() {
 			oldNodePool := nodePool.DeepCopy()
-			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey)) {
+			// Capacity Type is runtime validated
+			for label := range WellKnownLabels.Difference(sets.New(NodePoolLabelKey, CapacityTypeLabelKey)) {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: label, Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 				}

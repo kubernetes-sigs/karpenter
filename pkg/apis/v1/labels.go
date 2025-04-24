@@ -89,6 +89,14 @@ var (
 		v1.LabelWindowsBuild,
 	)
 
+	WellKnownValuesForRequirements = map[string]sets.Set[string]{
+		CapacityTypeLabelKey: sets.New(
+			CapacityTypeOnDemand,
+			CapacityTypeSpot,
+			CapacityTypeReserved,
+		),
+	}
+
 	// RestrictedLabels are labels that should not be used
 	// because they may interfere with the internal provisioning logic.
 	RestrictedLabels = sets.New(
@@ -113,6 +121,17 @@ func IsRestrictedLabel(key string) error {
 	}
 	if IsRestrictedNodeLabel(key) {
 		return serrors.Wrap(fmt.Errorf("label is restricted; specify a well known label or a custom label that does not use a restricted domain"), "label", key, "well-known-labels", sets.List(WellKnownLabels), "restricted-labels", sets.List(RestrictedLabelDomains))
+	}
+	return nil
+}
+
+// HasKnownValues returns an error if the requirement has well known values and is presented with an unknown value.
+func HasKnownValues(requirement NodeSelectorRequirementWithMinValues) error {
+	if !WellKnownLabels.Has(requirement.Key) {
+		return nil
+	}
+	if !WellKnownValuesForRequirements[requirement.Key].HasAny(requirement.Values...) {
+		return fmt.Errorf("bad values for key")
 	}
 	return nil
 }

@@ -121,6 +121,10 @@ func ValidateRequirement(requirement NodeSelectorRequirementWithMinValues) error
 	if e := IsRestrictedLabel(requirement.Key); e != nil {
 		errs = multierr.Append(errs, e)
 	}
+	// Validate that at least one value is valid for well-known labels with known values
+	if err := validateKnownValues(requirement); err != nil {
+		errs = multierr.Append(errs, fmt.Errorf("key %s with known values must only have known values defined", requirement.Key))
+	}
 	for _, err := range validation.IsQualifiedName(requirement.Key) {
 		errs = multierr.Append(errs, fmt.Errorf("key %s is not a qualified name, %s", requirement.Key, err))
 	}
@@ -148,4 +152,31 @@ func ValidateRequirement(requirement NodeSelectorRequirementWithMinValues) error
 		}
 	}
 	return errs
+}
+
+// ValidateKnownValues checks if the requirement has well known values and validates that at least one of the values is valid.
+// It returns error if all values are invalid, which will prevent the nodepool from going ready, otherwise it fails open.
+func validateKnownValues(requirement NodeSelectorRequirementWithMinValues) error {
+	// If the key doesn't have well-known values or the operator is not In, nothing to validate
+	if !WellKnownLabels.Has(requirement.Key) || requirement.Operator != v1.NodeSelectorOpIn {
+		return nil
+	}
+
+	// If the key doesn't have well-known values defined, nothing to validate
+	knownValues, exists := WellKnownValuesForRequirements[requirement.Key]
+	if !exists {
+		return nil
+	}
+
+	rejectedValues := lo.Filter(requirement.Values, func(val string, _ int) bool {
+		return !knownValues.Has(val)
+	})
+
+	// If there are no valid values, set an error to prevent the nodepool from going ready
+	if len(rejectedValues) != 0 {
+		return fmt.Errorf("invalid values found in %v for %s, expected one of: %v, got: %v",
+			requirement.Values, requirement.Key, knownValues, rejectedValues)
+	}
+
+	return nil
 }
