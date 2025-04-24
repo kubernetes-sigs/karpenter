@@ -154,8 +154,8 @@ func ValidateRequirement(requirement NodeSelectorRequirementWithMinValues) error
 	return errs
 }
 
-// ValidateKnownValues checks if the requirement has well known values and validates that at least one of the values is valid.
-// It returns error if all values are invalid, which will prevent the nodepool from going ready, otherwise it fails open.
+// ValidateKnownValues checks if the requirement has well known values.
+// It returns an error if any value is invalid, which will prevent the nodepool from going ready.
 func validateKnownValues(requirement NodeSelectorRequirementWithMinValues) error {
 	// If the key doesn't have well-known values or the operator is not In, nothing to validate
 	if !WellKnownLabels.Has(requirement.Key) || requirement.Operator != v1.NodeSelectorOpIn {
