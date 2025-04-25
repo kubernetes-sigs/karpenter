@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -243,7 +244,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 // nolint:gocyclo
 func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	if q.clock.Since(cmd.timeAdded) > maxRetryDuration {
-		return NewUnrecoverableError(fmt.Errorf("command reached timeout after %s", q.clock.Since(cmd.timeAdded)))
+		return NewUnrecoverableError(serrors.Wrap(fmt.Errorf("command reached timeout"), "duration", q.clock.Since(cmd.timeAdded)))
 	}
 	waitErrs := make([]error, len(cmd.Replacements))
 	for i := range cmd.Replacements {
@@ -269,7 +270,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		initializedStatus := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
-			waitErrs[i] = fmt.Errorf("nodeclaim %s not initialized", nodeClaim.Name)
+			waitErrs[i] = serrors.Wrap(fmt.Errorf("nodeclaim not initialized"), "NodeClaim", klog.KRef("", nodeClaim.Name))
 			continue
 		}
 		cmd.Replacements[i].Initialized = true

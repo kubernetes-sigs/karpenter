@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/awslabs/operatorpkg/option"
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -43,7 +45,8 @@ import (
 )
 
 type Topology struct {
-	kubeClient client.Client
+	kubeClient       client.Client
+	preferencePolicy PreferencePolicy
 	// Both the topologyGroups and inverseTopologies are maps of the hash from TopologyGroup.Hash() to the topology group
 	// itself. This is used to allow us to store one topology group that tracks the topology of many pods instead of
 	// having a 1<->1 mapping between topology groups and pods owned/selected by that group.
@@ -70,9 +73,11 @@ func NewTopology(
 	nodePools []*v1.NodePool,
 	instanceTypes map[string][]*cloudprovider.InstanceType,
 	pods []*corev1.Pod,
+	opts ...Options,
 ) (*Topology, error) {
 	t := &Topology{
 		kubeClient:            kubeClient,
+		preferencePolicy:      option.Resolve(opts...).preferencePolicy,
 		cluster:               cluster,
 		stateNodes:            stateNodes,
 		domainGroups:          buildDomainGroups(nodePools, instanceTypes),
@@ -159,7 +164,8 @@ func (t *Topology) Update(ctx context.Context, p *corev1.Pod) error {
 		topology.RemoveOwner(p.UID)
 	}
 
-	if pod.HasPodAntiAffinity(p) {
+	if (t.preferencePolicy == PreferencePolicyIgnore && pod.HasRequiredPodAntiAffinity(p)) ||
+		(t.preferencePolicy == PreferencePolicyRespect && pod.HasPodAntiAffinity(p)) {
 		if err := t.updateInverseAntiAffinity(ctx, p, nil); err != nil {
 			return fmt.Errorf("updating inverse anti-affinities, %w", err)
 		}
@@ -387,7 +393,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 				if errors.IsNotFound(err) {
 					continue
 				}
-				return fmt.Errorf("getting node %s, %w", p.Spec.NodeName, err)
+				return serrors.Wrap(fmt.Errorf("getting node, %w", err), "Node", klog.KRef("", p.Spec.NodeName))
 			}
 			nodeRequirements = scheduling.NewLabelRequirements(node.Labels)
 
@@ -422,6 +428,9 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 func (t *Topology) newForTopologies(p *corev1.Pod) []*TopologyGroup {
 	var topologyGroups []*TopologyGroup
 	for _, tsc := range p.Spec.TopologySpreadConstraints {
+		if t.preferencePolicy == PreferencePolicyIgnore && tsc.WhenUnsatisfiable != corev1.DoNotSchedule {
+			continue
+		}
 		for _, key := range tsc.MatchLabelKeys {
 			if value, ok := p.Labels[key]; ok {
 				tsc.LabelSelector.MatchExpressions = append(tsc.LabelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
@@ -459,16 +468,20 @@ func (t *Topology) newForAffinities(ctx context.Context, p *corev1.Pod) ([]*Topo
 	// include both soft and hard affinity terms
 	if p.Spec.Affinity.PodAffinity != nil {
 		affinityTerms[TopologyTypePodAffinity] = append(affinityTerms[TopologyTypePodAffinity], p.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution...)
-		for _, term := range p.Spec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
-			affinityTerms[TopologyTypePodAffinity] = append(affinityTerms[TopologyTypePodAffinity], term.PodAffinityTerm)
+		if t.preferencePolicy == PreferencePolicyRespect {
+			for _, term := range p.Spec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
+				affinityTerms[TopologyTypePodAffinity] = append(affinityTerms[TopologyTypePodAffinity], term.PodAffinityTerm)
+			}
 		}
 	}
 
 	// include both soft and hard antiaffinity terms
 	if p.Spec.Affinity.PodAntiAffinity != nil {
 		affinityTerms[TopologyTypePodAntiAffinity] = append(affinityTerms[TopologyTypePodAntiAffinity], p.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution...)
-		for _, term := range p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
-			affinityTerms[TopologyTypePodAntiAffinity] = append(affinityTerms[TopologyTypePodAntiAffinity], term.PodAffinityTerm)
+		if t.preferencePolicy == PreferencePolicyRespect {
+			for _, term := range p.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
+				affinityTerms[TopologyTypePodAntiAffinity] = append(affinityTerms[TopologyTypePodAntiAffinity], term.PodAffinityTerm)
+			}
 		}
 	}
 
