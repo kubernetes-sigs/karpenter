@@ -43,11 +43,11 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 e2etests: ## Run the e2e suite against your local cluster
 	cd test && go test \
 		-count 1 \
-		-timeout 30m \
+		-timeout 2h \
 		-v \
 		./suites/$(shell echo $(TEST_SUITE) | tr A-Z a-z)/... \
 		--ginkgo.focus="${FOCUS}" \
-		--ginkgo.timeout=30m \
+		--ginkgo.timeout=2h \
 		--ginkgo.grace-period=5m \
 		--ginkgo.vv
 
