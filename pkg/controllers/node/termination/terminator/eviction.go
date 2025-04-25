@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -202,7 +203,7 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 			q.recorder.Publish(terminatorevents.NodeFailedToDrain(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name:      key.Name,
 				Namespace: key.Namespace,
-			}}, fmt.Errorf("evicting pod %s/%s violates a PDB", key.Namespace, key.Name)))
+			}}, serrors.Wrap(fmt.Errorf("evicting pod violates a PDB"), "Pod", klog.KRef(key.Namespace, key.Name))))
 			return false
 		}
 		log.FromContext(ctx).Error(err, "failed evicting pod")

@@ -68,7 +68,7 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	// if the sync hasn't happened yet and the race protecting startup taint isn't present then log it as missing and proceed
 	// if the sync has happened then the startup taint has been removed if it was present
 	if _, ok := node.Labels[v1.NodeRegisteredLabelKey]; !ok && !hasStartupTaint {
-		log.FromContext(ctx).Error(fmt.Errorf("missing %s taint which prevents registration related race conditions on Karpenter-managed nodes", v1.UnregisteredTaintKey), "node claim registration error")
+		log.FromContext(ctx).WithValues("taint", v1.UnregisteredTaintKey).Error(fmt.Errorf("missing taint prevents registration-related race conditions on Karpenter-managed nodes"), "node claim registration error")
 		r.recorder.Publish(UnregisteredTaintMissingEvent(nodeClaim))
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KObj(node)))

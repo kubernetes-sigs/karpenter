@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -201,7 +202,7 @@ func NewVolumeUsage() *VolumeUsage {
 func (v *VolumeUsage) ExceedsLimits(vols Volumes) error {
 	for k, volumes := range v.volumes.Union(vols) {
 		if limit, hasLimit := v.limits[k]; hasLimit && len(volumes) > limit {
-			return fmt.Errorf("would exceed volume limit for %s, %d > %d", k, len(volumes), limit)
+			return serrors.Wrap(fmt.Errorf("would exceed volume limit"), "provisioner", k, "volume-count", len(volumes), "volume-limit", limit)
 		}
 	}
 	return nil

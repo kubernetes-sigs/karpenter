@@ -53,14 +53,10 @@ func NewReservationManager(instanceTypes map[string][]*cloudprovider.InstanceTyp
 	}
 }
 
-func (rm *ReservationManager) Reserve(hostname string, offering *cloudprovider.Offering) bool {
+func (rm *ReservationManager) CanReserve(hostname string, offering *cloudprovider.Offering) bool {
 	reservations, ok := rm.reservations[hostname]
 	if ok && reservations.Has(offering.ReservationID()) {
 		return true
-	}
-	if !ok {
-		reservations = sets.New[string]()
-		rm.reservations[hostname] = reservations
 	}
 	capacity, ok := rm.capacity[offering.ReservationID()]
 	if !ok {
@@ -70,9 +66,20 @@ func (rm *ReservationManager) Reserve(hostname string, offering *cloudprovider.O
 	if capacity == 0 {
 		return false
 	}
-	rm.capacity[offering.ReservationID()] -= 1
-	reservations.Insert(offering.ReservationID())
 	return true
+}
+
+func (rm *ReservationManager) Reserve(hostname string, offerings ...*cloudprovider.Offering) {
+	for _, of := range offerings {
+		rm.capacity[of.ReservationID()] -= 1
+		if rm.capacity[of.ReservationID()] < 0 {
+			panic(fmt.Sprintf("attempted to over-reserve an offering with reservation id %q", of.ReservationID()))
+		}
+		if _, ok := rm.reservations[hostname]; !ok {
+			rm.reservations[hostname] = sets.New[string]()
+		}
+		rm.reservations[hostname].Insert(of.ReservationID())
+	}
 }
 
 func (rm *ReservationManager) Release(hostname string, offerings ...*cloudprovider.Offering) {

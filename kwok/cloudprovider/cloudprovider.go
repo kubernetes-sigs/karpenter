@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
@@ -160,7 +161,7 @@ func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.
 		return it.Name == instanceTypeName
 	})
 	if !found {
-		return nil, fmt.Errorf("unable to find instance type %q", instanceTypeName)
+		return nil, serrors.Wrap(fmt.Errorf("unable to find instance type"), "instance-type", instanceTypeName)
 	}
 	return it, nil
 }
@@ -184,7 +185,7 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 	for _, val := range req.Values {
 		it, err := c.getInstanceType(val)
 		if err != nil {
-			return nil, fmt.Errorf("instance type %s not found", val)
+			return nil, serrors.Wrap(fmt.Errorf("instance type not found"), "instance-type", val)
 		}
 
 		availableOfferings := it.Offerings.Available().Compatible(requirements)

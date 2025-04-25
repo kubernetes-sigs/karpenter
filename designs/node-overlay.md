@@ -200,7 +200,7 @@ metadata:
 spec:
   weight: 90
   requirements:
-  - key: karpenter.k8s.aws/instance-memory
+  - key: karpenter.k8s.aws/instance-type
     operator: Gt
     values: ["m5.large", "m5.2xlarge"]
   capacity:

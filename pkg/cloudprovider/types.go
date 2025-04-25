@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -214,7 +215,7 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 		}
 	}
 	if incompatibleKey != "" {
-		return len(its), fmt.Errorf("minValues requirement is not met for %q", incompatibleKey)
+		return len(its), serrors.Wrap(fmt.Errorf("minValues requirement is not met for label"), "label", incompatibleKey)
 	}
 	return len(its), nil
 }

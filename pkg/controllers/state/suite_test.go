@@ -106,8 +106,7 @@ var _ = Describe("Pod Healthy NodePool", func() {
 	It("should not store pod schedulable time if the nodePool that pod is scheduled to does not have NodeRegistrationHealthy=true", func() {
 		pod := test.Pod()
 		ExpectApplied(ctx, env.Client, pod, nodePool)
-
-		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
 		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
 		Expect(setTime.IsZero()).To(BeTrue())
 	})
@@ -116,7 +115,7 @@ var _ = Describe("Pod Healthy NodePool", func() {
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
 		ExpectApplied(ctx, env.Client, pod, nodePool)
 
-		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
 		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
 		Expect(setTime.IsZero()).To(BeFalse())
 	})
@@ -126,13 +125,13 @@ var _ = Describe("Pod Healthy NodePool", func() {
 		ExpectApplied(ctx, env.Client, pod, nodePool)
 
 		// This will store the pod schedulable time
-		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
 		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
 		Expect(setTime.IsZero()).To(BeFalse())
 
 		fakeClock.Step(time.Minute)
 		// We try to update pod schedulable time, but it should not change as we have already stored it
-		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
 		Expect(cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))).To(Equal(setTime))
 	})
 	It("should delete the pod schedulable time if the pod is deleted", func() {
@@ -141,7 +140,7 @@ var _ = Describe("Pod Healthy NodePool", func() {
 		ExpectApplied(ctx, env.Client, pod, nodePool)
 
 		// This will store the pod schedulable time
-		cluster.UpdatePodHealthyNodePoolScheduledTime(ctx, nodePool.Name, []*corev1.Pod{pod}...)
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
 		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
 		Expect(setTime.IsZero()).To(BeFalse())
 
@@ -160,12 +159,48 @@ var _ = Describe("Pod Ack", func() {
 		setTime := cluster.PodSchedulingSuccessTime(nn)
 		Expect(setTime.IsZero()).To(BeTrue())
 
-		cluster.MarkPodSchedulingDecisions(map[*corev1.Pod]error{}, pod)
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{"n1": {pod}}, map[string][]*corev1.Pod{"nc1": {pod}})
 		setTime = cluster.PodSchedulingSuccessTime(nn)
 		Expect(setTime.IsZero()).To(BeFalse())
 
 		newTime := cluster.PodSchedulingSuccessTime(nn)
 		Expect(newTime.Compare(setTime)).To(Equal(0))
+		Expect(cluster.PodNodeClaimMapping(nn)).To(BeEquivalentTo("nc1"))
+	})
+	It("should delete pod schedulable time and pod to nodeClaim mapping if we get error for the pod", func() {
+		pod := test.Pod()
+		ExpectApplied(ctx, env.Client, pod)
+		nn := client.ObjectKeyFromObject(pod)
+
+		setTime := cluster.PodSchedulingSuccessTime(nn)
+		Expect(setTime.IsZero()).To(BeTrue())
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{"n1": {pod}}, nil)
+		setTime = cluster.PodSchedulingSuccessTime(nn)
+		Expect(setTime.IsZero()).To(BeFalse())
+
+		cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{
+			pod: fmt.Errorf("ignoring pod"),
+		}, nil, nil)
+		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
+		Expect(cluster.PodNodeClaimMapping(nn)).To(BeEquivalentTo(""))
+	})
+	It("should delete the pod mappings from memory when the pod is deleted", func() {
+		pod := test.Pod()
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
+		ExpectApplied(ctx, env.Client, pod, nodePool)
+
+		nn := client.ObjectKeyFromObject(pod)
+		// This will store the pod mappings
+		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{"np1": {pod}}, map[string][]*corev1.Pod{"nc1": {pod}})
+		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeFalse())
+		Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeFalse())
+		Expect(cluster.PodNodeClaimMapping(nn)).To(BeEquivalentTo("nc1"))
+
+		// Delete the pod
+		cluster.DeletePod(client.ObjectKeyFromObject(pod))
+		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
+		Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeTrue())
+		Expect(cluster.PodNodeClaimMapping(nn)).To(BeEquivalentTo(""))
 	})
 })
 
@@ -1186,6 +1221,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1227,6 +1263,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node()
 				ExpectApplied(ctx, env.Client, node)
@@ -1246,6 +1283,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func(index int) {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node()
 				ExpectApplied(ctx, env.Client, node)
@@ -1259,6 +1297,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func(index int) {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodes[index].Spec.ProviderID = test.RandomProviderID()
 				ExpectApplied(ctx, env.Client, nodes[index])
@@ -1276,6 +1315,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1295,6 +1335,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 250 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1314,6 +1355,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 250 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1327,6 +1369,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 500 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1346,6 +1389,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 500 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1369,6 +1413,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func(index int) {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1392,6 +1437,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
 					Status: v1.NodeClaimStatus{
@@ -1415,6 +1461,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for i := range 1000 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1463,6 +1510,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 250 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1482,6 +1530,7 @@ var _ = Describe("Cluster State Sync", func() {
 		for range 250 {
 			wg.Add(1)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
@@ -1692,6 +1741,7 @@ var _ = Describe("Data Races", func() {
 		// Keep calling Synced for the entirety of this test
 		wg.Add(1)
 		go func() {
+			defer GinkgoRecover()
 			defer wg.Done()
 			for {
 				_ = cluster.Synced(ctx)
@@ -1714,6 +1764,7 @@ var _ = Describe("Data Races", func() {
 		// Keep calling Synced for the entirety of this test
 		wg.Add(1)
 		go func() {
+			defer GinkgoRecover()
 			defer wg.Done()
 			for {
 				_ = cluster.Synced(ctx)
@@ -2294,6 +2345,81 @@ var _ = Describe("NodePool Resources", func() {
 
 		// UnmarkForDeletion and expect the count of resources to be restored
 		cluster.UnmarkForDeletion(nodeClaim1.Status.ProviderID)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+	})
+	It("should not double subtract resources when marking for deletion and then deleting", func() {
+		nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            test.RandomName(),
+					v1.NodeRegisteredLabelKey:      "true",
+					corev1.LabelInstanceTypeStable: "m5.large",
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse("2"),
+					corev1.ResourceMemory:           resource.MustParse("2Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+				},
+			},
+		})
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("2"),
+			corev1.ResourceMemory:           resource.MustParse("2Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		// MarkForDeletion and expect the count of resources to reduce
+		cluster.MarkForDeletion(nodeClaim1.Status.ProviderID)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		nodeClaim1.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		cluster.UpdateNodeClaim(nodeClaim1.DeepCopy())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		node1.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		Expect(cluster.UpdateNode(ctx, node1.DeepCopy())).To(Succeed())
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		cluster.DeleteNodeClaim(nodeClaim1.Name)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+
+		cluster.DeleteNode(node1.Name)
+
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("0"),
+			corev1.ResourceMemory:           resource.MustParse("0Gi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
+		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
 	})
 })
 

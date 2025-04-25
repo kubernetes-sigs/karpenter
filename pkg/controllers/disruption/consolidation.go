@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
@@ -318,7 +319,7 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 			if reqs.Get(v1.CapacityTypeLabelKey).Has(v1.CapacityTypeReserved) {
 				return 0.0, nil
 			}
-			return 0.0, fmt.Errorf("unable to determine offering for %s/%s/%s", c.instanceType.Name, c.capacityType, c.zone)
+			return 0.0, serrors.Wrap(fmt.Errorf("unable to determine offering"), "instance-type", c.instanceType.Name, "capacity-type", c.capacityType, "zone", c.zone)
 		}
 		price += compatibleOfferings.Cheapest().Price
 	}

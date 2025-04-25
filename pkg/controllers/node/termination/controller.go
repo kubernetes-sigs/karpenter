@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
@@ -113,7 +114,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("tainting node with %s, %w", pretty.Taint(v1.DisruptedNoScheduleTaint), err))
+		return reconcile.Result{}, client.IgnoreNotFound(serrors.Wrap(fmt.Errorf("tainting node, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint)))
 	}
 	if err = c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
@@ -283,7 +284,7 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaims ...*v1.No
 	c.recorder.Publish(terminatorevents.NodeTerminationGracePeriodExpiring(node, expirationTimeString))
 	expirationTime, err := time.Parse(time.RFC3339, expirationTimeString)
 	if err != nil {
-		return nil, fmt.Errorf("parsing %s annotation, %w", v1.NodeClaimTerminationTimestampAnnotationKey, err)
+		return nil, serrors.Wrap(fmt.Errorf("parsing annotation, %w", err), "annotation", v1.NodeClaimTerminationTimestampAnnotationKey)
 	}
 	return &expirationTime, nil
 }
