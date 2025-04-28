@@ -28,6 +28,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/go-logr/zapr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
@@ -117,7 +118,7 @@ func NewOperator() (context.Context, *Operator) {
 	}
 
 	// Logging
-	logger := zapr.NewLogger(logging.NewLogger(ctx, component))
+	logger := serrors.NewLogger(zapr.NewLogger(logging.NewLogger(ctx, component)))
 	log.SetLogger(logger)
 	klog.SetLogger(logger)
 

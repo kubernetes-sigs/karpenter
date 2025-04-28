@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/awslabs/operatorpkg/option"
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -391,7 +393,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 				if errors.IsNotFound(err) {
 					continue
 				}
-				return fmt.Errorf("getting node %s, %w", p.Spec.NodeName, err)
+				return serrors.Wrap(fmt.Errorf("getting node, %w", err), "Node", klog.KRef("", p.Spec.NodeName))
 			}
 			nodeRequirements = scheduling.NewLabelRequirements(node.Labels)
 

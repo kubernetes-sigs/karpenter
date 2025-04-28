@@ -21,6 +21,7 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
@@ -146,7 +147,7 @@ func (l Limits) ExceededBy(resources v1.ResourceList) error {
 	for resourceName, usage := range resources {
 		if limit, ok := l[resourceName]; ok {
 			if usage.Cmp(limit) > 0 {
-				return fmt.Errorf("%s resource usage of %v exceeds limit of %v", resourceName, usage.AsDec(), limit.AsDec())
+				return serrors.Wrap(fmt.Errorf("resource usage exceeds limit"), "resource-name", resourceName, "usage", usage.AsDec(), "limit", limit.AsDec())
 			}
 		}
 	}
@@ -358,7 +359,7 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	if err != nil {
 		// Should only occur if there's a discrepancy
 		// with the validation regex and the cron package.
-		return false, fmt.Errorf("invariant violated, invalid cron %s", schedule)
+		return false, serrors.Wrap(fmt.Errorf("invariant violated, invalid cron"), "cron", schedule)
 	}
 	// Walk back in time for the duration associated with the schedule
 	checkPoint := c.Now().UTC().Add(-lo.FromPtr(in.Duration).Duration)

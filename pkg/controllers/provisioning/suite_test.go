@@ -464,6 +464,7 @@ var _ = Describe("Provisioning", func() {
 
 		nodeClaim := &v1.NodeClaim{}
 		Expect(env.Client.Get(ctx, types.NamespacedName{Name: nodeClaims[0]}, nodeClaim)).To(Succeed())
+		Expect(cluster.PodNodeClaimMapping(client.ObjectKeyFromObject(pod))).To(BeEquivalentTo(nodeClaim.Name))
 
 		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodePoolHashAnnotationKey, hash))
 	})

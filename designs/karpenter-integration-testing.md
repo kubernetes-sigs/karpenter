@@ -240,8 +240,6 @@ As part of the initial functional integration testing, the cloud-agnostic tests 
         * should terminate an empty node
     * Termination Grace Period 
         * should delete pod with do-not-disrupt when it reaches its terminationGracePeriodSeconds
-        * should delete pod that has a pre-stop hook after termination grace period seconds
     * Termination 
-        * should terminate the node and the instance on deletion
         * should drain pods on a node in order
 
