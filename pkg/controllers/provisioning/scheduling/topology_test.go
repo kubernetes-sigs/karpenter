@@ -635,7 +635,7 @@ var _ = Describe("Topology", func() {
 			Expect(nodes.Items).To(HaveLen(4))
 		})
 		It("should reuse inflight nodeclaim that can support the pod", func() {
-			nodePool := test.NodePool(v1.NodePool{
+			testNodePool := test.NodePool(v1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test",
 				},
@@ -658,7 +658,7 @@ var _ = Describe("Topology", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, testNodePool)
 			pod := test.UnschedulablePod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
