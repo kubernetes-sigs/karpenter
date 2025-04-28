@@ -247,6 +247,56 @@ func (env *Environment) ReplaceNodeConditions(node *corev1.Node, conds ...corev1
 	return node
 }
 
+func (env *Environment) EventuallyExpectConsolidatable(nodeClaims ...*v1.NodeClaim) {
+	GinkgoHelper()
+	Eventually(func(g Gomega) {
+		for _, nc := range nodeClaims {
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
+			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
+		}
+	}).Should(Succeed())
+}
+
+func (env *Environment) ConsistentlyExpectHealthyPods(duration time.Duration, pods ...*corev1.Pod) {
+	GinkgoHelper()
+	By(fmt.Sprintf("expecting %d pods to be ready for %s", len(pods), duration))
+	Consistently(func(g Gomega) {
+		for _, pod := range pods {
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+			g.Expect(pod.Status.Conditions).To(ContainElement(And(
+				HaveField("Type", Equal(corev1.PodReady)),
+				HaveField("Status", Equal(corev1.ConditionTrue)),
+			)))
+		}
+	}, duration.String()).Should(Succeed())
+}
+
+func (env *Environment) EventuallyExpectTerminating(pods ...*corev1.Pod) {
+	GinkgoHelper()
+	env.eventuallyExpectTerminatingWithTimeout(-1, pods...)
+}
+
+func (env *Environment) eventuallyExpectTerminatingWithTimeout(timeout time.Duration, pods ...*corev1.Pod) {
+	GinkgoHelper()
+	Eventually(func(g Gomega) {
+		for _, pod := range pods {
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+			g.Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
+		}
+	}).WithTimeout(timeout).Should(Succeed())
+}
+
+func (env *Environment) ConsistentlyExpectActivePods(duration time.Duration, pods ...*corev1.Pod) {
+	GinkgoHelper()
+	By(fmt.Sprintf("expecting %d pods to be live for %s", len(pods), duration))
+	Consistently(func(g Gomega) {
+		for _, pod := range pods {
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+			g.Expect(pod.DeletionTimestamp.IsZero()).To(BeTrue())
+		}
+	}, duration.String()).Should(Succeed())
+}
+
 func (env *Environment) ExpectSettings() (res []corev1.EnvVar) {
 	GinkgoHelper()
 
