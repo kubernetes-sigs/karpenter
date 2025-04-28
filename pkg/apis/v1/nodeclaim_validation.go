@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -25,6 +26,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 var (
@@ -101,16 +103,16 @@ func validateTaintsField(taints []v1.Taint, existing map[taintKeyEffect]struct{}
 // This function is used by the NodeClaim validation webhook to verify the nodepool requirements.
 // When this function is called, the nodepool's requirements do not include the requirements from labels.
 // NodeClaim requirements only support well known labels.
-func (in *NodeClaimTemplateSpec) validateRequirements() (errs error) {
+func (in *NodeClaimTemplateSpec) validateRequirements(ctx context.Context) (errs error) {
 	for _, requirement := range in.Requirements {
-		if err := ValidateRequirement(requirement); err != nil {
+		if err := ValidateRequirement(ctx, requirement); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("invalid value: %w in requirements, restricted", err))
 		}
 	}
 	return errs
 }
 
-func ValidateRequirement(requirement NodeSelectorRequirementWithMinValues) error { //nolint:gocyclo
+func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequirementWithMinValues) error { //nolint:gocyclo
 	var errs error
 	if normalized, ok := NormalizedLabels[requirement.Key]; ok {
 		requirement.Key = normalized
@@ -122,7 +124,7 @@ func ValidateRequirement(requirement NodeSelectorRequirementWithMinValues) error
 		errs = multierr.Append(errs, e)
 	}
 	// Validate that at least one value is valid for well-known labels with known values
-	if err := validateKnownValues(requirement); err != nil {
+	if err := validateKnownValues(ctx, requirement); err != nil {
 		errs = multierr.Append(errs, fmt.Errorf("key %s with known values must only have known values defined", requirement.Key))
 	}
 	for _, err := range validation.IsQualifiedName(requirement.Key) {
@@ -155,8 +157,11 @@ func ValidateRequirement(requirement NodeSelectorRequirementWithMinValues) error
 }
 
 // ValidateKnownValues checks if the requirement has well known values.
-// It returns an error if any value is invalid, which will prevent the nodepool from going ready.
-func validateKnownValues(requirement NodeSelectorRequirementWithMinValues) error {
+// An error will cause a NodePool's Readiness to transition to False.
+// It returns an error if all values are invalid.
+// It returns an error if there are not enough valid values to satisfy min values for a requirement with known values.
+// It logs if invalid values are found but valid values can be used.
+func validateKnownValues(ctx context.Context, requirement NodeSelectorRequirementWithMinValues) error {
 	// If the key doesn't have well-known values or the operator is not In, nothing to validate
 	if !WellKnownLabels.Has(requirement.Key) || requirement.Operator != v1.NodeSelectorOpIn {
 		return nil
@@ -168,14 +173,27 @@ func validateKnownValues(requirement NodeSelectorRequirementWithMinValues) error
 		return nil
 	}
 
-	rejectedValues := lo.Filter(requirement.Values, func(val string, _ int) bool {
-		return !knownValues.Has(val)
+	values, rejectedValues := lo.FilterReject(requirement.Values, func(val string, _ int) bool {
+		return knownValues.Has(val)
 	})
 
-	// If there are no valid values, set an error to prevent the nodepool from going ready
-	if len(rejectedValues) != 0 {
+	// If there are only invalid values, set an error to transition the nodepool's readiness to false
+	if len(values) == 0 && len(rejectedValues) != 0 {
+		log.FromContext(ctx).V(1).Info("no valid values found", "requirement", requirement)
 		return fmt.Errorf("invalid values found in %v for %s, expected one of: %v, got: %v",
 			requirement.Values, requirement.Key, knownValues, rejectedValues)
+	}
+
+	// If there are valid values, but the minimum number of values is not met, set an error to prevent the nodepool from going ready
+	if requirement.MinValues != nil && len(values) < lo.FromPtr(requirement.MinValues) {
+		log.FromContext(ctx).V(1).Info("not enough valid values to meet min values", "requirement", requirement)
+		return fmt.Errorf("invalid values %v for %s, expected at least %d values, got: %v",
+			rejectedValues, requirement.Key, lo.FromPtr(requirement.MinValues), len(values))
+	}
+
+	// If there are valid and invalid values, log the invalid values and proceed with valid values
+	if len(rejectedValues) > 0 {
+		log.FromContext(ctx).V(1).Info("invalid values found, proceeding with valid values", "requirement", requirement, "values", rejectedValues)
 	}
 
 	return nil
