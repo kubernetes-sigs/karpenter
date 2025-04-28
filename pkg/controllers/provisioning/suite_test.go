@@ -2241,6 +2241,50 @@ var _ = Describe("Provisioning", func() {
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Spec.Taints).To(ContainElement(corev1.Taint{Key: "foo", Value: "bar", Effect: corev1.TaintEffectPreferNoSchedule}))
 			})
+			DescribeTable("should ignore node preferredDuringSchedulingIgnoredDuringExecution affinity", func(topologyKey string) {
+				pod1 := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "foo",
+						},
+					},
+					PodPreferences: []corev1.WeightedPodAffinityTerm{},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("2"),
+						},
+					},
+				})
+				nodePreferencePod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "baz",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+					NodePreferences: []corev1.NodeSelectorRequirement{
+						{
+							Key:      topologyKey,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"value-1"},
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, nodePreferencePod)
+
+				pod1Node := ExpectScheduled(ctx, env.Client, pod1)
+				podNodePreferenceNode := ExpectScheduled(ctx, env.Client, nodePreferencePod)
+
+				Expect(pod1Node.Name).To(Equal(podNodePreferenceNode.Name))
+			},
+				Entry(corev1.LabelTopologyZone, corev1.LabelTopologyZone),
+				Entry(corev1.LabelTopologyZone, corev1.LabelHostname),
+			)
 		})
 		Context("Ignore Preferences", func() {
 			BeforeEach(func() {

@@ -524,9 +524,6 @@ func validateAffinity(p *corev1.Pod) (errs error) {
 		return nil
 	}
 	if p.Spec.Affinity.NodeAffinity != nil {
-		for _, term := range p.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
-			errs = multierr.Append(errs, validateNodeSelectorTerm(term.Preference))
-		}
 		if p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
 			for _, term := range p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
 				errs = multierr.Append(errs, validateNodeSelectorTerm(term))
