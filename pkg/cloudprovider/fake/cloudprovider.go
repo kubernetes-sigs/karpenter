@@ -175,6 +175,16 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 		labels[req.Key] = req.Any()
 	}
 
+	// add the derived nodeclaim requirement labels as we do in addInstanceLabels in KWOK provider 
+	for _, r := range nodeClaim.Spec.Requirements {
+		if len(r.Values) == 1 && r.Operator == corev1.NodeSelectorOpIn {
+			labels[r.Key] = r.Values[0]
+		}
+	}
+
+	// add hostname labels
+	labels[corev1.LabelHostname] = nodeClaim.Name
+
 	created := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        nodeClaim.Name,

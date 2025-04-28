@@ -307,6 +307,39 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 }
 
 //nolint:gocyclo
+func ExpectProvisionedNoNode(ctx context.Context,c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ([]*v1.NodeClaim,error) {
+	GinkgoHelper()
+	nodeClaims := []*v1.NodeClaim{}
+	// Persist objects
+	for _, pod := range pods {
+		ExpectApplied(ctx, c, pod)
+	}
+	//Create nodeclaims
+	results, err := provisioner.Schedule(ctx)
+	if err != nil {
+		log.Printf("error provisioning in test, %s", err)
+		return nodeClaims,err
+	}
+	for _, m := range results.NewNodeClaims {
+		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
+		if err != nil {
+			return nodeClaims,err
+		}
+		nodeClaim := &v1.NodeClaim{}
+		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
+		nodeClaim, err = ExpectNodeClaimDeployedNoNode(ctx, c, cloudProvider, nodeClaim)
+		if err != nil {
+			return nodeClaims,err
+		}
+		//Update state nodes
+		cluster.UpdateNodeClaim(nodeClaim)
+		ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
+		nodeClaims = append(nodeClaims, nodeClaim)
+	}
+	return nodeClaims, nil
+}
+
+//nolint:gocyclo
 func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
 	GinkgoHelper()
 	// Persist objects

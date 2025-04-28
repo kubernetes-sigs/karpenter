@@ -634,6 +634,109 @@ var _ = Describe("Topology", func() {
 			// same test as the previous one, but now the architectures are different so we need four nodes in total
 			Expect(nodes.Items).To(HaveLen(4))
 		})
+		It("should reuse inflight nodeclaim that can support the pod", func() {
+			nodePool := test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						ObjectMeta: v1.ObjectMeta{
+							Labels: map[string]string{
+								"test": "true",
+							},
+						},
+						Spec: v1.NodeClaimTemplateSpec{
+							Taints: []corev1.Taint{
+								{
+									Effect: corev1.TaintEffectNoSchedule,
+									Key:    "pool",
+									Value:  "test",
+								},
+							},
+						},
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": "app1",
+					},
+				},
+
+				Tolerations: []corev1.Toleration{
+					{
+						Key:      "pool",
+						Operator: corev1.TolerationOpEqual,
+						Value:    "test",
+					},
+				},
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+					{
+						TopologyKey:       corev1.LabelHostname,
+						WhenUnsatisfiable: corev1.DoNotSchedule,
+						MaxSkew:           3,
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app": "app1",
+							},
+						},
+					},
+				},
+			})
+			pod.Spec.Affinity = &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "does-not-exist",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"true"},
+									},
+								},
+							},
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "test",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"true"}},
+								},
+							},
+						},
+					},
+				},
+				PodAntiAffinity: &corev1.PodAntiAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+						{
+							Weight: 50,
+							PodAffinityTerm: corev1.PodAffinityTerm{
+								TopologyKey: corev1.LabelHostname,
+								LabelSelector: &metav1.LabelSelector{
+									MatchExpressions: []metav1.LabelSelectorRequirement{
+										{
+											Key:      "app",
+											Operator: metav1.LabelSelectorOpIn,
+											Values:   []string{"app1"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+			nodeclaims, err := ExpectProvisionedNoNode(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(nodeclaims).To(HaveLen(1))
+			newNodeclaims, err := ExpectProvisionedNoNode(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(newNodeclaims).To(HaveLen(0))
+		})
 	})
 
 	Context("CapacityType", func() {
