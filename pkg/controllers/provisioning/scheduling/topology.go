@@ -356,7 +356,7 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 			tg.emptyDomains.Insert(domain)
 		}
 	}
-	
+
 	// sort our pods by the node they are scheduled to
 	sort.Slice(pods, func(i, j int) bool {
 		return pods[i].Spec.NodeName < pods[j].Spec.NodeName
