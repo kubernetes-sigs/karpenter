@@ -27,13 +27,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
+	"sigs.k8s.io/karpenter/pkg/test"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 var _ = Describe("Termination", func() {
@@ -126,7 +127,7 @@ var _ = Describe("Termination", func() {
 			env.EventuallyExpectNotFound(nodeClaim, node)
 		})
 	})
-	Context("TerminationGracePeriod", func() {
+	Describe("TerminationGracePeriod", func() {
 		BeforeEach(func() {
 			nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 60}
 		})
@@ -162,6 +163,58 @@ var _ = Describe("Termination", func() {
 			// Both nodeClaim and node should be gone once terminationGracePeriod is reached
 			env.EventuallyExpectNotFound(nodeClaim, node, pod)
 		})
+		It("should delete pod that has a pre-stop hook after termination grace period seconds", func() {
+			pod := test.UnschedulablePod(test.PodOptions{
+				PreStopSleep:                  lo.ToPtr(int64(300)),
+				TerminationGracePeriodSeconds: lo.ToPtr(int64(30)),
+				Image:                         "alpine:3.20.2",
+				Command:                       []string{"/bin/sh", "-c", "sleep 30"},
+			})
+			env.ExpectCreated(nodeClass, nodePool, pod)
+
+			nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+			node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+			env.EventuallyExpectHealthy(pod)
+
+			// Delete the nodeclaim to start the TerminationGracePeriod
+			env.ExpectDeleted(nodeClaim)
+
+			// Eventually the node will be tainted
+			Eventually(func(g Gomega) {
+				g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).Should(Succeed())
+				_, ok := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
+					return t.MatchTaint(&karpv1.DisruptedNoScheduleTaint)
+				})
+				g.Expect(ok).To(BeTrue())
+			}).WithTimeout(3 * time.Second).WithPolling(100 * time.Millisecond).Should(Succeed())
+
+			env.EventuallyExpectTerminating(pod)
+
+			// Check that pod remains healthy until termination grace period
+			// subtracting 5s is close enough to say that we waited for the entire terminationGracePeriod
+			// and to stop us flaking from tricky timing bugs
+			env.ConsistentlyExpectHealthyPods(time.Duration(lo.FromPtr(pod.Spec.TerminationGracePeriodSeconds)-5)*time.Second, pod)
+
+			// Both nodeClaim and node should be gone once terminationGracePeriod is reached
+			env.EventuallyExpectNotFound(nodeClaim, node, pod)
+		})
+	})
+	It("should terminate the node and the instance on deletion", func() {
+		pod := test.Pod()
+		env.ExpectCreated(nodeClass, nodePool, pod)
+		env.EventuallyExpectHealthy(pod)
+		env.ExpectCreatedNodeCount("==", 1)
+
+		nodes := env.Monitor.CreatedNodes()
+
+		// Pod is deleted so that we don't re-provision after node deletion
+		// NOTE: We have to do this right now to deal with a race condition in nodepool ownership
+		// This can be removed once this race is resolved with the NodePool
+		env.ExpectDeleted(pod)
+
+		// Node is deleted and now should be not found
+		env.ExpectDeleted(nodes[0])
+		env.EventuallyExpectNotFound(nodes[0])
 	})
 	// Pods from Karpenter nodes are expected to drain in the following order:
 	//   1. Non-Critical Non-Daemonset pods
