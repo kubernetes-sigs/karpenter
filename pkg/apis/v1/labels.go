@@ -41,7 +41,7 @@ const (
 	NodePoolLabelKey            = apis.Group + "/nodepool"
 	NodeInitializedLabelKey     = apis.Group + "/initialized"
 	NodeRegisteredLabelKey      = apis.Group + "/registered"
-	NodeDoNotSyncTaintsLabelKey = apis.Group + "/nodeclaim-do-not-sync-taints"
+	NodeDoNotSyncTaintsLabelKey = apis.Group + "/do-not-sync-taints"
 	CapacityTypeLabelKey        = apis.Group + "/capacity-type"
 )
 
