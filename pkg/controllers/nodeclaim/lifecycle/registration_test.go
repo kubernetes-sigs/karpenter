@@ -477,7 +477,19 @@ var _ = Describe("Registration", func() {
 				Labels: map[string]string{v1.NodeDoNotSyncTaintsLabelKey: "do-not-sync"},
 			},
 			ProviderID: nodeClaim.Status.ProviderID,
-			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
+			Taints: []corev1.Taint{
+				v1.UnregisteredNoExecuteTaint,
+				{
+					Key:    "custom-startup-taint",
+					Effect: corev1.TaintEffectNoSchedule,
+					Value:  "custom-startup-value",
+				},
+				{
+					Key:    "other-custom-startup-taint",
+					Effect: corev1.TaintEffectNoExecute,
+					Value:  "other-custom-startup-value",
+				},
+			},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
