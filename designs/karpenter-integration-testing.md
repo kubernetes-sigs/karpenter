@@ -2,41 +2,46 @@
 
 ## Summary
 
-Historically, the AWS Karpenter Provider served as the primary testing ground for Karpenter's core functionality, with comprehensive integration tests covering provisioning, scheduling, disruption handling, networking configurations, and AWS-specific feature implementations. The kubernetes-sigs/karpenter (Core) repository has contained testing that is more limited, and primarily utilizing the KWOK (Kubernetes Without Kubelet) Provider with KWOKNodeClass for node simulation to validate basic provisioning and deprovisioning functionality. To best support specific Karpenter provider implementations and to reduce the toil of test duplication, this document identifies core common tests that should be migrated from the AWS Karpenter provider implementation into the Core Karpenter repository. 
+Historically, the [`aws/karpenter-provider-aws`](https://github.com/aws/karpenter-provider-aws) repository has served as the primary testing ground for Karpenter's core functionality, with comprehensive integration tests covering provisioning, scheduling, disruption handling, networking configurations, and AWS-specific feature implementations. The [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter) repository has contained limited integration testing, primarily utilizing the KWOK (Kubernetes Without Kubelet) Provider with `KWOKNodeClass` for node simulation to validate basic provisioning and deprovisioning functionality. To best support specific Karpenter provider implementations and to reduce the toil of test duplication, this document identifies core common tests that should be migrated from [`aws/karpenter-provider-aws`](https://github.com/aws/karpenter-provider-aws) provider implementation into [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter). 
 
-The test migration will help provider implementers by reducing the pain points of having to be aware of all functionality changes in the Karpenter core, having to continually update individual tests within their repositories, and by specifying a common set of features and capabilities that are expected from all Karpenter provider implementations. This document serves as a living specification for Karpenter's integration testing strategy and orchestration mechanisms. As the project evolves, both the design requirements and this documentation will be updated to reflect current best practices and project needs.
+The test migration will help provider implementers by reducing the pain points of having to be aware of all functionality changes in [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter), having to continually update individual tests within their repositories, and by specifying a common set of features and capabilities that are expected from all Karpenter provider implementations.  As the project evolves, both the design requirements and this documentation will be updated to reflect current best practices and project needs.
 
-The testing framework for the AWS Karpenter Provider has several types of tests:
+The testing framework for [`aws/karpenter-provider-aws`](https://github.com/aws/karpenter-provider-aws) has several types of tests:
 
 * Unit Tests
     * Run in a mock Kubernetes environment
     * Part of the regular developer workflow
+    * Runs as a pre-merge CI check on GitHub
 
 * Integration Tests
     * Create EKS clusters and interact with a live API server and AWS APIs 
-    * Run on every commit
+    * Runs against every commit merged to `main` and release branches
+
 * Scale Tests
     * Will validate Karpenter's performance at large scales
     * Focus on horizontal scaling workloads and resource provisioned by Karpenter
+    * Runs once a day to measures benchmarks for Karpenter provisioning and deprovisioning nodes
+
 * Soak Tests 
     * Designed to identify resource usage regressions
     * Will target memory leaks and long-running stability issues
+    * Runs head commit of the  [`aws/karpenter-provider-aws`](https://github.com/aws/karpenter-provider-aws) for 7 days on an hour interval.
 
-The kubernetes-sigs/karpenter repository mainly utilizes unit tests to validate functionality. 
+The [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter) repository mainly utilizes unit tests to validate functionality. 
 
 ## Problem 
 
-The testing architecture in the Karpenter ecosystem faces two critical challenges in its testing framework: having a set of tests for all core functionality and having a standard set of tests for all providers. The `kubernetes-sigs/karpenter` repository lacks comprehensive integration tests to validate core functionality across code changes, making it difficult to ensure that fundamental Karpenter behaviors remain intact as the codebase evolves.
+The testing architecture in the Karpenter ecosystem faces two critical challenges in its testing framework: having a set of tests for all core functionality and having a standard set of tests for all providers. The [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter) repository lacks comprehensive integration tests to validate core functionality across code changes, making it difficult to ensure that fundamental Karpenter behaviors remain intact as the codebase evolves.
 
-Additionally, cloud provider implementations of Karpenter lack a standardized conformance testing framework, meaning there's no systematic way to verify that provider-specific implementations maintain compatibility with `kubernetes-sigs/karpenter's` core requirements and expectations. It's worth noting that historically the `kubernetes-sigs/karpenter` repository relyed on tests running within the AWS Karpenter. 
+Additionally, cloud provider implementations of Karpenter lack a standardized conformance testing framework, meaning there's no systematic way to verify that provider-specific implementations maintain compatibility with [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter)'s core requirements and expectations. It's worth noting that historically the [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter) repository relied on tests running within [`aws/karpenter-provider-aws`](https://github.com/aws/karpenter-provider-aws). 
 
-This document defines the appropriate placement of different test types across repositories, establishes clear testing responsibilities for both `kubernetes-sigs/karpenter` and cloud provider implementations, and provides a conformance testing framework that cloud providers can use to validate their implementations against kubernetes-sigs/karpenter's requirements.
+This document defines the appropriate placement of different test types across repositories, establishes clear testing responsibilities for both [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter) and cloud provider implementations, and provides a conformance testing framework that cloud providers can use to validate their implementations against [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter)'s requirements.
 
 ## Solution
 
-The `kubernetes-sigs/karpenter` repository will serve as the primary location for a common test suite. The repository will contain tests for the majority of core functionality validation, including CEL validation for NodePool and NodeClaim. This repository will also provide base integration tests that cloud providers can consume and adapt by injecting their own NodeClass implementations to verify compatibility with core functionality. Any additional validation rules introduced by cloud providers must be tested within their respective provider repositories. The responsibility boundary will be drawn as such: 
+The [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter) repository will serve as the primary location for a common test suite. The repository will contain tests for the majority of core functionality validation, including CEL validation for NodePool and NodeClaim. This repository will also provide base integration tests that cloud providers can consume and adapt by injecting their own NodeClass implementations to verify compatibility with core functionality. Any additional validation rules introduced by cloud providers must be tested within their respective provider repositories. The responsibility boundary will be drawn as such: 
 
-#### Kubernetes-sigs/karpenter
+#### kubernetes-sigs/karpenter
 
 * Environment: Kind clusters with KWOK Karpenter Controller for simulated node provisioning
 * Test Coverage:
@@ -54,7 +59,7 @@ The `kubernetes-sigs/karpenter` repository will serve as the primary location fo
     * Storage
     * Scale
 
-#### Karpenter Cloud Provider
+#### karpenter Cloud Provider
 
 *  Environment: Non-Kind Cluster with in-cluster Cloud Provider Karpenter Controller
 * Test Coverage:
@@ -66,7 +71,7 @@ The `kubernetes-sigs/karpenter` repository will serve as the primary location fo
         * Forceful Disruption Operations
 
 
-As part of the initial functional integration testing, the cloud-agnostic tests from the AWS Karpenter Provider repository will be migrated to core Karpenter repository. These tests will be contained in the `kubernetes-sigs/karpenter` repository and made available for use by any cloud provider. The migration will focus on provider-neutral test cases including core provisioning behaviors, scaling operations, configuration validation, and general controller functionality. This consolidation will establish a standardized testing framework while reducing duplicate code across different provider implementations. By centralizing these common test scenarios, we can ensure consistent validation of critical functionality across all cloud providers while maintaining clear documentation and portable test utilities such as:
+As part of the initial functional integration testing, the cloud-agnostic tests from [`aws/karpenter-provider-aws`](https://github.com/aws/karpenter-provider-aws) will be migrated to [`kubernetes-sigs/karpenter`](https://github.com/kubernetes-sigs/karpenter), where they will be made available for use by any cloud provider. The migration will focus on provider-neutral test cases including core provisioning behaviors, scaling operations, configuration validation, and general controller functionality. This consolidation will establish a standardized testing framework while reducing duplicate code across different provider implementations. By centralizing these common test scenarios, we can ensure consistent validation of critical functionality across all cloud providers while maintaining clear documentation and portable test utilities such as:
 
 ##### Chaos 
 
