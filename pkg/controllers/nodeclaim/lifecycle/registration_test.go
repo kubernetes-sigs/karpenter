@@ -204,52 +204,7 @@ var _ = Describe("Registration", func() {
 			Expect(node.Annotations).To(HaveKeyWithValue(k, v))
 		}
 	})
-	It("should not sync the taints to the Node when the Node comes online, with node label do not sync taints", func() {
-		nodeClaim := test.NodeClaim(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-			Spec: v1.NodeClaimSpec{
-				Taints: []corev1.Taint{
-					{
-						Key:    "custom-taint",
-						Effect: corev1.TaintEffectNoSchedule,
-						Value:  "custom-value",
-					},
-					{
-						Key:    "other-custom-taint",
-						Effect: corev1.TaintEffectNoExecute,
-						Value:  "other-custom-value",
-					},
-				},
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(nodeClaim.Spec.Taints).To(ContainElements(
-			corev1.Taint{
-				Key:    "custom-taint",
-				Effect: corev1.TaintEffectNoSchedule,
-				Value:  "custom-value",
-			},
-			corev1.Taint{
-				Key:    "other-custom-taint",
-				Effect: corev1.TaintEffectNoExecute,
-				Value:  "other-custom-value",
-			},
-		))
-
-		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
-		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		node = ExpectExists(ctx, env.Client, node)
-
-		Expect(node.Spec.Taints).To(ContainElements())
-	})
-	It("should sync the taints to the Node when the Node comes online, if node label do not sync taints is missing", func() {
+	It("should sync the taints to the Node when the Node comes online, if node label do not sync taints is not present", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -304,6 +259,57 @@ var _ = Describe("Registration", func() {
 				Value:  "other-custom-value",
 			},
 		))
+	})
+	It("should not sync the taints to the Node when the Node comes online, with node label do not sync taints", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+			Spec: v1.NodeClaimSpec{
+				Taints: []corev1.Taint{
+					{
+						Key:    "custom-taint",
+						Effect: corev1.TaintEffectNoSchedule,
+						Value:  "custom-value",
+					},
+					{
+						Key:    "other-custom-taint",
+						Effect: corev1.TaintEffectNoExecute,
+						Value:  "other-custom-value",
+					},
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.Spec.Taints).To(ContainElements(
+			corev1.Taint{
+				Key:    "custom-taint",
+				Effect: corev1.TaintEffectNoSchedule,
+				Value:  "custom-value",
+			},
+			corev1.Taint{
+				Key:    "other-custom-taint",
+				Effect: corev1.TaintEffectNoExecute,
+				Value:  "other-custom-value",
+			},
+		))
+
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1.NodeDoNotSyncTaintsLabelKey: "do-not-sync"},
+			},
+			ProviderID: nodeClaim.Status.ProviderID,
+			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		node = ExpectExists(ctx, env.Client, node)
+
+		Expect(node.Spec.Taints).To(ContainElements())
 	})
 	It("should not sync the startupTaints to the Node when the Node comes online, with node label do not sync taints", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -368,7 +374,7 @@ var _ = Describe("Registration", func() {
 
 		Expect(node.Spec.Taints).To(ContainElements())
 	})
-	It("should sync the startupTaints to the Node when the Node comes online, if node label do not sync taints is missing", func() {
+	It("should sync the startupTaints to the Node when the Node comes online, if node label do not sync taints is not present", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
