@@ -366,18 +366,6 @@ var _ = Describe("Initialization", func() {
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
 	})
 	It("should not consider the Node to be initialized when all startupTaints aren't removed", func() {
-		startupTaints := []corev1.Taint{
-			{
-				Key:    "custom-startup-taint",
-				Effect: corev1.TaintEffectNoSchedule,
-				Value:  "custom-startup-value",
-			},
-			{
-				Key:    "other-custom-startup-taint",
-				Effect: corev1.TaintEffectNoExecute,
-				Value:  "other-custom-startup-value",
-			},
-		}
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -392,7 +380,18 @@ var _ = Describe("Initialization", func() {
 						corev1.ResourcePods:   resource.MustParse("5"),
 					},
 				},
-				StartupTaints: startupTaints,
+				StartupTaints: []corev1.Taint{
+					{
+						Key:    "custom-startup-taint",
+						Effect: corev1.TaintEffectNoSchedule,
+						Value:  "custom-startup-value",
+					},
+					{
+						Key:    "other-custom-startup-taint",
+						Effect: corev1.TaintEffectNoExecute,
+						Value:  "other-custom-startup-value",
+					},
+				},
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -411,13 +410,13 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourceMemory: resource.MustParse("80Mi"),
 				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Taints: append(startupTaints, v1.UnregisteredNoExecuteTaint),
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		// Startup taints should be the only taints remaining
+		// Should add the startup taints to the node
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).To(ContainElements(
@@ -440,18 +439,6 @@ var _ = Describe("Initialization", func() {
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
 	})
 	It("should consider the Node to be initialized once the startupTaints are removed", func() {
-		startupTaints := []corev1.Taint{
-			{
-				Key:    "custom-startup-taint",
-				Effect: corev1.TaintEffectNoSchedule,
-				Value:  "custom-startup-value",
-			},
-			{
-				Key:    "other-custom-startup-taint",
-				Effect: corev1.TaintEffectNoExecute,
-				Value:  "other-custom-startup-value",
-			},
-		}
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -466,7 +453,18 @@ var _ = Describe("Initialization", func() {
 						corev1.ResourcePods:   resource.MustParse("5"),
 					},
 				},
-				StartupTaints: startupTaints,
+				StartupTaints: []corev1.Taint{
+					{
+						Key:    "custom-startup-taint",
+						Effect: corev1.TaintEffectNoSchedule,
+						Value:  "custom-startup-value",
+					},
+					{
+						Key:    "other-custom-startup-taint",
+						Effect: corev1.TaintEffectNoExecute,
+						Value:  "other-custom-startup-value",
+					},
+				},
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -485,7 +483,7 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourceMemory: resource.MustParse("80Mi"),
 				corev1.ResourcePods:   resource.MustParse("110"),
 			},
-			Taints: append(startupTaints, v1.UnregisteredNoExecuteTaint),
+			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
