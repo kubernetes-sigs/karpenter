@@ -5,8 +5,8 @@ go 1.24.2
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
-	github.com/awslabs/operatorpkg v0.0.0-20250320000002-b05af0f15c68
-	github.com/docker/docker v28.0.4+incompatible
+	github.com/awslabs/operatorpkg v0.0.0-20250425180727-b22281cd8057
+	github.com/docker/docker v28.1.1+incompatible
 	github.com/go-logr/logr v1.4.2
 	github.com/imdario/mergo v0.3.16
 	github.com/mitchellh/hashstructure/v2 v2.0.2
@@ -15,7 +15,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.2
-	github.com/samber/lo v1.49.1
+	github.com/samber/lo v1.50.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/text v0.24.0
@@ -65,7 +65,7 @@ require (
 	github.com/spf13/cobra v1.8.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	golang.org/x/net v0.37.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/oauth2 v0.24.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/term v0.30.0 // indirect
