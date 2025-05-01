@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -60,7 +62,11 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
+	env = test.NewEnvironment(
+		test.WithCRDs(apis.CRDs...),
+		test.WithCRDs(v1alpha1.CRDs...),
+		test.WithFieldIndexers(test.NodeClaimProviderIDFieldIndexer(ctx)),
+	)
 	ctx = options.ToContext(ctx, test.Options())
 	recorder = test.NewEventRecorder()
 	queue = terminator.NewTestingQueue(env.Client, recorder)
@@ -96,6 +102,7 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		node = test.Node(test.NodeOptions{ProviderID: "123456789"})
 		terminator.NodesEvictionRequestsTotal.Reset()
+		terminator.PodsDrainedTotal.Reset()
 	})
 
 	Context("Eviction API", func() {
@@ -163,6 +170,36 @@ var _ = Describe("Eviction/Queue", func() {
 			for i := 0; i < 10000; i++ {
 				queue.Add(node, test.Pod())
 			}
+		})
+		It("should increment PodsDrainedTotal metric when a pod is evicted", func() {
+			ExpectApplied(ctx, env.Client, pod)
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
+			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
+			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
+			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
+		})
+		It("should increment PodsDrainedTotal metric with specific reason when a pod is evicted", func() {
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-nodeclaim",
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: node.Spec.ProviderID,
+				},
+			})
+			nodeClaim.StatusConditions().Set(status.Condition{
+				Type:    v1.ConditionTypeDisruptionReason,
+				Status:  metav1.ConditionTrue,
+				Reason:  "SpotInterruption",
+				Message: "Node is being interrupted",
+			})
+
+			ExpectApplied(ctx, env.Client, nodeClaim, pod)
+			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
+
+			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: "SpotInterruption"})
+			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
+			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 	})
 

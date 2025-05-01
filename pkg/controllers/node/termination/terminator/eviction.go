@@ -210,7 +210,9 @@ func (q *Queue) Evict(ctx context.Context, key QueueKey) bool {
 		return false
 	}
 	NodesEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
-	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}, evictionReason(ctx, key, q.kubeClient)))
+	reason := evictionReason(ctx, key, q.kubeClient)
+	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}, reason))
+	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: reason})
 	return true
 }
 
