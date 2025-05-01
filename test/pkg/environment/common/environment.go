@@ -45,6 +45,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
+	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 )
@@ -172,7 +173,7 @@ func (env *Environment) DefaultNodePool(nodeClass client.Object) *v1.NodePool {
 		Group: env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Group,
 		Name:  env.DefaultNodeClass.GetName(),
 	}
-
+	nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{test.DiscoveryLabel: "unspecified"})
 	return nodePool
 }
 
