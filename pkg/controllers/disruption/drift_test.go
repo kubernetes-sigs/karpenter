@@ -122,7 +122,7 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 		})
-		It("should allow all empty nodes to be disrupted", func() {
+		It("should not disrupt empty nodes during drift", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -151,56 +151,18 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_voluntary_disruption_decisions_total", map[string]string{
 				"nodepool": nodePool.Name,
+				"reason":   string(v1.DisruptionReasonDrifted),
 			})
-			Expect(found).To(BeTrue())
-			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 10))
+			Expect(found).To(BeFalse())
+			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
 
 			// Execute command, thus deleting all nodes
 			ExpectSingletonReconciled(ctx, queue)
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
 		})
-		It("should allow no empty nodes to be disrupted", func() {
-			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					Allocatable: map[corev1.ResourceName]resource.Quantity{
-						corev1.ResourceCPU:  resource.MustParse("32"),
-						corev1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-
-			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
-
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
-
-			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
-			})
-			Expect(found).To(BeTrue())
-			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
-
-			// Execute command, thus deleting no nodes
-			ExpectSingletonReconciled(ctx, queue)
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
-		})
-		It("should only allow 3 empty nodes to be disrupted", func() {
+		It("should only allow 3 nodes to be disrupted", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -234,9 +196,9 @@ var _ = Describe("Drift", func() {
 			Expect(found).To(BeTrue())
 			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
 
-			// Execute command, thus deleting 3 nodes
+			// emptiness is not performed in drift, so expect all nodeclaims to exist
 			ExpectSingletonReconciled(ctx, queue)
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
 		})
 		It("should disrupt 3 nodes, taking into account commands in progress", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
@@ -373,9 +335,9 @@ var _ = Describe("Drift", func() {
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 2))
 			}
 
-			// Execute the command in the queue, only deleting 20 nodes
+			// emptiness is not performed in drift, so expect all nodeclaims to exist
 			ExpectSingletonReconciled(ctx, queue)
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(30))
 		})
 		It("should allow all nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
@@ -434,9 +396,9 @@ var _ = Describe("Drift", func() {
 				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
 			}
 
-			// Execute the command in the queue, deleting all nodes
+			// emptiness is not performed in drift, so expect all nodeclaims to exist
 			ExpectSingletonReconciled(ctx, queue)
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(30))
 		})
 	})
 	Context("Drift", func() {
@@ -634,7 +596,7 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
-		It("should disrupt all empty drifted nodes in parallel", func() {
+		It("should disrupt all drifted nodes in parallel", func() {
 			nodeClaims, nodes := test.NodeClaimsAndNodes(100, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
