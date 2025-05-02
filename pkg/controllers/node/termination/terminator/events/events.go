@@ -66,7 +66,7 @@ func NodeAwaitingVolumeDetachmentEvent(node *corev1.Node, volumeAttachments ...*
 		Type:           corev1.EventTypeNormal,
 		Reason:         "AwaitingVolumeDetachment",
 		Message: fmt.Sprintf(
-			"Awaiting deletion of bound VolumeAttachments (%s)",
+			"Awaiting deletion of bound volumeattachments (%s)",
 			pretty.Slice(lo.Map(volumeAttachments, func(va *storagev1.VolumeAttachment, _ int) string {
 				return va.Name
 			}), 5),
@@ -92,5 +92,28 @@ func NodeClaimTerminationGracePeriodExpiring(nodeClaim *v1.NodeClaim, terminatio
 		Reason:         events.TerminationGracePeriodExpiring,
 		Message:        fmt.Sprintf("All pods will be deleted by %s", terminationTime),
 		DedupeValues:   []string{nodeClaim.Name},
+	}
+}
+
+func DuplicateNodeClaimsFound(node *corev1.Node, nodeClaims ...*v1.NodeClaim) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.TerminationFailed,
+		Message: fmt.Sprintf(
+			"Failed to terminate node, bound to duplicate nodeclaims (%s)",
+			pretty.Slice(lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) string { return nc.Name }), 5),
+		),
+		DedupeValues: []string{node.Name},
+	}
+}
+
+func NodeClaimNotFound(node *corev1.Node, nodeClaims ...*v1.NodeClaim) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.TerminationFailed,
+		Message:        "Failed to terminate node, nodeclaims not found",
+		DedupeValues:   []string{node.Name},
 	}
 }
