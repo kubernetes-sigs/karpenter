@@ -39,10 +39,11 @@ const (
 
 // Karpenter specific domains and labels
 const (
-	NodePoolLabelKey        = apis.Group + "/nodepool"
-	NodeInitializedLabelKey = apis.Group + "/initialized"
-	NodeRegisteredLabelKey  = apis.Group + "/registered"
-	CapacityTypeLabelKey    = apis.Group + "/capacity-type"
+	NodePoolLabelKey            = apis.Group + "/nodepool"
+	NodeInitializedLabelKey     = apis.Group + "/initialized"
+	NodeRegisteredLabelKey      = apis.Group + "/registered"
+	NodeDoNotSyncTaintsLabelKey = apis.Group + "/do-not-sync-taints"
+	CapacityTypeLabelKey        = apis.Group + "/capacity-type"
 )
 
 // Karpenter specific annotations
