@@ -177,6 +177,10 @@ func (env *Environment) DefaultNodePool(nodeClass client.Object) *v1.NodePool {
 	return nodePool
 }
 
+func (env *Environment) IsDefaultNodeClassKWOK() bool {
+	return env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Kind == "KWOKNodeClass"
+}
+
 func decodeNodeClass() *unstructured.Unstructured {
 	// Open the file
 	if lo.FromPtr(nodeClassPath) == "" {
