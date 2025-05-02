@@ -78,8 +78,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 
 func (c *Controller) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "node.termination")
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef(n.Namespace, n.Name)))
-
 	if !n.GetDeletionTimestamp().IsZero() {
 		return c.finalize(ctx, n)
 	}
@@ -95,22 +93,18 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, nil
 	}
 
-	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
-	if err != nil {
-		// This should not occur. The NodeClaim is required to track details about the termination stage and termination grace
-		// period and will not be finalized until after the Node has been terminated by Karpenter. If there are duplicates or
-		// the nodeclaim does not exist, this indicates a customer induced error (e.g. removing finalizers or manually
-		// creating nodeclaims with matching provider IDs).
-		if nodeutils.IsDuplicateNodeClaimError(err) || nodeutils.IsNodeClaimNotFoundError(err) {
-			return reconcile.Result{}, c.associatedNodeClaimError(err)
-		}
+	nodeClaim, err := c.NodeClaimForNode(ctx, node)
+	if nodeClaim == nil || err != nil {
 		return reconcile.Result{}, err
 	}
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KRef(nodeClaim.Namespace, nodeClaim.Name)))
+
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 	if nodeClaim.DeletionTimestamp.IsZero() {
 		if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 			if errors.IsNotFound(err) {
-				return reconcile.Result{}, c.associatedNodeClaimError(err)
+				log.FromContext(ctx).WithValues("node", klog.KObj(node)).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
+				c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
+				return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 			}
 			return reconcile.Result{}, fmt.Errorf("deleting nodeclaim, %w", err)
 		}
@@ -150,7 +144,35 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 			return *result, err
 		}
 	}
+	if err := c.removeFinalizer(ctx, node); err != nil {
+		return reconcile.Result{}, err
+	}
 	return reconcile.Result{}, nil
+}
+
+func (c *Controller) NodeClaimForNode(ctx context.Context, node *corev1.Node) (*v1.NodeClaim, error) {
+	nodeClaims, err := nodeutils.GetNodeClaims(ctx, c.kubeClient, node)
+	if err != nil {
+		return nil, err
+	}
+	// This should not occur. The NodeClaim is required to track details about the termination stage and termination grace
+	// period and will not be finalized until after the Node has been terminated by Karpenter. If there are duplicates or
+	// the nodeclaim does not exist, this indicates a customer induced error (e.g. removing finalizers or manually
+	// creating nodeclaims with matching provider IDs).
+	if len(nodeClaims) == 0 {
+		log.FromContext(ctx).WithValues("node", klog.KObj(node)).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
+		c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
+		return nil, nil
+	}
+	if len(nodeClaims) > 1 {
+		log.FromContext(ctx).WithValues(
+			"node", klog.KObj(node),
+			"nodeclaims", lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) klog.ObjectRef { return klog.KObj(nc) }),
+		).Error(fmt.Errorf("duplicate nodeclaims found"), "failed to terminate node")
+		c.recorder.Publish(terminatorevents.DuplicateNodeClaimsFound(node, nodeClaims...))
+		return nil, nil
+	}
+	return nodeClaims[0], nil
 }
 
 type terminationFunc func(context.Context, *v1.NodeClaim, *corev1.Node, *time.Time) (*reconcile.Result, error)
@@ -176,7 +198,9 @@ func (c *Controller) awaitDrain(
 					return &reconcile.Result{Requeue: true}, nil
 				}
 				if errors.IsNotFound(err) {
-					return &reconcile.Result{}, c.associatedNodeClaimError(err)
+					log.FromContext(ctx).WithValues("node", klog.KObj(node)).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
+					c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
+					return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 				}
 				return &reconcile.Result{}, err
 			}
@@ -192,7 +216,9 @@ func (c *Controller) awaitDrain(
 				return &reconcile.Result{Requeue: true}, nil
 			}
 			if errors.IsNotFound(err) {
-				return &reconcile.Result{}, c.associatedNodeClaimError(err)
+				log.FromContext(ctx).WithValues("node", klog.KObj(node)).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
+				c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
+				return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 			}
 			return &reconcile.Result{}, err
 		}
@@ -234,7 +260,9 @@ func (c *Controller) awaitVolumeDetachment(
 					return &reconcile.Result{Requeue: true}, nil
 				}
 				if errors.IsNotFound(err) {
-					return &reconcile.Result{}, c.associatedNodeClaimError(err)
+					log.FromContext(ctx).WithValues("node", klog.KObj(node)).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
+					c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
+					return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 				}
 				return &reconcile.Result{}, err
 			}
@@ -242,7 +270,10 @@ func (c *Controller) awaitVolumeDetachment(
 			// operations on the NodeClaim.
 			return &reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
-	} else if !c.hasTerminationGracePeriodElapsed(nodeTerminationTime) {
+		return nil, nil
+	}
+
+	if !c.hasTerminationGracePeriodElapsed(nodeTerminationTime) {
 		// There are volume attachments blocking instance termination remaining. We should set the status condition to
 		// unknown (if not already) and requeue. This case should never fall through, to continue to instance termination
 		// one of two conditions must be met: all blocking volume attachment objects must be deleted or the nodeclaim's TGP
@@ -255,31 +286,35 @@ func (c *Controller) awaitVolumeDetachment(
 					return &reconcile.Result{Requeue: true}, nil
 				}
 				if errors.IsNotFound(err) {
-					return &reconcile.Result{}, c.associatedNodeClaimError(err)
+					log.FromContext(ctx).WithValues("node", klog.KObj(node)).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
+					c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
+					return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 				}
 				return &reconcile.Result{}, err
 			}
 		}
 		return &reconcile.Result{RequeueAfter: 1 * time.Second}, nil
-	} else {
-		// There are volume attachments blocking instance termination remaining, but the nodeclaim's TGP has expired. In this
-		// case we should set the status condition to false (requeing if it wasn't already) and then fall through to instance
-		// termination.
-		stored := nodeClaim.DeepCopy()
-		if modified := nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeVolumesDetached, "TerminationGracePeriodElapsed", "TerminationGracePeriodElapsed"); modified {
-			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				if errors.IsConflict(err) {
-					return &reconcile.Result{Requeue: true}, nil
-				}
-				if errors.IsNotFound(err) {
-					return &reconcile.Result{}, c.associatedNodeClaimError(err)
-				}
-				return &reconcile.Result{}, err
+	}
+
+	// There are volume attachments blocking instance termination remaining, but the nodeclaim's TGP has expired. In this
+	// case we should set the status condition to false (requeing if it wasn't already) and then fall through to instance
+	// termination.
+	stored := nodeClaim.DeepCopy()
+	if modified := nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeVolumesDetached, "TerminationGracePeriodElapsed", "TerminationGracePeriodElapsed"); modified {
+		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return &reconcile.Result{Requeue: true}, nil
 			}
-			// We requeue after a patch operation since we want to ensure we read our own writes before any subsequent
-			// operations on the NodeClaim.
-			return &reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+			if errors.IsNotFound(err) {
+				log.FromContext(ctx).WithValues("node", klog.KObj(node)).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
+				c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
+				return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+			}
+			return &reconcile.Result{}, err
 		}
+		// We requeue after a patch operation since we want to ensure we read our own writes before any subsequent
+		// operations on the NodeClaim.
+		return &reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	return nil, nil
 }
@@ -304,21 +339,14 @@ func (c *Controller) awaitInstanceTermination(
 	if !isInstanceTerminated {
 		return &reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 	}
-	if err := c.removeFinalizer(ctx, node); err != nil {
-		return &reconcile.Result{}, err
-	}
 	return nil, nil
-}
-
-func (*Controller) associatedNodeClaimError(err error) error {
-	return reconcile.TerminalError(fmt.Errorf("failed to terminate node, expected a single associated nodeclaim, %w", err))
 }
 
 func (c *Controller) hasTerminationGracePeriodElapsed(nodeTerminationTime *time.Time) bool {
 	if nodeTerminationTime == nil {
 		return false
 	}
-	return !c.clock.Now().Before(*nodeTerminationTime)
+	return c.clock.Now().After(*nodeTerminationTime)
 }
 
 func (c *Controller) pendingVolumeAttachments(ctx context.Context, node *corev1.Node) ([]*storagev1.VolumeAttachment, error) {
