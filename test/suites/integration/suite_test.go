@@ -62,13 +62,15 @@ var _ = BeforeEach(func() {
 	env.BeforeEach()
 	nodeClass = env.DefaultNodeClass.DeepCopy()
 	nodePool = env.DefaultNodePool(nodeClass)
-	test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-		NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-			Key:      v1alpha1.InstanceSizeLabelKey,
-			Operator: corev1.NodeSelectorOpLt,
-			Values:   []string{"32"},
-		},
-	})
+	if env.IsDefaultNodeClassKWOK() {
+		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+				Key:      v1alpha1.InstanceSizeLabelKey,
+				Operator: corev1.NodeSelectorOpLt,
+				Values:   []string{"32"},
+			},
+		})
+	}
 	// no limits!!! to the moon!!!
 	nodePool.Spec.Limits = v1.Limits{}
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
