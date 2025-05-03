@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	coretest "sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 
@@ -51,7 +51,7 @@ var _ = Describe("Chaos", func() {
 			ctx, cancel := context.WithCancel(env.Context)
 			defer cancel()
 
-			nodePool = coretest.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+			nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
 				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 					Key:      v1.CapacityTypeLabelKey,
 					Operator: corev1.NodeSelectorOpIn,
@@ -62,9 +62,9 @@ var _ = Describe("Chaos", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
 
 			numPods := 1
-			dep := coretest.Deployment(coretest.DeploymentOptions{
+			dep := test.Deployment(test.DeploymentOptions{
 				Replicas: int32(numPods),
-				PodOptions: coretest.PodOptions{
+				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{"app": "my-app"},
 					},
@@ -81,7 +81,7 @@ var _ = Describe("Chaos", func() {
 			// Expect that we never get over a high number of nodes
 			Consistently(func(g Gomega) {
 				list := &corev1.NodeList{}
-				g.Expect(env.Client.List(env.Context, list, client.HasLabels{coretest.DiscoveryLabel})).To(Succeed())
+				g.Expect(env.Client.List(env.Context, list, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
 				g.Expect(len(list.Items)).To(BeNumerically("<", 35))
 			}, time.Minute*5).Should(Succeed())
 		})
@@ -92,9 +92,9 @@ var _ = Describe("Chaos", func() {
 			nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 			numPods := 1
-			dep := coretest.Deployment(coretest.DeploymentOptions{
+			dep := test.Deployment(test.DeploymentOptions{
 				Replicas: int32(numPods),
-				PodOptions: coretest.PodOptions{
+				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{"app": "my-app"},
 					},
@@ -111,7 +111,7 @@ var _ = Describe("Chaos", func() {
 			// Expect that we never get over a high number of nodes
 			Consistently(func(g Gomega) {
 				list := &corev1.NodeList{}
-				g.Expect(env.Client.List(env.Context, list, client.HasLabels{coretest.DiscoveryLabel})).To(Succeed())
+				g.Expect(env.Client.List(env.Context, list, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
 				g.Expect(len(list.Items)).To(BeNumerically("<", 35))
 			}, time.Minute*5).Should(Succeed())
 		})
@@ -148,7 +148,7 @@ func (t *taintAdder) Builder(mgr manager.Manager) *controllerruntime.Builder {
 		WithOptions(controller.Options{SkipNameValidation: lo.ToPtr(true)}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 			node := obj.(*corev1.Node)
-			if _, ok := node.Labels[coretest.DiscoveryLabel]; !ok {
+			if _, ok := node.Labels[test.DiscoveryLabel]; !ok {
 				return false
 			}
 			return true
@@ -189,7 +189,7 @@ func startNodeCountMonitor(ctx context.Context, kubeClient client.Client) {
 	go func() {
 		for {
 			list := &corev1.NodeList{}
-			if err := kubeClient.List(ctx, list, client.HasLabels{coretest.DiscoveryLabel}); err == nil {
+			if err := kubeClient.List(ctx, list, client.HasLabels{test.DiscoveryLabel}); err == nil {
 				readyCount := lo.CountBy(list.Items, func(n corev1.Node) bool {
 					return nodeutils.GetCondition(&n, corev1.NodeReady).Status == corev1.ConditionTrue
 				})
