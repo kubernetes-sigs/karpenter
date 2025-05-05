@@ -441,17 +441,25 @@ var _ = Describe("Emptiness", func() {
 		})
 		It("should delete nodes with the karpenter.sh/do-not-disrupt annotation set to false", func() {
 			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "false"})
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectToWait(fakeClock, &wg)
 			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
 
-			// Expect to not create or delete more nodeclaims
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, nodeClaim)
+			ExpectSingletonReconciled(ctx, queue)
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("should ignore nodes that have pods", func() {
 			pod := test.Pod()
