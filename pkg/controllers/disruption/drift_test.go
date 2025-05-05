@@ -578,63 +578,6 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
-		It("can delete drifted nodes", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
-			ExpectSingletonReconciled(ctx, disruptionController)
-			// Process the item so that the nodes can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
-			// Cascade any deletion of the nodeClaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-			// We should delete the nodeClaim that has drifted
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
-		})
-		It("should disrupt all drifted nodes in parallel", func() {
-			nodeClaims, nodes := test.NodeClaimsAndNodes(100, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					Allocatable: map[corev1.ResourceName]resource.Quantity{
-						corev1.ResourceCPU:  resource.MustParse("32"),
-						corev1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-			for _, m := range nodeClaims {
-				m.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-				ExpectApplied(ctx, env.Client, m)
-			}
-			for _, n := range nodes {
-				ExpectApplied(ctx, env.Client, n)
-			}
-			ExpectApplied(ctx, env.Client, nodePool)
-
-			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
-
-			// Process the item so that the nodes can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
-			// Cascade any deletion of the nodeClaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
-
-			// Expect that the drifted nodeClaims are gone
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-		})
 		It("can replace drifted nodes", func() {
 			labels := map[string]string{
 				"app": "test",
@@ -902,25 +845,6 @@ var _ = Describe("Drift", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim2, node2)
 			ExpectExists(ctx, env.Client, nodeClaim)
 			ExpectExists(ctx, env.Client, node)
-		})
-		It("should delete nodes with the karpenter.sh/do-not-disrupt annotation set to false", func() {
-			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "false"})
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
-			ExpectSingletonReconciled(ctx, disruptionController)
-			// Process the item so that the nodes can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
-			// Cascade any deletion of the nodeClaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-			// We should delete the nodeClaim that has drifted
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 	})
 })

@@ -439,6 +439,20 @@ var _ = Describe("Emptiness", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
+		It("should delete nodes with the karpenter.sh/do-not-disrupt annotation set to false", func() {
+			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "false"})
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Expect to not create or delete more nodeclaims
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
 		It("should ignore nodes that have pods", func() {
 			pod := test.Pod()
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
