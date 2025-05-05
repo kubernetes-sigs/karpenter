@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -52,6 +53,17 @@ func (d *NillableDuration) UnmarshalJSON(b []byte) error {
 	if err != nil {
 		return err
 	}
+
+	// check for base64 encoded string, can happen from unstructuredConverter marshaling []byte
+	base64Decoded, err := base64.StdEncoding.DecodeString(str)
+	if err == nil && base64Decoded[0] == byte('"') {
+		b = base64Decoded
+		err = json.Unmarshal(base64Decoded, &str)
+		if err != nil {
+			return err
+		}
+	} // otherwise, it is not base64 encoded
+
 	if str == Never {
 		return nil
 	}
