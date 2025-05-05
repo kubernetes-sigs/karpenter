@@ -68,7 +68,7 @@ var _ = Describe("Counter", func() {
 		nodePool = test.NodePool()
 		nodePool.StatusConditions().SetUnknown(v1.ConditionTypeValidationSucceeded)
 	})
-	It("should fail validation with invalid capacity type", func() {
+	It("should fail validation with only invalid capacity types", func() {
 		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
 			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 				Key:      v1.CapacityTypeLabelKey,
@@ -82,7 +82,7 @@ var _ = Describe("Counter", func() {
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
 	})
-	It("should pass validation with valid capacity type", func() {
+	It("should pass validation with valid capacity types", func() {
 		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
 			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 				Key:      v1.CapacityTypeLabelKey,
@@ -97,7 +97,7 @@ var _ = Describe("Counter", func() {
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
 		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
 	})
-	It("should fail closed if an invalid and valid capacity types are present", func() {
+	It("should fail open if invalid and valid capacity types are present", func() {
 		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
 			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 				Key:      v1.CapacityTypeLabelKey,
@@ -109,8 +109,8 @@ var _ = Describe("Counter", func() {
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
-		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeFalse())
-		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeFalse())
+		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
+		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
 	})
 	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
 		nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
