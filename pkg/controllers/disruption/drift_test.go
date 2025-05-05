@@ -122,8 +122,8 @@ var _ = Describe("Drift", func() {
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 		})
-		It("should not disrupt empty nodes during drift", func() {
-			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
+		It("should not consider empty nodes for drift budgets", func() {
+			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1.NodePoolLabelKey:            nodePool.Name,
@@ -140,29 +140,67 @@ var _ = Describe("Drift", func() {
 				},
 			})
 
-			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{
+				{Reasons: []v1.DisruptionReason{v1.DisruptionReasonDrifted}, Nodes: "1"},
+				{Reasons: []v1.DisruptionReason{v1.DisruptionReasonEmpty}, Nodes: "0"},
+			}
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < numNodes; i++ {
+			for i := 0; i < 2; i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			// inform cluster state about nodes and nodeclaims
+			labels := map[string]string{
+				"app": "test",
+			}
+			// Apply the replicaset
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+
+			emptyNodeClaim, driftedNodeClaim := nodeClaims[0], nodeClaims[1]
+			driftedNode := nodes[1]
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectApplied(ctx, env.Client, rs, pod, nodePool)
+
+			// bind pod to the node eligible for disruption
+			ExpectManualBinding(ctx, env.Client, pod, driftedNode)
+
+			// inform cluster state about nodes and nodeclaims
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := FindMetricWithLabelValues("karpenter_voluntary_disruption_decisions_total", map[string]string{
-				"nodepool": nodePool.Name,
-				"reason":   string(v1.DisruptionReasonDrifted),
+			// only allow a single node to be disrupted because of budgets
+			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 1, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
-			Expect(found).To(BeFalse())
-			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 0))
 
-			// Execute command, deleting no nodes
+			// Execute command, deleting one node
 			ExpectSingletonReconciled(ctx, queue)
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, driftedNodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim, driftedNode)
+			ncs := ExpectNodeClaims(ctx, env.Client)
+			Expect(len(ncs)).To(Equal(1))
+			Expect(ncs[0].Name).To(Equal(emptyNodeClaim.Name))
+			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
+				metrics.ReasonLabel: "drifted",
+			})
 		})
-		It("should only allow 3 nodes to be disrupted", func() {
+		It("should only allow 3 nodes to be disrupted because of budgets", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -190,15 +228,11 @@ var _ = Describe("Drift", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
-			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-				"nodepool": nodePool.Name,
-			})
-			Expect(found).To(BeTrue())
-			Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
 
-			// emptiness is not performed in drift, so expect all nodeclaims to exist
-			ExpectSingletonReconciled(ctx, queue)
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
+			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 3, map[string]string{
+				metrics.NodePoolLabel: nodePool.Name,
+				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
+			})
 		})
 		It("should disrupt 3 nodes, taking into account commands in progress", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
@@ -272,15 +306,14 @@ var _ = Describe("Drift", func() {
 			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
-		It("should allow 2 nodes from each nodePool to be deleted", func() {
+		It("should respect budgets for multiple nodepools", func() {
 			// Create 10 nodepools
 			nps := test.NodePools(10, v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Disruption: v1.Disruption{
 						ConsolidateAfter: v1.MustParseNillableDuration("Never"),
 						Budgets: []v1.Budget{{
-							// 1/2 of 3 nodes == 1.5 nodes. This should round up to 2.
-							Nodes: "50%",
+							Nodes: "1",
 						}},
 					},
 					Template: v1.NodeClaimTemplate{
@@ -296,7 +329,7 @@ var _ = Describe("Drift", func() {
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
 			nodes = make([]*corev1.Node, 0, 30)
-			// Create 3 nodes for each nodePool
+			// Create 3 nodes for each nodePool, 2 of which have a pod
 			for _, np := range nps {
 				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
@@ -314,91 +347,59 @@ var _ = Describe("Drift", func() {
 						},
 					},
 				})
+				for i := range ncs {
+					ncs[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+					ExpectApplied(ctx, env.Client, ncs[i], ns[i])
+				}
 				nodeClaims = append(nodeClaims, ncs...)
 				nodes = append(nodes, ns...)
-			}
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nodeClaims); i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				pods := test.Pods(2, test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+					ObjectMeta: metav1.ObjectMeta{Labels: labels,
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "ReplicaSet",
+								Name:               rs.Name,
+								UID:                rs.UID,
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
+							},
+						}}})
+				// Bind the pods to the first 2 nodes for each nodepool.
+				for i := range pods {
+					ExpectApplied(ctx, env.Client, pods[i])
+					ExpectManualBinding(ctx, env.Client, pods[i], ns[i])
+				}
 			}
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
-
-			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
-				})
-				Expect(found).To(BeTrue())
-				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 2))
+			// Reconcile 30 times, enqueuing 10 commands total
+			for range 30 {
+				ExpectSingletonReconciled(ctx, disruptionController)
 			}
 
-			// emptiness is not performed in drift, so expect all nodeclaims to exist
-			ExpectSingletonReconciled(ctx, queue)
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(30))
-		})
-		It("should allow all nodes from each nodePool to be deleted", func() {
-			// Create 10 nodepools
-			nps := test.NodePools(10, v1.NodePool{
-				Spec: v1.NodePoolSpec{
-					Disruption: v1.Disruption{
-						ConsolidateAfter: v1.MustParseNillableDuration("Never"),
-						Budgets: []v1.Budget{{
-							Nodes: "100%",
-						}},
-					},
-				},
+			for _, np := range nps {
+				ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 1, map[string]string{
+					metrics.NodePoolLabel: np.Name,
+					metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
+				})
+			}
+
+			// Delete 10 nodes, 1 node per nodepool, according to their budgets
+			for range 30 {
+				ExpectSingletonReconciled(ctx, queue)
+			}
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(20))
+			// These nodes will disrupt because of Drift instead of Emptiness because they are not marked consolidatable
+			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 10, map[string]string{
+				metrics.ReasonLabel: "drifted",
 			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nps); i++ {
-				ExpectApplied(ctx, env.Client, nps[i])
-			}
-			nodeClaims = make([]*v1.NodeClaim, 0, 30)
-			nodes = make([]*corev1.Node, 0, 30)
-			// Create 3 nodes for each nodePool
-			for _, np := range nps {
-				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							v1.NodePoolLabelKey:            np.Name,
-							corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-							v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-							corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
-						},
-					},
-					Status: v1.NodeClaimStatus{
-						Allocatable: map[corev1.ResourceName]resource.Quantity{
-							corev1.ResourceCPU:  resource.MustParse("32"),
-							corev1.ResourcePods: resource.MustParse("100"),
-						},
-					},
-				})
-				nodeClaims = append(nodeClaims, ncs...)
-				nodes = append(nodes, ns...)
-			}
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < len(nodeClaims); i++ {
-				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-			}
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
-
-			for _, np := range nps {
-				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
-					"nodepool": np.Name,
-				})
-				Expect(found).To(BeTrue())
-				Expect(metric.GetGauge().GetValue()).To(BeNumerically("==", 3))
-			}
-
-			// emptiness is not performed in drift, so expect all nodeclaims to exist
-			ExpectSingletonReconciled(ctx, queue)
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(30))
 		})
 	})
 	Context("Drift", func() {
@@ -494,6 +495,64 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
+		It("should delete drifted nodes with the karpenter.sh/do-not-disrupt annotation set to false", func() {
+			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "false"})
+			labels := map[string]string{
+				"app": "test",
+			}
+			// create replicaset
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, nodeClaim2, node, node2, nodePool)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+
+			// Process candidates
+			ExpectSingletonReconciled(ctx, disruptionController)
+			// Process the eligible candidate so that the node can be deleted.
+			ExpectSingletonReconciled(ctx, queue)
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// We should delete the nodeClaim that has drifted
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
 		It("should not create replacements for drifted nodes that have pods with the karpenter.sh/do-not-disrupt annotation", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -578,7 +637,7 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
-		It("can replace drifted nodes", func() {
+		It("should replace drifted nodes", func() {
 			labels := map[string]string{
 				"app": "test",
 			}
@@ -631,7 +690,7 @@ var _ = Describe("Drift", func() {
 			Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
 			Expect(nodes[0].Name).ToNot(Equal(node.Name))
 		})
-		It("can delete drifted nodes", func() {
+		It("should delete drifted nodes", func() {
 			labels := map[string]string{
 				"app": "test",
 			}
@@ -902,64 +961,6 @@ var _ = Describe("Drift", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim2, node2)
 			ExpectExists(ctx, env.Client, nodeClaim)
 			ExpectExists(ctx, env.Client, node)
-		})
-		It("should delete drifted nodes with the karpenter.sh/do-not-disrupt annotation set to false", func() {
-			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "false"})
-			labels := map[string]string{
-				"app": "test",
-			}
-			// create replicaset
-			rs := test.ReplicaSet()
-			ExpectApplied(ctx, env.Client, rs)
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
-			pod := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion:         "apps/v1",
-							Kind:               "ReplicaSet",
-							Name:               rs.Name,
-							UID:                rs.UID,
-							Controller:         lo.ToPtr(true),
-							BlockOwnerDeletion: lo.ToPtr(true),
-						},
-					}}})
-			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
-						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
-						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-					Allocatable: map[corev1.ResourceName]resource.Quantity{
-						corev1.ResourceCPU:  resource.MustParse("32"),
-						corev1.ResourcePods: resource.MustParse("100"),
-					},
-				},
-			})
-
-			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, nodeClaim2, node, node2, nodePool)
-			ExpectManualBinding(ctx, env.Client, pod, node)
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
-
-			// Process candidates
-			ExpectSingletonReconciled(ctx, disruptionController)
-			// Process the eligible candidate so that the node can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
-			// Cascade any deletion of the nodeClaim to the node
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
-
-			// We should delete the nodeClaim that has drifted
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 	})
 })
