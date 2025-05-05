@@ -173,6 +173,7 @@ func (env *Environment) DefaultNodePool(nodeClass client.Object) *v1.NodePool {
 		Group: env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Group,
 		Name:  env.DefaultNodeClass.GetName(),
 	}
+	nodePool.ObjectMeta.Labels = lo.Assign(nodePool.ObjectMeta.Labels, map[string]string{test.DiscoveryLabel: "unspecified"})
 	nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{test.DiscoveryLabel: "unspecified"})
 	return nodePool
 }
