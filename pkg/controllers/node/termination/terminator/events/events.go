@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -41,7 +42,7 @@ func DisruptPodDelete(pod *corev1.Pod, gracePeriodSeconds *int64, nodeGracePerio
 		InvolvedObject: pod,
 		Type:           corev1.EventTypeNormal,
 		Reason:         events.Disrupted,
-		Message:        fmt.Sprintf("Deleting the pod to accommodate the terminationTime %v of the node. The pod was granted %v seconds of grace-period of its %v terminationGracePeriodSeconds. This bypasses the PDB of the pod and the do-not-disrupt annotation.", *nodeGracePeriodTerminationTime, *gracePeriodSeconds, pod.Spec.TerminationGracePeriodSeconds),
+		Message:        fmt.Sprintf("Deleting the pod to accommodate the terminationTime %v of the node. The pod was granted %v seconds of grace-period of its %v terminationGracePeriodSeconds. This bypasses the PDB of the pod and the do-not-disrupt annotation.", lo.FromPtr(nodeGracePeriodTerminationTime), lo.FromPtr(gracePeriodSeconds), lo.FromPtr(pod.Spec.TerminationGracePeriodSeconds)),
 		DedupeValues:   []string{pod.Name},
 	}
 }
