@@ -142,7 +142,6 @@ var _ = Describe("Drift", func() {
 
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{
 				{Reasons: []v1.DisruptionReason{v1.DisruptionReasonDrifted}, Nodes: "1"},
-				{Reasons: []v1.DisruptionReason{v1.DisruptionReasonEmpty}, Nodes: "0"},
 			}
 
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -150,13 +149,6 @@ var _ = Describe("Drift", func() {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
-			labels := map[string]string{
-				"app": "test",
-			}
-			// Apply the replicaset
-			ExpectApplied(ctx, env.Client, rs)
-			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
-
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels,
 					OwnerReferences: []metav1.OwnerReference{
@@ -200,7 +192,7 @@ var _ = Describe("Drift", func() {
 				metrics.ReasonLabel: "drifted",
 			})
 		})
-		It("should only allow 3 nodes to be disrupted because of budgets", func() {
+		It("should only consider 3 nodes allowed to be disrupted because of budgets", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -481,6 +473,21 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
+		It("should ignore nodes with the drifted status condition set to false", func() {
+			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeDrifted, "NotDrifted", "NotDrifted")
+			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Expect to not create or delete more nodeclaims
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+		})
 		It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation", func() {
 			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
@@ -620,21 +627,6 @@ var _ = Describe("Drift", func() {
 			// Expect no new nodeclaims to be created.
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, nodeClaim)
-		})
-		It("should ignore nodes with the drifted status condition set to false", func() {
-			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeDrifted, "NotDrifted", "NotDrifted")
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
-
-			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
-			fakeClock.Step(10 * time.Minute)
-
-			ExpectSingletonReconciled(ctx, disruptionController)
-
-			// Expect to not create or delete more nodeclaims
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
 		})
 		It("should replace drifted nodes", func() {

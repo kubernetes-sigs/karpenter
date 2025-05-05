@@ -411,6 +411,31 @@ var _ = Describe("Emptiness", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
+		It("can delete empty and drifted nodes", func() {
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectToWait(fakeClock, &wg)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
+			ExpectSingletonReconciled(ctx, queue)
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
+				metrics.ReasonLabel: "empty",
+			})
+		})
 		It("should ignore nodes without the consolidatable status condition", func() {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
