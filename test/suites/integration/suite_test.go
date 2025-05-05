@@ -43,7 +43,7 @@ var testLabels = map[string]string{
 }
 var labelSelector = labels.SelectorFromSet(testLabels)
 
-func TestPerf(t *testing.T) {
+func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = common.NewEnvironment(t)
@@ -55,7 +55,7 @@ func TestPerf(t *testing.T) {
 		}
 		env.Stop()
 	})
-	RunSpecs(t, "Perf")
+	RunSpecs(t, "Integration")
 }
 
 var _ = BeforeEach(func() {

@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -65,6 +66,8 @@ var (
 		&schedulingv1.PriorityClass{},
 		&corev1.Node{},
 		&v1.NodeClaim{},
+		&admissionregistrationv1.ValidatingAdmissionPolicy{},
+		&admissionregistrationv1.ValidatingAdmissionPolicyBinding{},
 	}
 )
 
