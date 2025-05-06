@@ -89,6 +89,9 @@ var (
 		v1.LabelWindowsBuild,
 	)
 
+	// WellKnownValuesForRequirements are for requirements where a known set of values
+	// is expected to be used for that requirement. For example, in the AWS provider,
+	// only on-demand, spot, and reserved make sense as values for the capacity type requirement
 	WellKnownValuesForRequirements = map[string]sets.Set[string]{
 		CapacityTypeLabelKey: sets.New(
 			CapacityTypeOnDemand,
@@ -125,13 +128,13 @@ func IsRestrictedLabel(key string) error {
 	return nil
 }
 
-// HasKnownValues returns an error if the requirement has well known values and is presented with an unknown value.
+// HasKnownValues returns an error if the requirement has well known values and is only presented with unknown values.
 func HasKnownValues(requirement NodeSelectorRequirementWithMinValues) error {
 	if !WellKnownLabels.Has(requirement.Key) {
 		return nil
 	}
 	if !WellKnownValuesForRequirements[requirement.Key].HasAny(requirement.Values...) {
-		return fmt.Errorf("bad values for key")
+		return fmt.Errorf("invalid values: %v for key: %s, expected one of: %v", requirement.Values, requirement.Key, WellKnownValuesForRequirements[requirement.Key].UnsortedList())
 	}
 	return nil
 }
