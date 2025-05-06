@@ -49,12 +49,17 @@ jobs:
         kubectl get nodepools
         kubectl get pods -A
         kubectl describe nodes
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        repository: nathangeology/karpenter_evaluate
-        path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
-        ref: "1130af927302e6913a4947952112f793eeafc564"
-        fetch-depth: 0
+    # TEMPORARILY DISABLED: Karpenter KPI Analysis Package
+    # This package analyzes key performance indicators (KPIs) for integration tests.
+    # Currently non-functional due to changes in core Karpenter metrics.
+    # Disabled due to test flakiness until underlying metric changes are addressed.
+    # Reference: https://github.com/nathangeology/karpenter_evaluate/blob/main/main.py
+    # - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+    #   with:
+    #     repository: nathangeology/karpenter_evaluate
+    #     path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
+    #     ref: "1130af927302e6913a4947952112f793eeafc564"
+    #     fetch-depth: 0
     - name: install KPI report dependencies
       shell: bash
       run: |
