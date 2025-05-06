@@ -191,7 +191,7 @@ func validateWellKnownValues(ctx context.Context, requirement NodeSelectorRequir
 
 	// If there are valid and invalid values, log the invalid values and proceed with valid values
 	if len(invalidValues) > 0 {
-		log.FromContext(ctx).Error(fmt.Errorf("invalid values found for %s", requirement.Key), "please correct found invalid values, proceeding with valid values", "valid-values", values, "invalid-values", invalidValues)
+		log.FromContext(ctx).Error(fmt.Errorf("invalid values found for key"), "please correct found invalid values, proceeding with valid values", "key", requirement.Key, "valid-values", values, "invalid-values", invalidValues)
 	}
 
 	return nil
