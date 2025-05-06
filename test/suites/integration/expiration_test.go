@@ -26,9 +26,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
-	coretest "sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -40,9 +40,9 @@ var _ = Describe("Expiration", func() {
 	var numPods int
 	BeforeEach(func() {
 		numPods = 1
-		dep = coretest.Deployment(coretest.DeploymentOptions{
+		dep = test.Deployment(test.DeploymentOptions{
 			Replicas: int32(numPods),
-			PodOptions: coretest.PodOptions{
+			PodOptions: test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						"app": "my-app",
@@ -54,14 +54,29 @@ var _ = Describe("Expiration", func() {
 		selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 	})
 	It("should expire the node after the expiration is reached", func() {
+		// Disable Drift to prevent Karpenter from continually expiring nodes
+		// This test initially launches a node with an expiration. After removing the expireAfter value,
+		// drift will be induced on all nodes owned by the nodepool. The replacement node for the expired node
+		// will not have a time limitation, allowing the test to complete without racing against the next expiration.
+		nodePool.Spec.Disruption = v1.Disruption{
+			Budgets: []v1.Budget{
+				{
+					Nodes:   "0",
+					Reasons: []v1.DisruptionReason{v1.DisruptionReasonDrifted},
+				},
+			},
+		}
 		if env.IsDefaultNodeClassKWOK() {
-			nodePool.Spec.Template.Spec.ExpireAfter = karpv1.MustParseNillableDuration("30s")
+			nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
 		} else {
-			nodePool.Spec.Template.Spec.ExpireAfter = karpv1.MustParseNillableDuration("5m")
+			nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("3m")
 		}
 		env.ExpectCreated(nodeClass, nodePool, dep)
 
 		nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+		// Disable expiration so newly created node won't terminate
+		nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{}
+		env.ExpectUpdated(nodePool)
 		node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
 		env.EventuallyExpectHealthyPodCount(selector, numPods)
 		env.Monitor.Reset() // Reset the monitor so that we can expect a single node to be spun up after expiration
@@ -70,7 +85,7 @@ var _ = Describe("Expiration", func() {
 		Eventually(func(g Gomega) {
 			g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).Should(Succeed())
 			_, ok := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
-				return t.MatchTaint(&karpv1.DisruptedNoScheduleTaint)
+				return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
 			})
 			g.Expect(ok).To(BeTrue())
 		}).Should(Succeed())
@@ -78,7 +93,7 @@ var _ = Describe("Expiration", func() {
 		env.EventuallyExpectCreatedNodeCount("==", 1)
 		// Set the limit to 0 to make sure we don't continue to create nodeClaims.
 		// This is CRITICAL since it prevents leaking node resources into subsequent tests
-		nodePool.Spec.Limits = karpv1.Limits{
+		nodePool.Spec.Limits = v1.Limits{
 			corev1.ResourceCPU: resource.MustParse("0"),
 		}
 		env.ExpectUpdated(nodePool)
@@ -92,17 +107,28 @@ var _ = Describe("Expiration", func() {
 		env.EventuallyExpectHealthyPodCount(selector, numPods)
 	})
 	It("should replace expired node with a single node and schedule all pods", func() {
-		// Set expire after to 5 minutes since we have to respect PDB and move over pods one at a time from one node to another.
-		// The new nodes should not expire before all the pods are moved over.
-		if env.IsDefaultNodeClassKWOK() {
-			nodePool.Spec.Template.Spec.ExpireAfter = karpv1.MustParseNillableDuration("30s")
-		} else {
-			nodePool.Spec.Template.Spec.ExpireAfter = karpv1.MustParseNillableDuration("5m")
+		// Disable Drift to prevent Karpenter from continually expiring nodes
+		// This test initially launches a node with an expiration. After removing the expireAfter value,
+		// drift will be induced on all nodes owned by the nodepool. The replacement node for the expired node
+		// will not have a time limitation, allowing the test to complete without racing against the next expiration.
+		nodePool.Spec.Disruption = v1.Disruption{
+			Budgets: []v1.Budget{
+				{
+					Nodes:   "0",
+					Reasons: []v1.DisruptionReason{v1.DisruptionReasonDrifted},
+				},
+			},
 		}
+		if env.IsDefaultNodeClassKWOK() {
+			nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
+		} else {
+			nodePool.Spec.Template.Spec.ExpireAfter = v1.MustParseNillableDuration("3m")
+		}
+
 		var numPods int32 = 5
 		// We should setup a PDB that will only allow a minimum of 1 pod to be pending at a time
 		minAvailable := intstr.FromInt32(numPods - 1)
-		pdb := coretest.PodDisruptionBudget(coretest.PDBOptions{
+		pdb := test.PodDisruptionBudget(test.PDBOptions{
 			Labels: map[string]string{
 				"app": "my-app",
 			},
@@ -113,6 +139,9 @@ var _ = Describe("Expiration", func() {
 		env.ExpectCreated(nodeClass, nodePool, pdb, dep)
 
 		nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
+		// Disable expiration so newly created node won't terminate
+		nodePool.Spec.Template.Spec.ExpireAfter = v1.NillableDuration{}
+		env.ExpectUpdated(nodePool)
 		node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
 		env.EventuallyExpectHealthyPodCount(selector, int(numPods))
 		env.Monitor.Reset() // Reset the monitor so that we can expect a single node to be spun up after expiration
@@ -121,7 +150,7 @@ var _ = Describe("Expiration", func() {
 		Eventually(func(g Gomega) {
 			g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).Should(Succeed())
 			_, ok := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
-				return t.MatchTaint(&karpv1.DisruptedNoScheduleTaint)
+				return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
 			})
 			g.Expect(ok).To(BeTrue())
 		}).Should(Succeed())
@@ -129,7 +158,7 @@ var _ = Describe("Expiration", func() {
 		env.EventuallyExpectCreatedNodeCount("==", 1)
 		// Set the limit to 0 to make sure we don't continue to create nodeClaims.
 		// This is CRITICAL since it prevents leaking node resources into subsequent tests
-		nodePool.Spec.Limits = karpv1.Limits{
+		nodePool.Spec.Limits = v1.Limits{
 			corev1.ResourceCPU: resource.MustParse("0"),
 		}
 		env.ExpectUpdated(nodePool)
