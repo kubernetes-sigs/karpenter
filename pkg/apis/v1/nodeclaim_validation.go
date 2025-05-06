@@ -173,25 +173,25 @@ func validateWellKnownValues(ctx context.Context, requirement NodeSelectorRequir
 		return nil
 	}
 
-	values, rejectedValues := lo.FilterReject(requirement.Values, func(val string, _ int) bool {
+	values, invalidValues := lo.FilterReject(requirement.Values, func(val string, _ int) bool {
 		return knownValues.Has(val)
 	})
 
 	// If there are only invalid values, set an error to transition the nodepool's readiness to false
 	if len(values) == 0 {
 		return fmt.Errorf("no valid values found in %v for %s, expected one of: %v, got: %v",
-			requirement.Values, requirement.Key, knownValues, rejectedValues)
+			requirement.Values, requirement.Key, knownValues, invalidValues)
 	}
 
 	// If there are valid values, but the minimum number of values is not met, set an error to prevent the nodepool from going ready
 	if requirement.MinValues != nil && len(values) < lo.FromPtr(requirement.MinValues) {
 		return fmt.Errorf("not enough valid values found in %v for %s, expected at least %d valid values from: %v, got: %v",
-			requirement.Values, requirement.Key, lo.FromPtr(requirement.MinValues), knownValues, len(values))
+			requirement.Values, requirement.Key, lo.FromPtr(requirement.MinValues), knownValues.UnsortedList(), len(values))
 	}
 
 	// If there are valid and invalid values, log the invalid values and proceed with valid values
-	if len(rejectedValues) > 0 {
-		log.FromContext(ctx).V(1).Info("invalid values found, proceeding with valid values", "requirement", requirement, "values", rejectedValues)
+	if len(invalidValues) > 0 {
+		log.FromContext(ctx).Error(fmt.Errorf("invalid values found for %s", requirement.Key), "please correct found invalid values, proceeding with valid values", "valid-values", values, "invalid-values", invalidValues)
 	}
 
 	return nil
