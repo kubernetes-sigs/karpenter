@@ -1833,18 +1833,20 @@ var _ = Describe("Metrics", func() {
 	})
 	It("should fire metrics for single node empty disruption", func() {
 		nodeClaim, node := nodeClaims[0], nodes[0]
-		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-		ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		fakeClock.Step(10 * time.Minute)
+		wg := sync.WaitGroup{}
+		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
+		wg.Wait()
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "delete",
-			metrics.ReasonLabel: "drifted",
+			metrics.ReasonLabel: "empty",
 		})
 	})
 	It("should fire metrics for single node delete disruption", func() {
