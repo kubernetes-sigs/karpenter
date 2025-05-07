@@ -124,7 +124,6 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconcile.Result, e
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !p.cluster.Synced(ctx) {
-		log.FromContext(ctx).V(1).Info("waiting on cluster sync")
 		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
