@@ -706,7 +706,7 @@ func isDaemonPodCompatible(nodeClaimTemplate *NodeClaimTemplate, pod *corev1.Pod
 	}
 	for {
 		// We don't consider pod preferences for scheduling requirements since we know that pod preferences won't matter with Daemonset scheduling
-		if nodeClaimTemplate.Requirements.IsCompatible(scheduling.NewStrictPodRequirements(pod), scheduling.AllowUndefinedWellKnownLabels) {
+		if nodeClaimTemplate.Requirements.IsCompatible(scheduling.NewStrictPodRequirements(pod), scheduling.AllowUndefinedLabelsForDaemonset) {
 			return true
 		}
 		// If relaxing the Node Affinity term didn't succeed, then this DaemonSet can't schedule to this NodePool

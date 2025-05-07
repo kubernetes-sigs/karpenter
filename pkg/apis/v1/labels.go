@@ -90,6 +90,14 @@ var (
 		v1.LabelWindowsBuild,
 	)
 
+	// AllowedDaemonsetLabels is a set of label keys permitted for Daemonset resources.
+	// For Daemonsets, Karpenter also considers labels indicating registration and initialization status
+	// when performing scheduling.
+	AllowedDaemonsetLabels = sets.New(
+		NodeRegisteredLabelKey,
+		NodeInitializedLabelKey,
+	)
+
 	// RestrictedLabels are labels that should not be used
 	// because they may interfere with the internal provisioning logic.
 	RestrictedLabels = sets.New(
