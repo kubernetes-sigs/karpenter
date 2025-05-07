@@ -2266,6 +2266,7 @@ var _ = Describe("Provisioning", func() {
 							corev1.ResourceCPU: resource.MustParse("1"),
 						},
 					},
+					// Create a nodePreference that can't be satisfied
 					NodePreferences: []corev1.NodeSelectorRequirement{
 						{
 							Key:      topologyKey,
@@ -2283,7 +2284,7 @@ var _ = Describe("Provisioning", func() {
 				Expect(pod1Node.Name).To(Equal(podNodePreferenceNode.Name))
 			},
 				Entry(corev1.LabelTopologyZone, corev1.LabelTopologyZone),
-				Entry(corev1.LabelTopologyZone, corev1.LabelHostname),
+				Entry(corev1.LabelHostname, corev1.LabelHostname),
 			)
 		})
 		Context("Ignore Preferences", func() {
