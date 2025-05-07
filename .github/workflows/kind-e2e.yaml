@@ -60,14 +60,14 @@ jobs:
     #     path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
     #     ref: "1130af927302e6913a4947952112f793eeafc564"
     #     fetch-depth: 0
-    - name: install KPI report dependencies
-      shell: bash
-      run: |
-        pip install pandas==2.2.2
-        pip install pyarrow==16.1.0 
-        pip install tabulate==0.9.0
-        pip install prometheus-api-client==0.5.5
-        pip install ./karpenter_eval/
+    # - name: install KPI report dependencies
+    #   shell: bash
+    #   run: |
+    #     pip install pandas==2.2.2
+    #     pip install pyarrow==16.1.0 
+    #     pip install tabulate==0.9.0
+    #     pip install prometheus-api-client==0.5.5
+    #     pip install ./karpenter_eval/
     - name: run test suites
       shell: bash
       run: |
@@ -75,10 +75,10 @@ jobs:
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         make e2etests
-    - name: run test analysis
-      shell: bash
-      run: |
-        OUTPUT_DIR=${{ env.OUTPUT_DIR }} python ./karpenter_eval/main.py
+    # - name: run test analysis
+    #   shell: bash
+    #   run: |
+    #     OUTPUT_DIR=${{ env.OUTPUT_DIR }} python ./karpenter_eval/main.py
     - name: cleanup 
       shell: bash
       run: | 
