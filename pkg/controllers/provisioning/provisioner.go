@@ -124,7 +124,6 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconcile.Result, e
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !p.cluster.Synced(ctx) {
-		log.FromContext(ctx).V(1).Info("waiting on cluster sync")
 		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
@@ -469,8 +468,8 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*corev1.Pod, erro
 func (p *Provisioner) Validate(ctx context.Context, pod *corev1.Pod) error {
 	return multierr.Combine(
 		validateKarpenterManagedLabelCanExist(pod),
-		validateNodeSelector(pod),
-		validateAffinity(pod),
+		validateNodeSelector(ctx, pod),
+		validateAffinity(ctx, pod),
 		p.volumeTopology.ValidatePersistentVolumeClaims(ctx, pod),
 	)
 }
@@ -501,7 +500,7 @@ func (p *Provisioner) injectVolumeTopologyRequirements(ctx context.Context, pods
 	return schedulablePods, nil
 }
 
-func validateNodeSelector(p *corev1.Pod) (errs error) {
+func validateNodeSelector(ctx context.Context, p *corev1.Pod) (errs error) {
 	terms := lo.MapToSlice(p.Spec.NodeSelector, func(k string, v string) corev1.NodeSelectorTerm {
 		return corev1.NodeSelectorTerm{
 			MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -514,34 +513,35 @@ func validateNodeSelector(p *corev1.Pod) (errs error) {
 		}
 	})
 	for _, term := range terms {
-		errs = multierr.Append(errs, validateNodeSelectorTerm(term))
+		errs = multierr.Append(errs, validateNodeSelectorTerm(ctx, term))
 	}
 	return errs
 }
 
-func validateAffinity(p *corev1.Pod) (errs error) {
+func validateAffinity(ctx context.Context, p *corev1.Pod) (errs error) {
 	if p.Spec.Affinity == nil {
 		return nil
 	}
 	if p.Spec.Affinity.NodeAffinity != nil {
 		if p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
 			for _, term := range p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-				errs = multierr.Append(errs, validateNodeSelectorTerm(term))
+				errs = multierr.Append(errs, validateNodeSelectorTerm(ctx, term))
 			}
 		}
 	}
 	return errs
 }
 
-func validateNodeSelectorTerm(term corev1.NodeSelectorTerm) (errs error) {
+func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm) (errs error) {
 	if term.MatchFields != nil {
 		errs = multierr.Append(errs, fmt.Errorf("node selector term with matchFields is not supported"))
 	}
 	if term.MatchExpressions != nil {
 		for _, requirement := range term.MatchExpressions {
-			errs = multierr.Append(errs, v1.ValidateRequirement(v1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: requirement,
-			}))
+			errs = multierr.Append(errs, v1.ValidateRequirement(ctx,
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: requirement,
+				}))
 		}
 	}
 	return errs

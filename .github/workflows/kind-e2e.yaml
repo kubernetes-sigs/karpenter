@@ -1,5 +1,7 @@
 name: kind-e2e
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 jobs:
   kind-e2e:
@@ -47,20 +49,25 @@ jobs:
         kubectl get nodepools
         kubectl get pods -A
         kubectl describe nodes
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        repository: nathangeology/karpenter_evaluate
-        path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
-        ref: "1130af927302e6913a4947952112f793eeafc564"
-        fetch-depth: 0
-    - name: install KPI report dependencies
-      shell: bash
-      run: |
-        pip install pandas==2.2.2
-        pip install pyarrow==16.1.0 
-        pip install tabulate==0.9.0
-        pip install prometheus-api-client==0.5.5
-        pip install ./karpenter_eval/
+    # TEMPORARILY DISABLED: Karpenter KPI Analysis Package
+    # This package analyzes key performance indicators (KPIs) for integration tests.
+    # Currently non-functional due to changes in core Karpenter metrics.
+    # Disabled due to test flakiness until underlying metric changes are addressed.
+    # Reference: https://github.com/nathangeology/karpenter_evaluate/blob/main/main.py
+    # - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+    #   with:
+    #     repository: nathangeology/karpenter_evaluate
+    #     path: ./karpenter_eval/ # Installs to a folder in the Karpenter repo for the test
+    #     ref: "1130af927302e6913a4947952112f793eeafc564"
+    #     fetch-depth: 0
+    # - name: install KPI report dependencies
+    #   shell: bash
+    #   run: |
+    #     pip install pandas==2.2.2
+    #     pip install pyarrow==16.1.0 
+    #     pip install tabulate==0.9.0
+    #     pip install prometheus-api-client==0.5.5
+    #     pip install ./karpenter_eval/
     - name: run test suites
       shell: bash
       run: |
@@ -68,10 +75,10 @@ jobs:
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         make e2etests
-    - name: run test analysis
-      shell: bash
-      run: |
-        OUTPUT_DIR=${{ env.OUTPUT_DIR }} python ./karpenter_eval/main.py
+    # - name: run test analysis
+    #   shell: bash
+    #   run: |
+    #     OUTPUT_DIR=${{ env.OUTPUT_DIR }} python ./karpenter_eval/main.py
     - name: cleanup 
       shell: bash
       run: | 
