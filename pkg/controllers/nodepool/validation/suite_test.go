@@ -68,6 +68,50 @@ var _ = Describe("Counter", func() {
 		nodePool = test.NodePool()
 		nodePool.StatusConditions().SetUnknown(v1.ConditionTypeValidationSucceeded)
 	})
+	It("should fail validation with only invalid capacity types", func() {
+		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"xspot"}, // Invalid value
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
+		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
+	})
+	It("should pass validation with valid capacity types", func() {
+		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeOnDemand}, // Valid value
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
+		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
+	})
+	It("should fail open if invalid and valid capacity types are present", func() {
+		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeOnDemand, "xspot"}, // Valid and invalid value
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
+		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
+	})
 	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
 		nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
 			Group: "karpenter.test.sh",
