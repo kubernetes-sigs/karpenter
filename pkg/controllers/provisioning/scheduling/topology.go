@@ -343,14 +343,29 @@ func (t *Topology) countDomains(ctx context.Context, tg *TopologyGroup) error {
 	// Note: long term we should handle this when constructing the domain groups, but that would require domain groups
 	// to handle affinity in addition to taints / tolerations.
 	for _, n := range t.stateNodes {
-		// ignore the node if it doesn't match the topology group
-		if !tg.nodeFilter.Matches(n.Taints(), scheduling.NewLabelRequirements(n.Labels())) {
-			continue
+		labels := n.Labels()
+		requirements := scheduling.NewLabelRequirements(labels)
+
+		domain, exists := labels[tg.Key]
+
+		// We special-case kubernetes.io/hostname primarily for stateNodes having NodeClaims without a node
+		//  and since their domain won't be registered until the node joins the cluster.
+		if !exists && tg.Key == corev1.LabelHostname {
+			hostNameRequirements := scheduling.NewRequirement(corev1.LabelHostname, corev1.NodeSelectorOpIn, n.HostName())
+			requirements.Add(hostNameRequirements)
+			domain = n.HostName()
+			exists = true
 		}
-		domain, exists := n.Labels()[tg.Key]
+
 		if !exists {
 			continue
 		}
+
+		// ignore the node if it doesn't match the topology group
+		if !tg.nodeFilter.Matches(n.Taints(), requirements) {
+			continue
+		}
+
 		if _, ok := tg.domains[domain]; !ok {
 			tg.domains[domain] = 0
 			tg.emptyDomains.Insert(domain)
