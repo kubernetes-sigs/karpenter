@@ -182,9 +182,6 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v
 		}
 	}
 
-	// add hostname labels
-	labels[corev1.LabelHostname] = nodeClaim.Name
-
 	created := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        nodeClaim.Name,
