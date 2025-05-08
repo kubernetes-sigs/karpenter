@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -34,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -91,6 +93,7 @@ func (env *Environment) ExpectUpdated(objects ...client.Object) {
 	}
 }
 
+// ExpectStatusUpdated will update objects in the cluster to match the inputs.
 // WARNING: This ignores the resource version check, which can result in
 // overwriting changes made by other controllers in the cluster.
 // This is useful in ensuring that we can clean up resources by patching
@@ -109,6 +112,43 @@ func (env *Environment) ExpectStatusUpdated(objects ...client.Object) {
 			g.Expect(env.Client.Status().Update(env.Context, o)).To(Succeed())
 		}).WithTimeout(time.Second * 10).Should(Succeed())
 	}
+}
+
+func (env *Environment) ExpectNodeClassCondition(nodeclass *unstructured.Unstructured, conditions []status.Condition) client.Object {
+	result := nodeclass.DeepCopy()
+
+	err := unstructured.SetNestedSlice(result.Object, lo.Map(conditions, func(condition status.Condition, _ int) interface{} {
+		b := map[string]interface{}{}
+		if condition.Type != "" {
+			b["type"] = condition.Type
+		}
+		if condition.Reason != "" {
+			b["reason"] = condition.Reason
+		}
+		if condition.Status != "" {
+			b["status"] = string(condition.Status)
+		}
+		if condition.Message != "" {
+			b["message"] = condition.Message
+		}
+		if !condition.LastTransitionTime.IsZero() {
+			b["lastTransitionTime"] = condition.LastTransitionTime.Format(time.RFC3339)
+		}
+		if condition.ObservedGeneration != 0 {
+			b["observedGeneration"] = condition.ObservedGeneration
+		}
+		return b
+	}), "status", "conditions")
+	Expect(err).To(BeNil())
+
+	return result
+}
+
+func (env *Environment) ExpectParsedProviderID(providerID string) string {
+	GinkgoHelper()
+	providerIDSplit := strings.Split(providerID, "/")
+	Expect(len(providerIDSplit)).ToNot(Equal(0))
+	return providerIDSplit[len(providerIDSplit)-1]
 }
 
 // ExpectCreatedOrUpdated can update objects in the cluster to match the inputs.
