@@ -36,7 +36,6 @@ jobs:
     - name: install kwok and controller
       shell: bash
       run: |
-        make toolchain
         make install-kwok
         export KWOK_REPO=kind.local
         export KIND_CLUSTER_NAME=chart-testing
