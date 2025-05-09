@@ -484,6 +484,7 @@ var _ = Describe("Drift", Ordered, func() {
 					},
 				},
 			})
+			// Expect only a single node to get tainted due to default disruption budgets
 			nodePool.Spec.Disruption = v1.Disruption{}
 			env.ExpectCreated(dep, nodeClass, nodePool)
 
@@ -531,6 +532,8 @@ var _ = Describe("Drift", Ordered, func() {
 					},
 				},
 			})
+			// Expect only a single node to get tainted due to default disruption budgets
+			nodePool.Spec.Disruption = v1.Disruption{}
 			env.ExpectCreated(dep, nodeClass, nodePool)
 
 			startingNodeClaimState := env.EventuallyExpectCreatedNodeClaimCount("==", int(numPods))
