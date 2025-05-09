@@ -183,6 +183,58 @@ func (env *Environment) ReplaceNodeConditions(node *corev1.Node, conds ...corev1
 	return node
 }
 
+// ConsistentlyExpectDisruptionsUntilNoneLeft consistently ensures a max on number of concurrently disrupting and non-terminating nodes.
+// This actually uses an Eventually() under the hood so that when we reach 0 tainted nodes we exit early.
+// We use the StopTrying() so that we can exit the Eventually() if we've breached an assertion on total concurrency of disruptions.
+// For example: if we have 5 nodes, with a budget of 2 nodes, we ensure that `disruptingNodes <= maxNodesDisrupting=2`
+// We use nodesAtStart+maxNodesDisrupting to assert that we're not creating too many instances in replacement.
+func (env *Environment) ConsistentlyExpectDisruptionsUntilNoneLeft(nodesAtStart, maxNodesDisrupting int, timeout time.Duration) {
+	GinkgoHelper()
+	nodes := []corev1.Node{}
+	// We use an eventually to exit when we detect the number of tainted/disrupted nodes matches our target.
+	Eventually(func(g Gomega) {
+		// Grab Nodes and NodeClaims
+		nodeClaimList := &v1.NodeClaimList{}
+		nodeList := &corev1.NodeList{}
+		g.Expect(env.Client.List(env, nodeClaimList, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
+		g.Expect(env.Client.List(env, nodeList, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
+
+		// Don't include NodeClaims with the `Terminating` status condition, as they're not included in budgets
+		removedProviderIDs := sets.Set[string]{}
+		nodeClaimList.Items = lo.Filter(nodeClaimList.Items, func(nc v1.NodeClaim, _ int) bool {
+			if !nc.StatusConditions().IsTrue(v1.ConditionTypeInstanceTerminating) {
+				return true
+			}
+			removedProviderIDs.Insert(nc.Status.ProviderID)
+			return false
+		})
+		if len(nodeClaimList.Items) > nodesAtStart+maxNodesDisrupting {
+			StopTrying(fmt.Sprintf("Too many nodeclaims created. Expected no more than %d, got %d", nodesAtStart+maxNodesDisrupting, len(nodeClaimList.Items))).Now()
+		}
+
+		// Don't include Nodes whose NodeClaims have been ignored
+		nodeList.Items = lo.Filter(nodeList.Items, func(n corev1.Node, _ int) bool {
+			return !removedProviderIDs.Has(n.Spec.ProviderID)
+		})
+		if len(nodeList.Items) > nodesAtStart+maxNodesDisrupting {
+			StopTrying(fmt.Sprintf("Too many nodes created. Expected no more than %d, got %d", nodesAtStart+maxNodesDisrupting, len(nodeList.Items))).Now()
+		}
+
+		// Filter further by the number of tainted nodes to get the number of nodes that are disrupting
+		nodes = lo.Filter(nodeList.Items, func(n corev1.Node, _ int) bool {
+			_, ok := lo.Find(n.Spec.Taints, func(t corev1.Taint) bool {
+				return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
+			})
+			return ok
+		})
+		if len(nodes) > maxNodesDisrupting {
+			StopTrying(fmt.Sprintf("Too many disruptions detected. Expected no more than %d, got %d", maxNodesDisrupting, len(nodeList.Items))).Now()
+		}
+
+		g.Expect(nodes).To(HaveLen(0))
+	}).WithTimeout(timeout).WithPolling(5 * time.Second).Should(Succeed())
+}
+
 func (env *Environment) ExpectSettings() (res []corev1.EnvVar) {
 	GinkgoHelper()
 
@@ -592,7 +644,7 @@ func (env *Environment) EventuallyExpectTaintedNodeCount(comparator string, coun
 	By(fmt.Sprintf("waiting for tainted nodes to be %s to %d", comparator, count))
 	nodeList := &corev1.NodeList{}
 	Eventually(func(g Gomega) {
-		g.Expect(env.Client.List(env, nodeList, client.MatchingFields{"spec.taints[*].karpenter.sh/disruption": "disrupting"})).To(Succeed())
+		g.Expect(env.Client.List(env, nodeList, client.MatchingFields{"spec.taints[*].karpenter.sh/disrupted": "true"})).To(Succeed())
 		g.Expect(len(nodeList.Items)).To(BeNumerically(comparator, count),
 			fmt.Sprintf("expected %d tainted nodes, had %d (%v)", count, len(nodeList.Items), NodeNames(lo.ToSlicePtr(nodeList.Items))))
 	}).Should(Succeed())
@@ -604,7 +656,7 @@ func (env *Environment) EventuallyExpectNodesUntaintedWithTimeout(timeout time.D
 	By(fmt.Sprintf("waiting for %d nodes to be untainted", len(nodes)))
 	nodeList := &corev1.NodeList{}
 	Eventually(func(g Gomega) {
-		g.Expect(env.Client.List(env, nodeList, client.MatchingFields{"spec.taints[*].karpenter.sh/disruption": "disrupting"})).To(Succeed())
+		g.Expect(env.Client.List(env, nodeList, client.MatchingFields{"spec.taints[*].karpenter.sh/disrupted": "true"})).To(Succeed())
 		taintedNodeNames := lo.Map(nodeList.Items, func(n corev1.Node, _ int) string { return n.Name })
 		g.Expect(taintedNodeNames).ToNot(ContainElements(lo.Map(nodes, func(n *corev1.Node, _ int) interface{} { return n.Name })...))
 	}).WithTimeout(timeout).Should(Succeed())

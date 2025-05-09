@@ -117,5 +117,6 @@ then
 else
   kubectl apply -f ${HOME_DIR}/kwok.yaml
   kubectl apply -f ${crdURL}
+  kubectl apply -f $(pwd)/hack/kwok/stages
 fi
 
