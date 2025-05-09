@@ -366,7 +366,7 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 		// If we don't schedule it, we store the original pod (with preferences)
 		// in the queue and give ourselves another chance to schedule it later
 		if err := s.trySchedule(ctx, pod.DeepCopy()); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.DeadlineExceeded) {
 				log.FromContext(ctx).V(1).WithValues("duration", s.clock.Since(startTime).Truncate(time.Second), "scheduling-id", string(s.uuid)).Info("scheduling simulation timed out")
 				break
 			}
