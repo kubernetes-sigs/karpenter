@@ -160,12 +160,13 @@ func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {
 					defer GinkgoRecover()
 					g.Expect(env.ExpectTestingFinalizerRemoved(&metaList.Items[i])).To(Succeed())
 					g.Expect(client.IgnoreNotFound(env.Client.Delete(env, &metaList.Items[i],
+						client.PropagationPolicy(metav1.DeletePropagationForeground),
 						&client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))).To(Succeed())
 				})
 				// If the deletes eventually succeed, we should have no elements here at the end of the test
 				g.Expect(env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel}), client.Limit(1))).To(Succeed())
 				g.Expect(metaList.Items).To(HaveLen(0))
-			}).WithTimeout(10 * time.Minute).Should(Succeed())
+			}).Should(Succeed())
 		}(obj)
 	}
 	wg.Wait()
