@@ -29,6 +29,7 @@ import (
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -122,14 +123,20 @@ func NodeClaimForNode(ctx context.Context, c client.Client, node *corev1.Node) (
 	return nodes[0], nil
 }
 
-// GetReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria
-func GetReschedulablePods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
+// GetCurrentlyReschedulablePods grabs all pods from the passed nodes that satisfy the IsReschedulable criteria
+func GetCurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Node) ([]*corev1.Pod, error) {
 	pods, err := GetPods(ctx, kubeClient, nodes...)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods, %w", err)
 	}
+
+	pdbs, err := pdb.NewLimits(ctx, kubeClient)
+	if err != nil {
+		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
+	}
+
 	return lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return pod.IsReschedulable(p)
+		return pdbs.IsCurrentlyReschedulable(p)
 	}), nil
 }
 

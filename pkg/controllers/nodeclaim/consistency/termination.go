@@ -31,13 +31,11 @@ import (
 
 // Termination detects nodes that are stuck terminating and reports why.
 type Termination struct {
-	clk        clock.Clock
 	kubeClient client.Client
 }
 
 func NewTermination(clk clock.Clock, kubeClient client.Client) Check {
 	return &Termination{
-		clk:        clk,
 		kubeClient: kubeClient,
 	}
 }
@@ -47,7 +45,7 @@ func (t *Termination) Check(ctx context.Context, node *corev1.Node, nodeClaim *v
 	if nodeClaim.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
-	pdbs, err := pdb.NewLimits(ctx, t.clk, t.kubeClient)
+	pdbs, err := pdb.NewLimits(ctx, t.kubeClient)
 	if err != nil {
 		return nil, err
 	}
