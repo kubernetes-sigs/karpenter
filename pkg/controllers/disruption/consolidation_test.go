@@ -232,8 +232,9 @@ var _ = Describe("Consolidation", func() {
 				},
 				Status: v1.NodeClaimStatus{
 					Allocatable: map[corev1.ResourceName]resource.Quantity{
-						corev1.ResourceCPU:  resource.MustParse("32"),
-						corev1.ResourcePods: resource.MustParse("100"),
+						corev1.ResourceCPU:    resource.MustParse("64"),
+						corev1.ResourcePods:   resource.MustParse("100"),
+						corev1.ResourceMemory: resource.MustParse("128Gi"),
 					},
 				},
 			})
@@ -331,7 +332,8 @@ var _ = Describe("Consolidation", func() {
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: map[corev1.ResourceName]resource.Quantity{
 						// 100m * 10 = 1 vCPU. This should be less than the largest node capacity.
-						corev1.ResourceCPU: resource.MustParse("100m"),
+						corev1.ResourceCPU:    resource.MustParse("30"),
+						corev1.ResourceMemory: resource.MustParse("58Gi"),
 					},
 				},
 				ObjectMeta: metav1.ObjectMeta{Labels: labels,
@@ -376,7 +378,8 @@ var _ = Describe("Consolidation", func() {
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: map[corev1.ResourceName]resource.Quantity{
 						// 15 + 15 = 30 < 32
-						corev1.ResourceCPU: resource.MustParse("15"),
+						corev1.ResourceCPU:    resource.MustParse("12"),
+						corev1.ResourceMemory: resource.MustParse("58Gi"),
 					},
 				},
 				ObjectMeta: metav1.ObjectMeta{Labels: labels,
@@ -411,6 +414,53 @@ var _ = Describe("Consolidation", func() {
 				ExpectSingletonReconciled(ctx, queue)
 			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
+		})
+		It("should allow 5 nodes to be deleted in single node consolidation delete", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			for i := 0; i < numNodes; i++ {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			// make a pod for each node, where only two pods can fit each node.
+			// this will skip over multi node consolidation and go to single
+			// node consolidation delete
+			pods := test.Pods(numNodes, test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:    resource.MustParse("30"),
+						corev1.ResourceMemory: resource.MustParse("50Gi"),
+					},
+				},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			for i := 0; i < numNodes; i++ {
+				ExpectApplied(ctx, env.Client, pods[i])
+				ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
+			}
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			var wg sync.WaitGroup
+			// Reconcile 1 time, enqueuing 1 multi-node and 1 single-node command
+			// delete 5 big ones and create 2 small ones
+			ExpectToWait(fakeClock, &wg)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
+			// Execute all commands in the queue, only deleting 3 nodes
+			ExpectSingletonReconciled(ctx, queue)
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(5))
 		})
 		It("should allow 2 nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
