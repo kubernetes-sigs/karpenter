@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -125,7 +126,8 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 	}
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	// If we filtered out any candidates, return nil as some NodeClaims in the consolidation decision have changed.
-	if len(validatedCandidates) != len(candidates) {
+	// When evaluating emptiness, if we have some valid candidates, proceed with the remaining candidates
+	if (v.reason != v1.DisruptionReasonEmpty && len(validatedCandidates) != len(candidates)) || len(validatedCandidates) == 0 {
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)-len(validatedCandidates)))
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, v.cluster, v.clock, v.kubeClient, v.cloudProvider, v.recorder, v.reason)
@@ -135,16 +137,17 @@ func (v *Validation) ValidateCandidates(ctx context.Context, candidates ...*Cand
 	// Return nil if any candidate meets either of the following conditions:
 	//  a. A pod was nominated to the candidate
 	//  b. Disrupting the candidate would violate node disruption budgets
-	for _, vc := range validatedCandidates {
-		if v.cluster.IsNodeNominated(vc.ProviderID()) {
-			return nil, NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
+	valid, invalid := lo.FilterReject(validatedCandidates, func(cn *Candidate, _ int) bool {
+		if v.cluster.IsNodeNominated(cn.ProviderID()) || disruptionBudgetMapping[cn.NodePool.Name] == 0 {
+			return false
 		}
-		if disruptionBudgetMapping[vc.NodePool.Name] == 0 {
-			return nil, NewValidationError(fmt.Errorf("a candidate can no longer be disrupted without violating budgets"))
-		}
-		disruptionBudgetMapping[vc.NodePool.Name]--
+		disruptionBudgetMapping[cn.NodePool.Name]--
+		return true
+	})
+	if v.reason != v1.DisruptionReasonEmpty && len(invalid) > 0 {
+		return nil, NewValidationError(fmt.Errorf("a candidate failed validation because it was nominated for a pod or would violate disruption budgets"))
 	}
-	return validatedCandidates, nil
+	return valid, nil
 }
 
 // ShouldDisrupt is a predicate used to filter candidates

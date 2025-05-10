@@ -101,6 +101,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	}
 
 	v := NewValidation(e.clock, e.cluster, e.kubeClient, e.provisioner, e.cloudProvider, e.recorder, e.queue, e.Reason())
+	// validatedCandidates may be different from cmd.candidates, but err will be nil if we still have valid candidates
 	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
 	if err != nil {
 		if IsValidationError(err) {
@@ -111,12 +112,14 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	}
 
 	// TODO (jmdeal@): better encapsulate within validation
-	if lo.ContainsBy(validatedCandidates, func(c *Candidate) bool {
-		return len(c.reschedulablePods) != 0
-	}) {
+	valid := lo.Filter(validatedCandidates, func(c *Candidate, _ int) bool {
+		return len(c.reschedulablePods) == 0
+	})
+	if len(valid) == 0 {
 		log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
 		return Command{}, scheduling.Results{}, nil
 	}
+	cmd.candidates = valid
 
 	return cmd, scheduling.Results{}, nil
 }
