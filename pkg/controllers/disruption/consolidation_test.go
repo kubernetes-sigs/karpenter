@@ -2335,7 +2335,7 @@ var _ = Describe("Consolidation", func() {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			// create a custom validation function that creates and binds a pod to a node after determining the emtpy candidates and during validation,
+			// create a custom validation function that creates and binds a pod to a node after determining the empty candidates and during validation,
 			// this invalidate the command because emptiness bails for the entire batch when there is pod churn
 			customValidation := func(ctx context.Context, candidates ...*disruption.Candidate) ([]*disruption.Candidate, error) {
 				pods := test.Pods(1, test.PodOptions{
