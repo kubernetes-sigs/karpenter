@@ -2207,6 +2207,6 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 	provisioner *provisioning.Provisioner) *orchestration.Queue {
 
 	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
-	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface[*orchestration.Command](workqueue.TypedQueueConfig[*orchestration.Command]{Name: "disruption.workqueue"})
+	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface(workqueue.TypedQueueConfig[*orchestration.Command]{Name: "disruption.workqueue"})
 	return q
 }

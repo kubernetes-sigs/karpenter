@@ -36,7 +36,6 @@ import (
 	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllertest"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -45,6 +44,7 @@ import (
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/pkg/utils/node"
 )
 
@@ -108,7 +108,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 
 func NewTestingQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	return &Queue{
-		TypedRateLimitingInterface: &controllertest.TypedQueue[QueueKey]{TypedInterface: workqueue.NewTypedWithConfig(workqueue.TypedQueueConfig[QueueKey]{Name: "eviction.workqueue"})},
+		TypedRateLimitingInterface: test.NewTypedRateLimitingInterface(workqueue.TypedQueueConfig[QueueKey]{Name: "eviction.workqueue"}),
 		set:                        sets.New[QueueKey](),
 		kubeClient:                 kubeClient,
 		recorder:                   recorder,
