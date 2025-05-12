@@ -624,12 +624,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			customValidation := func(ctx context.Context, candidates ...*disruption.Candidate) ([]*disruption.Candidate, error) {
-				standardValidator := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, emptyConsolidation.Reason())
-				return standardValidator.ValidateCandidates(ctx, candidates...)
-			}
-
-			validation := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, emptyConsolidation.Reason(), disruption.WithValidateCandidateFunc(customValidation))
+			validation := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, emptyConsolidation.Reason())
 
 			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, validation, candidates...)
 			Expect(err).To(Succeed())
