@@ -133,12 +133,12 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 		node := o.(*corev1.Node)
 		return []string{strconv.FormatBool(node.Spec.Unschedulable)}
 	}))
-	lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.taints[*].karpenter.sh/disruption", func(o client.Object) []string {
+	lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.taints[*].karpenter.sh/disrupted", func(o client.Object) []string {
 		node := o.(*corev1.Node)
-		t, _ := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
+		_, found := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
 			return t.Key == v1.DisruptedTaintKey
 		})
-		return []string{t.Value}
+		return []string{lo.Ternary(found, "true", "false")}
 	}))
 	lo.Must0(cache.IndexField(ctx, &v1.NodeClaim{}, "status.conditions[*].type", func(o client.Object) []string {
 		nodeClaim := o.(*v1.NodeClaim)
@@ -173,6 +173,7 @@ func (env *Environment) DefaultNodePool(nodeClass client.Object) *v1.NodePool {
 		Group: env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Group,
 		Name:  env.DefaultNodeClass.GetName(),
 	}
+	nodePool.ObjectMeta.Labels = lo.Assign(nodePool.ObjectMeta.Labels, map[string]string{test.DiscoveryLabel: "unspecified"})
 	nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{test.DiscoveryLabel: "unspecified"})
 	return nodePool
 }

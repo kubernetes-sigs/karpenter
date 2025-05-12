@@ -25,15 +25,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -91,6 +94,64 @@ func (env *Environment) ExpectUpdated(objects ...client.Object) {
 	}
 }
 
+// ExpectStatusUpdated will update objects in the cluster to match the inputs.
+// WARNING: This ignores the resource version check, which can result in
+// overwriting changes made by other controllers in the cluster.
+// This is useful in ensuring that we can clean up resources by patching
+// out finalizers.
+// Grab the object before making the updates to reduce the chance of this race.
+func (env *Environment) ExpectStatusUpdated(objects ...client.Object) {
+	GinkgoHelper()
+	for _, o := range objects {
+		Eventually(func(g Gomega) {
+			current := o.DeepCopyObject().(client.Object)
+			g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(current), current)).To(Succeed())
+			if current.GetResourceVersion() != o.GetResourceVersion() {
+				log.FromContext(env).Info(fmt.Sprintf("detected an update to an object (%s) with an outdated resource version, did you get the latest version of the object before patching?", lo.Must(apiutil.GVKForObject(o, env.Client.Scheme()))))
+			}
+			o.SetResourceVersion(current.GetResourceVersion())
+			g.Expect(env.Client.Status().Update(env.Context, o)).To(Succeed())
+		}).WithTimeout(time.Second * 10).Should(Succeed())
+	}
+}
+
+func (env *Environment) ExpectNodeClassCondition(nodeclass *unstructured.Unstructured, conditions []status.Condition) client.Object {
+	result := nodeclass.DeepCopy()
+
+	err := unstructured.SetNestedSlice(result.Object, lo.Map(conditions, func(condition status.Condition, _ int) interface{} {
+		b := map[string]interface{}{}
+		if condition.Type != "" {
+			b["type"] = condition.Type
+		}
+		if condition.Reason != "" {
+			b["reason"] = condition.Reason
+		}
+		if condition.Status != "" {
+			b["status"] = string(condition.Status)
+		}
+		if condition.Message != "" {
+			b["message"] = condition.Message
+		}
+		if !condition.LastTransitionTime.IsZero() {
+			b["lastTransitionTime"] = condition.LastTransitionTime.Format(time.RFC3339)
+		}
+		if condition.ObservedGeneration != 0 {
+			b["observedGeneration"] = condition.ObservedGeneration
+		}
+		return b
+	}), "status", "conditions")
+	Expect(err).To(BeNil())
+
+	return result
+}
+
+func (env *Environment) ExpectParsedProviderID(providerID string) string {
+	GinkgoHelper()
+	providerIDSplit := strings.Split(providerID, "/")
+	Expect(len(providerIDSplit)).ToNot(Equal(0))
+	return providerIDSplit[len(providerIDSplit)-1]
+}
+
 // ExpectCreatedOrUpdated can update objects in the cluster to match the inputs.
 // WARNING: ExpectUpdated ignores the resource version check, which can result in
 // overwriting changes made by other controllers in the cluster.
@@ -112,6 +173,67 @@ func (env *Environment) ExpectCreatedOrUpdated(objects ...client.Object) {
 			env.ExpectUpdated(o)
 		}
 	}
+}
+
+func (env *Environment) ReplaceNodeConditions(node *corev1.Node, conds ...corev1.NodeCondition) *corev1.Node {
+	keys := sets.New[string](lo.Map(conds, func(c corev1.NodeCondition, _ int) string { return string(c.Type) })...)
+	node.Status.Conditions = lo.Reject(node.Status.Conditions, func(c corev1.NodeCondition, _ int) bool {
+		return keys.Has(string(c.Type))
+	})
+	node.Status.Conditions = append(node.Status.Conditions, conds...)
+	return node
+}
+
+// ConsistentlyExpectDisruptionsUntilNoneLeft consistently ensures a max on number of concurrently disrupting and non-terminating nodes.
+// This actually uses an Eventually() under the hood so that when we reach 0 tainted nodes we exit early.
+// We use the StopTrying() so that we can exit the Eventually() if we've breached an assertion on total concurrency of disruptions.
+// For example: if we have 5 nodes, with a budget of 2 nodes, we ensure that `disruptingNodes <= maxNodesDisrupting=2`
+// We use nodesAtStart+maxNodesDisrupting to assert that we're not creating too many instances in replacement.
+func (env *Environment) ConsistentlyExpectDisruptionsUntilNoneLeft(nodesAtStart, maxNodesDisrupting int, timeout time.Duration) {
+	GinkgoHelper()
+	nodes := []corev1.Node{}
+	// We use an eventually to exit when we detect the number of tainted/disrupted nodes matches our target.
+	Eventually(func(g Gomega) {
+		// Grab Nodes and NodeClaims
+		nodeClaimList := &v1.NodeClaimList{}
+		nodeList := &corev1.NodeList{}
+		g.Expect(env.Client.List(env, nodeClaimList, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
+		g.Expect(env.Client.List(env, nodeList, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
+
+		// Don't include NodeClaims with the `Terminating` status condition, as they're not included in budgets
+		removedProviderIDs := sets.Set[string]{}
+		nodeClaimList.Items = lo.Filter(nodeClaimList.Items, func(nc v1.NodeClaim, _ int) bool {
+			if !nc.StatusConditions().IsTrue(v1.ConditionTypeInstanceTerminating) {
+				return true
+			}
+			removedProviderIDs.Insert(nc.Status.ProviderID)
+			return false
+		})
+		if len(nodeClaimList.Items) > nodesAtStart+maxNodesDisrupting {
+			StopTrying(fmt.Sprintf("Too many nodeclaims created. Expected no more than %d, got %d", nodesAtStart+maxNodesDisrupting, len(nodeClaimList.Items))).Now()
+		}
+
+		// Don't include Nodes whose NodeClaims have been ignored
+		nodeList.Items = lo.Filter(nodeList.Items, func(n corev1.Node, _ int) bool {
+			return !removedProviderIDs.Has(n.Spec.ProviderID)
+		})
+		if len(nodeList.Items) > nodesAtStart+maxNodesDisrupting {
+			StopTrying(fmt.Sprintf("Too many nodes created. Expected no more than %d, got %d", nodesAtStart+maxNodesDisrupting, len(nodeList.Items))).Now()
+		}
+
+		// Filter further by the number of tainted nodes to get the number of nodes that are disrupting
+		nodes = lo.Filter(nodeList.Items, func(n corev1.Node, _ int) bool {
+			_, ok := lo.Find(n.Spec.Taints, func(t corev1.Taint) bool {
+				return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
+			})
+			return ok
+		})
+		if len(nodes) > maxNodesDisrupting {
+			StopTrying(fmt.Sprintf("Too many disruptions detected. Expected no more than %d, got %d", maxNodesDisrupting, len(nodeList.Items))).Now()
+		}
+
+		g.Expect(nodes).To(HaveLen(0))
+	}).WithTimeout(timeout).WithPolling(5 * time.Second).Should(Succeed())
 }
 
 func (env *Environment) ExpectSettings() (res []corev1.EnvVar) {
@@ -523,7 +645,7 @@ func (env *Environment) EventuallyExpectTaintedNodeCount(comparator string, coun
 	By(fmt.Sprintf("waiting for tainted nodes to be %s to %d", comparator, count))
 	nodeList := &corev1.NodeList{}
 	Eventually(func(g Gomega) {
-		g.Expect(env.Client.List(env, nodeList, client.MatchingFields{"spec.taints[*].karpenter.sh/disruption": "disrupting"})).To(Succeed())
+		g.Expect(env.Client.List(env, nodeList, client.MatchingFields{"spec.taints[*].karpenter.sh/disrupted": "true"})).To(Succeed())
 		g.Expect(len(nodeList.Items)).To(BeNumerically(comparator, count),
 			fmt.Sprintf("expected %d tainted nodes, had %d (%v)", count, len(nodeList.Items), NodeNames(lo.ToSlicePtr(nodeList.Items))))
 	}).Should(Succeed())
@@ -535,7 +657,7 @@ func (env *Environment) EventuallyExpectNodesUntaintedWithTimeout(timeout time.D
 	By(fmt.Sprintf("waiting for %d nodes to be untainted", len(nodes)))
 	nodeList := &corev1.NodeList{}
 	Eventually(func(g Gomega) {
-		g.Expect(env.Client.List(env, nodeList, client.MatchingFields{"spec.taints[*].karpenter.sh/disruption": "disrupting"})).To(Succeed())
+		g.Expect(env.Client.List(env, nodeList, client.MatchingFields{"spec.taints[*].karpenter.sh/disrupted": "true"})).To(Succeed())
 		taintedNodeNames := lo.Map(nodeList.Items, func(n corev1.Node, _ int) string { return n.Name })
 		g.Expect(taintedNodeNames).ToNot(ContainElements(lo.Map(nodes, func(n *corev1.Node, _ int) interface{} { return n.Name })...))
 	}).WithTimeout(timeout).Should(Succeed())
@@ -661,6 +783,89 @@ func (env *Environment) EventuallyExpectDrifted(nodeClaims ...*v1.NodeClaim) {
 			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
 			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		}
+	}).Should(Succeed())
+}
+
+// ExpectBlockNodeRegistration sets up and validates a node registration blocking mechanism using ValidatingAdmissionPolicy.
+// It creates a policy that prevents nodes from registering if they have the label 'registration: fail'.
+//
+// The function performs the following steps:
+// 1. Verifies the cluster version is 1.28 or higher (requirement for ValidatingAdmissionPolicy)
+// 2. Creates an admission policy that specifically targets node creation
+// 3. Creates a binding for the admission policy to enforce the validation
+// 4. Ensures the policy is active through validation testing
+//
+// Note: Requires Kubernetes version 1.28+ to function properly.
+func (env *Environment) ExpectBlockNodeRegistration() {
+	GinkgoHelper()
+
+	version, err := env.KubeClient.Discovery().ServerVersion()
+	Expect(err).To(BeNil())
+	if version.Minor < "28" {
+		Skip("This test is only valid for K8s >= 1.28")
+	}
+
+	// Define the ValidatingAdmissionPolicy that will inspect node creation requests
+	// The policy's validation expression checks if the 'registration' label equals 'fail'
+	admissionspolicy := &admissionregistrationv1.ValidatingAdmissionPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "admission-policy",
+			Labels: map[string]string{
+				test.DiscoveryLabel: "unspecified",
+			},
+		},
+		Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
+			FailurePolicy: lo.ToPtr(admissionregistrationv1.Fail),
+			MatchConstraints: &admissionregistrationv1.MatchResources{
+				ResourceRules: []admissionregistrationv1.NamedRuleWithOperations{
+					{
+						RuleWithOperations: admissionregistrationv1.RuleWithOperations{
+							Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create},
+							Rule: admissionregistrationv1.Rule{
+								APIGroups:   []string{""},
+								APIVersions: []string{"v1"},
+								Resources:   []string{"nodes"},
+							},
+						},
+					},
+				},
+			},
+			Validations: []admissionregistrationv1.Validation{
+				{
+					Expression: "has(object.metadata.labels.registration) ? object.metadata.labels['registration'] != 'fail' : true",
+				},
+			},
+		},
+	}
+
+	// Create the binding that connects the admission policy to the cluster's admission chain
+	admissionspolicybinding := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "admission-policy-binding",
+			Labels: map[string]string{
+				test.DiscoveryLabel: "unspecified",
+			},
+		},
+		Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{
+			PolicyName:        admissionspolicy.Name,
+			ValidationActions: []admissionregistrationv1.ValidationAction{admissionregistrationv1.Deny},
+		},
+	}
+	// Create both the policy and binding in the cluster
+	env.ExpectCreated(admissionspolicy, admissionspolicybinding)
+
+	// Wait for the admission policy to become active
+	// Note: There can be a delay between resource creation and policy enforcement
+	// We use a dry-run node creation attempt to verify the policy is active
+	Eventually(func(g Gomega) {
+		g.Expect(env.Client.Create(env, &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "test-name",
+				Labels: map[string]string{"registration": "fail"},
+			},
+			Spec: corev1.NodeSpec{
+				ProviderID: "test-provider",
+			}}, client.DryRunAll)).ToNot(Succeed())
 	}).Should(Succeed())
 }
 

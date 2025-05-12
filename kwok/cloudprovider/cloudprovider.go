@@ -19,6 +19,7 @@ package kwok
 import (
 	"context"
 	_ "embed"
+	stderrors "errors"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -77,6 +78,10 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1
 			log.FromContext(ctx).Error(err, "failed creating node from nodeclaim")
 		}
 	}()
+	nodeClassReady := nodeClass.StatusConditions().Get(status.ConditionReady)
+	if nodeClassReady.IsFalse() {
+		return nil, cloudprovider.NewNodeClassNotReadyError(stderrors.New(nodeClassReady.Message))
+	}
 	// convert the node back into a node claim to get the chosen resolved requirement values.
 	return c.toNodeClaim(node)
 }
@@ -153,7 +158,19 @@ func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 }
 
 func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
-	return []cloudprovider.RepairPolicy{}
+	return []cloudprovider.RepairPolicy{
+		// Supported Kubelet Node Conditions
+		{
+			ConditionType:      corev1.NodeReady,
+			ConditionStatus:    corev1.ConditionFalse,
+			TolerationDuration: 10 * time.Minute,
+		},
+		{
+			ConditionType:      corev1.NodeReady,
+			ConditionStatus:    corev1.ConditionUnknown,
+			TolerationDuration: 10 * time.Minute,
+		},
+	}
 }
 
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {

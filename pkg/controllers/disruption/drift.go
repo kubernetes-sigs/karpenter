@@ -62,29 +62,14 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
 	})
 
-	// Do a quick check through the candidates to see if they're empty.
-	// For each candidate that is empty with a nodePool allowing its disruption
-	// add it to the existing command.
-	empty := make([]*Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if len(candidate.reschedulablePods) > 0 {
+		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
+		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
+		// can find their nodes disrupted here, which while that in itself isn't an issue for empty nodes, it could
+		// constrain the `drift` budget.
+		if len(candidate.reschedulablePods) == 0 {
 			continue
 		}
-		// If there's disruptions allowed for the candidate's nodepool,
-		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.NodePool.Name] > 0 {
-			empty = append(empty, candidate)
-			disruptionBudgetMapping[candidate.NodePool.Name]--
-		}
-	}
-	// Disrupt all empty drifted candidates, as they require no scheduling simulations.
-	if len(empty) > 0 {
-		return Command{
-			candidates: empty,
-		}, scheduling.Results{}, nil
-	}
-
-	for _, candidate := range candidates {
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since drift commands can only have one candidate.
