@@ -200,7 +200,12 @@ var _ = Describe("NodeClaim", func() {
 			env.EventuallyExpectNotFound(nodeClaim, node)
 		})
 		It("should delete a NodeClaim after the registration timeout when the node doesn't register", func() {
+			env.ExpectBlockNodeRegistration()
+
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: test.ObjectMeta(metav1.ObjectMeta{
+					Labels: map[string]string{"registration": "fail"},
+				}),
 				Spec: v1.NodeClaimSpec{
 					Requirements: requirements,
 					NodeClassRef: &v1.NodeClassReference{
@@ -210,27 +215,11 @@ var _ = Describe("NodeClaim", func() {
 					},
 				},
 			})
-
 			env.ExpectCreated(nodeClass, nodeClaim)
 			nodeClaim = env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
-			nodeClaim.Status = v1.NodeClaimStatus{
-				Conditions: []status.Condition{
-					{
-						Type:               v1.ConditionTypeLaunched,
-						Status:             metav1.ConditionStatus(corev1.ConditionTrue),
-						LastTransitionTime: metav1.Now(),
-					},
-					{
-						Type:               v1.ConditionTypeRegistered,
-						Status:             metav1.ConditionStatus(corev1.ConditionUnknown),
-						LastTransitionTime: metav1.Time{Time: metav1.Now().Add(-time.Minute * 14)},
-					},
-				},
-			}
-			env.ExpectStatusUpdated(nodeClaim)
 
 			// Expect that the nodeClaim eventually launches and has unknown Registration/Initialization
-			Eventually(func(g Gomega) {
+			Consistently(func(g Gomega) {
 				temp := &v1.NodeClaim{}
 				g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(nodeClaim), temp)).To(Succeed())
 				g.Expect(temp.StatusConditions().Get(v1.ConditionTypeRegistered).IsUnknown()).To(BeTrue())
@@ -240,7 +229,7 @@ var _ = Describe("NodeClaim", func() {
 			// Expect that the nodeClaim is eventually de-provisioned due to the registration timeout
 			Eventually(func(g Gomega) {
 				g.Expect(errors.IsNotFound(env.Client.Get(env.Context, client.ObjectKeyFromObject(nodeClaim), nodeClaim))).To(BeTrue())
-			}).WithTimeout(time.Minute * 3).Should(Succeed())
+			}).WithTimeout(time.Minute * 16).Should(Succeed())
 		})
 		It("should delete a NodeClaim if it references a NodeClass that doesn't exist", func() {
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -283,7 +272,12 @@ var _ = Describe("NodeClaim", func() {
 			env.EventuallyExpectNotFound(nodeClaim)
 		})
 		It("should succeed to garbage collect an Instance that was launched by a NodeClaim but has no Instance mapping", func() {
+			env.ExpectBlockNodeRegistration()
+
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: test.ObjectMeta(metav1.ObjectMeta{
+					Labels: map[string]string{"registration": "fail"},
+				}),
 				Spec: v1.NodeClaimSpec{
 					Requirements: requirements,
 					NodeClassRef: &v1.NodeClassReference{
@@ -294,11 +288,14 @@ var _ = Describe("NodeClaim", func() {
 				},
 			})
 			env.ExpectCreated(nodeClass, nodeClaim)
-			env.EventuallyExpectNodeClaimsReady(nodeClaim)
 			nodeClaim = env.ExpectExists(nodeClaim).(*v1.NodeClaim)
 
 			By("Updated NodeClaim Status")
 			nodeClaim.Status.ProviderID = "test-provider-id"
+			nodeClaim.Status.NodeName = "test-node-name"
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
 			env.ExpectStatusUpdated(nodeClaim)
 			env.EventuallyExpectNotFound(nodeClaim)
 		})

@@ -48,6 +48,7 @@ e2etests: ## Run the e2e suite against your local cluster
 		-v \
 		./suites/$(shell echo $(TEST_SUITE) | tr A-Z a-z)/... \
 		--ginkgo.focus="${FOCUS}" \
+		--ginkgo.skip="${SKIP}" \
 		--ginkgo.timeout=2h \
 		--ginkgo.grace-period=5m \
 		--ginkgo.vv
