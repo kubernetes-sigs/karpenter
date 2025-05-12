@@ -29,6 +29,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -844,6 +845,89 @@ func (env *Environment) EventuallyExpectDrifted(nodeClaims ...*v1.NodeClaim) {
 			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
 			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		}
+	}).Should(Succeed())
+}
+
+// ExpectBlockNodeRegistration sets up and validates a node registration blocking mechanism using ValidatingAdmissionPolicy.
+// It creates a policy that prevents nodes from registering if they have the label 'registration: fail'.
+//
+// The function performs the following steps:
+// 1. Verifies the cluster version is 1.28 or higher (requirement for ValidatingAdmissionPolicy)
+// 2. Creates an admission policy that specifically targets node creation
+// 3. Creates a binding for the admission policy to enforce the validation
+// 4. Ensures the policy is active through validation testing
+//
+// Note: Requires Kubernetes version 1.28+ to function properly.
+func (env *Environment) ExpectBlockNodeRegistration() {
+	GinkgoHelper()
+
+	version, err := env.KubeClient.Discovery().ServerVersion()
+	Expect(err).To(BeNil())
+	if version.Minor < "28" {
+		Skip("This test is only valid for K8s >= 1.28")
+	}
+
+	// Define the ValidatingAdmissionPolicy that will inspect node creation requests
+	// The policy's validation expression checks if the 'registration' label equals 'fail'
+	admissionspolicy := &admissionregistrationv1.ValidatingAdmissionPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "admission-policy",
+			Labels: map[string]string{
+				test.DiscoveryLabel: "unspecified",
+			},
+		},
+		Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
+			FailurePolicy: lo.ToPtr(admissionregistrationv1.Fail),
+			MatchConstraints: &admissionregistrationv1.MatchResources{
+				ResourceRules: []admissionregistrationv1.NamedRuleWithOperations{
+					{
+						RuleWithOperations: admissionregistrationv1.RuleWithOperations{
+							Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create},
+							Rule: admissionregistrationv1.Rule{
+								APIGroups:   []string{""},
+								APIVersions: []string{"v1"},
+								Resources:   []string{"nodes"},
+							},
+						},
+					},
+				},
+			},
+			Validations: []admissionregistrationv1.Validation{
+				{
+					Expression: "has(object.metadata.labels.registration) ? object.metadata.labels['registration'] != 'fail' : true",
+				},
+			},
+		},
+	}
+
+	// Create the binding that connects the admission policy to the cluster's admission chain
+	admissionspolicybinding := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "admission-policy-binding",
+			Labels: map[string]string{
+				test.DiscoveryLabel: "unspecified",
+			},
+		},
+		Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{
+			PolicyName:        admissionspolicy.Name,
+			ValidationActions: []admissionregistrationv1.ValidationAction{admissionregistrationv1.Deny},
+		},
+	}
+	// Create both the policy and binding in the cluster
+	env.ExpectCreated(admissionspolicy, admissionspolicybinding)
+
+	// Wait for the admission policy to become active
+	// Note: There can be a delay between resource creation and policy enforcement
+	// We use a dry-run node creation attempt to verify the policy is active
+	Eventually(func(g Gomega) {
+		g.Expect(env.Client.Create(env, &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "test-name",
+				Labels: map[string]string{"registration": "fail"},
+			},
+			Spec: corev1.NodeSpec{
+				ProviderID: "test-provider",
+			}}, client.DryRunAll)).ToNot(Succeed())
 	}).Should(Succeed())
 }
 

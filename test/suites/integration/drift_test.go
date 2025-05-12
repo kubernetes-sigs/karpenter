@@ -21,7 +21,6 @@ import (
 	"sort"
 	"time"
 
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -422,54 +421,8 @@ var _ = Describe("Drift", Ordered, func() {
 	})
 	Context("Failure", func() {
 		It("should not disrupt a drifted node if the replacement node never registers", func() {
-			version, err := env.KubeClient.Discovery().ServerVersion()
-			Expect(err).To(BeNil())
-			if version.Minor < "28" {
-				Skip("This test is only valid for K8s >= 1.28")
-			}
-			admissionspolicy := &admissionregistrationv1.ValidatingAdmissionPolicy{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "admission-policy",
-					Labels: map[string]string{
-						test.DiscoveryLabel: "unspecified",
-					},
-				},
-				Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
-					FailurePolicy: lo.ToPtr(admissionregistrationv1.Fail),
-					MatchConstraints: &admissionregistrationv1.MatchResources{
-						ResourceRules: []admissionregistrationv1.NamedRuleWithOperations{
-							{
-								RuleWithOperations: admissionregistrationv1.RuleWithOperations{
-									Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create},
-									Rule: admissionregistrationv1.Rule{
-										APIGroups:   []string{""},
-										APIVersions: []string{"v1"},
-										Resources:   []string{"nodes"},
-									},
-								},
-							},
-						},
-					},
-					Validations: []admissionregistrationv1.Validation{
-						{
-							Expression: "has(object.metadata.labels.registration) ? object.metadata.labels['registration'] != 'fail' : true",
-						},
-					},
-				},
-			}
-			admissionspolicybinding := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "admission-policy-binding",
-					Labels: map[string]string{
-						test.DiscoveryLabel: "unspecified",
-					},
-				},
-				Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{
-					PolicyName:        admissionspolicy.Name,
-					ValidationActions: []admissionregistrationv1.ValidationAction{admissionregistrationv1.Deny},
-				},
-			}
-			env.ExpectCreated(admissionspolicy, admissionspolicybinding)
+			env.ExpectBlockNodeRegistration()
+
 			// launch a new nodeClaim
 			var numPods int32 = 2
 			dep := test.Deployment(test.DeploymentOptions{
@@ -484,6 +437,7 @@ var _ = Describe("Drift", Ordered, func() {
 					},
 				},
 			})
+			// Expect only a single node to get tainted due to default disruption budgets
 			nodePool.Spec.Disruption = v1.Disruption{}
 			env.ExpectCreated(dep, nodeClass, nodePool)
 
@@ -531,6 +485,8 @@ var _ = Describe("Drift", Ordered, func() {
 					},
 				},
 			})
+			// Expect only a single node to get tainted due to default disruption budgets
+			nodePool.Spec.Disruption = v1.Disruption{}
 			env.ExpectCreated(dep, nodeClass, nodePool)
 
 			startingNodeClaimState := env.EventuallyExpectCreatedNodeClaimCount("==", int(numPods))
