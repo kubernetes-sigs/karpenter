@@ -196,8 +196,10 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				nodePool3.Name: 1,
 			}
 
+			v := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, v1.DisruptionReasonUnderutilized)
+
 			// Call ComputeCommand which should process all nodepools
-			_, _, _ = consolidation.ComputeCommand(ctx, budgetMapping, candidates...)
+			_, _, _ = consolidation.ComputeCommand(ctx, budgetMapping, v, candidates...)
 
 			// Verify nodePool2 is no longer marked as timed out
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeFalse())
@@ -216,7 +218,9 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				nodePool3.Name: 30,
 			}
 
-			_, _, _ = consolidation.ComputeCommand(ctx, budgetMapping, candidates...)
+			v := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, v1.DisruptionReasonUnderutilized)
+
+			_, _, _ = consolidation.ComputeCommand(ctx, budgetMapping, v, candidates...)
 
 			// Verify all nodepools are marked as timed out
 			// since we timed out before processing any candidates

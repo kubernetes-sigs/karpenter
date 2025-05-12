@@ -50,6 +50,16 @@ func IsValidationError(err error) bool {
 	return errors.As(err, &validationError)
 }
 
+// allow the customization of Validation
+type ValidationOption func(*Validation)
+
+// provide custom behavior for the validate candidates function
+func WithValidateCandidateFunc(fn func(context.Context, ...*Candidate) ([]*Candidate, error)) ValidationOption {
+	return func(v *Validation) {
+		v.validateCandidatesFunc = fn
+	}
+}
+
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
@@ -64,11 +74,13 @@ type Validation struct {
 	recorder      events.Recorder
 	queue         *orchestration.Queue
 	reason        v1.DisruptionReason
+
+	validateCandidatesFunc func(context.Context, ...*Candidate) ([]*Candidate, error)
 }
 
 func NewValidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue, reason v1.DisruptionReason) *Validation {
-	return &Validation{
+	cp cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue, reason v1.DisruptionReason, opts ...ValidationOption) *Validation {
+	v := &Validation{
 		clock:         clk,
 		cluster:       cluster,
 		kubeClient:    kubeClient,
@@ -78,6 +90,14 @@ func NewValidation(clk clock.Clock, cluster *state.Cluster, kubeClient client.Cl
 		queue:         queue,
 		reason:        reason,
 	}
+
+	// set the default ValidateCandidates func
+	v.validateCandidatesFunc = v.ValidateCandidates
+
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
 }
 
 func (v *Validation) IsValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
@@ -94,7 +114,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command, validationPeriod 
 		case <-v.clock.After(waitDuration):
 		}
 	}
-	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
+	validatedCandidates, err := v.validateCandidatesFunc(ctx, cmd.candidates...)
 	if err != nil {
 		return err
 	}
@@ -103,7 +123,7 @@ func (v *Validation) IsValid(ctx context.Context, cmd Command, validationPeriod 
 	}
 	// Revalidate candidates after validating the command. This mitigates the chance of a race condition outlined in
 	// the following GitHub issue: https://github.com/kubernetes-sigs/karpenter/issues/1167.
-	if _, err = v.ValidateCandidates(ctx, validatedCandidates...); err != nil {
+	if _, err = v.validateCandidatesFunc(ctx, validatedCandidates...); err != nil {
 		return err
 	}
 	return nil

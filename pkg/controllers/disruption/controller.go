@@ -181,8 +181,11 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
+
+	v := NewValidation(c.clock, c.cluster, c.kubeClient, c.provisioner, c.cloudProvider, c.recorder, c.queue, disruption.Reason())
+
 	// Determine the disruption action
-	cmd, schedulingResults, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
+	cmd, schedulingResults, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, v, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}

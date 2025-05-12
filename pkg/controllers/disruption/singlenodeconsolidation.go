@@ -50,13 +50,13 @@ func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolid
 
 // ComputeCommand generates a disruption command given candidates
 // nolint:gocyclo
-func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, v *Validation, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if s.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = s.SortCandidates(ctx, candidates)
 
-	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, s.Reason())
+	// v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, s.Reason())
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)

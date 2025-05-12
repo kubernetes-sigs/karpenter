@@ -54,7 +54,7 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 // ComputeCommand generates a disruption command given candidates
 //
 //nolint:gocyclo
-func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, v *Validation, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if e.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
@@ -100,8 +100,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	case <-e.clock.After(consolidationTTL):
 	}
 
-	v := NewValidation(e.clock, e.cluster, e.kubeClient, e.provisioner, e.cloudProvider, e.recorder, e.queue, e.Reason())
-	validatedCandidates, err := v.ValidateCandidates(ctx, cmd.candidates...)
+	validatedCandidates, err := v.validateCandidatesFunc(ctx, cmd.candidates...)
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")

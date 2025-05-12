@@ -17,6 +17,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -623,7 +624,14 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			customValidation := func(ctx context.Context, candidates ...*disruption.Candidate) ([]*disruption.Candidate, error) {
+				standardValidator := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, emptyConsolidation.Reason())
+				return standardValidator.ValidateCandidates(ctx, candidates...)
+			}
+
+			validation := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, emptyConsolidation.Reason(), disruption.WithValidateCandidateFunc(customValidation))
+
+			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, validation, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Equal(disruption.Command{}))
@@ -686,7 +694,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			v := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, emptyConsolidation.Reason())
+
+			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, v, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Equal(disruption.Command{}))
@@ -710,7 +720,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			v := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, multiConsolidation.Reason())
+
+			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, v, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Equal(disruption.Command{}))
@@ -773,7 +785,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			v := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, multiConsolidation.Reason())
+
+			cmd, results, err := multiConsolidation.ComputeCommand(ctx, budgets, v, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Equal(disruption.Command{}))
@@ -797,7 +811,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			v := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, singleConsolidation.Reason())
+
+			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, v, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Equal(disruption.Command{}))
@@ -860,7 +876,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			v := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, singleConsolidation.Reason())
+
+			cmd, results, err := singleConsolidation.ComputeCommand(ctx, budgets, v, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Equal(disruption.Command{}))
@@ -2301,6 +2319,65 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
+		})
+		It("does not delete nodes when there is pod churn", func() {
+			// create our RS so we can link a pod to it
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range 2 {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
+			Expect(err).To(Succeed())
+
+			// create a custom validation function that creates and binds a pod to a node after determining the emtpy candidates and during validation,
+			// this invalidate the command because emptiness bails for the entire batch when there is pod churn
+			customValidation := func(ctx context.Context, candidates ...*disruption.Candidate) ([]*disruption.Candidate, error) {
+				pods := test.Pods(1, test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							// 100m * 10 = 1 vCPU. This should be less than the largest node capacity.
+							corev1.ResourceCPU: resource.MustParse("100m"),
+						},
+					},
+					ObjectMeta: metav1.ObjectMeta{Labels: labels,
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion:         "apps/v1",
+								Kind:               "ReplicaSet",
+								Name:               rs.Name,
+								UID:                rs.UID,
+								Controller:         lo.ToPtr(true),
+								BlockOwnerDeletion: lo.ToPtr(true),
+							},
+						}}})
+				ExpectApplied(ctx, env.Client, pods[0])
+				ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+				standardValidator := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, v1.DisruptionReasonUnderutilized)
+				return standardValidator.ValidateCandidates(ctx, candidates...)
+			}
+
+			validation := disruption.NewValidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue, emptyConsolidation.Reason(), disruption.WithValidateCandidateFunc(customValidation))
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
+			Expect(err).To(Succeed())
+
+			var wg sync.WaitGroup
+			ExpectToWait(fakeClock, &wg)
+			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, validation, candidates...)
+			wg.Wait()
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd).To(Equal(disruption.Command{}))
+
+			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
+
 		})
 		It("can delete nodes if another nodePool has no node template", func() {
 			// create our RS so we can link a pod to it
