@@ -95,6 +95,19 @@ func Subtract(lhs, rhs v1.ResourceList) v1.ResourceList {
 	return result
 }
 
+// SubtractFrom subtracts the src v1.ResourceList from the dest v1.ResourceList in-place
+func SubtractFrom(dest v1.ResourceList, src v1.ResourceList) {
+	if dest == nil {
+		sz := len(src)
+		dest = make(v1.ResourceList, sz)
+	}
+	for resourceName, quantity := range src {
+		current := dest[resourceName]
+		current.Sub(quantity)
+		dest[resourceName] = current
+	}
+}
+
 // podRequests calculates the max between the sum of container resources and max of initContainers along with sidecar feature consideration
 // inspired from https://github.com/kubernetes/kubernetes/blob/e2afa175e4077d767745246662170acd86affeaf/pkg/api/v1/resource/helpers.go#L96
 // https://kubernetes.io/blog/2023/08/25/native-sidecar-containers/
