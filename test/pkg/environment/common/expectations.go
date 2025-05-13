@@ -236,6 +236,68 @@ func (env *Environment) ConsistentlyExpectDisruptionsUntilNoneLeft(nodesAtStart,
 	}).WithTimeout(timeout).WithPolling(5 * time.Second).Should(Succeed())
 }
 
+func (env *Environment) EventuallyExpectLaunchedNodeClaimCount(comparator string, count int) []*v1.NodeClaim {
+	GinkgoHelper()
+	By(fmt.Sprintf("waiting for nodes to be %s to %d", comparator, count))
+	nodeClaimList := &v1.NodeClaimList{}
+	Eventually(func(g Gomega) {
+		g.Expect(env.Client.List(env, nodeClaimList, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
+		g.Expect(lo.CountBy(nodeClaimList.Items, func(nc v1.NodeClaim) bool { return nc.StatusConditions().IsTrue(v1.ConditionTypeLaunched) })).To(BeNumerically(comparator, count),
+			fmt.Sprintf("expected %d nodeclaims, had %d (%v)", count, len(nodeClaimList.Items), NodeClaimNames(lo.ToSlicePtr(nodeClaimList.Items))))
+	}).Should(Succeed())
+	return lo.ToSlicePtr(nodeClaimList.Items)
+}
+
+func (env *Environment) EventuallyExpectConsolidatable(nodeClaims ...*v1.NodeClaim) {
+	GinkgoHelper()
+	Eventually(func(g Gomega) {
+		for _, nc := range nodeClaims {
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(nc), nc)).To(Succeed())
+			g.Expect(nc.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
+		}
+	}).Should(Succeed())
+}
+
+func (env *Environment) ConsistentlyExpectHealthyPods(duration time.Duration, pods ...*corev1.Pod) {
+	GinkgoHelper()
+	By(fmt.Sprintf("expecting %d pods to be ready for %s", len(pods), duration))
+	Consistently(func(g Gomega) {
+		for _, pod := range pods {
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+			g.Expect(pod.Status.Conditions).To(ContainElement(And(
+				HaveField("Type", Equal(corev1.PodReady)),
+				HaveField("Status", Equal(corev1.ConditionTrue)),
+			)))
+		}
+	}, duration.String()).Should(Succeed())
+}
+
+func (env *Environment) EventuallyExpectTerminating(pods ...*corev1.Pod) {
+	GinkgoHelper()
+	env.eventuallyExpectTerminatingWithTimeout(-1, pods...)
+}
+
+func (env *Environment) eventuallyExpectTerminatingWithTimeout(timeout time.Duration, pods ...*corev1.Pod) {
+	GinkgoHelper()
+	Eventually(func(g Gomega) {
+		for _, pod := range pods {
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+			g.Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
+		}
+	}).WithTimeout(timeout).Should(Succeed())
+}
+
+func (env *Environment) ConsistentlyExpectActivePods(duration time.Duration, pods ...*corev1.Pod) {
+	GinkgoHelper()
+	By(fmt.Sprintf("expecting %d pods to be live for %s", len(pods), duration))
+	Consistently(func(g Gomega) {
+		for _, pod := range pods {
+			g.Expect(env.Client.Get(env, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+			g.Expect(pod.DeletionTimestamp.IsZero()).To(BeTrue())
+		}
+	}, duration.String()).Should(Succeed())
+}
+
 func (env *Environment) ExpectSettings() (res []corev1.EnvVar) {
 	GinkgoHelper()
 
