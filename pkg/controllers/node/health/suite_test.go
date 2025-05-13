@@ -116,6 +116,7 @@ var _ = Describe("Node Health", func() {
 			Expect(condition).ToNot(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(condition.Reason).To(Equal(v1.DisruptionReasonUnhealthy))
+			Expect(condition.Message).To(ContainSubstring("BadNode"))
 		})
 		It("should not delete node when unhealthy type does not match cloud provider passed in value", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{

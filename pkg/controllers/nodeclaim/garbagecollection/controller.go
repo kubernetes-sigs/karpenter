@@ -18,12 +18,15 @@ package garbagecollection
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -56,6 +59,7 @@ func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudp
 	}
 }
 
+// nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.garbagecollection")
 
@@ -95,7 +99,22 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		if node != nil && nodeutils.GetCondition(node, corev1.NodeReady).Status == corev1.ConditionTrue {
 			return
 		}
-		if err := c.updateStatusAndDelete(ctx, nodeClaims[i]); err != nil {
+		// update status for each nodeclaim indicating reason for removal
+		statusMessage := fmt.Sprintf("nodeClaim garbage collected - node %s (provider-id: %s) no longer exists in cloud provider",
+			nodeClaims[i].Status.NodeName,
+			nodeClaims[i].Status.ProviderID)
+		stored := nodeClaims[i].DeepCopy()
+		nodeClaims[i].StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, v1.DisruptionReasonGarbageCollected, statusMessage)
+		if !equality.Semantic.DeepEqual(stored, nodeClaims[i]) {
+			if err := c.kubeClient.Status().Patch(ctx, nodeClaims[i], client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+				if errors.IsConflict(err) {
+					errs[i] = fmt.Errorf("conflict updating nodeClaim status, will retry: %w", err)
+				}
+				errs[i] = client.IgnoreNotFound(err)
+				return
+			}
+		}
+		if err := c.kubeClient.Delete(ctx, nodeClaims[i]); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
@@ -114,18 +133,6 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil
-}
-
-func (c *Controller) updateStatusAndDelete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
-	stored := nodeClaim.DeepCopy()
-	nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, v1.DisruptionReasonGarbageCollected, "nodeClaim garbage collected")
-	if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
-		return err
-	}
-	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
