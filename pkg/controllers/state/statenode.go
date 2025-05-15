@@ -91,7 +91,7 @@ func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*core
 
 // Disruptable filters StateNodes that are meet the IsDisruptable condition
 func (n StateNodes) Disruptable(ctx context.Context, clk clock.Clock, kubeClient client.Client) (StateNodes, error) {
-	pdbs, err := pdb.NewLimits(ctx, clk, kubeClient)
+	pdbs, err := pdb.NewLimits(ctx, kubeClient)
 	if err != nil {
 		return StateNodes{}, fmt.Errorf("constructing pdbs, %w", err)
 	}
@@ -103,10 +103,10 @@ func (n StateNodes) Disruptable(ctx context.Context, clk clock.Clock, kubeClient
 	return n, nil
 }
 
-func (n StateNodes) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+func (n StateNodes) CurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
 	var pods []*corev1.Pod
 	for _, node := range n {
-		p, err := node.ReschedulablePods(ctx, kubeClient)
+		p, err := node.CurrentlyReschedulablePods(ctx, kubeClient)
 		if err != nil {
 			return nil, err
 		}
@@ -243,12 +243,12 @@ func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient cli
 	return pods, nil
 }
 
-// ReschedulablePods gets the pods assigned to the Node that are reschedulable based on the kubernetes api-server bindings
-func (in *StateNode) ReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
+// CurrentlyReschedulablePods gets the pods assigned to the Node that are currently reschedulable based on the kubernetes api-server bindings
+func (in *StateNode) CurrentlyReschedulablePods(ctx context.Context, kubeClient client.Client) ([]*corev1.Pod, error) {
 	if in.Node == nil {
 		return nil, nil
 	}
-	return nodeutils.GetReschedulablePods(ctx, kubeClient, in.Node)
+	return nodeutils.GetCurrentlyReschedulablePods(ctx, kubeClient, in.Node)
 }
 
 func (in *StateNode) HostName() string {
