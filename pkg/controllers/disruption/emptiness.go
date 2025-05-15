@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -32,11 +31,13 @@ import (
 // Emptiness is a subreconciler that deletes empty candidates.
 type Emptiness struct {
 	consolidation
+	Validator
 }
 
 func NewEmptiness(c consolidation) *Emptiness {
 	return &Emptiness{
 		consolidation: c,
+		Validator:     NewEmptinessValidator(c),
 	}
 }
 
@@ -54,7 +55,7 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 // ComputeCommand generates a disruption command given candidates
 //
 //nolint:gocyclo
-func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, v *Validation, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if e.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
@@ -100,7 +101,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	case <-e.clock.After(consolidationTTL):
 	}
 
-	validatedCandidates, err := v.validateCandidatesFunc(ctx, cmd.candidates...)
+	validCmd, err := e.Validator.Validate(ctx, cmd, consolidationTTL)
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
@@ -109,15 +110,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 		return Command{}, scheduling.Results{}, err
 	}
 
-	// TODO (jmdeal@): better encapsulate within validation
-	if lo.ContainsBy(validatedCandidates, func(c *Candidate) bool {
-		return len(c.reschedulablePods) != 0
-	}) {
-		log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
-		return Command{}, scheduling.Results{}, nil
-	}
-
-	return cmd, scheduling.Results{}, nil
+	return validCmd, scheduling.Results{}, nil
 }
 
 func (e *Emptiness) Reason() v1.DisruptionReason {

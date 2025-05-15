@@ -38,13 +38,17 @@ const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
 	consolidation
+	Validator
 }
 
 func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidation {
-	return &MultiNodeConsolidation{consolidation: consolidation}
+	return &MultiNodeConsolidation{
+		consolidation: consolidation,
+		Validator:     NewConsolidationValidator(consolidation),
+	}
 }
 
-func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, v *Validation, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
 	if m.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
@@ -96,7 +100,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, scheduling.Results{}, nil
 	}
 
-	if err := v.IsValid(ctx, cmd, consolidationTTL); err != nil {
+	if cmd, err = m.Validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
 			return Command{}, scheduling.Results{}, nil
