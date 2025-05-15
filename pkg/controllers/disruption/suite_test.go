@@ -117,9 +117,8 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
-	cluster.MarkUnconsolidated()
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
 	*queue = lo.FromPtr(NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov))
+	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
 	ctx = options.ToContext(ctx, test.Options())
