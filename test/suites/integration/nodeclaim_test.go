@@ -80,7 +80,7 @@ var _ = Describe("NodeClaim", func() {
 					Resources: v1.ResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("3"),
-							corev1.ResourceMemory: resource.MustParse("64Gi"),
+							corev1.ResourceMemory: resource.MustParse("11Gi"),
 						},
 					},
 					NodeClassRef: &v1.NodeClassReference{
