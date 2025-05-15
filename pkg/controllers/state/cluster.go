@@ -234,6 +234,19 @@ func (c *Cluster) ForEachNode(f func(n *StateNode) bool) {
 	}
 }
 
+// Nodes creates a DeepCopy of all the state nodes that the f func returns true for
+// NOTE: This has a worst case efficiency equal to Nodes()
+func (c *Cluster) NodesAfterFilter(f func(n *StateNode) bool) StateNodes {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return lo.Map(lo.Filter(lo.Values(c.nodes), func(n *StateNode, _ int) bool {
+		return f(n)
+	}), func(n *StateNode, _ int) *StateNode {
+		return n.DeepCopy()
+	})
+}
+
 // Nodes creates a DeepCopy of all state nodes.
 // NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
 func (c *Cluster) Nodes() StateNodes {

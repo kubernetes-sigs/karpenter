@@ -18,26 +18,17 @@ package disruption
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
-	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -69,42 +60,15 @@ type Candidate struct {
 }
 
 //nolint:gocyclo
-func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
-	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue, disruptionClass string) (*Candidate, error) {
-	var err error
+func NewCandidate(ctx context.Context, clk clock.Clock, node *state.StateNode, nodePoolMap map[string]*v1.NodePool,
+	nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType) *Candidate {
 	var pods []*corev1.Pod
-	if err = node.ValidateNodeDisruptable(); err != nil {
-		// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
-		if node.NodeClaim != nil {
-			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
-		}
-		return nil, err
-	}
-	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
-	if queue.HasAny(node.ProviderID()) {
-		return nil, fmt.Errorf("candidate is already being disrupted")
-	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
 	nodePool := nodePoolMap[nodePoolName]
 	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
-	// skip any candidates where we can't determine the nodePool
-	if nodePool == nil || instanceTypeMap == nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("NodePool not found (NodePool=%s)", nodePoolName))...)
-		return nil, serrors.Wrap(fmt.Errorf("nodepool not found"), "NodePool", klog.KRef("", nodePoolName))
-	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
-	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
-		// If the NodeClaim has a TerminationGracePeriod set and the disruption class is eventual, the node should be
-		// considered a candidate even if there's a pod that will block eviction. Other error types should still cause
-		// failure creating the candidate.
-		eventualDisruptionCandidate := node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass
-		if lo.Ternary(eventualDisruptionCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
-			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
-			return nil, err
-		}
-	}
 	return &Candidate{
 		StateNode:         node.DeepCopy(),
 		instanceType:      instanceType,
@@ -114,7 +78,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
 		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
-	}, nil
+	}
 }
 
 type Command struct {
