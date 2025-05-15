@@ -248,7 +248,7 @@ var _ = Describe("NodeClaim", func() {
 		})
 		It("should delete a NodeClaim if it references a NodeClass that isn't Ready", func() {
 			env.ExpectCreated(nodeClass)
-			nodeClass = env.ExpectNodeClassCondition(env.DefaultNodeClass, []status.Condition{
+			nodeClass = env.ExpectNodeClassCondition(nodeClass, []status.Condition{
 				{
 					Type:               "Ready",
 					Status:             metav1.ConditionFalse,

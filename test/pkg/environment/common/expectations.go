@@ -115,7 +115,7 @@ func (env *Environment) ExpectStatusUpdated(objects ...client.Object) {
 	}
 }
 
-func (env *Environment) ExpectNodeClassCondition(nodeclass *unstructured.Unstructured, conditions []status.Condition) client.Object {
+func (env *Environment) ExpectNodeClassCondition(nodeclass *unstructured.Unstructured, conditions []status.Condition) *unstructured.Unstructured {
 	result := nodeclass.DeepCopy()
 
 	err := unstructured.SetNestedSlice(result.Object, lo.Map(conditions, func(condition status.Condition, _ int) interface{} {
