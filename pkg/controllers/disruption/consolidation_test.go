@@ -2318,8 +2318,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			// create a custom validation function that creates and binds a pod to a node after determining the empty candidates and during validation,
-			// this invalidates the command because emptiness bails for the entire batch when there is pod churn
+			// this test validator invalidates the command because it creates pod churn during validaiton
 			emptyConsolidation.Validator = NewTestEmptinessValidator(nodes, nodeClaims, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), WithChurn())
 
 			fakeClock.Step(10 * time.Minute)
