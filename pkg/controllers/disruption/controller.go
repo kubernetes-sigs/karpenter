@@ -180,7 +180,6 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
-
 	// Determine the disruption action
 	cmd, schedulingResults, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
