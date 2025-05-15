@@ -69,9 +69,8 @@ func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim,
 	return v
 }
 
-func (t *TestEmptinessValidator) Reset() {
-	return
-}
+// Satisfy the interface but it isn't run
+func (t *TestEmptinessValidator) Reset() {}
 
 func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
 	var pods []*corev1.Pod
