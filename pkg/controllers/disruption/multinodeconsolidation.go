@@ -49,6 +49,8 @@ func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidat
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+	// needed to reset the validator sync after every run
+	defer m.Validator.Reset()
 	if m.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}

@@ -69,6 +69,10 @@ func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim,
 	return v
 }
 
+func (t *TestEmptinessValidator) Reset() {
+	return
+}
+
 func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
 	var pods []*corev1.Pod
 	if t.churn {

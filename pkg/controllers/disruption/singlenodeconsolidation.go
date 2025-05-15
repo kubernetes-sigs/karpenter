@@ -53,6 +53,8 @@ func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolid
 // ComputeCommand generates a disruption command given candidates
 // nolint:gocyclo
 func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+	// needed to reset the validator sync after every run
+	defer s.Validator.Reset()
 	if s.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}

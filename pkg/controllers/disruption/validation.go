@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"k8s.io/utils/clock"
@@ -52,6 +53,7 @@ func IsValidationError(err error) bool {
 
 type Validator interface {
 	Validate(context.Context, Command, time.Duration) (Command, error)
+	Reset()
 }
 
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
@@ -64,6 +66,7 @@ type validation struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	provisioner   *provisioning.Provisioner
+	once          sync.Once
 	recorder      events.Recorder
 	queue         *orchestration.Queue
 	reason        v1.DisruptionReason
@@ -125,7 +128,9 @@ func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, vali
 
 func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
 	var err error
-	c.start = c.clock.Now()
+	c.once.Do(func() {
+		c.start = c.clock.Now()
+	})
 
 	waitDuration := validationPeriod - c.clock.Since(c.start)
 	if waitDuration > 0 {
@@ -148,6 +153,10 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 		return err
 	}
 	return nil
+}
+
+func (v *validation) Reset() {
+	v.once = sync.Once{}
 }
 
 // ValidateCandidates gets the current representation of the provided candidates and ensures that they are all still valid.
@@ -193,7 +202,7 @@ func (v *validation) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	return c.NodePool.Spec.Disruption.ConsolidateAfter.Duration != nil && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
-// Emptiness ShouldDisrupt is used for specific validation done on empty candidates
+// Emptiness ShouldDisrupt checks that the node does not have reschedulable pods
 func (e *EmptinessValidator) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 	// If consolidation is disabled, don't do anything. This emptiness should run for both WhenEmpty and WhenEmptyOrUnderutilized
 	if c.NodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {

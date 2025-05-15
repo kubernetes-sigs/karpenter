@@ -437,8 +437,6 @@ var _ = Describe("Simulate Scheduling", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		fakeClock.Step(10 * time.Minute)
-
 		// disruption won't delete the old node until the new node is ready
 		var wg sync.WaitGroup
 		ExpectToWait(fakeClock, &wg)
