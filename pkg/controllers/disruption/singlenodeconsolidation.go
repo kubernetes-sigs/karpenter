@@ -43,18 +43,17 @@ type SingleNodeConsolidation struct {
 }
 
 func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolidation {
-	return &SingleNodeConsolidation{
+	s := &SingleNodeConsolidation{
 		consolidation:             consolidation,
 		PreviouslyUnseenNodePools: sets.New[string](),
-		Validator:                 NewConsolidationValidator(consolidation),
 	}
+	s.Validator = NewConsolidationValidator(consolidation, s.ShouldDisrupt)
+	return s
 }
 
 // ComputeCommand generates a disruption command given candidates
 // nolint:gocyclo
 func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
-	// needed to reset the validator sync after every run
-	defer s.Validator.Reset()
 	if s.IsConsolidated() {
 		return Command{}, scheduling.Results{}, nil
 	}
@@ -101,7 +100,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		if cmd.Decision() == NoOpDecision {
 			continue
 		}
-		if _, err = s.Validator.Validate(ctx, cmd, consolidationTTL); err != nil {
+		if _, err = s.Validate(ctx, cmd, consolidationTTL); err != nil {
 			if IsValidationError(err) {
 				log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid")
 				return Command{}, scheduling.Results{}, nil

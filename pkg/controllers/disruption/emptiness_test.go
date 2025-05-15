@@ -69,9 +69,6 @@ func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim,
 	return v
 }
 
-// Satisfy the interface but it isn't run
-func (t *TestEmptinessValidator) Reset() {}
-
 func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
 	var pods []*corev1.Pod
 	if t.churn {
@@ -102,7 +99,7 @@ func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Co
 		ExpectApplied(ctx, env.Client, pods[0])
 		ExpectManualBinding(ctx, env.Client, pods[0], t.nodes[0])
 	}
-	return t.emptiness.Validate(ctx, cmd, time.Minute)
+	return t.emptiness.Validate(ctx, cmd, 0)
 }
 
 var _ = Describe("Emptiness", func() {

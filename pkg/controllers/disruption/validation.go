@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"k8s.io/utils/clock"
@@ -28,7 +27,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -53,7 +51,6 @@ func IsValidationError(err error) bool {
 
 type Validator interface {
 	Validate(context.Context, Command, time.Duration) (Command, error)
-	Reset()
 }
 
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
@@ -66,17 +63,17 @@ type validation struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	provisioner   *provisioning.Provisioner
-	once          sync.Once
 	recorder      events.Recorder
 	queue         *orchestration.Queue
 	reason        v1.DisruptionReason
+	filter        CandidateFilter
 }
 
 type EmptinessValidator struct {
 	validation
 }
 
-func NewEmptinessValidator(c consolidation) *EmptinessValidator {
+func NewEmptinessValidator(c consolidation, filter CandidateFilter) *EmptinessValidator {
 	return &EmptinessValidator{
 		validation: validation{
 			clock:         c.clock,
@@ -87,12 +84,13 @@ func NewEmptinessValidator(c consolidation) *EmptinessValidator {
 			recorder:      c.recorder,
 			queue:         c.queue,
 			reason:        v1.DisruptionReasonEmpty,
+			filter:        filter,
 		},
 	}
 }
 
 func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command, _ time.Duration) (Command, error) {
-	validatedCandidates, err := e.validateCandidates(ctx, e.ShouldDisrupt, cmd.candidates...)
+	validatedCandidates, err := e.validateCandidates(ctx, cmd.candidates...)
 	if err != nil {
 		return Command{}, err
 	}
@@ -104,7 +102,7 @@ type ConsolidationValidator struct {
 	validation
 }
 
-func NewConsolidationValidator(c consolidation) *ConsolidationValidator {
+func NewConsolidationValidator(c consolidation, filter CandidateFilter) *ConsolidationValidator {
 	return &ConsolidationValidator{
 		validation: validation{
 			clock:         c.clock,
@@ -115,6 +113,7 @@ func NewConsolidationValidator(c consolidation) *ConsolidationValidator {
 			recorder:      c.recorder,
 			queue:         c.queue,
 			reason:        v1.DisruptionReasonUnderutilized,
+			filter:        filter,
 		},
 	}
 }
@@ -128,9 +127,7 @@ func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, vali
 
 func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
 	var err error
-	c.once.Do(func() {
-		c.start = c.clock.Now()
-	})
+	c.start = c.clock.Now()
 
 	waitDuration := validationPeriod - c.clock.Since(c.start)
 	if waitDuration > 0 {
@@ -140,7 +137,7 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 		case <-c.clock.After(waitDuration):
 		}
 	}
-	validatedCandidates, err := c.validateCandidates(ctx, c.ShouldDisrupt, cmd.candidates...)
+	validatedCandidates, err := c.validateCandidates(ctx, cmd.candidates...)
 	if err != nil {
 		return err
 	}
@@ -149,14 +146,10 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 	}
 	// Revalidate candidates after validating the command. This mitigates the chance of a race condition outlined in
 	// the following GitHub issue: https://github.com/kubernetes-sigs/karpenter/issues/1167.
-	if _, err = c.validateCandidates(ctx, c.ShouldDisrupt, validatedCandidates...); err != nil {
+	if _, err = c.validateCandidates(ctx, validatedCandidates...); err != nil {
 		return err
 	}
 	return nil
-}
-
-func (v *validation) Reset() {
-	v.once = sync.Once{}
 }
 
 // ValidateCandidates gets the current representation of the provided candidates and ensures that they are all still valid.
@@ -167,9 +160,9 @@ func (v *validation) Reset() {
 //	c. It must still be disruptable without violating node disruption budgets
 //
 // If these conditions are met for all candidates, ValidateCandidates returns a slice with the updated representations.
-func (v *validation) validateCandidates(ctx context.Context, filter CandidateFilter, candidates ...*Candidate) ([]*Candidate, error) {
+func (v *validation) validateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
 	// GracefulDisruptionClass is hardcoded here because ValidateCandidates is only used for consolidation disruption. All consolidation disruption is graceful disruption.
-	validatedCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, filter, GracefulDisruptionClass, v.queue)
+	validatedCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.filter, GracefulDisruptionClass, v.queue)
 	if err != nil {
 		return nil, fmt.Errorf("constructing validation candidates, %w", err)
 	}
@@ -195,22 +188,6 @@ func (v *validation) validateCandidates(ctx context.Context, filter CandidateFil
 		disruptionBudgetMapping[vc.NodePool.Name]--
 	}
 	return validatedCandidates, nil
-}
-
-// ShouldDisrupt is a predicate used to filter candidates
-func (v *validation) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	return c.NodePool.Spec.Disruption.ConsolidateAfter.Duration != nil && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
-}
-
-// Emptiness ShouldDisrupt checks that the node does not have reschedulable pods
-func (e *EmptinessValidator) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	// If consolidation is disabled, don't do anything. This emptiness should run for both WhenEmpty and WhenEmptyOrUnderutilized
-	if c.NodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
-		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.NodePool.Name))...)
-		return false
-	}
-	// return true if there are no pods and the nodeclaim is consolidatable
-	return len(c.reschedulablePods) == 0 && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()
 }
 
 // ValidateCommand validates a command for a Method
