@@ -57,7 +57,6 @@ type Validator interface {
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
 type validation struct {
-	start         time.Time
 	clock         clock.Clock
 	cluster       *state.Cluster
 	kubeClient    client.Client
@@ -127,9 +126,8 @@ func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, vali
 
 func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
 	var err error
-	c.start = c.clock.Now()
-
-	waitDuration := validationPeriod - c.clock.Since(c.start)
+	validationStart := c.clock.Now()
+	waitDuration := validationPeriod - c.clock.Since(validationStart)
 	if waitDuration > 0 {
 		select {
 		case <-ctx.Done():
