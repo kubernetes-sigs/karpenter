@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -65,6 +66,8 @@ var (
 		&schedulingv1.PriorityClass{},
 		&corev1.Node{},
 		&v1.NodeClaim{},
+		&admissionregistrationv1.ValidatingAdmissionPolicy{},
+		&admissionregistrationv1.ValidatingAdmissionPolicyBinding{},
 	}
 )
 
@@ -157,12 +160,13 @@ func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {
 					defer GinkgoRecover()
 					g.Expect(env.ExpectTestingFinalizerRemoved(&metaList.Items[i])).To(Succeed())
 					g.Expect(client.IgnoreNotFound(env.Client.Delete(env, &metaList.Items[i],
+						client.PropagationPolicy(metav1.DeletePropagationForeground),
 						&client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))).To(Succeed())
 				})
 				// If the deletes eventually succeed, we should have no elements here at the end of the test
 				g.Expect(env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel}), client.Limit(1))).To(Succeed())
 				g.Expect(metaList.Items).To(HaveLen(0))
-			}).WithTimeout(10 * time.Minute).Should(Succeed())
+			}).Should(Succeed())
 		}(obj)
 	}
 	wg.Wait()

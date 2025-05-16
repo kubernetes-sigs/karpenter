@@ -182,7 +182,6 @@ As part of the initial functional integration testing, the cloud-agnostic tests 
         * should create a NodeClaim propagating all NodeClaim spec details
         * should remove the cloudProvider NodeClaim when the cluster NodeClaim is deleted
         * should delete a NodeClaim from the node termination finalizer 
-        * should create a NodeClaim with custom labels passed through the userData
         * should delete a NodeClaim after the registration timeout when the node doesn’t register
         * should delete a NodeClaim if it references a NodeClass that doesn’t exist
         * should delete a NodeClaim if it references a NodeClass that isn’t Ready 

@@ -18,6 +18,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,68 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
+
+type TestEmptinessValidator struct {
+	churn      bool
+	nodes      []*corev1.Node
+	nodeClaims []*v1.NodeClaim
+	nodePool   *v1.NodePool
+	emptiness  *disruption.EmptinessValidator
+}
+
+type TestEmptinessValidatorOption func(*TestEmptinessValidator)
+
+func WithChurn() TestEmptinessValidatorOption {
+	return func(v *TestEmptinessValidator) {
+		v.churn = true
+	}
+}
+
+func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool, e *disruption.EmptinessValidator, opts ...TestEmptinessValidatorOption) disruption.Validator {
+	v := &TestEmptinessValidator{
+		nodes:      nodes,
+		nodeClaims: nodeClaims,
+		nodePool:   nodePool,
+		emptiness:  e,
+	}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
+}
+
+func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
+	var pods []*corev1.Pod
+	if t.churn {
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, t.nodes, t.nodeClaims)
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		// Simulate churn
+		pods = test.Pods(1, test.PodOptions{
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					// 100m * 10 = 1 vCPU. This should be less than the largest node capacity.
+					corev1.ResourceCPU: resource.MustParse("100m"),
+				},
+			},
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				"app": "test",
+			},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
+				}}})
+		ExpectApplied(ctx, env.Client, pods[0])
+		ExpectManualBinding(ctx, env.Client, pods[0], t.nodes[0])
+	}
+	return t.emptiness.Validate(ctx, cmd, 0)
+}
 
 var _ = Describe("Emptiness", func() {
 	var nodePool *v1.NodePool
@@ -411,6 +474,31 @@ var _ = Describe("Emptiness", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
+		It("can delete empty and drifted nodes", func() {
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectToWait(fakeClock, &wg)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
+			ExpectSingletonReconciled(ctx, queue)
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
+				metrics.ReasonLabel: "empty",
+			})
+		})
 		It("should ignore nodes without the consolidatable status condition", func() {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
 			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
@@ -438,6 +526,28 @@ var _ = Describe("Emptiness", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
+		})
+		It("should delete nodes with the karpenter.sh/do-not-disrupt annotation set to false", func() {
+			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "false"})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			fakeClock.Step(10 * time.Minute)
+			wg := sync.WaitGroup{}
+			ExpectToWait(fakeClock, &wg)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			wg.Wait()
+
+			ExpectSingletonReconciled(ctx, queue)
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("should ignore nodes that have pods", func() {
 			pod := test.Pod()

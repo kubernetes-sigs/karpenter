@@ -31,32 +31,32 @@ type ExistingNode struct {
 	cachedAvailable v1.ResourceList // Cache so we don't have to re-subtract resources on the StateNode every time
 	cachedTaints    []v1.Taint      // Cache so we don't hae to re-construct the taints each time we attempt to schedule a pod
 
-	Pods         []*v1.Pod
-	topology     *Topology
-	requests     v1.ResourceList
-	requirements scheduling.Requirements
+	Pods               []*v1.Pod
+	topology           *Topology
+	remainingResources v1.ResourceList
+	requirements       scheduling.Requirements
 }
 
 func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, daemonResources v1.ResourceList) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
-	remainingDaemonResources := resources.Subtract(daemonResources, n.DaemonSetRequests())
+	resources.SubtractFrom(daemonResources, n.DaemonSetRequests())
 	// If unexpected daemonset pods schedule to the node due to labels appearing on the node which cause the
 	// DS to be able to schedule, we need to ensure that we don't let our remainingDaemonResources go negative as
 	// it will cause us to mis-calculate the amount of remaining resources
-	for k, v := range remainingDaemonResources {
+	for k, v := range daemonResources {
 		if v.AsApproximateFloat64() < 0 {
 			v.Set(0)
-			remainingDaemonResources[k] = v
+			daemonResources[k] = v
 		}
 	}
 	node := &ExistingNode{
-		StateNode:       n,
-		cachedAvailable: n.Available(),
-		cachedTaints:    taints,
-		topology:        topology,
-		requests:        remainingDaemonResources,
-		requirements:    scheduling.NewLabelRequirements(n.Labels()),
+		StateNode:          n,
+		cachedAvailable:    n.Available(),
+		cachedTaints:       taints,
+		topology:           topology,
+		remainingResources: resources.Subtract(n.Available(), daemonResources),
+		requirements:       scheduling.NewLabelRequirements(n.Labels()),
 	}
 	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
 	topology.Register(v1.LabelHostname, n.HostName())
@@ -79,15 +79,11 @@ func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.
 	if err = n.HostPortUsage().Conflicts(pod, hostPorts); err != nil {
 		return nil, fmt.Errorf("checking host port usage, %w", err)
 	}
-
 	// check resource requests first since that's a pretty likely reason the pod won't schedule on an in-flight
 	// node, which at this point can't be increased in size
-	requests := resources.Merge(n.requests, podData.Requests)
-
-	if !resources.Fits(requests, n.cachedAvailable) {
+	if !resources.Fits(podData.Requests, n.remainingResources) {
 		return nil, fmt.Errorf("exceeds node resources")
 	}
-
 	// Check NodeClaim Affinity Requirements
 	if err = n.requirements.Compatible(podData.Requirements); err != nil {
 		return nil, err
@@ -114,7 +110,7 @@ func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.
 func (n *ExistingNode) Add(pod *v1.Pod, podData *PodData, nodeRequirements scheduling.Requirements, volumes scheduling.Volumes) {
 	// Update node
 	n.Pods = append(n.Pods, pod)
-	n.requests = resources.Merge(n.requests, podData.Requests)
+	resources.SubtractFrom(n.remainingResources, podData.Requests)
 	n.requirements = nodeRequirements
 	n.topology.Record(pod, n.cachedTaints, nodeRequirements)
 	n.HostPortUsage().Add(pod, scheduling.GetHostPorts(pod))

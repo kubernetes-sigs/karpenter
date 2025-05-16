@@ -76,9 +76,12 @@ type Cluster struct {
 	// changed about the cluster that might make consolidation possible. By recording
 	// the state, interested disruption methods can check to see if this has changed to
 	// optimize and not try to disrupt if nothing about the cluster has changed.
-	clusterState      time.Time
-	unsyncedStartTime time.Time
-	antiAffinityPods  sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
+	clusterState time.Time
+
+	unsyncedTimeMu      sync.Mutex
+	unsyncedStartTime   time.Time
+	lastUnsyncedLogTime time.Time
+	antiAffinityPods    sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
@@ -110,12 +113,21 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 	// Set the metric depending on the result of the Synced() call
 	defer func() {
+		c.unsyncedTimeMu.Lock()
+		defer c.unsyncedTimeMu.Unlock()
+
 		if synced {
 			c.unsyncedStartTime = time.Time{}
+			c.lastUnsyncedLogTime = time.Time{}
 			ClusterStateUnsyncedTimeSeconds.Set(0, nil)
 		} else {
 			if c.unsyncedStartTime.IsZero() {
 				c.unsyncedStartTime = c.clock.Now()
+			}
+			// We want to log every 10s when the cluster hasn't synced for 30s which is long enough for us to think there is an issue
+			if c.clock.Since(c.unsyncedStartTime) > time.Second*30 && c.clock.Since(c.lastUnsyncedLogTime) > time.Second*10 {
+				c.lastUnsyncedLogTime = c.clock.Now()
+				log.FromContext(ctx).WithValues("duration", c.clock.Since(c.unsyncedStartTime).Truncate(time.Second)).Error(fmt.Errorf("waiting on cluster sync"), "cluster is waiting on sync for extended duration")
 			}
 			ClusterStateUnsyncedTimeSeconds.Set(c.clock.Since(c.unsyncedStartTime).Seconds(), nil)
 		}
@@ -530,6 +542,7 @@ func (c *Cluster) Reset() {
 	defer c.mu.Unlock()
 	c.clusterState = time.Time{}
 	c.unsyncedStartTime = time.Time{}
+	c.lastUnsyncedLogTime = time.Time{}
 	c.hasSynced.Store(false)
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
