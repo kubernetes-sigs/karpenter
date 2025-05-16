@@ -2302,7 +2302,7 @@ var _ = Describe("Consolidation", func() {
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
-		FIt("does not delete nodes when there is pod churn", func() {
+		It("does not delete nodes with pod churn, deletes nodes without pod churn", func() {
 			// create our RS so we can link a pod to it
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := range 2 {
