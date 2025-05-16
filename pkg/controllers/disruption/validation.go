@@ -126,9 +126,7 @@ func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, vali
 
 func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
 	var err error
-	validationStart := c.clock.Now()
-	waitDuration := validationPeriod - c.clock.Since(validationStart)
-	if waitDuration > 0 {
+	if validationPeriod > 0 {
 		select {
 		case <-ctx.Done():
 			return errors.New("context canceled")
