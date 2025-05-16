@@ -100,7 +100,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	case <-e.clock.After(consolidationTTL):
 	}
 
-	validCmd, err := e.Validator.Validate(ctx, cmd, consolidationTTL)
+	validCmd, err := e.Validate(ctx, cmd, consolidationTTL)
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")

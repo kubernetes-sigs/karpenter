@@ -126,6 +126,7 @@ func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, vali
 
 func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
 	var err error
+	// TODO: see if this check can be removed, as written, consolidation tests begin hanging with its removal
 	if validationPeriod > 0 {
 		select {
 		case <-ctx.Done():
