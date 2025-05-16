@@ -132,7 +132,7 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 		select {
 		case <-ctx.Done():
 			return errors.New("context canceled")
-		case <-c.clock.After(waitDuration):
+		case <-c.clock.After(validationPeriod):
 		}
 	}
 	validatedCandidates, err := c.validateCandidates(ctx, cmd.candidates...)
