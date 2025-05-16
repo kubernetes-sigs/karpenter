@@ -108,6 +108,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 		}
 		return Command{}, scheduling.Results{}, err
 	}
+
 	return validCmd, scheduling.Results{}, nil
 }
 
