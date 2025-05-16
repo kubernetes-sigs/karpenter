@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -32,10 +33,17 @@ const SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 // SingleNodeConsolidation is the consolidation controller that performs single-node consolidation.
 type SingleNodeConsolidation struct {
 	consolidation
+	PreviouslyUnseenNodePools sets.Set[string]
+	Validator
 }
 
 func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolidation {
-	return &SingleNodeConsolidation{consolidation: consolidation}
+	s := &SingleNodeConsolidation{
+		consolidation:             consolidation,
+		PreviouslyUnseenNodePools: sets.New[string](),
+	}
+	s.Validator = NewConsolidationValidator(consolidation, s.ShouldDisrupt)
+	return s
 }
 
 // ComputeCommand generates a disruption command given candidates
@@ -45,8 +53,6 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		return Command{}, scheduling.Results{}, nil
 	}
 	candidates = s.sortCandidates(candidates)
-
-	v := NewValidation(s.clock, s.cluster, s.kubeClient, s.provisioner, s.cloudProvider, s.recorder, s.queue, s.Reason())
 
 	// Set a timeout
 	timeout := s.clock.Now().Add(SingleNodeConsolidationTimeoutDuration)
@@ -80,7 +86,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		if cmd.Decision() == NoOpDecision {
 			continue
 		}
-		if err := v.IsValid(ctx, cmd, consolidationTTL); err != nil {
+		if _, err = s.Validate(ctx, cmd, consolidationTTL); err != nil {
 			if IsValidationError(err) {
 				log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
 				return Command{}, scheduling.Results{}, nil
