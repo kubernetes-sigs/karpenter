@@ -141,6 +141,10 @@ func (c Command) Decision() Decision {
 	}
 }
 
+func (c Command) Candidates() []*Candidate {
+	return c.candidates
+}
+
 func (c Command) LogValues() []any {
 	podCount := lo.Reduce(c.candidates, func(_ int, cd *Candidate, _ int) int { return len(cd.reschedulablePods) }, 0)
 
