@@ -55,7 +55,7 @@ func TestIntegration(t *testing.T) {
 		}
 		env.Stop()
 	})
-	RunSpecs(t, "Integration")
+	RunSpecs(t, "Regression")
 }
 
 var _ = BeforeEach(func() {
