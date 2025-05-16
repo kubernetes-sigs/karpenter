@@ -61,7 +61,6 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	}
 	candidates = e.sortCandidates(candidates)
 
-	// empty := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
 	empty := lo.Filter(candidates, func(candidate *Candidate, _ int) bool {
 		if len(candidate.reschedulablePods) > 0 {
