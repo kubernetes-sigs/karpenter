@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -60,22 +61,19 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	}
 	candidates = e.sortCandidates(candidates)
 
-	empty := make([]*Candidate, 0, len(candidates))
+	// empty := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
-	for _, candidate := range candidates {
+	empty := lo.Filter(candidates, func(candidate *Candidate, _ int) bool {
 		if len(candidate.reschedulablePods) > 0 {
-			continue
+			return false
 		}
 		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
-			// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 			constrainedByBudgets = true
-			continue
+			return false
 		}
-		// If there's disruptions allowed for the candidate's nodepool,
-		// add it to the list of candidates, and decrement the budget.
-		empty = append(empty, candidate)
 		disruptionBudgetMapping[candidate.NodePool.Name]--
-	}
+		return true
+	})
 	// none empty, so do nothing
 	if len(empty) == 0 {
 		// if there are no candidates, but a nodepool had a fully blocking budget,
