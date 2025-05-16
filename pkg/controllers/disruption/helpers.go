@@ -43,6 +43,7 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
@@ -180,12 +181,58 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
-		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
-		return cn, e == nil
+
+	// Check if a node could be a possible candidate before we deep copy it.
+	candidates := lo.Map(cluster.NodesAfterFilter(NodeIsPossibleCandidateFunc(ctx, kubeClient, recorder, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)), func(n *state.StateNode, _ int) *Candidate {
+		cn := NewCandidate(ctx, clk, n, nodePoolMap, nodePoolToInstanceTypesMap)
+		return cn
 	})
 	// Filter only the valid candidates that we should disrupt
 	return lo.Filter(candidates, func(c *Candidate, _ int) bool { return shouldDisrupt(ctx, c) }), nil
+}
+
+// returns a function that can be used to filter out nodes that are not possible candidates before
+// copying them.
+// NOTE: This function should not mutate the node as it is not a state node
+func NodeIsPossibleCandidateFunc(ctx context.Context, kubeClient client.Client, recorder events.Recorder, pdbs pdb.Limits,
+	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *orchestration.Queue, disruptionClass string) func(n *state.StateNode) bool {
+	return func(node *state.StateNode) bool {
+		var err error
+		if err = node.ValidateNodeDisruptable(); err != nil {
+			// Only emit an event if the NodeClaim is not nil, ensuring that we only emit events for Karpenter-managed nodes
+			if node.NodeClaim != nil {
+				recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
+			}
+			return false
+		}
+
+		// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
+		if queue.HasAny(node.ProviderID()) {
+			return false
+		}
+
+		// We know that the node will have the label key because of the node.IsDisruptable check above
+		nodePoolName := node.Labels()[v1.NodePoolLabelKey]
+		nodePool := nodePoolMap[nodePoolName]
+		instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
+		// skip any candidates where we can't determine the nodePool
+		if nodePool == nil || instanceTypeMap == nil {
+			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("NodePool not found (NodePool=%s)", nodePoolName))...)
+			return false
+		}
+
+		if _, err := node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
+			// If the NodeClaim has a TerminationGracePeriod set and the disruption class is eventual, the node should be
+			// considered a candidate even if there's a pod that will block eviction. Other error types should still cause
+			// failure creating the candidate.
+			eventualDisruptionCandidate := node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass
+			if lo.Ternary(eventualDisruptionCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
+				recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
+				return false
+			}
+		}
+		return true
+	}
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map

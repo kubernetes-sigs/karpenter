@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
-	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
 
 var nodePool1, nodePool2, nodePool3 *v1.NodePool
@@ -101,8 +100,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 
 	Context("Candidate Shuffling", func() {
 		It("should sort candidates by disruption cost", func() {
-			candidates, err := createCandidates(1.0, 3)
-			Expect(err).To(BeNil())
+			candidates := createCandidates(1.0, 3)
 
 			sortedCandidates := consolidation.SortCandidates(ctx, candidates)
 
@@ -114,8 +112,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 		})
 
 		It("should prioritize nodepools that timed out in previous runs", func() {
-			candidates, err := createCandidates(1.0, 3)
-			Expect(err).To(BeNil())
+			candidates := createCandidates(1.0, 3)
 
 			consolidation.PreviouslyUnseenNodePools.Insert(nodePool2.Name)
 			sortedCandidates := consolidation.SortCandidates(ctx, candidates)
@@ -128,14 +125,11 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			// Create candidates with different disruption costs
 			// We'll create 3 sets of candidates with costs 1.0, 2.0, and 3.0
 			// Use 1 node per nodepool to make the test more predictable
-			candidates1, err := createCandidates(1.0, 1)
-			Expect(err).To(BeNil())
+			candidates1 := createCandidates(1.0, 1)
 
-			candidates2, err := createCandidates(2.0, 1)
-			Expect(err).To(BeNil())
+			candidates2 := createCandidates(2.0, 1)
 
-			candidates3, err := createCandidates(3.0, 1)
-			Expect(err).To(BeNil())
+			candidates3 := createCandidates(3.0, 1)
 
 			// Combine all candidates
 			allCandidates := append(candidates3, append(candidates2, candidates1...)...)
@@ -184,8 +178,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 
 		It("should reset timed out nodepools when all nodepools are evaluated", func() {
 			// Create candidates from different nodepools
-			candidates, err := createCandidates(1.0, 1)
-			Expect(err).To(BeNil())
+			candidates := createCandidates(1.0, 1)
 
 			// Mark nodePool2 as timed out
 			consolidation.PreviouslyUnseenNodePools.Insert(nodePool2.Name)
@@ -206,8 +199,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 		It("should mark nodepools as timed out when timeout occurs", func() {
 			disruption.SingleNodeConsolidationTimeoutDuration = -5 * time.Second
 			// Create many candidates to trigger timeout
-			candidates, err := createCandidates(1.0, 10)
-			Expect(err).To(BeNil())
+			candidates := createCandidates(1.0, 10)
 
 			// Create a budget mapping that allows all disruptions
 			budgetMapping := map[string]int{
@@ -227,7 +219,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 	})
 })
 
-func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disruption.Candidate, error) {
+func createCandidates(disruptionCost float64, nodesPerNodePool ...int) []*disruption.Candidate {
 	// Default to 3 nodes per nodepool if not specified
 	numNodesPerNodePool := 3
 	if len(nodesPerNodePool) > 0 && nodesPerNodePool[0] > 0 {
@@ -268,29 +260,16 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 		}
 	}
 
-	limits, err := pdb.NewLimits(ctx, env.Client)
-	if err != nil {
-		return nil, err
-	}
-
 	return lo.Map(nodeClaims, func(nodeClaim *v1.NodeClaim, _ int) *disruption.Candidate {
 		stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
-		candidate, err := disruption.NewCandidate(
+		candidate := disruption.NewCandidate(
 			ctx,
-			env.Client,
-			recorder,
 			fakeClock,
 			stateNode,
-			limits,
 			nodePoolMap,
 			nodePoolInstanceTypeMap,
-			queue,
-			disruption.GracefulDisruptionClass,
 		)
-		if err != nil {
-			return nil
-		}
 		candidate.DisruptionCost = disruptionCost
 		return candidate
-	}), nil
+	})
 }
