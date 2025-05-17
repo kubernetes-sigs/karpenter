@@ -35,10 +35,12 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
-var ctx context.Context
-var hydrationController *hydration.Controller
-var env *test.Environment
-var cloudProvider *fake.CloudProvider
+var (
+	ctx                 context.Context
+	hydrationController *hydration.Controller
+	env                 *test.Environment
+	cloudProvider       *fake.CloudProvider
+)
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
