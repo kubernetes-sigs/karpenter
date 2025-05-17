@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/mitchellh/hashstructure/v2"
@@ -78,6 +79,7 @@ type Disruption struct {
 	// the most restrictive value. If left undefined,
 	// this will default to one budget with a value to 10%.
 	// +kubebuilder:validation:XValidation:message="'schedule' must be set with 'duration'",rule="self.all(x, has(x.schedule) == has(x.duration))"
+	// +kubebuilder:validation:XValidation:message="'timeZone' can only be set when 'schedule' is set",rule="self.all(x, !has(x.timeZone) || has(x.schedule))"
 	// +kubebuilder:default:={{nodes: "10%"}}
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
@@ -104,7 +106,6 @@ type Budget struct {
 	Nodes string `json:"nodes" hash:"ignore"`
 	// Schedule specifies when a budget begins being active, following
 	// the upstream cronjob syntax. If omitted, the budget is always active.
-	// Timezones are not supported.
 	// This field is required if Duration is set.
 	// +kubebuilder:validation:Pattern:=`^(@(annually|yearly|monthly|weekly|daily|midnight|hourly))|((.+)\s(.+)\s(.+)\s(.+)\s(.+))$`
 	// +optional
@@ -119,6 +120,12 @@ type Budget struct {
 	// +kubebuilder:validation:Type="string"
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty" hash:"ignore"`
+	// TimeZone specifies the timezone the Schedule is evaluated against.
+	// If not specified, this will default to the UTC.
+	// See https://en.wikipedia.org/wiki/List_of_tz_database_time_zones for valid time zones.
+	// +kubebuilder:validation:Type="string"
+	// +optional
+	TimeZone *string `json:"timeZone,omitempty" hash:"ignore"`
 }
 
 type ConsolidationPolicy string
@@ -355,16 +362,24 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	if in.Schedule == nil && in.Duration == nil {
 		return true, nil
 	}
-	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=UTC %s", lo.FromPtr(in.Schedule)))
+	tz := "UTC"
+	if in.TimeZone != nil && *in.TimeZone != "" {
+		tz = *in.TimeZone
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return false, fmt.Errorf("invalid time zone %q: %w", tz, err)
+	}
+	schedule, err := cron.ParseStandard(fmt.Sprintf("TZ=%s %s", tz, lo.FromPtr(in.Schedule)))
 	if err != nil {
 		// Should only occur if there's a discrepancy
 		// with the validation regex and the cron package.
 		return false, serrors.Wrap(fmt.Errorf("invariant violated, invalid cron"), "cron", schedule)
 	}
 	// Walk back in time for the duration associated with the schedule
-	checkPoint := c.Now().UTC().Add(-lo.FromPtr(in.Duration).Duration)
+	checkPoint := c.Now().In(loc).Add(-lo.FromPtr(in.Duration).Duration)
 	nextHit := schedule.Next(checkPoint)
-	return !nextHit.After(c.Now().UTC()), nil
+	return !nextHit.After(c.Now().In(loc)), nil
 }
 
 func GetIntStrFromValue(str string) intstr.IntOrString {
