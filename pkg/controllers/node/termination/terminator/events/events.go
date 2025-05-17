@@ -25,6 +25,9 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+
+	storagev1 "k8s.io/api/storage/v1"
 )
 
 func EvictPod(pod *corev1.Pod, reason string) events.Event {
@@ -57,6 +60,21 @@ func NodeFailedToDrain(node *corev1.Node, err error) events.Event {
 	}
 }
 
+func NodeAwaitingVolumeDetachmentEvent(node *corev1.Node, volumeAttachments ...*storagev1.VolumeAttachment) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           corev1.EventTypeNormal,
+		Reason:         "AwaitingVolumeDetachment",
+		Message: fmt.Sprintf(
+			"Awaiting deletion of bound volumeattachments (%s)",
+			pretty.Slice(lo.Map(volumeAttachments, func(va *storagev1.VolumeAttachment, _ int) string {
+				return va.Name
+			}), 5),
+		),
+		DedupeValues: []string{node.Name},
+	}
+}
+
 func NodeTerminationGracePeriodExpiring(node *corev1.Node, terminationTime string) events.Event {
 	return events.Event{
 		InvolvedObject: node,
@@ -74,5 +92,28 @@ func NodeClaimTerminationGracePeriodExpiring(nodeClaim *v1.NodeClaim, terminatio
 		Reason:         events.TerminationGracePeriodExpiring,
 		Message:        fmt.Sprintf("All pods will be deleted by %s", terminationTime),
 		DedupeValues:   []string{nodeClaim.Name},
+	}
+}
+
+func DuplicateNodeClaimsFound(node *corev1.Node, nodeClaims ...*v1.NodeClaim) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.TerminationFailed,
+		Message: fmt.Sprintf(
+			"Failed to terminate node, bound to duplicate nodeclaims (%s)",
+			pretty.Slice(lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) string { return nc.Name }), 5),
+		),
+		DedupeValues: []string{node.Name},
+	}
+}
+
+func NodeClaimNotFound(node *corev1.Node, nodeClaims ...*v1.NodeClaim) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.TerminationFailed,
+		Message:        "Failed to terminate node, nodeclaims not found",
+		DedupeValues:   []string{node.Name},
 	}
 }
