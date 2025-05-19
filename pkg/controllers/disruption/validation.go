@@ -174,7 +174,6 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 		return valid, nil
 	}
 	return nil, NewValidationError(fmt.Errorf("a candidate failed validation because it was nominated for a pod or would violate disruption budgets"))
-
 }
 
 // ValidateCandidates gets the current representation of the provided candidates and ensures that they are all still valid.
