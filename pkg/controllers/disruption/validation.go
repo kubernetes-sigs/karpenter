@@ -155,6 +155,7 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 	if err != nil {
 		return nil, fmt.Errorf("constructing validation candidates, %w", err)
 	}
+	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	if len(validatedCandidates) == 0 {
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)))
 	}
