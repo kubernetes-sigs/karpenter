@@ -247,9 +247,8 @@ var _ = Describe("Consolidation", func() {
 			})
 		},
 			Entry("is blocked by budgets", disruption.BlockingBudget, WithBlockingBudget()),
-			Entry("has filtered candidates", disruption.CandidatesFiltered, WithChurn()),
-			// TODO: update to CandidateNominated when changing validation for emptiness
-			Entry("has candidates nominated", disruption.CandidatesFiltered, WithNodeNomination()),
+			Entry("filters out candidates due to pod churn", disruption.CandidatesFiltered, WithChurn()),
+			Entry("filters out candidates due to candidate being nominated", disruption.CandidatesFiltered, WithNodeNomination()),
 		)
 	})
 	Context("Budgets", func() {

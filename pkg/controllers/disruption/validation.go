@@ -38,7 +38,6 @@ import (
 const (
 	BlockingBudget     = "blocking_budget"
 	CandidatesFiltered = "candidates_filtered"
-	CandidateNominated = "candidate_nominated"
 )
 
 type ValidationError struct {
@@ -161,12 +160,14 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 }
 
 func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
+	// This GetCandidates call filters out nodes that were nominated
 	validatedCandidates, err := GetCandidates(ctx, e.cluster, e.kubeClient, e.recorder, e.clock, e.cloudProvider, e.filter, GracefulDisruptionClass, e.queue)
 	if err != nil {
 		return nil, fmt.Errorf("constructing validation candidates, %w", err)
 	}
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	if len(validatedCandidates) == 0 {
+		InvalidatedConsolidationTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesFiltered})
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)))
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, e.cluster, e.clock, e.kubeClient, e.cloudProvider, e.recorder, e.reason)
@@ -174,8 +175,13 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 		return nil, fmt.Errorf("building disruption budgets, %w", err)
 	}
 
+	constrainedByBudgets := false
 	if valid := lo.Filter(validatedCandidates, func(cn *Candidate, _ int) bool {
-		if e.cluster.IsNodeNominated(cn.ProviderID()) || disruptionBudgetMapping[cn.NodePool.Name] == 0 {
+		if e.cluster.IsNodeNominated(cn.ProviderID()) {
+			return false
+		}
+		if disruptionBudgetMapping[cn.NodePool.Name] == 0 {
+			constrainedByBudgets = true
 			return false
 		}
 		disruptionBudgetMapping[cn.NodePool.Name]--
@@ -183,7 +189,11 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 	}); len(valid) > 0 {
 		return valid, nil
 	}
-	return nil, NewValidationError(fmt.Errorf("a candidate failed validation because it was nominated for a pod or would violate disruption budgets"))
+	if constrainedByBudgets {
+		InvalidatedConsolidationTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: BlockingBudget})
+	}
+	InvalidatedConsolidationTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesFiltered})
+	return nil, NewValidationError(fmt.Errorf("%d candidates failed validation because it they were nominated for a pod or would violate disruption budgets", len(candidates)))
 }
 
 // ValidateCandidates gets the current representation of the provided candidates and ensures that they are all still valid.
@@ -215,7 +225,7 @@ func (v *validation) validateCandidates(ctx context.Context, candidates ...*Cand
 	//  b. Disrupting the candidate would violate node disruption budgets
 	for _, vc := range validatedCandidates {
 		if v.cluster.IsNodeNominated(vc.ProviderID()) {
-			InvalidatedConsolidationTotal.Inc(map[string]string{ConsolidationTypeLabel: v.validationType, metrics.ReasonLabel: CandidateNominated})
+			InvalidatedConsolidationTotal.Inc(map[string]string{ConsolidationTypeLabel: v.validationType, metrics.ReasonLabel: CandidatesFiltered})
 			return nil, NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
 		}
 		if disruptionBudgetMapping[vc.NodePool.Name] == 0 {
