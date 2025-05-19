@@ -2301,7 +2301,7 @@ var _ = Describe("Consolidation", func() {
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
 		})
-		It("does not delete nodes when there is pod churn", func() {
+		It("does not delete nodes with pod churn, deletes nodes without pod churn", func() {
 			// create our RS so we can link a pod to it
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := range 2 {
@@ -2328,7 +2328,10 @@ var _ = Describe("Consolidation", func() {
 			wg.Wait()
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmd.Candidates()).To(HaveLen(1))
+			// the test validator manually binds a pod to nodes[0], causing it to no longer be eligible
+			Expect(cmd.Candidates()[0].StateNode.Node.Name).To(Equal(nodes[1].Name))
+			Expect(cmd.Decision()).To(Equal(disruption.DeleteDecision))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 
