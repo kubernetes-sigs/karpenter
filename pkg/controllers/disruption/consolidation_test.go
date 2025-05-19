@@ -179,6 +179,9 @@ var _ = Describe("Consolidation", func() {
 		})
 	})
 	Context("Metrics", func() {
+		BeforeEach(func() {
+			disruption.InvalidatedConsolidationTotal.Reset()
+		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -242,7 +245,6 @@ var _ = Describe("Consolidation", func() {
 				disruption.ConsolidationTypeLabel: "empty",
 				metrics.ReasonLabel:               invalidatedReason,
 			})
-			disruption.InvalidatedConsolidationTotal.Reset()
 		},
 			Entry("is blocked by budgets", disruption.BlockingBudget, WithBlockingBudget()),
 			Entry("has filtered candidates", disruption.CandidatesFiltered, WithChurn()),
@@ -2873,7 +2875,7 @@ var _ = Describe("Consolidation", func() {
 
 			// Setup 100 nodeclaims/nodes with a single nodeclaim/node that is initialized
 			elem := rand.Intn(100) //nolint:gosec
-			for i := 0; i < podCount; i++ {
+			for i := range podCount {
 				m, n := test.NodeClaimAndNode(v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
