@@ -90,7 +90,7 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 }
 
 // Eligible fields for drift are described in the docs
-// https://karpenter.sh/docs/concepts/deprovisioning/#drift
+// https://karpenter.sh/docs/concepts/disruption/#drift
 func areStaticFieldsDrifted(nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) cloudprovider.DriftReason {
 	nodePoolHash, foundNodePoolHash := nodePool.Annotations[v1.NodePoolHashAnnotationKey]
 	nodePoolHashVersion, foundNodePoolHashVersion := nodePool.Annotations[v1.NodePoolHashVersionAnnotationKey]
