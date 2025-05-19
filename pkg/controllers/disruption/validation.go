@@ -31,6 +31,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+)
+
+const (
+	BlockingBudget     = "blocking_budget"
+	CandidatesFiltered = "candidates_filtered"
+	CandidateNominated = "candidate_nominated"
 )
 
 type ValidationError struct {
@@ -57,33 +64,35 @@ type Validator interface {
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
 type validation struct {
-	clock         clock.Clock
-	cluster       *state.Cluster
-	kubeClient    client.Client
-	cloudProvider cloudprovider.CloudProvider
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	queue         *orchestration.Queue
-	reason        v1.DisruptionReason
-	filter        CandidateFilter
+	clock          clock.Clock
+	cluster        *state.Cluster
+	kubeClient     client.Client
+	cloudProvider  cloudprovider.CloudProvider
+	provisioner    *provisioning.Provisioner
+	recorder       events.Recorder
+	queue          *orchestration.Queue
+	reason         v1.DisruptionReason
+	filter         CandidateFilter
+	validationType string
 }
 
 type EmptinessValidator struct {
 	validation
 }
 
-func NewEmptinessValidator(c consolidation, filter CandidateFilter) *EmptinessValidator {
+func NewEmptinessValidator(c consolidation, filter CandidateFilter, validationType string) *EmptinessValidator {
 	return &EmptinessValidator{
 		validation: validation{
-			clock:         c.clock,
-			cluster:       c.cluster,
-			kubeClient:    c.kubeClient,
-			provisioner:   c.provisioner,
-			cloudProvider: c.cloudProvider,
-			recorder:      c.recorder,
-			queue:         c.queue,
-			reason:        v1.DisruptionReasonEmpty,
-			filter:        filter,
+			clock:          c.clock,
+			cluster:        c.cluster,
+			kubeClient:     c.kubeClient,
+			provisioner:    c.provisioner,
+			cloudProvider:  c.cloudProvider,
+			recorder:       c.recorder,
+			queue:          c.queue,
+			reason:         v1.DisruptionReasonEmpty,
+			filter:         filter,
+			validationType: validationType,
 		},
 	}
 }
@@ -101,18 +110,19 @@ type ConsolidationValidator struct {
 	validation
 }
 
-func NewConsolidationValidator(c consolidation, filter CandidateFilter) *ConsolidationValidator {
+func NewConsolidationValidator(c consolidation, filter CandidateFilter, validationType string) *ConsolidationValidator {
 	return &ConsolidationValidator{
 		validation: validation{
-			clock:         c.clock,
-			cluster:       c.cluster,
-			kubeClient:    c.kubeClient,
-			provisioner:   c.provisioner,
-			cloudProvider: c.cloudProvider,
-			recorder:      c.recorder,
-			queue:         c.queue,
-			reason:        v1.DisruptionReasonUnderutilized,
-			filter:        filter,
+			clock:          c.clock,
+			cluster:        c.cluster,
+			kubeClient:     c.kubeClient,
+			provisioner:    c.provisioner,
+			cloudProvider:  c.cloudProvider,
+			recorder:       c.recorder,
+			queue:          c.queue,
+			reason:         v1.DisruptionReasonUnderutilized,
+			filter:         filter,
+			validationType: validationType,
 		},
 	}
 }
@@ -166,6 +176,7 @@ func (v *validation) validateCandidates(ctx context.Context, candidates ...*Cand
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	// If we filtered out any candidates, return nil as some NodeClaims in the consolidation decision have changed.
 	if len(validatedCandidates) != len(candidates) {
+		InvalidatedConsolidationTotal.Inc(map[string]string{ConsolidationTypeLabel: v.validationType, metrics.ReasonLabel: CandidatesFiltered})
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)-len(validatedCandidates)))
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, v.cluster, v.clock, v.kubeClient, v.cloudProvider, v.recorder, v.reason)
@@ -177,9 +188,11 @@ func (v *validation) validateCandidates(ctx context.Context, candidates ...*Cand
 	//  b. Disrupting the candidate would violate node disruption budgets
 	for _, vc := range validatedCandidates {
 		if v.cluster.IsNodeNominated(vc.ProviderID()) {
+			InvalidatedConsolidationTotal.Inc(map[string]string{ConsolidationTypeLabel: v.validationType, metrics.ReasonLabel: CandidateNominated})
 			return nil, NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
 		}
 		if disruptionBudgetMapping[vc.NodePool.Name] == 0 {
+			InvalidatedConsolidationTotal.Inc(map[string]string{ConsolidationTypeLabel: v.validationType, metrics.ReasonLabel: BlockingBudget})
 			return nil, NewValidationError(fmt.Errorf("a candidate can no longer be disrupted without violating budgets"))
 		}
 		disruptionBudgetMapping[vc.NodePool.Name]--

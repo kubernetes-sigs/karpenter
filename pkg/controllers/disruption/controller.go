@@ -162,7 +162,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {
 	defer metrics.Measure(EvaluationDurationSeconds, map[string]string{
 		metrics.ReasonLabel:    strings.ToLower(string(disruption.Reason())),
-		consolidationTypeLabel: disruption.ConsolidationType(),
+		ConsolidationTypeLabel: disruption.ConsolidationType(),
 	})()
 	candidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, disruption.ShouldDisrupt, disruption.Class(), c.queue)
 	if err != nil {
@@ -241,7 +241,7 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	DecisionsPerformedTotal.Inc(map[string]string{
 		decisionLabel:          string(cmd.Decision()),
 		metrics.ReasonLabel:    strings.ToLower(string(m.Reason())),
-		consolidationTypeLabel: m.ConsolidationType(),
+		ConsolidationTypeLabel: m.ConsolidationType(),
 	})
 	return nil
 }

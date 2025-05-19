@@ -222,7 +222,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		DisruptionQueueFailuresTotal.Add(float64(len(failedLaunches)), map[string]string{
 			decisionLabel:          cmd.Decision(),
 			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.reason)),
-			consolidationTypeLabel: cmd.consolidationType,
+			ConsolidationTypeLabel: cmd.consolidationType,
 		})
 		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		multiErr = multierr.Combine(multiErr, state.ClearNodeClaimsCondition(ctx, q.kubeClient, v1.ConditionTypeDisruptionReason, cmd.candidates...))

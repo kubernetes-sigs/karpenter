@@ -27,12 +27,12 @@ import (
 const (
 	voluntaryDisruptionSubsystem = "voluntary_disruption"
 	decisionLabel                = "decision"
-	consolidationTypeLabel       = "consolidation_type"
+	ConsolidationTypeLabel       = "consolidation_type"
 )
 
 func init() {
-	ConsolidationTimeoutsTotal.Add(0, map[string]string{consolidationTypeLabel: MultiNodeConsolidationType})
-	ConsolidationTimeoutsTotal.Add(0, map[string]string{consolidationTypeLabel: SingleNodeConsolidationType})
+	ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: MultiNodeConsolidationType})
+	ConsolidationTimeoutsTotal.Add(0, map[string]string{ConsolidationTypeLabel: SingleNodeConsolidationType})
 }
 
 var (
@@ -45,7 +45,7 @@ var (
 			Help:      "Duration of the disruption decision evaluation process in seconds. Labeled by method and consolidation type.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{metrics.ReasonLabel, consolidationTypeLabel},
+		[]string{metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
 	DecisionsPerformedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
@@ -55,7 +55,7 @@ var (
 			Name:      "decisions_total",
 			Help:      "Number of disruption decisions performed. Labeled by disruption decision, reason, and consolidation type.",
 		},
-		[]string{decisionLabel, metrics.ReasonLabel, consolidationTypeLabel},
+		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
 	EligibleNodes = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
@@ -75,7 +75,17 @@ var (
 			Name:      "consolidation_timeouts_total",
 			Help:      "Number of times the Consolidation algorithm has reached a timeout. Labeled by consolidation type.",
 		},
-		[]string{consolidationTypeLabel},
+		[]string{ConsolidationTypeLabel},
+	)
+	InvalidatedConsolidationTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "failed_validations_total",
+			Help:      "Number of times a consolidation decision was invalidated. Labeled by consolidation type and reason.",
+		},
+		[]string{ConsolidationTypeLabel, metrics.ReasonLabel},
 	)
 	NodePoolAllowedDisruptions = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,

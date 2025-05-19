@@ -214,6 +214,41 @@ var _ = Describe("Consolidation", func() {
 				metrics.ReasonLabel: "underutilized",
 			})
 		})
+		DescribeTable("should correctly report invalidated commands when", func(invalidatedReason string, validatorOpt TestEmptinessValidatorOption) {
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
+			Expect(err).To(Succeed())
+
+			emptyConsolidation.Validator = NewTestEmptinessValidator(cluster, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), validatorOpt)
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectToWait(fakeClock, &wg)
+			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			wg.Wait()
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd).To(Equal(disruption.Command{}))
+
+			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
+			ExpectMetricCounterValue(disruption.InvalidatedConsolidationTotal, 1, map[string]string{
+				disruption.ConsolidationTypeLabel: "empty",
+				metrics.ReasonLabel:               invalidatedReason,
+			})
+			disruption.InvalidatedConsolidationTotal.Reset()
+		},
+			Entry("is blocked by budgets", disruption.BlockingBudget, WithBlockingBudget()),
+			Entry("has filtered candidates", disruption.CandidatesFiltered, WithChurn()),
+			// TODO: update to CandidateNominated when changing validation for emptiness
+			Entry("has candidates nominated", disruption.CandidatesFiltered, WithNodeNomination()),
+		)
 	})
 	Context("Budgets", func() {
 		var numNodes = 10
@@ -2319,7 +2354,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(err).To(Succeed())
 
 			// this test validator invalidates the command because it creates pod churn during validaiton
-			emptyConsolidation.Validator = NewTestEmptinessValidator(nodes, nodeClaims, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), WithChurn())
+			emptyConsolidation.Validator = NewTestEmptinessValidator(cluster, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), WithChurn())
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -2332,7 +2367,6 @@ var _ = Describe("Consolidation", func() {
 			Expect(cmd).To(Equal(disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
-
 		})
 		It("can delete nodes if another nodePool has no node template", func() {
 			// create our RS so we can link a pod to it

@@ -47,7 +47,7 @@ func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolid
 		consolidation:             consolidation,
 		PreviouslyUnseenNodePools: sets.New[string](),
 	}
-	s.Validator = NewConsolidationValidator(consolidation, s.ShouldDisrupt)
+	s.Validator = NewConsolidationValidator(consolidation, s.ShouldDisrupt, s.ConsolidationType())
 	return s
 }
 
@@ -67,7 +67,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 
 	for i, candidate := range candidates {
 		if s.clock.Now().After(timeout) {
-			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: s.ConsolidationType()})
+			ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: s.ConsolidationType()})
 			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning single-node consolidation due to timeout after evaluating %d candidates", i))
 
 			s.PreviouslyUnseenNodePools = unseenNodePools

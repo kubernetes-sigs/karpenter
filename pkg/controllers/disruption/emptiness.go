@@ -36,7 +36,7 @@ type Emptiness struct {
 
 func NewEmptiness(c consolidation) *Emptiness {
 	e := &Emptiness{consolidation: c}
-	e.Validator = NewEmptinessValidator(c, e.ShouldDisrupt)
+	e.Validator = NewEmptinessValidator(c, e.ShouldDisrupt, e.ConsolidationType())
 	return e
 }
 
