@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -147,6 +148,32 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 		return err
 	}
 	return nil
+}
+
+func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
+	validatedCandidates, err := GetCandidates(ctx, e.cluster, e.kubeClient, e.recorder, e.clock, e.cloudProvider, e.filter, GracefulDisruptionClass, e.queue)
+	if err != nil {
+		return nil, fmt.Errorf("constructing validation candidates, %w", err)
+	}
+	validatedCandidates = mapCandidates(candidates, validatedCandidates)
+	if len(validatedCandidates) == 0 {
+		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)))
+	}
+	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, e.cluster, e.clock, e.kubeClient, e.cloudProvider, e.recorder, e.reason)
+	if err != nil {
+		return nil, fmt.Errorf("building disruption budgets, %w", err)
+	}
+
+	if valid := lo.Filter(validatedCandidates, func(cn *Candidate, _ int) bool {
+		if e.cluster.IsNodeNominated(cn.ProviderID()) || disruptionBudgetMapping[cn.NodePool.Name] == 0 {
+			return false
+		}
+		disruptionBudgetMapping[cn.NodePool.Name]--
+		return true
+	}); len(valid) > 0 {
+		return valid, nil
+	}
+	return nil, NewValidationError(fmt.Errorf("a candidate failed validation because it was nominated for a pod or would violate disruption budgets"))
 }
 
 // ValidateCandidates gets the current representation of the provided candidates and ensures that they are all still valid.
