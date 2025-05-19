@@ -175,7 +175,6 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 		return nil, fmt.Errorf("building disruption budgets, %w", err)
 	}
 
-
 	constrainedByBudgets := false
 	if valid := lo.Filter(validatedCandidates, func(cn *Candidate, _ int) bool {
 		if e.cluster.IsNodeNominated(cn.ProviderID()) {
