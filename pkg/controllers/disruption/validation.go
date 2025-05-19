@@ -192,7 +192,6 @@ func (v *validation) validateCandidates(ctx context.Context, candidates ...*Cand
 	}
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	// If we filtered out any candidates, return nil as some NodeClaims in the consolidation decision have changed.
-	// When evaluating emptiness, if we have some valid candidates, proceed with the remaining candidates
 	if len(validatedCandidates) != len(candidates) {
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)-len(validatedCandidates)))
 	}
