@@ -75,7 +75,6 @@ func NewTestEmptinessValidator(cluster *state.Cluster, nodePool *v1.NodePool, e 
 }
 
 func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
-	var pods []*corev1.Pod
 	stateNodes := t.cluster.Nodes()
 	nodes := make([]*corev1.Node, len(stateNodes))
 	nodeClaims := make([]*v1.NodeClaim, len(stateNodes))
@@ -84,47 +83,13 @@ func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Co
 		nodeClaims[i] = stateNode.NodeClaim
 	}
 	if t.blocked {
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-		t.nodePool.Spec.Disruption.Budgets = []v1.Budget{{
-			Nodes: "0%",
-		}}
-		ExpectApplied(ctx, env.Client, t.nodePool)
+		blockingBudget(nodes, nodeClaims, t.nodePool)
 	}
 	if t.churn {
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-		// Simulate churn
-		pods = test.Pods(1, test.PodOptions{
-			ResourceRequirements: corev1.ResourceRequirements{
-				Requests: map[corev1.ResourceName]resource.Quantity{
-					// 100m * 10 = 1 vCPU. This should be less than the largest node capacity.
-					corev1.ResourceCPU: resource.MustParse("100m"),
-				},
-			},
-			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				"app": "test",
-			},
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
-					},
-				}}})
-		ExpectApplied(ctx, env.Client, pods[0])
-		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-		t.cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
-		Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
+		churn(nodes, nodeClaims)
 	}
 	if t.nominated {
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-		// Simulate churn
-		t.cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
-		Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
+		nominated(nodes, nodeClaims, t.cluster)
 	}
 	return t.emptiness.Validate(ctx, cmd, 0)
 }
@@ -171,7 +136,6 @@ func NewTestConsolidationValidator(cluster *state.Cluster, nodePool *v1.NodePool
 }
 
 func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
-	var pods []*corev1.Pod
 	stateNodes := t.cluster.Nodes()
 	nodes := make([]*corev1.Node, len(stateNodes))
 	nodeClaims := make([]*v1.NodeClaim, len(stateNodes))
@@ -180,47 +144,57 @@ func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruptio
 		nodeClaims[i] = stateNode.NodeClaim
 	}
 	if t.blocked {
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-		t.nodePool.Spec.Disruption.Budgets = []v1.Budget{{
-			Nodes: "0%",
-		}}
-		ExpectApplied(ctx, env.Client, t.nodePool)
+		blockingBudget(nodes, nodeClaims, t.nodePool)
 	}
 	if t.churn {
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs)
-		// Simulate churn
-		pods = test.Pods(1, test.PodOptions{
-			ResourceRequirements: corev1.ResourceRequirements{
-				Requests: map[corev1.ResourceName]resource.Quantity{
-					// 100m * 10 = 1 vCPU. This should be less than the largest node capacity.
-					corev1.ResourceCPU: resource.MustParse("100m"),
-				},
-			},
-			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-				"app": "test",
-			},
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "apps/v1",
-						Kind:               "ReplicaSet",
-						Name:               rs.Name,
-						UID:                rs.UID,
-						Controller:         lo.ToPtr(true),
-						BlockOwnerDeletion: lo.ToPtr(true),
-					},
-				}}})
-		ExpectApplied(ctx, env.Client, pods[0])
-		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-		t.cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
-		Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
+		churn(nodes, nodeClaims)
 	}
 	if t.nominated {
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-		// Simulate churn
-		t.cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
-		Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
+		nominated(nodes, nodeClaims, t.cluster)
 	}
 	return t.consolidation.Validate(ctx, cmd, 0)
+}
+
+func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
+	var pods []*corev1.Pod
+	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	rs := test.ReplicaSet()
+	ExpectApplied(ctx, env.Client, rs)
+	pods = test.Pods(1, test.PodOptions{
+		ResourceRequirements: corev1.ResourceRequirements{
+			Requests: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceCPU: resource.MustParse("100m"),
+			},
+		},
+		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+			"app": "test",
+		},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         "apps/v1",
+					Kind:               "ReplicaSet",
+					Name:               rs.Name,
+					UID:                rs.UID,
+					Controller:         lo.ToPtr(true),
+					BlockOwnerDeletion: lo.ToPtr(true),
+				},
+			}}})
+	ExpectApplied(ctx, env.Client, pods[0])
+	ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+	cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
+	Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
+}
+
+func blockingBudget(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool) {
+	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	nodePool.Spec.Disruption.Budgets = []v1.Budget{{
+		Nodes: "0%",
+	}}
+	ExpectApplied(ctx, env.Client, nodePool)
+}
+
+func nominated(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, cluster *state.Cluster) {
+	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
+	Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
 }
