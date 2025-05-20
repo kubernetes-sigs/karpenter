@@ -108,12 +108,12 @@ func DuplicateNodeClaimsFound(node *corev1.Node, nodeClaims ...*v1.NodeClaim) ev
 	}
 }
 
-func NodeClaimNotFound(node *corev1.Node, nodeClaims ...*v1.NodeClaim) events.Event {
+func NodeClaimNotFound(node *corev1.Node) events.Event {
 	return events.Event{
 		InvolvedObject: node,
 		Type:           corev1.EventTypeWarning,
 		Reason:         events.TerminationFailed,
-		Message:        "Failed to terminate node, nodeclaims not found",
+		Message:        "Failed to terminate node, nodeclaim not found",
 		DedupeValues:   []string{node.Name},
 	}
 }
