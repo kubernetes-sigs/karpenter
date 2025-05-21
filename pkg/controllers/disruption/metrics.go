@@ -84,7 +84,7 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "failed_validations_total",
-			Help:      "Number of times a consolidation decision was invalidated. Labeled by consolidation type.",
+			Help:      "Number of candidates that were selected for disruption but failed validation. Labeled by consolidation type.",
 		},
 		[]string{ConsolidationTypeLabel, metrics.ReasonLabel},
 	)
