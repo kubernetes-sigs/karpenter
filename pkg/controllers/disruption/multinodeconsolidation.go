@@ -44,7 +44,7 @@ type MultiNodeConsolidation struct {
 func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidation {
 	return &MultiNodeConsolidation{
 		consolidation: consolidation,
-		Validator:     NewConsolidationValidator(consolidation),
+		Validator:     NewMultiConsolidationValidator(consolidation),
 	}
 }
 

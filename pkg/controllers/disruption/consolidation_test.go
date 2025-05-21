@@ -242,7 +242,7 @@ var _ = Describe("Consolidation", func() {
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{
-				disruption.ConsolidationTypeLabel: "empty",
+				disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType(),
 				metrics.ReasonLabel:               disruption.CandidatesIneligible,
 			})
 		},
@@ -250,7 +250,70 @@ var _ = Describe("Consolidation", func() {
 			Entry("when candidates are filtered out due to pod churn", WithEmptinessChurn()),
 			Entry("when candidates are filtered out due to candidate being nominated", WithEmptinessNodeNomination()),
 		)
-		DescribeTable("should correctly report invalidated commands for underutilized disruption", func(validatorOpt TestConsolidationValidatorOption) {
+		DescribeTable("should correctly report invalidated commands for multi node disruption", func(validatorOpt TestConsolidationValidatorOption) {
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pods := test.Pods(2, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("1")},
+				},
+			})
+			nodeClaim2.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], node, node2, nodeClaim, nodeClaim2, nodePool)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], node)
+			ExpectManualBinding(ctx, env.Client, pods[1], node2)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, node2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+
+			multiNodeConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, multiNodeConsolidation.Reason())
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
+			Expect(err).To(Succeed())
+
+			multiNodeConsolidation.Validator = NewTestConsolidationValidator(cluster, nodePool, multiNodeConsolidation.Validator.(*disruption.ConsolidationValidator), validatorOpt)
+
+			cmd, results, err := multiNodeConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd).To(Equal(disruption.Command{}))
+
+			Expect(multiNodeConsolidation.IsConsolidated()).To(BeFalse())
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{
+				disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType(),
+				metrics.ReasonLabel:               disruption.CandidatesIneligible,
+			})
+		},
+			Entry("when candidates are blocked by budgets", WithUnderutilizedBlockingBudget()),
+			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
+			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination()),
+		)
+		DescribeTable("should correctly report invalidated commands for single node disruption", func(validatorOpt TestConsolidationValidatorOption) {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -274,23 +337,23 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			underutilizedConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, underutilizedConsolidation.Reason())
+			singleNodeConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, singleNodeConsolidation.Reason())
 			Expect(err).To(Succeed())
 
-			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, underutilizedConsolidation.ShouldDisrupt, underutilizedConsolidation.Class(), queue)
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			underutilizedConsolidation.Validator = NewTestConsolidationValidator(cluster, nodePool, underutilizedConsolidation.Validator.(*disruption.ConsolidationValidator), validatorOpt)
+			singleNodeConsolidation.Validator = NewTestConsolidationValidator(cluster, nodePool, singleNodeConsolidation.Validator.(*disruption.ConsolidationValidator), validatorOpt)
 
-			cmd, results, err := underutilizedConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmd, results, err := singleNodeConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(results).To(Equal(pscheduling.Results{}))
 			Expect(cmd).To(Equal(disruption.Command{}))
 
-			Expect(underutilizedConsolidation.IsConsolidated()).To(BeFalse())
+			Expect(singleNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{
-				disruption.ConsolidationTypeLabel: "underutilized",
+				disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType(),
 				metrics.ReasonLabel:               disruption.CandidatesIneligible,
 			})
 		},

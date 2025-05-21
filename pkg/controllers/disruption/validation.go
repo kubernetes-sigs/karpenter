@@ -109,7 +109,8 @@ type ConsolidationValidator struct {
 	validationType string
 }
 
-func NewConsolidationValidator(c consolidation) *ConsolidationValidator {
+func NewSingleConsolidationValidator(c consolidation) *ConsolidationValidator {
+	s := &SingleNodeConsolidation{consolidation: c}
 	return &ConsolidationValidator{
 		validation: validation{
 			clock:         c.clock,
@@ -121,8 +122,26 @@ func NewConsolidationValidator(c consolidation) *ConsolidationValidator {
 			queue:         c.queue,
 			reason:        v1.DisruptionReasonUnderutilized,
 		},
-		filter:         c.ShouldDisrupt,
-		validationType: "underutilized",
+		filter:         s.ShouldDisrupt,
+		validationType: s.ConsolidationType(),
+	}
+}
+
+func NewMultiConsolidationValidator(c consolidation) *ConsolidationValidator {
+	m := &MultiNodeConsolidation{consolidation: c}
+	return &ConsolidationValidator{
+		validation: validation{
+			clock:         c.clock,
+			cluster:       c.cluster,
+			kubeClient:    c.kubeClient,
+			provisioner:   c.provisioner,
+			cloudProvider: c.cloudProvider,
+			recorder:      c.recorder,
+			queue:         c.queue,
+			reason:        v1.DisruptionReasonUnderutilized,
+		},
+		filter:         m.ShouldDisrupt,
+		validationType: m.ConsolidationType(),
 	}
 }
 
@@ -166,7 +185,7 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 	}
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	if len(validatedCandidates) == 0 {
-		FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesIneligible})
+		FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesIneligible})
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)))
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, e.cluster, e.clock, e.kubeClient, e.cloudProvider, e.recorder, e.reason)
@@ -176,9 +195,11 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 
 	if valid := lo.Filter(validatedCandidates, func(cn *Candidate, _ int) bool {
 		if e.cluster.IsNodeNominated(cn.ProviderID()) {
+			FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesIneligible})
 			return false
 		}
 		if disruptionBudgetMapping[cn.NodePool.Name] == 0 {
+			FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesIneligible})
 			return false
 		}
 		disruptionBudgetMapping[cn.NodePool.Name]--
@@ -186,7 +207,6 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 	}); len(valid) > 0 {
 		return valid, nil
 	}
-	FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesIneligible})
 	return nil, NewValidationError(fmt.Errorf("%d candidates failed validation because it they were nominated for a pod or would violate disruption budgets", len(candidates)))
 }
 

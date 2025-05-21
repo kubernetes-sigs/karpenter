@@ -46,7 +46,7 @@ func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolid
 	return &SingleNodeConsolidation{
 		consolidation:             consolidation,
 		PreviouslyUnseenNodePools: sets.New[string](),
-		Validator:                 NewConsolidationValidator(consolidation),
+		Validator:                 NewSingleConsolidationValidator(consolidation),
 	}
 }
 

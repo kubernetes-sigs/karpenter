@@ -195,6 +195,9 @@ func blockingBudget(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *
 
 func nominated(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, cluster *state.Cluster) {
 	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-	cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
-	Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
+	for i := range nodes {
+		cluster.NominateNodeForPod(ctx, nodes[i].Spec.ProviderID)
+		cluster.NominateNodeForPod(ctx, nodes[i].Spec.ProviderID)
+		Expect(cluster.UpdateNode(ctx, nodes[i])).To(Succeed())
+	}
 }
