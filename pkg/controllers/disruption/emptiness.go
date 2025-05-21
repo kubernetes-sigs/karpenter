@@ -35,9 +35,7 @@ type Emptiness struct {
 }
 
 func NewEmptiness(c consolidation) *Emptiness {
-	e := &Emptiness{consolidation: c}
-	e.Validator = NewEmptinessValidator(c, e.ShouldDisrupt)
-	return e
+	return &Emptiness{consolidation: c, Validator: NewEmptinessValidator(c)}
 }
 
 // ShouldDisrupt is a predicate used to filter candidates

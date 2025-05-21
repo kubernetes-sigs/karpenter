@@ -66,14 +66,16 @@ type validation struct {
 	recorder      events.Recorder
 	queue         *orchestration.Queue
 	reason        v1.DisruptionReason
-	filter        CandidateFilter
 }
 
 type EmptinessValidator struct {
 	validation
+	filter         CandidateFilter
+	validationType string
 }
 
-func NewEmptinessValidator(c consolidation, filter CandidateFilter) *EmptinessValidator {
+func NewEmptinessValidator(c consolidation) *EmptinessValidator {
+	e := &Emptiness{consolidation: c}
 	return &EmptinessValidator{
 		validation: validation{
 			clock:         c.clock,
@@ -84,8 +86,9 @@ func NewEmptinessValidator(c consolidation, filter CandidateFilter) *EmptinessVa
 			recorder:      c.recorder,
 			queue:         c.queue,
 			reason:        v1.DisruptionReasonEmpty,
-			filter:        filter,
 		},
+		filter:         e.ShouldDisrupt,
+		validationType: e.ConsolidationType(),
 	}
 }
 
@@ -100,9 +103,12 @@ func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command, _ time.D
 
 type ConsolidationValidator struct {
 	validation
+	filter         CandidateFilter
+	validationType string
 }
 
-func NewConsolidationValidator(c consolidation, filter CandidateFilter) *ConsolidationValidator {
+func NewSingleConsolidationValidator(c consolidation) *ConsolidationValidator {
+	s := &SingleNodeConsolidation{consolidation: c}
 	return &ConsolidationValidator{
 		validation: validation{
 			clock:         c.clock,
@@ -113,8 +119,27 @@ func NewConsolidationValidator(c consolidation, filter CandidateFilter) *Consoli
 			recorder:      c.recorder,
 			queue:         c.queue,
 			reason:        v1.DisruptionReasonUnderutilized,
-			filter:        filter,
 		},
+		filter:         s.ShouldDisrupt,
+		validationType: s.ConsolidationType(),
+	}
+}
+
+func NewMultiConsolidationValidator(c consolidation) *ConsolidationValidator {
+	m := &MultiNodeConsolidation{consolidation: c}
+	return &ConsolidationValidator{
+		validation: validation{
+			clock:         c.clock,
+			cluster:       c.cluster,
+			kubeClient:    c.kubeClient,
+			provisioner:   c.provisioner,
+			cloudProvider: c.cloudProvider,
+			recorder:      c.recorder,
+			queue:         c.queue,
+			reason:        v1.DisruptionReasonUnderutilized,
+		},
+		filter:         m.ShouldDisrupt,
+		validationType: m.ConsolidationType(),
 	}
 }
 
@@ -151,12 +176,14 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 }
 
 func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
+	// This GetCandidates call filters out nodes that were nominated
 	validatedCandidates, err := GetCandidates(ctx, e.cluster, e.kubeClient, e.recorder, e.clock, e.cloudProvider, e.filter, GracefulDisruptionClass, e.queue)
 	if err != nil {
 		return nil, fmt.Errorf("constructing validation candidates, %w", err)
 	}
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	if len(validatedCandidates) == 0 {
+		FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: e.validationType})
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)))
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, e.cluster, e.clock, e.kubeClient, e.cloudProvider, e.recorder, e.reason)
@@ -165,7 +192,12 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 	}
 
 	if valid := lo.Filter(validatedCandidates, func(cn *Candidate, _ int) bool {
-		if e.cluster.IsNodeNominated(cn.ProviderID()) || disruptionBudgetMapping[cn.NodePool.Name] == 0 {
+		if e.cluster.IsNodeNominated(cn.ProviderID()) {
+			FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType})
+			return false
+		}
+		if disruptionBudgetMapping[cn.NodePool.Name] == 0 {
+			FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType})
 			return false
 		}
 		disruptionBudgetMapping[cn.NodePool.Name]--
@@ -173,7 +205,7 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 	}); len(valid) > 0 {
 		return valid, nil
 	}
-	return nil, NewValidationError(fmt.Errorf("a candidate failed validation because it was nominated for a pod or would violate disruption budgets"))
+	return nil, NewValidationError(fmt.Errorf("%d candidates failed validation because it they were nominated for a pod or would violate disruption budgets", len(candidates)))
 }
 
 // ValidateCandidates gets the current representation of the provided candidates and ensures that they are all still valid.
@@ -184,18 +216,19 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 //	c. It must still be disruptable without violating node disruption budgets
 //
 // If these conditions are met for all candidates, ValidateCandidates returns a slice with the updated representations.
-func (v *validation) validateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
+func (c *ConsolidationValidator) validateCandidates(ctx context.Context, candidates ...*Candidate) ([]*Candidate, error) {
 	// GracefulDisruptionClass is hardcoded here because ValidateCandidates is only used for consolidation disruption. All consolidation disruption is graceful disruption.
-	validatedCandidates, err := GetCandidates(ctx, v.cluster, v.kubeClient, v.recorder, v.clock, v.cloudProvider, v.filter, GracefulDisruptionClass, v.queue)
+	validatedCandidates, err := GetCandidates(ctx, c.cluster, c.kubeClient, c.recorder, c.clock, c.cloudProvider, c.filter, GracefulDisruptionClass, c.queue)
 	if err != nil {
 		return nil, fmt.Errorf("constructing validation candidates, %w", err)
 	}
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	// If we filtered out any candidates, return nil as some NodeClaims in the consolidation decision have changed.
 	if len(validatedCandidates) != len(candidates) {
+		FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: c.validationType})
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)-len(validatedCandidates)))
 	}
-	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, v.cluster, v.clock, v.kubeClient, v.cloudProvider, v.recorder, v.reason)
+	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, c.reason)
 	if err != nil {
 		return nil, fmt.Errorf("building disruption budgets, %w", err)
 	}
@@ -203,10 +236,12 @@ func (v *validation) validateCandidates(ctx context.Context, candidates ...*Cand
 	//  a. A pod was nominated to the candidate
 	//  b. Disrupting the candidate would violate node disruption budgets
 	for _, vc := range validatedCandidates {
-		if v.cluster.IsNodeNominated(vc.ProviderID()) {
+		if c.cluster.IsNodeNominated(vc.ProviderID()) {
+			FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: c.validationType})
 			return nil, NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
 		}
 		if disruptionBudgetMapping[vc.NodePool.Name] == 0 {
+			FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: c.validationType})
 			return nil, NewValidationError(fmt.Errorf("a candidate can no longer be disrupted without violating budgets"))
 		}
 		disruptionBudgetMapping[vc.NodePool.Name]--

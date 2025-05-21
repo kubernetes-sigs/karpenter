@@ -41,10 +41,11 @@ type MultiNodeConsolidation struct {
 	Validator
 }
 
-func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidation {
-	m := &MultiNodeConsolidation{consolidation: consolidation}
-	m.Validator = NewConsolidationValidator(consolidation, m.ShouldDisrupt)
-	return m
+func NewMultiNodeConsolidation(c consolidation) *MultiNodeConsolidation {
+	return &MultiNodeConsolidation{
+		consolidation: c,
+		Validator:     NewMultiConsolidationValidator(c),
+	}
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
@@ -136,7 +137,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
+				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
 				if lastSavedCommand.candidates == nil {
 					log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
 					return Command{}, scheduling.Results{}, nil
