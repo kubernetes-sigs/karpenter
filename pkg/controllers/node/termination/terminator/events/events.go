@@ -94,26 +94,3 @@ func NodeClaimTerminationGracePeriodExpiring(nodeClaim *v1.NodeClaim, terminatio
 		DedupeValues:   []string{nodeClaim.Name},
 	}
 }
-
-func DuplicateNodeClaimsFound(node *corev1.Node, nodeClaims ...*v1.NodeClaim) events.Event {
-	return events.Event{
-		InvolvedObject: node,
-		Type:           corev1.EventTypeWarning,
-		Reason:         events.TerminationFailed,
-		Message: fmt.Sprintf(
-			"Failed to terminate node, bound to duplicate nodeclaims (%s)",
-			pretty.Slice(lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) string { return nc.Name }), 5),
-		),
-		DedupeValues: []string{node.Name},
-	}
-}
-
-func NodeClaimNotFound(node *corev1.Node) events.Event {
-	return events.Event{
-		InvolvedObject: node,
-		Type:           corev1.EventTypeWarning,
-		Reason:         events.TerminationFailed,
-		Message:        "Failed to terminate node, nodeclaim not found",
-		DedupeValues:   []string{node.Name},
-	}
-}

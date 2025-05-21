@@ -18,7 +18,6 @@ package termination
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -28,7 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -94,18 +93,8 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 
 	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
-		if nodeutils.IsDuplicateNodeClaimError(err) {
-			log.FromContext(ctx).Error(err, "failed to terminate node")
-			c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
-			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
-		}
-		if nodeutils.IsNodeClaimNotFoundError(err) {
-			log.FromContext(ctx).Error(err, "failed to terminate node")
-
-			dnce := nodeutils.DuplicateNodeClaimError{}
-			lo.Must0(errors.As(err, &dnce))
-			c.recorder.Publish(terminatorevents.DuplicateNodeClaimsFound(node, dnce.NodeClaims()...))
-			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+		if nodeutils.IsDuplicateNodeClaimError(err) || nodeutils.IsNodeClaimNotFoundError(err) {
+			return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, %w", err))
 		}
 		return reconcile.Result{}, err
 	}
@@ -113,10 +102,8 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 	if nodeClaim.DeletionTimestamp.IsZero() {
 		if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
-			if apierrors.IsNotFound(err) {
-				log.FromContext(ctx).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
-				c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
-				return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+			if errors.IsNotFound(err) {
+				return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, %w", err))
 			}
 			return reconcile.Result{}, fmt.Errorf("deleting nodeclaim, %w", err)
 		}
@@ -140,7 +127,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, err
 	}
 	if err = c.terminator.Taint(ctx, node, v1.DisruptedNoScheduleTaint); err != nil {
-		if apierrors.IsConflict(err) {
+		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
 		}
 		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("tainting node, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
@@ -181,13 +168,11 @@ func (c *Controller) awaitDrain(
 		stored := nodeClaim.DeepCopy()
 		if modified := nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining"); modified {
 			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				if apierrors.IsConflict(err) {
+				if errors.IsConflict(err) {
 					return &reconcile.Result{Requeue: true}, nil
 				}
-				if apierrors.IsNotFound(err) {
-					log.FromContext(ctx).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
-					c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
-					return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+				if errors.IsNotFound(err) {
+					return &reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, %w", err))
 				}
 				return &reconcile.Result{}, err
 			}
@@ -199,13 +184,11 @@ func (c *Controller) awaitDrain(
 		// No need to check for modification since we've already verifyied it wasn't set to true
 		_ = nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrained)
 		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-			if apierrors.IsConflict(err) {
+			if errors.IsConflict(err) {
 				return &reconcile.Result{Requeue: true}, nil
 			}
-			if apierrors.IsNotFound(err) {
-				log.FromContext(ctx).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
-				c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
-				return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+			if errors.IsNotFound(err) {
+				return &reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, %w", err))
 			}
 			return &reconcile.Result{}, err
 		}
@@ -243,13 +226,11 @@ func (c *Controller) awaitVolumeDetachment(
 		stored := nodeClaim.DeepCopy()
 		if modified := nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeVolumesDetached); modified {
 			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				if apierrors.IsConflict(err) {
+				if errors.IsConflict(err) {
 					return &reconcile.Result{Requeue: true}, nil
 				}
-				if apierrors.IsNotFound(err) {
-					log.FromContext(ctx).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
-					c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
-					return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+				if errors.IsNotFound(err) {
+					return &reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, %w", err))
 				}
 				return &reconcile.Result{}, err
 			}
@@ -269,13 +250,11 @@ func (c *Controller) awaitVolumeDetachment(
 		stored := nodeClaim.DeepCopy()
 		if modified := nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeVolumesDetached, "AwaitingVolumeDetachment", "AwaitingVolumeDetachment"); modified {
 			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				if apierrors.IsConflict(err) {
+				if errors.IsConflict(err) {
 					return &reconcile.Result{Requeue: true}, nil
 				}
-				if apierrors.IsNotFound(err) {
-					log.FromContext(ctx).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
-					c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
-					return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+				if errors.IsNotFound(err) {
+					return &reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, %w", err))
 				}
 				return &reconcile.Result{}, err
 			}
@@ -289,13 +268,11 @@ func (c *Controller) awaitVolumeDetachment(
 	stored := nodeClaim.DeepCopy()
 	if modified := nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeVolumesDetached, "TerminationGracePeriodElapsed", "TerminationGracePeriodElapsed"); modified {
 		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-			if apierrors.IsConflict(err) {
+			if errors.IsConflict(err) {
 				return &reconcile.Result{Requeue: true}, nil
 			}
-			if apierrors.IsNotFound(err) {
-				log.FromContext(ctx).Error(fmt.Errorf("nodeclaim not found"), "failed to terminate node")
-				c.recorder.Publish(terminatorevents.NodeClaimNotFound(node))
-				return &reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+			if errors.IsNotFound(err) {
+				return &reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("failed to terminate node, %w", err))
 			}
 			return &reconcile.Result{}, err
 		}
@@ -318,7 +295,7 @@ func (c *Controller) awaitInstanceTermination(
 	isInstanceTerminated, err := termination.EnsureTerminated(ctx, c.kubeClient, nodeClaim, c.cloudProvider)
 	if client.IgnoreNotFound(err) != nil {
 		// 409 - The nodeClaim exists, but its status has already been modified
-		if apierrors.IsConflict(err) {
+		if errors.IsConflict(err) {
 			return &reconcile.Result{Requeue: true}, nil
 		}
 		return &reconcile.Result{}, fmt.Errorf("ensuring instance termination, %w", err)
@@ -370,7 +347,7 @@ func filterVolumeAttachments(ctx context.Context, kubeClient client.Client, node
 	for _, p := range unDrainablePods {
 		for _, v := range p.Spec.Volumes {
 			pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, kubeClient, p, v)
-			if apierrors.IsNotFound(err) {
+			if errors.IsNotFound(err) {
 				continue
 			}
 			if err != nil {

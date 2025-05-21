@@ -72,7 +72,6 @@ func IgnoreNodeClaimNotFoundError(err error) error {
 // DuplicateNodeClaimError is an error returned when multiple v1.NodeClaims are found matching the passed providerID
 type DuplicateNodeClaimError struct {
 	error
-	nodeClaims []*v1.NodeClaim
 }
 
 func NewDuplicateNodeClaimError(providerID string, nodeClaims ...*v1.NodeClaim) DuplicateNodeClaimError {
@@ -83,10 +82,6 @@ func NewDuplicateNodeClaimError(providerID string, nodeClaims ...*v1.NodeClaim) 
 			"NodeClaims", lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) klog.ObjectRef { return klog.KObj(nc) }),
 		),
 	}
-}
-
-func (e DuplicateNodeClaimError) NodeClaims() []*v1.NodeClaim {
-	return e.nodeClaims
 }
 
 func IsDuplicateNodeClaimError(err error) bool {
