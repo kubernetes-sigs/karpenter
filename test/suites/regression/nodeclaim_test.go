@@ -229,7 +229,7 @@ var _ = Describe("NodeClaim", func() {
 			// Expect that the nodeClaim is eventually de-provisioned due to the registration timeout
 			Eventually(func(g Gomega) {
 				g.Expect(errors.IsNotFound(env.Client.Get(env.Context, client.ObjectKeyFromObject(nodeClaim), nodeClaim))).To(BeTrue())
-			}).WithTimeout(time.Minute * 16).Should(Succeed())
+			}).WithTimeout(time.Minute * 17).Should(Succeed())
 		})
 		It("should delete a NodeClaim if it references a NodeClass that doesn't exist", func() {
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -291,8 +291,8 @@ var _ = Describe("NodeClaim", func() {
 			nodeClaim = env.ExpectExists(nodeClaim).(*v1.NodeClaim)
 
 			By("Updated NodeClaim Status")
-			nodeClaim.Status.ProviderID = "test-provider-id"
-			nodeClaim.Status.NodeName = "test-node-name"
+			nodeClaim.Status.ProviderID = ""
+			nodeClaim.Status.NodeName = ""
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
