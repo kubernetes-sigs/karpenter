@@ -60,7 +60,7 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 	timeToCheck := lo.Ternary(!nodeClaim.Status.LastPodEventTime.IsZero(), nodeClaim.Status.LastPodEventTime.Time, initialized.LastTransitionTime.Time)
 
 	// Consider a node consolidatable by looking at the lastPodEvent status field on the nodeclaim.
-	// This time is now based on the PodScheduled condition's lastTransitionTime or pod is being removed(terminal or terminating)
+	// This time is based on the PodScheduled condition's lastTransitionTime or pod is being removed(terminal or terminating)
 	if c.clock.Since(timeToCheck) < lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration) {
 		if hasConsolidatableCondition {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)

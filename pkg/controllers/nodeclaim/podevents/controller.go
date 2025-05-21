@@ -40,6 +40,11 @@ import (
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
+// dedupeTimeout is 10 seconds to reduce the number of writes to the APIServer, since pod scheduling and deletion events are very frequent.
+// The smaller this value is, the more writes Karpenter will make in a busy cluster. This timeout is intentionally smaller than the consolidation
+// 15 second validation period, so that we can ensure that we invalidate consolidation commands that are decided while we're de-duping pod events.
+const dedupeTimeout = 10 * time.Second
+
 // Podevents is a nodeclaim controller that updates the lastPodEvent status based on PodScheduled condition
 type Controller struct {
 	clock         clock.Clock
@@ -96,9 +101,16 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	// otherwise, set the pod event time to now
-	stored := nc.DeepCopy()
+	// If we've set the lastPodEvent before
+	// and the stored lastPodEventTime is after(max) eventTime
+	// and it hasn't been before the timeout, don't do anything
+	if !nc.Status.LastPodEventTime.Time.IsZero() &&
+		nc.Status.LastPodEventTime.Time.After(eventTime) &&
+		c.clock.Since(nc.Status.LastPodEventTime.Time) < dedupeTimeout {
+		return reconcile.Result{}, nil
+	}
 
+	stored := nc.DeepCopy()
 	nc.Status.LastPodEventTime.Time = eventTime
 	if !equality.Semantic.DeepEqual(stored, nc) {
 		if err = c.kubeClient.Status().Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
