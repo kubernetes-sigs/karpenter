@@ -28,6 +28,7 @@ const (
 	voluntaryDisruptionSubsystem = "voluntary_disruption"
 	decisionLabel                = "decision"
 	ConsolidationTypeLabel       = "consolidation_type"
+	CandidatesIneligible         = "candidates_ineligible"
 )
 
 func init() {
@@ -77,13 +78,13 @@ var (
 		},
 		[]string{ConsolidationTypeLabel},
 	)
-	InvalidatedConsolidationTotal = opmetrics.NewPrometheusCounter(
+	FailedValidationsTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "failed_validations_total",
-			Help:      "Number of times a consolidation decision was invalidated. Labeled by consolidation type and reason.",
+			Help:      "Number of times a consolidation decision was invalidated. Labeled by consolidation type.",
 		},
 		[]string{ConsolidationTypeLabel, metrics.ReasonLabel},
 	)

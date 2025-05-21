@@ -180,7 +180,7 @@ var _ = Describe("Consolidation", func() {
 	})
 	Context("Metrics", func() {
 		BeforeEach(func() {
-			disruption.InvalidatedConsolidationTotal.Reset()
+			disruption.FailedValidationsTotal.Reset()
 		})
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod(test.PodOptions{
@@ -217,7 +217,7 @@ var _ = Describe("Consolidation", func() {
 				metrics.ReasonLabel: "underutilized",
 			})
 		})
-		DescribeTable("should correctly report invalidated commands for emptiness disruption when", func(invalidatedReason string, validatorOpt TestEmptinessValidatorOption) {
+		DescribeTable("should correctly report invalidated commands for emptiness disruption", func(validatorOpt TestEmptinessValidatorOption) {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
@@ -241,16 +241,16 @@ var _ = Describe("Consolidation", func() {
 			Expect(cmd).To(Equal(disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
-			ExpectMetricCounterValue(disruption.InvalidatedConsolidationTotal, 1, map[string]string{
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{
 				disruption.ConsolidationTypeLabel: "empty",
-				metrics.ReasonLabel:               invalidatedReason,
+				metrics.ReasonLabel:               disruption.CandidatesIneligible,
 			})
 		},
-			Entry("a candidate is blocked by budgets", disruption.BlockingBudget, WithEmptinessBlockingBudget()),
-			Entry("filters out candidates due to pod churn", disruption.CandidatesFiltered, WithEmptinessChurn()),
-			Entry("filters out candidates due to candidate being nominated", disruption.CandidatesFiltered, WithEmptinessNodeNomination()),
+			Entry("when a candidate is blocked by budgets", WithEmptinessBlockingBudget()),
+			Entry("when candidates are filtered out due to pod churn", WithEmptinessChurn()),
+			Entry("when candidates are filtered out due to candidate being nominated", WithEmptinessNodeNomination()),
 		)
-		DescribeTable("should correctly report invalidated commands for underutilized disruption when", func(invalidatedReason string, validatorOpt TestConsolidationValidatorOption) {
+		DescribeTable("should correctly report invalidated commands for underutilized disruption", func(validatorOpt TestConsolidationValidatorOption) {
 			rs := test.ReplicaSet()
 			ExpectApplied(ctx, env.Client, rs)
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
@@ -289,14 +289,14 @@ var _ = Describe("Consolidation", func() {
 			Expect(cmd).To(Equal(disruption.Command{}))
 
 			Expect(underutilizedConsolidation.IsConsolidated()).To(BeFalse())
-			ExpectMetricCounterValue(disruption.InvalidatedConsolidationTotal, 1, map[string]string{
-				disruption.ConsolidationTypeLabel: "single",
-				metrics.ReasonLabel:               invalidatedReason,
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{
+				disruption.ConsolidationTypeLabel: "underutilized",
+				metrics.ReasonLabel:               disruption.CandidatesIneligible,
 			})
 		},
-			Entry("a candidate is blocked by budgets", disruption.BlockingBudget, WithUnderutilizedBlockingBudget()),
-			Entry("filters out candidates due to pod churn", disruption.CandidatesFiltered, WithUnderutilizedChurn()),
-			Entry("filters out candidates due to candidate being nominated", disruption.CandidatesFiltered, WithUnderutilizedNodeNomination()),
+			Entry("when a candidate is blocked by budgets", WithUnderutilizedBlockingBudget()),
+			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
+			Entry("when candidates are filtered out due to candidate being nominated", WithUnderutilizedNodeNomination()),
 		)
 	})
 	Context("Budgets", func() {

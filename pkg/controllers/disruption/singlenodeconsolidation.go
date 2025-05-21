@@ -43,12 +43,11 @@ type SingleNodeConsolidation struct {
 }
 
 func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolidation {
-	s := &SingleNodeConsolidation{
+	return &SingleNodeConsolidation{
 		consolidation:             consolidation,
 		PreviouslyUnseenNodePools: sets.New[string](),
+		Validator:                 NewConsolidationValidator(consolidation),
 	}
-	s.Validator = NewConsolidationValidator(consolidation, s.ShouldDisrupt, s.ConsolidationType())
-	return s
 }
 
 // ComputeCommand generates a disruption command given candidates

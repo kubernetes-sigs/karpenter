@@ -42,9 +42,10 @@ type MultiNodeConsolidation struct {
 }
 
 func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidation {
-	m := &MultiNodeConsolidation{consolidation: consolidation}
-	m.Validator = NewConsolidationValidator(consolidation, m.ShouldDisrupt, m.ConsolidationType())
-	return m
+	return &MultiNodeConsolidation{
+		consolidation: consolidation,
+		Validator:     NewConsolidationValidator(consolidation),
+	}
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
