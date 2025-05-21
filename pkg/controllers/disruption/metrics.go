@@ -86,7 +86,7 @@ var (
 			Name:      "failed_validations_total",
 			Help:      "Number of candidates that were selected for disruption but failed validation. Labeled by consolidation type.",
 		},
-		[]string{ConsolidationTypeLabel, metrics.ReasonLabel},
+		[]string{ConsolidationTypeLabel},
 	)
 	NodePoolAllowedDisruptions = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,

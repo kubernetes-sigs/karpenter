@@ -42,11 +42,11 @@ type SingleNodeConsolidation struct {
 	Validator
 }
 
-func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolidation {
+func NewSingleNodeConsolidation(c consolidation) *SingleNodeConsolidation {
 	return &SingleNodeConsolidation{
-		consolidation:             consolidation,
+		consolidation:             c,
 		PreviouslyUnseenNodePools: sets.New[string](),
-		Validator:                 NewSingleConsolidationValidator(consolidation),
+		Validator:                 NewSingleConsolidationValidator(c),
 	}
 }
 

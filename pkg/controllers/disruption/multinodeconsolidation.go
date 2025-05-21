@@ -41,10 +41,10 @@ type MultiNodeConsolidation struct {
 	Validator
 }
 
-func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidation {
+func NewMultiNodeConsolidation(c consolidation) *MultiNodeConsolidation {
 	return &MultiNodeConsolidation{
-		consolidation: consolidation,
-		Validator:     NewMultiConsolidationValidator(consolidation),
+		consolidation: c,
+		Validator:     NewMultiConsolidationValidator(c),
 	}
 }
 

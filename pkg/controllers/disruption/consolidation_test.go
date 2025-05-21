@@ -241,10 +241,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(cmd).To(Equal(disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
-			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{
-				disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType(),
-				metrics.ReasonLabel:               disruption.CandidatesIneligible,
-			})
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType()})
 		},
 			Entry("when a candidate is blocked by budgets", WithEmptinessBlockingBudget()),
 			Entry("when candidates are filtered out due to pod churn", WithEmptinessChurn()),
@@ -304,10 +301,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(cmd).To(Equal(disruption.Command{}))
 
 			Expect(multiNodeConsolidation.IsConsolidated()).To(BeFalse())
-			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{
-				disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType(),
-				metrics.ReasonLabel:               disruption.CandidatesIneligible,
-			})
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType()})
 		},
 			Entry("when candidates are blocked by budgets", WithUnderutilizedBlockingBudget()),
 			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),
@@ -352,10 +346,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(cmd).To(Equal(disruption.Command{}))
 
 			Expect(singleNodeConsolidation.IsConsolidated()).To(BeFalse())
-			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{
-				disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType(),
-				metrics.ReasonLabel:               disruption.CandidatesIneligible,
-			})
+			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType()})
 		},
 			Entry("when a candidate is blocked by budgets", WithUnderutilizedBlockingBudget()),
 			Entry("when candidates are filtered out due to pod churn", WithUnderutilizedChurn()),

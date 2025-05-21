@@ -32,7 +32,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 )
 
 type ValidationError struct {
@@ -184,7 +183,7 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 	}
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	if len(validatedCandidates) == 0 {
-		FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesIneligible})
+		FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: e.validationType})
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)))
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, e.cluster, e.clock, e.kubeClient, e.cloudProvider, e.recorder, e.reason)
@@ -194,11 +193,11 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 
 	if valid := lo.Filter(validatedCandidates, func(cn *Candidate, _ int) bool {
 		if e.cluster.IsNodeNominated(cn.ProviderID()) {
-			FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesIneligible})
+			FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType})
 			return false
 		}
 		if disruptionBudgetMapping[cn.NodePool.Name] == 0 {
-			FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType, metrics.ReasonLabel: CandidatesIneligible})
+			FailedValidationsTotal.Inc(map[string]string{ConsolidationTypeLabel: e.validationType})
 			return false
 		}
 		disruptionBudgetMapping[cn.NodePool.Name]--
@@ -226,7 +225,7 @@ func (c *ConsolidationValidator) validateCandidates(ctx context.Context, candida
 	validatedCandidates = mapCandidates(candidates, validatedCandidates)
 	// If we filtered out any candidates, return nil as some NodeClaims in the consolidation decision have changed.
 	if len(validatedCandidates) != len(candidates) {
-		FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: c.validationType, metrics.ReasonLabel: CandidatesIneligible})
+		FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: c.validationType})
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)-len(validatedCandidates)))
 	}
 	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, c.reason)
@@ -238,11 +237,11 @@ func (c *ConsolidationValidator) validateCandidates(ctx context.Context, candida
 	//  b. Disrupting the candidate would violate node disruption budgets
 	for _, vc := range validatedCandidates {
 		if c.cluster.IsNodeNominated(vc.ProviderID()) {
-			FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: c.validationType, metrics.ReasonLabel: CandidatesIneligible})
+			FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: c.validationType})
 			return nil, NewValidationError(fmt.Errorf("a candidate was nominated during validation"))
 		}
 		if disruptionBudgetMapping[vc.NodePool.Name] == 0 {
-			FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: c.validationType, metrics.ReasonLabel: CandidatesIneligible})
+			FailedValidationsTotal.Add(float64(len(candidates)), map[string]string{ConsolidationTypeLabel: c.validationType})
 			return nil, NewValidationError(fmt.Errorf("a candidate can no longer be disrupted without violating budgets"))
 		}
 		disruptionBudgetMapping[vc.NodePool.Name]--
