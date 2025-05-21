@@ -75,7 +75,6 @@ type EmptinessValidator struct {
 	validationType string
 }
 
-// TODO: get the struct to not need the filter either
 func NewEmptinessValidator(c consolidation) *EmptinessValidator {
 	e := &Emptiness{consolidation: c}
 	return &EmptinessValidator{
