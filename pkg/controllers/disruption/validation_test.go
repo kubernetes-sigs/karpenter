@@ -34,12 +34,13 @@ import (
 )
 
 type TestEmptinessValidator struct {
-	blocked   bool
-	churn     bool
-	nominated bool
-	cluster   *state.Cluster
-	nodePool  *v1.NodePool
-	emptiness *disruption.EmptinessValidator
+	blocked    bool
+	churn      bool
+	nominated  bool
+	nodes      []*corev1.Node
+	nodeClaims []*v1.NodeClaim
+	nodePool   *v1.NodePool
+	emptiness  *disruption.EmptinessValidator
 }
 
 type TestEmptinessValidatorOption func(*TestEmptinessValidator)
@@ -62,11 +63,12 @@ func WithEmptinessNodeNomination() TestEmptinessValidatorOption {
 	}
 }
 
-func NewTestEmptinessValidator(cluster *state.Cluster, nodePool *v1.NodePool, e *disruption.EmptinessValidator, opts ...TestEmptinessValidatorOption) disruption.Validator {
+func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool, e *disruption.EmptinessValidator, opts ...TestEmptinessValidatorOption) disruption.Validator {
 	v := &TestEmptinessValidator{
-		cluster:   cluster,
-		nodePool:  nodePool,
-		emptiness: e,
+		nodes:      nodes,
+		nodeClaims: nodeClaims,
+		nodePool:   nodePool,
+		emptiness:  e,
 	}
 	for _, opt := range opts {
 		opt(v)
@@ -75,21 +77,14 @@ func NewTestEmptinessValidator(cluster *state.Cluster, nodePool *v1.NodePool, e 
 }
 
 func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
-	stateNodes := t.cluster.Nodes()
-	nodes := make([]*corev1.Node, len(stateNodes))
-	nodeClaims := make([]*v1.NodeClaim, len(stateNodes))
-	for i, stateNode := range stateNodes {
-		nodes[i] = stateNode.Node
-		nodeClaims[i] = stateNode.NodeClaim
-	}
 	if t.blocked {
-		blockingBudget(nodes, nodeClaims, t.nodePool)
+		blockingBudget(t.nodes, t.nodeClaims, t.nodePool)
 	}
 	if t.churn {
-		churn(nodes, nodeClaims)
+		churn(t.nodes, t.nodeClaims)
 	}
 	if t.nominated {
-		nominated(nodes, nodeClaims, t.cluster)
+		nominated(t.nodes, t.nodeClaims)
 	}
 	return t.emptiness.Validate(ctx, cmd, 0)
 }
@@ -150,7 +145,7 @@ func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruptio
 		churn(nodes, nodeClaims)
 	}
 	if t.nominated {
-		nominated(nodes, nodeClaims, t.cluster)
+		nominated(nodes, nodeClaims)
 	}
 	return t.consolidation.Validate(ctx, cmd, 0)
 }
@@ -193,7 +188,7 @@ func blockingBudget(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *
 	ExpectApplied(ctx, env.Client, nodePool)
 }
 
-func nominated(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, cluster *state.Cluster) {
+func nominated(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	for i := range nodes {
 		cluster.NominateNodeForPod(ctx, nodes[i].Spec.ProviderID)

@@ -218,8 +218,10 @@ var _ = Describe("Consolidation", func() {
 			})
 		})
 		DescribeTable("should correctly report invalidated commands for emptiness disruption", func(validatorOpt TestEmptinessValidatorOption) {
+			nodes := []*corev1.Node{node}
+			nodeClaims := []*v1.NodeClaim{nodeClaim}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
@@ -228,7 +230,7 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			emptyConsolidation.Validator = NewTestEmptinessValidator(cluster, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), validatorOpt)
+			emptyConsolidation.Validator = NewTestEmptinessValidator(nodes, nodeClaims, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), validatorOpt)
 
 			fakeClock.Step(10 * time.Minute)
 
@@ -2446,6 +2448,9 @@ var _ = Describe("Consolidation", func() {
 			for i := range 2 {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
+			sort.Slice(nodes, func(i, j int) bool {
+				return nodes[i].Name < nodes[j].Name
+			})
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
@@ -2457,7 +2462,7 @@ var _ = Describe("Consolidation", func() {
 			Expect(err).To(Succeed())
 
 			// this test validator invalidates the command because it creates pod churn during validaiton
-			emptyConsolidation.Validator = NewTestEmptinessValidator(cluster, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), WithEmptinessChurn())
+			emptyConsolidation.Validator = NewTestEmptinessValidator(nodes, nodeClaims, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), WithEmptinessChurn())
 
 			fakeClock.Step(10 * time.Minute)
 
