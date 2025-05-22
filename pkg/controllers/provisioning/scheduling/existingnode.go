@@ -50,12 +50,13 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 			daemonResources[k] = v
 		}
 	}
+	available := n.Available()
 	node := &ExistingNode{
 		StateNode:          n,
-		cachedAvailable:    n.Available(),
+		cachedAvailable:    available,
 		cachedTaints:       taints,
 		topology:           topology,
-		remainingResources: resources.Subtract(n.Available(), daemonResources),
+		remainingResources: resources.Subtract(available, daemonResources),
 		requirements:       scheduling.NewLabelRequirements(n.Labels()),
 	}
 	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
