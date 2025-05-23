@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -82,7 +83,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 
-	// If a nodeclaim does has a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
+	// If a nodeclaim does have a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
 	// In the case of standalone nodeclaim, validate the nodes inside the cluster are healthy before proceeding
 	// to repair the nodes
 	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
@@ -129,6 +130,20 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim, node *corev1.Node, unhealthyNodeCondition *corev1.NodeCondition) (reconcile.Result, error) {
 	if !nodeClaim.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
+	}
+	statusMessage := fmt.Sprintf("node unhealthy due to condition: %s, detected at %s",
+		unhealthyNodeCondition.Type,
+		unhealthyNodeCondition.LastTransitionTime.Format(time.RFC3339))
+
+	stored := nodeClaim.DeepCopy()
+	nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, v1.DisruptionReasonUnhealthy, statusMessage)
+	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, client.IgnoreNotFound(err)
+		}
 	}
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
