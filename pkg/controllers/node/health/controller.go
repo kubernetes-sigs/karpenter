@@ -197,34 +197,27 @@ func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeCla
 // For example, given a NodePool with three nodes, one may be unhealthy without rendering the NodePool unhealthy, even though that's 33% of the total nodes.
 // This is analogous to how minAvailable and maxUnavailable work for PodDisruptionBudgets: https://kubernetes.io/docs/tasks/run-application/configure-pdb/#rounding-logic-when-specifying-percentages.
 func (c *Controller) isNodePoolHealthy(ctx context.Context, nodePoolName string) (bool, error) {
-	nodeList := &corev1.NodeList{}
-	if err := c.kubeClient.List(ctx, nodeList, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName})); err != nil {
-		return false, err
-	}
-
-	return c.isHealthyForNodes(nodeList.Items), nil
+	return c.areNodesHealthy(ctx, client.MatchingLabels(map[string]string{v1.NodePoolLabelKey: nodePoolName}))
 }
 
 func (c *Controller) isClusterHealthy(ctx context.Context) (bool, error) {
-	nodeList := &corev1.NodeList{}
-	if err := c.kubeClient.List(ctx, nodeList); err != nil {
-		return false, err
-	}
-
-	return c.isHealthyForNodes(nodeList.Items), nil
+	return c.areNodesHealthy(ctx)
 }
 
-func (c *Controller) isHealthyForNodes(nodes []corev1.Node) bool {
-	unhealthyNodeCount := lo.CountBy(nodes, func(node corev1.Node) bool {
+func (c *Controller) areNodesHealthy(ctx context.Context, opts ...client.ListOption) (bool, error) {
+	nodeList := &corev1.NodeList{}
+	if err := c.kubeClient.List(ctx, nodeList, append(opts, client.UnsafeDisableDeepCopy)...); err != nil {
+		return false, err
+	}
+	unhealthyNodeCount := lo.CountBy(nodeList.Items, func(node corev1.Node) bool {
 		_, found := lo.Find(c.cloudProvider.RepairPolicies(), func(policy cloudprovider.RepairPolicy) bool {
 			nodeCondition := nodeutils.GetCondition(lo.ToPtr(node), policy.ConditionType)
 			return nodeCondition.Status == policy.ConditionStatus
 		})
 		return found
 	})
-
-	threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(allowedUnhealthyPercent), len(nodes), true))
-	return unhealthyNodeCount <= threshold
+	threshold := lo.Must(intstr.GetScaledValueFromIntOrPercent(lo.ToPtr(allowedUnhealthyPercent), len(nodeList.Items), true))
+	return unhealthyNodeCount <= threshold, nil
 }
 
 func (c *Controller) publishNodePoolHealthEvent(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim, npName string) error {
