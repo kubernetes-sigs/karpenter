@@ -38,8 +38,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var _ = FDescribe("NodeClaim", func() {
-	FDescribe("StandaloneNodeClaim", func() {
+var _ = Describe("NodeClaim", func() {
+	Describe("StandaloneNodeClaim", func() {
 		var requirements []v1.NodeSelectorRequirementWithMinValues
 		BeforeEach(func() {
 			requirements = nodePool.Spec.Template.Spec.Requirements
@@ -246,7 +246,7 @@ var _ = FDescribe("NodeClaim", func() {
 			env.ExpectCreated(nodeClaim)
 			env.EventuallyExpectNotFound(nodeClaim)
 		})
-		FIt("should delete a NodeClaim if it references a NodeClass that isn't Ready", func() {
+		It("should delete a NodeClaim if it references a NodeClass that isn't Ready", func() {
 			env.ExpectCreated(nodeClass)
 			nodeClass = env.ExpectNodeClassCondition(nodeClass, []status.Condition{
 				{
