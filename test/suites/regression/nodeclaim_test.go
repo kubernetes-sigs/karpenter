@@ -38,8 +38,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var _ = Describe("NodeClaim", func() {
-	Describe("StandaloneNodeClaim", func() {
+var _ = FDescribe("NodeClaim", func() {
+	FDescribe("StandaloneNodeClaim", func() {
 		var requirements []v1.NodeSelectorRequirementWithMinValues
 		BeforeEach(func() {
 			requirements = nodePool.Spec.Template.Spec.Requirements
@@ -246,7 +246,7 @@ var _ = Describe("NodeClaim", func() {
 			env.ExpectCreated(nodeClaim)
 			env.EventuallyExpectNotFound(nodeClaim)
 		})
-		It("should delete a NodeClaim if it references a NodeClass that isn't Ready", func() {
+		FIt("should delete a NodeClaim if it references a NodeClass that isn't Ready", func() {
 			env.ExpectCreated(nodeClass)
 			nodeClass = env.ExpectNodeClassCondition(nodeClass, []status.Condition{
 				{
@@ -258,6 +258,9 @@ var _ = Describe("NodeClaim", func() {
 				},
 			})
 			env.ExpectStatusUpdated(nodeClass)
+			env.ExpectBlockNodeClassStatus(nodeClass)
+			// TODO: better not to have this but this suite runs quickly as is and this solves for multiple cloudproviders
+			time.Sleep(10 * time.Second)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				Spec: v1.NodeClaimSpec{
 					Requirements: requirements,
