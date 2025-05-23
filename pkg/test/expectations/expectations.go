@@ -109,9 +109,30 @@ func ExpectNotFound(ctx context.Context, c client.Client, objects ...client.Obje
 	GinkgoHelper()
 	for _, object := range objects {
 		Eventually(func() bool {
-			return errors.IsNotFound(c.Get(ctx, types.NamespacedName{Name: object.GetName(), Namespace: object.GetNamespace()}, object))
+			err := c.Get(ctx, types.NamespacedName{Name: object.GetName(), Namespace: object.GetNamespace()}, object)
+			fmt.Printf("Deleting pod: %s\n", object)
+			if err != nil {
+				fmt.Printf("Error deleting pod: %s\n", err.Error())
+			}
+			return errors.IsNotFound(err)
 		}, ReconcilerPropagationTime, RequestInterval).Should(BeTrue(), func() string {
 			return fmt.Sprintf("expected %s/%s to be deleted, but it still exists", lo.Must(apiutil.GVKForObject(object, scheme.Scheme)), client.ObjectKeyFromObject(object))
+		})
+	}
+}
+
+func ExpectPodNotFound(ctx context.Context, c client.Client, pods ...*corev1.Pod) {
+	GinkgoHelper()
+	for _, pod := range pods {
+		Eventually(func() bool {
+			err := c.Get(ctx, client.ObjectKeyFromObject(pod), pod)
+			fmt.Printf("Deleting pod: %s\n", pod.String())
+			if err != nil {
+				fmt.Printf("Error deleting pod: %s\n", err.Error())
+			}
+			return errors.IsNotFound(err)
+		}, ReconcilerPropagationTime, RequestInterval).Should(BeTrue(), func() string {
+			return fmt.Sprintf("expected %s/%s to be deleted, but it still exists", lo.Must(apiutil.GVKForObject(pod, scheme.Scheme)), client.ObjectKeyFromObject(pod))
 		})
 	}
 }

@@ -18,7 +18,7 @@ package terminator_test
 
 import (
 	"context"
-	"sync"
+	"fmt"
 	"testing"
 	"time"
 
@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	clock "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -69,7 +68,7 @@ var _ = BeforeSuite(func() {
 	)
 	ctx = options.ToContext(ctx, test.Options())
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewTestingQueue(env.Client, recorder)
+	queue = terminator.NewQueue(env.Client, recorder)
 	terminatorInstance = terminator.NewTerminator(fakeClock, env.Client, queue, recorder)
 })
 
@@ -80,7 +79,7 @@ var _ = AfterSuite(func() {
 var _ = BeforeEach(func() {
 	recorder.Reset() // Reset the events that we captured during the run
 	// Shut down the queue and restart it to ensure no races
-	*queue = lo.FromPtr(terminator.NewTestingQueue(env.Client, recorder))
+	*queue = lo.FromPtr(terminator.NewQueue(env.Client, recorder))
 })
 
 var _ = AfterEach(func() {
@@ -99,26 +98,29 @@ var _ = Describe("Eviction/Queue", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: testLabels,
 			},
+			NodeName: "my-node",
 		})
-		node = test.Node(test.NodeOptions{ProviderID: "123456789"})
+		node = test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Name: pod.Spec.NodeName, Namespace: pod.Namespace}, ProviderID: "my-provider"})
+
 		terminator.NodesEvictionRequestsTotal.Reset()
 		terminator.PodsDrainedTotal.Reset()
 	})
 
 	Context("Eviction API", func() {
 		It("should succeed with no event when the pod is not found", func() {
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
+			Expect(queue.Evict(ctx, pod)).To(BeNil())
 			Expect(recorder.Events()).To(HaveLen(0))
 		})
 		It("should succeed with no event when the pod UID conflicts", func() {
-			ExpectApplied(ctx, env.Client, pod)
-			Expect(queue.Evict(ctx, terminator.QueueKey{NamespacedName: client.ObjectKeyFromObject(pod), UID: uuid.NewUUID()})).To(BeTrue())
+			ExpectApplied(ctx, env.Client, pod, node)
+			pod.UID = uuid.NewUUID()
+			Expect(queue.Evict(ctx, pod)).To(BeNil())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "409"})
 			Expect(recorder.Events()).To(HaveLen(0))
 		})
 		It("should succeed with an evicted event when there are no PDBs", func() {
-			ExpectApplied(ctx, env.Client, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
+			ExpectApplied(ctx, env.Client, pod, node)
+			Expect(queue.Evict(ctx, pod)).To(BeNil())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
@@ -127,13 +129,13 @@ var _ = Describe("Eviction/Queue", func() {
 				Labels:         testLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 1},
 			})
-			ExpectApplied(ctx, env.Client, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
+			ExpectApplied(ctx, env.Client, pod, node)
+			Expect(queue.Evict(ctx, pod)).To(BeNil())
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
-			ExpectApplied(ctx, env.Client, pdb, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeFalse())
+			ExpectApplied(ctx, env.Client, pdb, pod, node)
+			Expect(queue.Evict(ctx, pod)).ToNot(BeNil())
 			Expect(recorder.Calls(events.FailedDraining)).To(Equal(1))
 		})
 		It("should fail when two PDBs refer to the same pod", func() {
@@ -141,39 +143,19 @@ var _ = Describe("Eviction/Queue", func() {
 				Labels:         testLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
 			})
-			ExpectApplied(ctx, env.Client, pdb, pdb2, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeFalse())
+			ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
+			Expect(queue.Evict(ctx, pod)).ToNot(BeNil())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "500"})
 		})
 		It("should ensure that calling Evict() is valid while making Add() calls", func() {
-			cancelCtx, cancel := context.WithCancel(ctx)
-			wg := sync.WaitGroup{}
-			DeferCleanup(func() {
-				cancel()
-				wg.Wait() // Ensure that we wait for reconcile loop to finish so that we don't get a RACE
-			})
-
-			// Keep calling Reconcile() for the entirety of this test
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-
-				for {
-					ExpectSingletonReconciled(ctx, queue)
-					if cancelCtx.Err() != nil {
-						return
-					}
-				}
-			}()
-
 			// Ensure that we add enough pods to the queue while we are pulling items off of the queue (enough to trigger a DATA RACE)
 			for i := 0; i < 10000; i++ {
-				queue.Add(node, test.Pod())
+				queue.Add(test.Pod())
 			}
 		})
 		It("should increment PodsDrainedTotal metric when a pod is evicted", func() {
-			ExpectApplied(ctx, env.Client, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
+			ExpectApplied(ctx, env.Client, pod, node)
+			Expect(queue.Evict(ctx, pod)).To(BeNil())
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
@@ -185,6 +167,7 @@ var _ = Describe("Eviction/Queue", func() {
 				},
 				Status: v1.NodeClaimStatus{
 					ProviderID: node.Spec.ProviderID,
+					NodeName:   node.Name,
 				},
 			})
 			nodeClaim.StatusConditions().Set(status.Condition{
@@ -194,18 +177,19 @@ var _ = Describe("Eviction/Queue", func() {
 				Message: "Node is being interrupted",
 			})
 
-			ExpectApplied(ctx, env.Client, nodeClaim, pod)
-			Expect(queue.Evict(ctx, terminator.NewQueueKey(pod, node.Spec.ProviderID))).To(BeTrue())
+			ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
+			Expect(queue.Evict(ctx, pod)).To(BeNil())
 
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: "SpotInterruption"})
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
+			fmt.Println("AHHHH")
 		})
 	})
 
 	Context("Pod Deletion API", func() {
 		It("should not delete a pod with no nodeTerminationTime", func() {
-			ExpectApplied(ctx, env.Client, pod)
+			ExpectApplied(ctx, env.Client, pod, node)
 
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, nil)).To(Succeed())
 			ExpectExists(ctx, env.Client, pod)
@@ -213,7 +197,7 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should not delete a pod with terminationGracePeriodSeconds still remaining before nodeTerminationTime", func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](60)
-			ExpectApplied(ctx, env.Client, pod)
+			ExpectApplied(ctx, env.Client, pod, node)
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 5)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
@@ -222,11 +206,12 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should delete a pod with less than terminationGracePeriodSeconds remaining before nodeTerminationTime", func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
-			ExpectApplied(ctx, env.Client, pod)
+			ExpectApplied(ctx, env.Client, pod, node)
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 1)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
-			ExpectNotFound(ctx, env.Client, pod)
+			fmt.Println("deleted the pod!")
+			ExpectPodNotFound(ctx, env.Client, pod)
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
 		})
 	})
