@@ -60,9 +60,10 @@ var (
 	//go:embed default_kowknodeclass.yaml
 	defaultNodeClass []byte
 	//go:embed default_nodepool.yaml
-	defaultNodePool []byte
-	nodeClassPath   = flag.String("default-nodeclass", "", "Pass in a default cloud specific node class")
-	nodePoolPath    = flag.String("default-nodepool", "", "Pass in a default karpenter nodepool")
+	defaultNodePool     []byte
+	nodeClassPath       = flag.String("default-nodeclass", "", "Pass in a default cloud specific node class")
+	invalidNodeClasPath = flag.String("invalid-nodeclass", "", "Pass in an invalid cloud specific node class")
+	nodePoolPath        = flag.String("default-nodepool", "", "Pass in a default karpenter nodepool")
 )
 
 type Environment struct {
@@ -75,6 +76,7 @@ type Environment struct {
 	KubeClient            kubernetes.Interface
 	Monitor               *Monitor
 	DefaultNodeClass      *unstructured.Unstructured
+	InvalidNodeClass      *unstructured.Unstructured
 
 	OutputDir         string
 	StartingNodeCount int
@@ -103,7 +105,8 @@ func NewEnvironment(t *testing.T) *Environment {
 		Monitor:               NewMonitor(ctx, client),
 		TimeIntervalCollector: debug.NewTimestampCollector(),
 		OutputDir:             outputDir,
-		DefaultNodeClass:      decodeNodeClass(),
+		DefaultNodeClass:      decodeNodeClass(nodeClassPath),
+		InvalidNodeClass:      decodeNodeClass(invalidNodeClasPath),
 	}
 }
 
@@ -183,13 +186,13 @@ func (env *Environment) IsDefaultNodeClassKWOK() bool {
 	return env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Kind == "KWOKNodeClass"
 }
 
-func decodeNodeClass() *unstructured.Unstructured {
+func decodeNodeClass(path *string) *unstructured.Unstructured {
 	// Open the file
-	if lo.FromPtr(nodeClassPath) == "" {
+	if lo.FromPtr(path) == "" {
 		return object.Unmarshal[unstructured.Unstructured](defaultNodeClass)
 	}
 
-	file := lo.Must1(os.Open(lo.FromPtr(nodeClassPath)))
+	file := lo.Must1(os.Open(lo.FromPtr(path)))
 	content := lo.Must1(io.ReadAll(file))
 
 	decoder := serializeryaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
