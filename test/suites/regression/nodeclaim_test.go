@@ -30,7 +30,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/awslabs/operatorpkg/object"
-	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
@@ -247,17 +246,9 @@ var _ = Describe("NodeClaim", func() {
 			env.EventuallyExpectNotFound(nodeClaim)
 		})
 		It("should delete a NodeClaim if it references a NodeClass that isn't Ready", func() {
+			nodeClass = env.InvalidNodeClass.DeepCopy()
+			time.Sleep(10 * time.Second)
 			env.ExpectCreated(nodeClass)
-			nodeClass = env.ExpectNodeClassCondition(nodeClass, []status.Condition{
-				{
-					Type:               "Ready",
-					Status:             metav1.ConditionFalse,
-					LastTransitionTime: metav1.Now(),
-					Reason:             "NotReady",
-					Message:            "NodeClass is not ready",
-				},
-			})
-			env.ExpectStatusUpdated(nodeClass)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				Spec: v1.NodeClaimSpec{
 					Requirements: requirements,
