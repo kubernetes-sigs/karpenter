@@ -25,6 +25,9 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+
+	storagev1 "k8s.io/api/storage/v1"
 )
 
 func EvictPod(pod *corev1.Pod, reason string) events.Event {
@@ -54,6 +57,21 @@ func NodeFailedToDrain(node *corev1.Node, err error) events.Event {
 		Reason:         events.FailedDraining,
 		Message:        fmt.Sprintf("Failed to drain node, %s", err),
 		DedupeValues:   []string{node.Name},
+	}
+}
+
+func NodeAwaitingVolumeDetachmentEvent(node *corev1.Node, volumeAttachments ...*storagev1.VolumeAttachment) events.Event {
+	return events.Event{
+		InvolvedObject: node,
+		Type:           corev1.EventTypeNormal,
+		Reason:         "AwaitingVolumeDetachment",
+		Message: fmt.Sprintf(
+			"Awaiting deletion of bound volumeattachments (%s)",
+			pretty.Slice(lo.Map(volumeAttachments, func(va *storagev1.VolumeAttachment, _ int) string {
+				return va.Name
+			}), 5),
+		),
+		DedupeValues: []string{node.Name},
 	}
 }
 
