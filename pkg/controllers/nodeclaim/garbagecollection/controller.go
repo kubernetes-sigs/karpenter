@@ -99,12 +99,22 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
+		pods := &corev1.PodList{}
+		var podCount int
+		if err := c.kubeClient.List(ctx, pods, client.MatchingFields{"spec.nodeName": node.Name}); err == nil {
+			podCount = len(pods.Items)
+		}
 		log.FromContext(ctx).WithValues(
 			"NodeClaim", klog.KObj(nodeClaims[i]),
 			"Node", klog.KRef("", nodeClaims[i].Status.NodeName),
 			"provider-id", nodeClaims[i].Status.ProviderID,
 		).V(1).Info("garbage collecting nodeclaim with no cloudprovider representation")
 		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+			metrics.ReasonLabel:       "garbage_collected",
+			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: nodeClaims[i].Labels[v1.CapacityTypeLabelKey],
+		})
+		metrics.PodsDisruptedTotal.Add(float64(podCount), map[string]string{
 			metrics.ReasonLabel:       "garbage_collected",
 			metrics.NodePoolLabel:     nodeClaims[i].Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: nodeClaims[i].Labels[v1.CapacityTypeLabelKey],

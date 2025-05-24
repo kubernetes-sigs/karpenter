@@ -87,6 +87,7 @@ var _ = Describe("Expiration", func() {
 			},
 		})
 		metrics.NodeClaimsDisruptedTotal.Reset()
+		metrics.PodsDisruptedTotal.Reset()
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
@@ -115,6 +116,23 @@ var _ = Describe("Expiration", func() {
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 				metrics.ReasonLabel: metrics.ExpiredReason,
 				"nodepool":          nodePool.Name,
+			})
+		})
+		It("should fire metrics with correct pod count when expired with multiple pods", func() {
+			pod1 := test.Pod(test.PodOptions{NodeName: node.Name})
+			pod2 := test.Pod(test.PodOptions{NodeName: node.Name})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod1, pod2)
+			nodeClaim.Status.NodeName = node.Name
+			ExpectApplied(ctx, env.Client, nodeClaim)
+
+			fakeClock.Step(60 * time.Second)
+			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+
+			ExpectNotFound(ctx, env.Client, nodeClaim)
+			ExpectMetricCounterValue(metrics.PodsDisruptedTotal, 2, map[string]string{
+				metrics.ReasonLabel:       metrics.ExpiredReason,
+				metrics.NodePoolLabel:     nodePool.Name,
+				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 			})
 		})
 	})

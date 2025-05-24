@@ -133,6 +133,10 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+	pods := &corev1.PodList{}
+	if err := c.kubeClient.List(ctx, pods, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+		return reconcile.Result{}, fmt.Errorf("listing pods on node %s, %w", node.Name, err)
+	}
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting unhealthy node")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
@@ -145,6 +149,11 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
 		ImageID:                   nodeClaim.Status.ImageID,
+	})
+	metrics.PodsDisruptedTotal.Add(float64(len(pods.Items)), map[string]string{
+		metrics.ReasonLabel:       metrics.UnhealthyReason,
+		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
 	})
 	return reconcile.Result{}, nil
 }
