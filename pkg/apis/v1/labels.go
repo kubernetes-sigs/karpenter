@@ -48,6 +48,7 @@ const (
 
 // Karpenter specific annotations
 const (
+	AllowDisruptionAnnotationKey               = apis.Group + "/allow-disruption"
 	DoNotDisruptAnnotationKey                  = apis.Group + "/do-not-disrupt"
 	ProviderCompatibilityAnnotationKey         = apis.CompatibilityGroup + "/provider"
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"

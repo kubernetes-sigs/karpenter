@@ -88,6 +88,9 @@ func (l Limits) isEvictable(pod *v1.Pod, evictionBlocker evictionBlocker) (clien
 	if !podutil.IsEvictable(pod) {
 		return client.ObjectKey{}, true
 	}
+
+	podAllowsDisruption := podutil.HasAllowDisruption(pod)
+
 	for _, pdb := range l {
 		if pdb.key.Namespace == pod.ObjectMeta.Namespace {
 			if pdb.selector.Matches(labels.Set(pod.Labels)) {
@@ -104,11 +107,11 @@ func (l Limits) isEvictable(pod *v1.Pod, evictionBlocker evictionBlocker) (clien
 
 				switch evictionBlocker {
 				case zeroDisruptions:
-					if pdb.disruptionsAllowed == 0 {
+					if pdb.disruptionsAllowed == 0 && !podAllowsDisruption {
 						return pdb.key, false
 					}
 				case fullyBlockingPDBs:
-					if pdb.isFullyBlocking {
+					if pdb.isFullyBlocking && !podAllowsDisruption {
 						return pdb.key, false
 					}
 				}

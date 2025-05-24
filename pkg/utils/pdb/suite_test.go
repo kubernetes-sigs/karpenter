@@ -189,6 +189,26 @@ var _ = Describe("CanEvictPods", func() {
 			MaxUnavailable: lo.ToPtr(intstr.FromInt(0)),
 		})),
 	)
+	It("can evict pod with blocking PDB when disruptions are allowed for pod", func() {
+		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:       podLabels,
+			MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+		})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{karpenterv1.AllowDisruptionAnnotationKey: "true"},
+				Labels:      podLabels,
+			},
+		})
+		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+
+		limits, err := pdb.NewLimits(ctx, env.Client)
+		Expect(err).NotTo(HaveOccurred())
+
+		violatingPDB, canEvict := limits.CanEvictPods([]*v1.Pod{pod})
+		Expect(violatingPDB).To(Equal(client.ObjectKey{}))
+		Expect(canEvict).To(BeTrue())
+	})
 })
 
 var _ = Describe("IsCurrentlyReschedulable", func() {
@@ -285,5 +305,22 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(limits.IsCurrentlyReschedulable(pod)).To(BeFalse())
+	})
+	It("considers pod as currently reschedulable with blocking PDB when disruptions are allowed for pod", func() {
+		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:       podLabels,
+			MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+		})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{karpenterv1.AllowDisruptionAnnotationKey: "true"},
+				Labels:      podLabels,
+			}})
+		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+
+		limits, err := pdb.NewLimits(ctx, env.Client)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(limits.IsCurrentlyReschedulable(pod)).To(BeTrue())
 	})
 })
