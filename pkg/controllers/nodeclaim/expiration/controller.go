@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -88,6 +89,18 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	})
+	if nodeClaim.Status.NodeName != "" {
+		nodeName := nodeClaim.Status.NodeName
+		pods := &corev1.PodList{}
+		if err := c.kubeClient.List(ctx, pods, client.MatchingFields{"spec.nodeName": nodeName}); err == nil {
+			metrics.PodsDisruptedTotal.Add(float64(len(pods.Items)), map[string]string{
+				metrics.ReasonLabel:       strings.ToLower(metrics.ExpiredReason),
+				metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+			})
+		}
+
+	}
 	// We sleep here after the delete operation since we want to ensure that we are able to read our own writes so that
 	// we avoid duplicating metrics and log lines due to quick re-queues.
 	// USE CAUTION when determining whether to increase this timeout or remove this line

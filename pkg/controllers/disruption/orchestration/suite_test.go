@@ -25,6 +25,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
@@ -344,6 +345,42 @@ var _ = Describe("Queue", func() {
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 			// And expect the nodeClaim and node to be deleted
 			ExpectNotFound(ctx, env.Client, nodeClaim2, node2)
+		})
+		It("should count disrupted pods when terminating nodes", func() {
+			// Create pods on the node that will be disrupted
+			pod1 := test.Pod(test.PodOptions{NodeName: node1.Name})
+			pod2 := test.Pod(test.PodOptions{NodeName: node1.Name})
+
+			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, replacementNodeClaim, replacementNode, pod1, pod2)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			// Reset metrics before test
+			metrics.NodeClaimsDisruptedTotal.Reset()
+			metrics.PodsDisruptedTotal.Reset()
+
+			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
+			Expect(queue.Add(cmd)).To(BeNil())
+
+			// Initialize the replacement node
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
+
+			ExpectSingletonReconciled(ctx, queue)
+			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
+
+			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, cmd.Reason())
+			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
+			Expect(recorder.DetectedEvent(terminatingEvents[1].Message)).To(BeTrue())
+
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
+			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
+
+			// Verify pod disruption metrics
+			ExpectMetricCounterValue(metrics.PodsDisruptedTotal, 2, map[string]string{
+				metrics.ReasonLabel:       "test-method",
+				metrics.NodePoolLabel:     nodePool.Name,
+				metrics.CapacityTypeLabel: nodeClaim1.Labels[v1.CapacityTypeLabelKey],
+			})
 		})
 
 	})
