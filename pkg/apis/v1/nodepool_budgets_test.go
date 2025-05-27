@@ -264,5 +264,13 @@ var _ = Describe("Budgets", func() {
 			Expect(err).To(Succeed())
 			Expect(active).ToNot(BeTrue())
 		})
+		It("should return an error indicating why the cron fails to parse", func() {
+			// Set the date to the first monday in 2024, the best year ever
+			fakeClock = clock.NewFakeClock(time.Date(2024, time.January, 7, 0, 0, 0, 0, time.UTC))
+			budgets[0].Schedule = lo.ToPtr("0 0 * * tue-mon")
+			budgets[0].Duration = lo.ToPtr(metav1.Duration{Duration: lo.Must(time.ParseDuration("6h"))})
+			_, err := budgets[0].IsActive(fakeClock)
+			Expect(err).To(MatchError(ContainSubstring("beginning of range (2) beyond end of range (1)")))
+		})
 	})
 })
