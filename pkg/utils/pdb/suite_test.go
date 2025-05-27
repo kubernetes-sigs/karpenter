@@ -323,4 +323,25 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 
 		Expect(limits.IsCurrentlyReschedulable(pod)).To(BeTrue())
 	})
+	It("does not consider pod with do-not-disrupt annotation as currently reschedulable, even if also marked allowed-disruption", func() {
+		podDisruptionBudget := test.PodDisruptionBudget(test.PDBOptions{
+			Labels:       podLabels,
+			MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+		})
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					karpenterv1.DoNotDisruptAnnotationKey:    "true",
+					karpenterv1.AllowDisruptionAnnotationKey: "true",
+				},
+				Labels: podLabels,
+			},
+		})
+		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+
+		limits, err := pdb.NewLimits(ctx, env.Client)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(limits.IsCurrentlyReschedulable(pod)).To(BeFalse())
+	})
 })
