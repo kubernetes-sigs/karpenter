@@ -156,13 +156,17 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 
 	// If we haven't synced before, then we need to make sure that our internal cache is fully hydrated
 	// before we start doing operations against the state
-	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
+	// Because we get so many NodeClaims from this response, we are not DeepCopying the cached data here
+	// DO NOT MUTATE NodeClaims in this function as this will affect the underlying cached NodeClaim
+	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider, client.UnsafeDisableDeepCopy)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
 	nodeList := &corev1.NodeList{}
-	if err := c.kubeClient.List(ctx, nodeList); err != nil {
+	// Because we get so many Nodes from this response, we are not DeepCopying the cached data here
+	// DO NOT MUTATE Nodes in this function as this will affect the underlying cached Node
+	if err := c.kubeClient.List(ctx, nodeList, client.UnsafeDisableDeepCopy); err != nil {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
