@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/patrickmn/go-cache"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -54,16 +55,23 @@ type Controller struct {
 
 	drift         *Drift
 	consolidation *Consolidation
+
+	// Dedupe cache for recently reconciled NodeClaims
+	lastReconciled *cache.Cache
 }
+
+// Dedupe window for NodeClaim reconciliation
+const dedupeTimeout = 10 * time.Second
 
 // NewController constructs a nodeclaim disruption controller. Note that every sub-controller has a dependency on its nodepool.
 // Disruption mechanisms that don't depend on the nodepool (like expiration), should live elsewhere.
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
-		kubeClient:    kubeClient,
-		cloudProvider: cloudProvider,
-		drift:         &Drift{cloudProvider: cloudProvider},
-		consolidation: &Consolidation{kubeClient: kubeClient, clock: clk},
+		kubeClient:     kubeClient,
+		cloudProvider:  cloudProvider,
+		drift:          &Drift{cloudProvider: cloudProvider},
+		consolidation:  &Consolidation{kubeClient: kubeClient, clock: clk},
+		lastReconciled: cache.New(dedupeTimeout, 10*time.Second),
 	}
 }
 
@@ -81,7 +89,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		return reconcile.Result{}, nil
 	}
 
-	stored := nodeClaim.DeepCopy()
 	nodePoolName, ok := nodeClaim.Labels[v1.NodePoolLabelKey]
 	if !ok {
 		return reconcile.Result{}, nil
@@ -101,20 +108,20 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
+
+	stored := nodeClaim.DeepCopy()
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
-		// can cause races due to the fact that it fully replaces the list on a change
-		// Here, we are updating the status condition list
+		cacheKey := string(nodeClaim.UID)
+		if _, found := c.lastReconciled.Get(cacheKey); found {
+			return reconcile.Result{}, nil
+		}
 		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
-		// We sleep here after a patch operation since we want to ensure that we are able to read our own writes
-		// so that we avoid duplicating metrics and log lines due to quick re-queues from our node watcher
-		// USE CAUTION when determining whether to increase this timeout or remove this line
-		time.Sleep(time.Second)
+		c.lastReconciled.Set(cacheKey, nil, dedupeTimeout)
 	}
 	if errs != nil {
 		return reconcile.Result{}, errs
