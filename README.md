@@ -37,10 +37,10 @@ Bi-weekly meetings alternating between Thursdays @ 9:00 PT ([convert to your tim
 Weekly meetings alternating between repositories and time slots. Please check the calendar invite for specific dates:
 
 **kubernetes-sigs/karpenter**:
-- Alternating Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and @ 15:00 PT [convert to your timezone](http://www.thetimezoneconverter.com/?t=15:00&tz=Seattle) bi-weekly
+- Alternating Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and @ 15:00 PT [convert to your timezone](http://www.thetimezoneconverter.com/?t=15:00&tz=Seattle) monthly
 
 **aws/karpenter-provider-aws**:
-- Alternating Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and @ 15:00 PT [convert to your timezone](http://www.thetimezoneconverter.com/?t=15:00&tz=Seattle) bi-weekly
+- Alternating Mondays @ 9:00 PT ([convert to your timezone](http://www.thetimezoneconverter.com/?t=9:00&tz=Seattle)) and @ 15:00 PT [convert to your timezone](http://www.thetimezoneconverter.com/?t=15:00&tz=Seattle) monthly
 
 #### Meeting Resources
 - **Zoom Link**: [Join Meeting](https://zoom.us/j/95618088729) (password: 77777)

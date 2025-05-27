@@ -38,10 +38,14 @@ const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
 	consolidation
+	Validator
 }
 
-func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidation {
-	return &MultiNodeConsolidation{consolidation: consolidation}
+func NewMultiNodeConsolidation(c consolidation) *MultiNodeConsolidation {
+	return &MultiNodeConsolidation{
+		consolidation: c,
+		Validator:     NewMultiConsolidationValidator(c),
+	}
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
@@ -96,7 +100,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, scheduling.Results{}, nil
 	}
 
-	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue, m.Reason()).IsValid(ctx, cmd, consolidationTTL); err != nil {
+	if cmd, err = m.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
 			return Command{}, scheduling.Results{}, nil
@@ -133,7 +137,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
+				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
 				if lastSavedCommand.candidates == nil {
 					log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
 					return Command{}, scheduling.Results{}, nil

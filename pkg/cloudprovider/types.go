@@ -128,14 +128,16 @@ func (its InstanceTypes) OrderByPrice(reqs scheduling.Requirements) InstanceType
 	sort.Slice(its, func(i, j int) bool {
 		iPrice := math.MaxFloat64
 		jPrice := math.MaxFloat64
-		if ofs := its[i].Offerings.Available().Compatible(reqs); len(ofs) > 0 {
-			iPrice = ofs.Cheapest().Price
+
+		for _, of := range its[i].Offerings {
+			if of.Available && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < iPrice {
+				iPrice = of.Price
+			}
 		}
-		if ofs := its[j].Offerings.Available().Compatible(reqs); len(ofs) > 0 {
-			jPrice = ofs.Cheapest().Price
-		}
-		if iPrice == jPrice {
-			return its[i].Name < its[j].Name
+		for _, of := range its[j].Offerings {
+			if of.Available && reqs.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && of.Price < jPrice {
+				jPrice = of.Price
+			}
 		}
 		return iPrice < jPrice
 	})

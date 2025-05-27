@@ -106,7 +106,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		}
 	}
 	return &Candidate{
-		StateNode:         node.DeepCopy(),
+		StateNode:         node,
 		instanceType:      instanceType,
 		NodePool:          nodePool,
 		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],
@@ -139,6 +139,10 @@ func (c Command) Decision() Decision {
 	default:
 		return NoOpDecision
 	}
+}
+
+func (c Command) Candidates() []*Candidate {
+	return c.candidates
 }
 
 func (c Command) LogValues() []any {

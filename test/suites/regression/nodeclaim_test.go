@@ -80,7 +80,7 @@ var _ = Describe("NodeClaim", func() {
 					Resources: v1.ResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("3"),
-							corev1.ResourceMemory: resource.MustParse("64Gi"),
+							corev1.ResourceMemory: resource.MustParse("11Gi"),
 						},
 					},
 					NodeClassRef: &v1.NodeClassReference{
@@ -229,7 +229,7 @@ var _ = Describe("NodeClaim", func() {
 			// Expect that the nodeClaim is eventually de-provisioned due to the registration timeout
 			Eventually(func(g Gomega) {
 				g.Expect(errors.IsNotFound(env.Client.Get(env.Context, client.ObjectKeyFromObject(nodeClaim), nodeClaim))).To(BeTrue())
-			}).WithTimeout(time.Minute * 16).Should(Succeed())
+			}).WithTimeout(time.Minute * 17).Should(Succeed())
 		})
 		It("should delete a NodeClaim if it references a NodeClass that doesn't exist", func() {
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -248,7 +248,7 @@ var _ = Describe("NodeClaim", func() {
 		})
 		It("should delete a NodeClaim if it references a NodeClass that isn't Ready", func() {
 			env.ExpectCreated(nodeClass)
-			nodeClass = env.ExpectNodeClassCondition(env.DefaultNodeClass, []status.Condition{
+			nodeClass = env.ExpectNodeClassCondition(nodeClass, []status.Condition{
 				{
 					Type:               "Ready",
 					Status:             metav1.ConditionFalse,
@@ -258,6 +258,9 @@ var _ = Describe("NodeClaim", func() {
 				},
 			})
 			env.ExpectStatusUpdated(nodeClass)
+			env.ExpectBlockNodeClassStatus(nodeClass)
+			// TODO: better not to have this but this suite runs quickly as is and this solves for multiple cloudproviders
+			time.Sleep(10 * time.Second)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				Spec: v1.NodeClaimSpec{
 					Requirements: requirements,
@@ -291,8 +294,8 @@ var _ = Describe("NodeClaim", func() {
 			nodeClaim = env.ExpectExists(nodeClaim).(*v1.NodeClaim)
 
 			By("Updated NodeClaim Status")
-			nodeClaim.Status.ProviderID = "test-provider-id"
-			nodeClaim.Status.NodeName = "test-node-name"
+			nodeClaim.Status.ProviderID = ""
+			nodeClaim.Status.NodeName = ""
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)

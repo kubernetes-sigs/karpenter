@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -115,7 +116,7 @@ func (env *Environment) ExpectStatusUpdated(objects ...client.Object) {
 	}
 }
 
-func (env *Environment) ExpectNodeClassCondition(nodeclass *unstructured.Unstructured, conditions []status.Condition) client.Object {
+func (env *Environment) ExpectNodeClassCondition(nodeclass *unstructured.Unstructured, conditions []status.Condition) *unstructured.Unstructured {
 	result := nodeclass.DeepCopy()
 
 	err := unstructured.SetNestedSlice(result.Object, lo.Map(conditions, func(condition status.Condition, _ int) interface{} {
@@ -929,6 +930,74 @@ func (env *Environment) ExpectBlockNodeRegistration() {
 				ProviderID: "test-provider",
 			}}, client.DryRunAll)).ToNot(Succeed())
 	}).Should(Succeed())
+}
+
+// ExpectBlockNodeClassStatus sets up a nodeclass status update blocking mechanism using ValidatingAdmissionPolicy.
+// It creates a policy that prevents nodeclassess from updating their status
+//
+// The function performs the following steps:
+// 1. Verifies the cluster version is 1.28 or higher (requirement for ValidatingAdmissionPolicy)
+// 2. Creates an admission policy that specifically targets nodeclass status updates
+// 3. Creates a binding for the admission policy to enforce the validation
+//
+// Note: Requires Kubernetes version 1.28+ to function properly.
+func (env *Environment) ExpectBlockNodeClassStatus(obj *unstructured.Unstructured) {
+	GinkgoHelper()
+
+	version, err := env.KubeClient.Discovery().ServerVersion()
+	Expect(err).To(BeNil())
+	if version.Minor < "28" {
+		Skip("This test is only valid for K8s >= 1.28")
+	}
+
+	// Define the ValidatingAdmissionPolicy that will inspect node creation requests
+	// The policy's validation expression checks if the 'registration' label equals 'fail'
+	admissionspolicy := &admissionregistrationv1.ValidatingAdmissionPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "admission-policy",
+			Labels: map[string]string{
+				test.DiscoveryLabel: "unspecified",
+			},
+		},
+		Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
+			FailurePolicy: lo.ToPtr(admissionregistrationv1.Fail),
+			MatchConstraints: &admissionregistrationv1.MatchResources{
+				ResourceRules: []admissionregistrationv1.NamedRuleWithOperations{
+					{
+						RuleWithOperations: admissionregistrationv1.RuleWithOperations{
+							Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
+							Rule: admissionregistrationv1.Rule{
+								APIGroups:   []string{object.GVK(obj).Group},
+								APIVersions: []string{object.GVK(obj).Version},
+								Resources:   []string{strings.ToLower(object.GVK(obj).Kind) + "es/status"},
+							},
+						},
+					},
+				},
+			},
+			Validations: []admissionregistrationv1.Validation{
+				{
+					Expression: "false",
+				},
+			},
+		},
+	}
+
+	// Create the binding that connects the admission policy to the cluster's admission chain
+	admissionspolicybinding := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "admission-policy-binding",
+			Labels: map[string]string{
+				test.DiscoveryLabel: "unspecified",
+			},
+		},
+		Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{
+			PolicyName:        admissionspolicy.Name,
+			ValidationActions: []admissionregistrationv1.ValidationAction{admissionregistrationv1.Deny},
+		},
+	}
+	// Create both the policy and binding in the cluster
+	env.ExpectCreated(admissionspolicy, admissionspolicybinding)
 }
 
 func (env *Environment) ConsistentlyExpectNodeClaimsNotDrifted(duration time.Duration, nodeClaims ...*v1.NodeClaim) {
