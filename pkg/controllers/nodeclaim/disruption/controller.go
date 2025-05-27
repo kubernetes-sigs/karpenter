@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/multierr"
@@ -89,13 +90,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		return reconcile.Result{}, nil
 	}
 
-	nodePoolName, ok := nodeClaim.Labels[v1.NodePoolLabelKey]
-	if !ok {
-		return reconcile.Result{}, nil
-	}
-	nodePool := &v1.NodePool{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+	nodePool, err := c.getNodePool(ctx, nodeClaim)
+	if err != nil {
+		return reconcile.Result{}, err
 	}
 	var results []reconcile.Result
 	var errs error
@@ -141,4 +138,16 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		b.Watches(nodeClass, nodeclaimutils.NodeClassEventHandler(c.kubeClient))
 	}
 	return b.Complete(reconcile.AsReconciler(m.GetClient(), c))
+}
+
+func (c *Controller) getNodePool(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodePool, error) {
+	nodePoolName, ok := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if !ok {
+		return nil, fmt.Errorf("%s not found in nodeClaim %s", v1.NodePoolLabelKey, nodeClaim.Name)
+	}
+	nodePool := &v1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+		return nil, client.IgnoreNotFound(err)
+	}
+	return nodePool, nil
 }
