@@ -31,6 +31,20 @@ const (
 	ConditionTypeNodeRegistrationHealthy = "NodeRegistrationHealthy"
 )
 
+type DisruptionStatus struct {
+	// AllowedDisruptionCount is the number of nodes that can be disrupted based on the disruption budget
+	// +optional
+	AllowedDisruptionCount int
+
+	// CurrentDisruptionCount is the number of nodes in the nodepool that are currently marked as disrupted
+	// +optional
+	CurrentDisruptionCount int
+
+	// DisruptionReason captures reason on why nodes are currently marked as disrupted
+	// +optional
+	DisruptionReason DisruptionReason
+}
+
 // NodePoolStatus defines the observed state of NodePool
 type NodePoolStatus struct {
 	// Resources is the list of resources that have been provisioned.
