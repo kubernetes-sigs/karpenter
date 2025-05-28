@@ -17,6 +17,7 @@ KWOK_REPO=kubernetes-sigs/kwok
 KWOK_RELEASE=v0.5.2
 # make a base directory for multi-base kustomization
 HOME_DIR=$(mktemp -d)
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 BASE=${HOME_DIR}/base
 mkdir ${BASE}
 
@@ -117,6 +118,6 @@ then
 else
   kubectl apply -f ${HOME_DIR}/kwok.yaml
   kubectl apply -f ${crdURL}
-  kubectl apply -f $(pwd)/hack/kwok/stages
+  kubectl apply -f ${SCRIPT_DIR}/kwok/stages
 fi
 
