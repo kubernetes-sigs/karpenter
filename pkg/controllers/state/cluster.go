@@ -409,7 +409,10 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 	}
 	for nodePoolName, pods := range npPods {
 		nodePool := &v1.NodePool{}
-		err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool)
+		if nodePoolName != "" {
+			// Swallow errors if we can't get the nodepool
+			_ = c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool)
+		}
 		for _, p := range pods {
 			nn := client.ObjectKeyFromObject(p)
 			c.podsSchedulableTimes.LoadOrStore(nn, now)
@@ -421,16 +424,14 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 					PodSchedulingDecisionSeconds.Observe(c.clock.Since(ackTime).Seconds(), nil)
 				}
 			}
-			if err == nil {
-				// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
-				// then mark the time when we thought it can schedule to now.
-				if nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
-					c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
-				} else {
-					// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
-					// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
-					c.podHealthyNodePoolScheduledTime.Delete(nn)
-				}
+			// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
+			// then mark the time when we thought it can schedule to now.
+			if nodePoolName != "" && nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+				c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
+			} else {
+				// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
+				// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
+				c.podHealthyNodePoolScheduledTime.Delete(nn)
 			}
 		}
 	}
