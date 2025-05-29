@@ -102,6 +102,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
+	nodeClaimDisruptionController.Reset()
 	cp.Reset()
 	ExpectCleanedUp(ctx, env.Client)
 })

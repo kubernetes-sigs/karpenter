@@ -19,8 +19,10 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -41,6 +43,9 @@ const (
 // Drift is a nodeclaim sub-controller that adds or removes status conditions on drifted nodeclaims
 type Drift struct {
 	cloudProvider cloudprovider.CloudProvider
+
+	mu                sync.Mutex
+	instanceTypeCache *cache.Cache
 }
 
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
@@ -84,12 +89,11 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	}); reason != "" {
 		return reason, nil
 	}
-	// Include instance type checking separate from the other two to reduce the amount of times we grab the instance types.
-	its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
+	reason, err := d.instanceTypeNotFound(ctx, nodePool, nodeClaim)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("getting instance type for drift, %w", err)
 	}
-	if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
+	if reason != "" {
 		return reason, nil
 	}
 	// Then check if it's drifted from the cloud provider side.
@@ -111,12 +115,30 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 // 1. The NodeClaim doesn't have the instance type label
 // 2. The NodeClaim has an instance type that doesn't exist in the cloudprovider instance types
 // 3. There are no offerings that match the requirements
-func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeClaim) cloudprovider.DriftReason {
-	it, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool {
-		return it.Name == nodeClaim.Labels[corev1.LabelInstanceTypeStable]
-	})
+func (d *Drift) instanceTypeNotFound(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (cloudprovider.DriftReason, error) {
+	// Include instance type checking separate from the other two to reduce the amount of times we grab the instance types.
+	var instanceTypes map[string]cloudprovider.Offerings
+	if v, ok := d.instanceTypeCache.Get(nodePool.Name); ok {
+		instanceTypes = v.(map[string]cloudprovider.Offerings)
+	} else {
+		d.mu.Lock()
+		if v, ok = d.instanceTypeCache.Get(nodePool.Name); ok {
+			instanceTypes = v.(map[string]cloudprovider.Offerings)
+		} else {
+			its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
+			if err != nil {
+				d.mu.Unlock()
+				return "", err
+			}
+			instanceTypes = lo.SliceToMap(its, func(it *cloudprovider.InstanceType) (string, cloudprovider.Offerings) { return it.Name, it.Offerings })
+			d.instanceTypeCache.SetDefault(nodePool.Name, instanceTypes)
+		}
+	}
+	d.mu.Unlock()
+
+	ofs, ok := instanceTypes[nodeClaim.Labels[corev1.LabelInstanceTypeStable]]
 	if !ok {
-		return InstanceTypeNotFound
+		return InstanceTypeNotFound, nil
 	}
 	reqs := scheduling.NewLabelRequirements(nodeClaim.Labels)
 	// The reserved capacity type is special because a NodeClaim can be demoted from reserved to on-demand after creation.
@@ -128,10 +150,10 @@ func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeC
 		reqs[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
 		delete(reqs, cloudprovider.ReservationIDLabel)
 	}
-	if !it.Offerings.HasCompatible(reqs) {
-		return InstanceTypeNotFound
+	if !ofs.HasCompatible(reqs) {
+		return InstanceTypeNotFound, nil
 	}
-	return ""
+	return "", nil
 }
 
 // Eligible fields for drift are described in the docs
