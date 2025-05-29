@@ -82,7 +82,19 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 
-	// If a nodeclaim does has a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
+	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node)
+	if unhealthyNodeCondition == nil {
+		return reconcile.Result{}, nil
+	}
+
+	// If the Node is unhealthy, but has not reached its full toleration disruption
+	// requeue at the termination time of the unhealthy node
+	terminationTime := unhealthyNodeCondition.LastTransitionTime.Add(policyTerminationDuration)
+	if c.clock.Now().Before(terminationTime) {
+		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
+	}
+
+	// If a nodeclaim does have a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
 	// In the case of standalone nodeclaim, validate the nodes inside the cluster are healthy before proceeding
 	// to repair the nodes
 	nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]
@@ -104,24 +116,10 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, nil
 		}
 	}
-
-	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node)
-	if unhealthyNodeCondition == nil {
-		return reconcile.Result{}, nil
-	}
-
-	// If the Node is unhealthy, but has not reached it's full toleration disruption
-	// requeue at the termination time of the unhealthy node
-	terminationTime := unhealthyNodeCondition.LastTransitionTime.Add(policyTerminationDuration)
-	if c.clock.Now().Before(terminationTime) {
-		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
-	}
-
 	// For unhealthy past the tolerationDisruption window we can forcefully terminate the node
 	if err := c.annotateTerminationGracePeriod(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-
 	return c.deleteNodeClaim(ctx, nodeClaim, node, unhealthyNodeCondition)
 }
 
@@ -176,7 +174,6 @@ func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeCla
 			return nil
 		}
 	}
-
 	stored := nodeClaim.DeepCopy()
 	terminationTime := c.clock.Now().Format(time.RFC3339)
 	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
@@ -187,7 +184,6 @@ func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeCla
 		}
 		log.FromContext(ctx).WithValues(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime).Info("annotated nodeclaim")
 	}
-
 	return nil
 }
 
