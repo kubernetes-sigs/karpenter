@@ -169,5 +169,5 @@ func GetLabelDomain(key string) string {
 }
 
 func NodeClassLabelKey(gk schema.GroupKind) string {
-	return fmt.Sprintf("%s/%s", gk.Group, strings.ToLower(gk.Kind))
+	return fmt.Sprintf("%s/%s", strings.Replace(gk.Group, "-", "_", -1), strings.ToLower(gk.Kind))
 }
