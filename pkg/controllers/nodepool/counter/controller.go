@@ -18,12 +18,15 @@ package counter
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,9 +36,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/awslabs/operatorpkg/status"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -46,6 +52,8 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
+	clock         clock.Clock
+	recorder      events.Recorder
 }
 
 var BaseResources = corev1.ResourceList{
@@ -57,11 +65,13 @@ var BaseResources = corev1.ResourceList{
 }
 
 // NewController is a constructor
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, clock clock.Clock, recorder events.Recorder) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		cluster:       cluster,
+		clock:         clock,
+		recorder:      recorder,
 	}
 }
 
@@ -79,7 +89,51 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 	stored := nodePool.DeepCopy()
-	// Determine resource usage and update nodepool.status.resources
+
+	// Track disruption count and reasons
+	currentDisruptions := 0
+	disruptionReasons := map[v1.DisruptionReason]int{}
+	c.cluster.ForEachNode(func(n *state.StateNode) bool {
+		if !n.Managed() || !n.Initialized() {
+			return true
+		}
+
+		// we don't count nodes that are in terminating status since cloud provider has already initiated termination
+		// after disruption
+		if n.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+			return true
+		}
+
+		if n.Labels()[v1.NodePoolLabelKey] == nodePool.Name {
+			if cond, found := lo.Find(n.NodeClaim.GetConditions(), func(s status.Condition) bool {
+				return s.Type == v1.ConditionTypeDisruptionReason && s.GetStatus() == metav1.ConditionTrue
+			}); found {
+				currentDisruptions++
+				disruptionReasons[v1.DisruptionReason(cond.Reason)]++
+			}
+		}
+		// continue with our iteration
+		return true
+	})
+
+	// Build budget mapping for each reason that has disrupted nodes
+	var totalAllowedDisruptions int
+	for reason := range disruptionReasons {
+		disruptionBudgetMapping, err := disruption.BuildDisruptionBudgetMapping(ctx, c.cluster, c.clock, c.kubeClient, c.cloudProvider, c.recorder, reason)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("building disruption budgets for reason %s, %w", reason, err)
+		}
+		totalAllowedDisruptions += disruptionBudgetMapping[nodePool.Name]
+	}
+
+	// Update the NodePool's status with disruption information
+	nodePool.Status.Disruptions = v1.DisruptionStatus{
+		AllowedDisruptionCount: totalAllowedDisruptions,
+		CurrentDisruptionCount: currentDisruptions,
+		DisruptionReasonCount:  disruptionReasons,
+	}
+
+	// Determine disruption status, resource usage and update nodepool.status.resources
 	nodePool.Status.Resources = lo.Assign(BaseResources, c.cluster.NodePoolResourcesFor(nodePool.Name))
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {

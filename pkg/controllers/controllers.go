@@ -90,7 +90,7 @@ func NewControllers(
 		metricsnode.NewController(cluster),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider),
-		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
+		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster, clock, recorder),
 		nodepoolvalidation.NewController(kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),

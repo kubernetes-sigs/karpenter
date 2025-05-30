@@ -40,9 +40,9 @@ type DisruptionStatus struct {
 	// +optional
 	CurrentDisruptionCount int
 
-	// DisruptionReason captures reason on why nodes are currently marked as disrupted
+	// DisruptionReasonCount captures count of nodes in the nodepool that are currently marked as disrupted by a specific reason
 	// +optional
-	DisruptionReason DisruptionReason
+	DisruptionReasonCount map[DisruptionReason]int
 }
 
 // NodePoolStatus defines the observed state of NodePool
@@ -57,6 +57,9 @@ type NodePoolStatus struct {
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
+	// Disruptions track allowed vs currently disrupted nodes along with disruption reason
+	// +optional
+	Disruptions DisruptionStatus
 }
 
 func (in *NodePool) StatusConditions() status.ConditionSet {

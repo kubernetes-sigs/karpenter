@@ -52,6 +52,7 @@ var cluster *state.Cluster
 var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
 var node, node2 *corev1.Node
+var recorder *test.EventRecorder
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -60,6 +61,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	recorder = test.NewEventRecorder()
 	cloudProvider = fake.NewCloudProvider()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	fakeClock = clock.NewFakeClock(time.Now())
@@ -67,7 +69,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	nodePoolInformerController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
-	nodePoolController = counter.NewController(env.Client, cloudProvider, cluster)
+	nodePoolController = counter.NewController(env.Client, cloudProvider, cluster, fakeClock, recorder)
 })
 
 var _ = AfterSuite(func() {
