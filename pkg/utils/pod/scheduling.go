@@ -180,6 +180,13 @@ func HasDoNotDisrupt(pod *corev1.Pod) bool {
 	return pod.Annotations[v1.DoNotDisruptAnnotationKey] == "true"
 }
 
+func HasAllowDisruption(pod *corev1.Pod) bool {
+	if pod.Annotations == nil {
+		return false
+	}
+	return pod.Annotations[v1.AllowDisruptionAnnotationKey] == "true"
+}
+
 // ToleratesDisruptedNoScheduleTaint returns true if the pod tolerates karpenter.sh/disruption:NoSchedule taint
 func ToleratesDisruptedNoScheduleTaint(pod *corev1.Pod) bool {
 	return scheduling.Taints([]corev1.Taint{v1.DisruptedNoScheduleTaint}).ToleratesPod(pod) == nil
