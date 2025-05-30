@@ -18,7 +18,9 @@ package disruption
 
 import (
 	"context"
+	"time"
 
+	"github.com/patrickmn/go-cache"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -61,7 +63,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
-		drift:         &Drift{cloudProvider: cloudProvider},
+		drift:         &Drift{clock: clk, cloudProvider: cloudProvider, instanceTypeNotFoundCheckCache: cache.New(time.Minute*30, time.Minute)},
 		consolidation: &Consolidation{kubeClient: kubeClient, clock: clk},
 	}
 }
@@ -129,4 +131,8 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		b.Watches(nodeClass, nodeclaimutils.NodeClassEventHandler(c.kubeClient))
 	}
 	return b.Complete(reconcile.AsReconciler(m.GetClient(), c))
+}
+
+func (c *Controller) Reset() {
+	c.drift.instanceTypeNotFoundCheckCache.Flush()
 }
