@@ -72,6 +72,13 @@ var _ = Describe("CEL/Validation", func() {
 			nodePool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("Never")
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
+		It("should support round trip to/from unstructured", func() {
+			nodePool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("30s")
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			nodePool2 := &NodePool{}
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, nodePool2))
+			Expect(nodePool2).To(Equal(nodePool))
+		})
 		DescribeTable("should succeed on a valid expireAfter", func(value string) {
 			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
 			lo.Must0(unstructured.SetNestedField(u, value, "spec", "template", "spec", "expireAfter"))
