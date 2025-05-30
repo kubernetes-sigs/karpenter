@@ -30,6 +30,7 @@ import (
 	"go.uber.org/multierr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -283,26 +284,24 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	// All replacements have been provisioned.
 	// All we need to do now is get a successful delete call for each node claim,
 	// then the termination controller will handle the eventual deletion of the nodes.
-	var multiErr error
-	for i := range cmd.candidates {
-		candidate := cmd.candidates[i]
-		q.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason())...)
-		if err := q.kubeClient.Delete(ctx, candidate.NodeClaim); err != nil {
-			multiErr = multierr.Append(multiErr, client.IgnoreNotFound(err))
-		} else {
-			metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-				metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.reason)),
-				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
-				metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
-			})
+	errs := make([]error, len(cmd.candidates))
+	workqueue.ParallelizeUntil(ctx, len(cmd.candidates), len(cmd.candidates), func(i int) {
+		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
+			return q.kubeClient.Delete(ctx, cmd.candidates[i].NodeClaim)
+		}); err != nil {
+			errs[i] = client.IgnoreNotFound(err)
+			return
 		}
-	}
+		q.recorder.Publish(disruptionevents.Terminating(cmd.candidates[i].Node, cmd.candidates[i].NodeClaim, cmd.Reason())...)
+		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+			metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.reason)),
+			metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
+		})
+	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
-	if multiErr != nil {
-		return fmt.Errorf("terminating nodeclaims, %w", multiErr)
-	}
-	return nil
+	return multierr.Combine(errs...)
 }
 
 // Add adds commands to the Queue
