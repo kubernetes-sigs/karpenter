@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -476,16 +477,17 @@ func nominationWindow(ctx context.Context) time.Duration {
 // to add/remove taints while executing a disruption action.
 // nolint:gocyclo
 func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTaint bool, nodes ...*StateNode) error {
-	var multiErr error
-	for _, n := range nodes {
+	errs := make([]error, len(nodes))
+	workqueue.ParallelizeUntil(ctx, len(nodes), len(nodes), func(i int) {
 		// If the StateNode is Karpenter owned and only has a nodeclaim, or is not owned by
 		// Karpenter, thus having no nodeclaim, don't touch the node.
-		if n.Node == nil || n.NodeClaim == nil {
-			continue
+		if nodes[i].Node == nil || nodes[i].NodeClaim == nil {
+			return
 		}
 		node := &corev1.Node{}
-		if err := kubeClient.Get(ctx, client.ObjectKey{Name: n.Node.Name}, node); client.IgnoreNotFound(err) != nil {
-			multiErr = multierr.Append(multiErr, fmt.Errorf("getting node, %w", err))
+		if err := kubeClient.Get(ctx, client.ObjectKey{Name: nodes[i].Node.Name}, node); err != nil {
+			errs[i] = client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
+			return
 		}
 		// If the node already has the taint, continue to the next
 		_, hasTaint := lo.Find(node.Spec.Taints, func(taint corev1.Taint) bool {
@@ -495,7 +497,7 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 		// This ensures that the disruption controller doesn't modify taints that the Termination
 		// controller is also modifying
 		if hasTaint && !node.DeletionTimestamp.IsZero() {
-			continue
+			return
 		}
 		stored := node.DeepCopy()
 		// If the taint is present and we want to remove the taint, remove it.
@@ -516,31 +518,35 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 			// can cause races due to the fact that it fully replaces the list on a change
 			// Here, we are updating the taint list
 			if err := kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				multiErr = multierr.Append(multiErr, serrors.Wrap(fmt.Errorf("patching node, %w", err), "Node", klog.KObj(node)))
+				errs[i] = client.IgnoreNotFound(serrors.Wrap(fmt.Errorf("patching node, %w", err), "Node", klog.KObj(node)))
+				return
 			}
 		}
-	}
-	return multiErr
+	})
+	return multierr.Combine(errs...)
 }
 
 // ClearNodeClaimsCondition will remove the conditionType from the NodeClaim status of the provided statenodes
 func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, conditionType string, nodes ...*StateNode) error {
-	return multierr.Combine(lo.Map(nodes, func(s *StateNode, _ int) error {
-		if !s.Initialized() || s.NodeClaim == nil {
-			return nil
+	errs := make([]error, len(nodes))
+	workqueue.ParallelizeUntil(ctx, len(nodes), len(nodes), func(i int) {
+		if !nodes[i].Initialized() || nodes[i].NodeClaim == nil {
+			return
 		}
 		nodeClaim := &v1.NodeClaim{}
-		if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(s.NodeClaim), nodeClaim); err != nil {
-			return client.IgnoreNotFound(err)
+		if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(nodes[i].NodeClaim), nodeClaim); err != nil {
+			errs[i] = client.IgnoreNotFound(err)
+			return
 		}
 		stored := nodeClaim.DeepCopy()
 		_ = nodeClaim.StatusConditions().Clear(conditionType)
 
 		if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 			if err := kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-				return client.IgnoreNotFound(err)
+				errs[i] = client.IgnoreNotFound(err)
+				return
 			}
 		}
-		return nil
-	})...)
+	})
+	return multierr.Combine(errs...)
 }

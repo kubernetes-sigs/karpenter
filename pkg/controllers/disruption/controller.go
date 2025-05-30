@@ -31,6 +31,7 @@ import (
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -230,8 +231,8 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	// the node is cleaned up.
 	schedulingResults.Record(log.IntoContext(ctx, operatorlogging.NopLogger), c.recorder, c.cluster)
 
-	statenodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
-	if err := c.queue.Add(orchestration.NewCommand(nodeClaimNames, statenodes, commandID, m.Reason(), m.ConsolidationType())); err != nil {
+	stateNodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
+	if err = c.queue.Add(orchestration.NewCommand(nodeClaimNames, stateNodes, commandID, m.Reason(), m.ConsolidationType())); err != nil {
 		providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 		c.cluster.UnmarkForDeletion(providerIDs...)
 		return serrors.Wrap(fmt.Errorf("adding command to queue, %w", err), "command-id", commandID)
@@ -270,17 +271,20 @@ func (c *Controller) MarkDisrupted(ctx context.Context, m Method, candidates ...
 	providerIDs := lo.Map(candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
 	c.cluster.MarkForDeletion(providerIDs...)
 
-	return multierr.Combine(lo.Map(candidates, func(candidate *Candidate, _ int) error {
+	errs := make([]error, len(candidates))
+	workqueue.ParallelizeUntil(ctx, len(candidates), len(candidates), func(i int) {
 		// refresh nodeclaim before updating status
 		nodeClaim := &v1.NodeClaim{}
 
-		if err := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(candidate.NodeClaim), nodeClaim); err != nil {
-			return client.IgnoreNotFound(err)
+		if err := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(candidates[i].NodeClaim), nodeClaim); err != nil {
+			errs[i] = client.IgnoreNotFound(err)
+			return
 		}
 		stored := nodeClaim.DeepCopy()
 		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(m.Reason()), string(m.Reason()))
-		return client.IgnoreNotFound(c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)))
-	})...)
+		errs[i] = client.IgnoreNotFound(c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)))
+	})
+	return multierr.Combine(errs...)
 }
 
 func (c *Controller) recordRun(s string) {
