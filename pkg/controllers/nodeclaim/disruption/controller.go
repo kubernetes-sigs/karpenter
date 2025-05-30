@@ -18,6 +18,8 @@ package disruption
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/patrickmn/go-cache"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -53,16 +56,23 @@ type Controller struct {
 
 	drift         *Drift
 	consolidation *Consolidation
+
+	// Dedupe cache for recently reconciled NodeClaims
+	lastReconciled *cache.Cache
 }
+
+// Dedupe window for NodeClaim reconciliation
+const dedupeTimeout = 10 * time.Second
 
 // NewController constructs a nodeclaim disruption controller. Note that every sub-controller has a dependency on its nodepool.
 // Disruption mechanisms that don't depend on the nodepool (like expiration), should live elsewhere.
 func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
-		kubeClient:    kubeClient,
-		cloudProvider: cloudProvider,
-		drift:         &Drift{cloudProvider: cloudProvider},
-		consolidation: &Consolidation{kubeClient: kubeClient, clock: clk},
+		kubeClient:     kubeClient,
+		cloudProvider:  cloudProvider,
+		drift:          &Drift{cloudProvider: cloudProvider},
+		consolidation:  &Consolidation{kubeClient: kubeClient, clock: clk},
+		lastReconciled: cache.New(dedupeTimeout, 10*time.Second),
 	}
 }
 
@@ -80,14 +90,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		return reconcile.Result{}, nil
 	}
 
-	stored := nodeClaim.DeepCopy()
-	nodePoolName, ok := nodeClaim.Labels[v1.NodePoolLabelKey]
-	if !ok {
-		return reconcile.Result{}, nil
-	}
-	nodePool := &v1.NodePool{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+	nodePool, err := c.getNodePool(ctx, nodeClaim)
+	if err != nil {
+		return reconcile.Result{}, err
 	}
 	var results []reconcile.Result
 	var errs error
@@ -100,16 +105,20 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
+
+	stored := nodeClaim.DeepCopy()
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
-		// can cause races due to the fact that it fully replaces the list on a change
-		// Here, we are updating the status condition list
+		cacheKey := string(nodeClaim.UID)
+		if _, found := c.lastReconciled.Get(cacheKey); found {
+			return reconcile.Result{}, nil
+		}
 		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
+		c.lastReconciled.Set(cacheKey, nil, dedupeTimeout)
 	}
 	if errs != nil {
 		return reconcile.Result{}, errs
@@ -129,4 +138,16 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		b.Watches(nodeClass, nodeclaimutils.NodeClassEventHandler(c.kubeClient))
 	}
 	return b.Complete(reconcile.AsReconciler(m.GetClient(), c))
+}
+
+func (c *Controller) getNodePool(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.NodePool, error) {
+	nodePoolName, ok := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if !ok {
+		return nil, fmt.Errorf("%s not found in nodeClaim %s", v1.NodePoolLabelKey, nodeClaim.Name)
+	}
+	nodePool := &v1.NodePool{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+		return nil, client.IgnoreNotFound(err)
+	}
+	return nodePool, nil
 }
