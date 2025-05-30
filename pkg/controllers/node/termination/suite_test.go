@@ -18,6 +18,7 @@ package termination_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -112,6 +113,26 @@ var _ = Describe("Termination", func() {
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // VolumeDetachment
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // InstanceTerminationInitiation
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationValidation
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should delete nodes without nodeclaims", func() {
+			ExpectApplied(ctx, env.Client, node)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			// Drain + VolumeDetachment + InstanceTermination (skipped)
+			// We don't requeue because we're not updating the status condition of a NodeClaim
+			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should delete nodes with duplicate nodeclaims", func() {
+			nodeClaim2 := nodeClaim.DeepCopy()
+			nodeClaim.Name = fmt.Sprintf("%s-2", nodeClaim.Name)
+			ExpectApplied(ctx, env.Client, node, nodeClaim, nodeClaim2)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			// Drain + VolumeDetachment + InstanceTermination (skipped)
+			// We don't requeue because we're not updating the status condition of a NodeClaim
+			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should ignore nodes not managed by this Karpenter instance", func() {
