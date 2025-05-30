@@ -28,6 +28,7 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -295,6 +296,16 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
 				metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
 			})
+			pods := &corev1.PodList{}
+			if err := q.kubeClient.List(ctx, pods, client.MatchingFields{"spec.nodeName": candidate.Node.Name}); err != nil {
+				return fmt.Errorf("listing pods on node %s, %w", candidate.Node.Name, err)
+			}
+			metrics.PodsDisruptedTotal.Add(float64(len(pods.Items)), map[string]string{
+				metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.reason)),
+				metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
+				metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
+			})
+
 		}
 	}
 	// If there were any deletion failures, we should requeue.
