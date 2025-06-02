@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -485,7 +486,7 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 			return
 		}
 		node := &corev1.Node{}
-		if err := kubeClient.Get(ctx, client.ObjectKey{Name: nodes[i].Node.Name}, node); err != nil {
+		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error { return kubeClient.Get(ctx, client.ObjectKey{Name: nodes[i].Node.Name}, node) }); err != nil {
 			errs[i] = client.IgnoreNotFound(fmt.Errorf("getting node, %w", err))
 			return
 		}
@@ -517,7 +518,9 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 			// can cause races due to the fact that it fully replaces the list on a change
 			// Here, we are updating the taint list
-			if err := kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
+				return kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
+			}); err != nil {
 				errs[i] = client.IgnoreNotFound(serrors.Wrap(fmt.Errorf("patching node, %w", err), "Node", klog.KObj(node)))
 				return
 			}
@@ -534,7 +537,9 @@ func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, con
 			return
 		}
 		nodeClaim := &v1.NodeClaim{}
-		if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(nodes[i].NodeClaim), nodeClaim); err != nil {
+		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
+			return kubeClient.Get(ctx, client.ObjectKeyFromObject(nodes[i].NodeClaim), nodeClaim)
+		}); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
@@ -542,7 +547,9 @@ func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, con
 		_ = nodeClaim.StatusConditions().Clear(conditionType)
 
 		if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-			if err := kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
+				return kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{}))
+			}); err != nil {
 				errs[i] = client.IgnoreNotFound(err)
 				return
 			}
