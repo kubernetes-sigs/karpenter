@@ -235,6 +235,11 @@ func AllNodesForNodeClaim(ctx context.Context, c client.Client, nodeClaim *v1.No
 
 func UpdateNodeOwnerReferences(nodeClaim *v1.NodeClaim, node *corev1.Node) *corev1.Node {
 	gvk := object.GVK(nodeClaim)
+	if lo.ContainsBy(node.OwnerReferences, func(o metav1.OwnerReference) bool {
+		return o.APIVersion == gvk.GroupVersion().String() && o.Kind == gvk.Kind && o.UID == nodeClaim.UID
+	}) {
+		return node
+	}
 	node.OwnerReferences = append(node.OwnerReferences, metav1.OwnerReference{
 		APIVersion:         gvk.GroupVersion().String(),
 		Kind:               gvk.Kind,
