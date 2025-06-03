@@ -68,6 +68,9 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1
 		}
 		return nil, fmt.Errorf("resolving node class from nodeclaim, %w", err)
 	}
+	if status := nodeClass.StatusConditions().Get(status.ConditionReady); status.IsFalse() {
+		return nil, cloudprovider.NewNodeClassNotReadyError(stderrors.New(status.Message))
+	}
 	// Kick-off a goroutine to allow us to asynchronously register nodes
 	// We're fine to leak this because failed registration can also happen in real providers
 	go func() {
@@ -78,10 +81,6 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1
 			log.FromContext(ctx).Error(err, "failed creating node from nodeclaim")
 		}
 	}()
-	nodeClassReady := nodeClass.StatusConditions().Get(status.ConditionReady)
-	if nodeClassReady.IsFalse() {
-		return nil, cloudprovider.NewNodeClassNotReadyError(stderrors.New(nodeClassReady.Message))
-	}
 	// convert the node back into a node claim to get the chosen resolved requirement values.
 	return c.toNodeClaim(node)
 }
