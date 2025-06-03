@@ -290,7 +290,32 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
-		It("should ignore unhealthy nodes if more then 20% of the nodes are unhealthy", func() {
+		It("should ignore unhealthy nodes if more then 20% of the nodes are unhealthy in a nodepool", func() {
+			ExpectApplied(ctx, env.Client, nodePool)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+			for _, node := range nodes[0:2] {
+				node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+					Type:               "BadNode",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+				})
+				node.Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
+			}
+			for i := range 10 {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			fakeClock.Step(60 * time.Minute)
+
+			// Determine if we should delete unhealthy nodes
+			for i := range 2 {
+				result := ExpectObjectReconciled(ctx, env.Client, healthController, nodes[i])
+				Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[i])
+				Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+			}
+		})
+		It("should ignore unhealthy nodes if more then 20% of the nodes are unhealthy in a cluster", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 			nodeClaims := []*v1.NodeClaim{}
 			nodes := []*corev1.Node{}
@@ -303,8 +328,6 @@ var _ = Describe("Node Health", func() {
 						LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 					})
 				}
-				node.Labels[v1.NodePoolLabelKey] = nodePool.Name
-				nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
 				nodeClaims = append(nodeClaims, nodeClaim)
 				nodes = append(nodes, node)
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -312,9 +335,10 @@ var _ = Describe("Node Health", func() {
 
 			fakeClock.Step(60 * time.Minute)
 
-			// Determine to delete unhealthy nodes
-			for i := range 4 {
-				ExpectObjectReconciled(ctx, env.Client, healthController, nodes[i])
+			// Determine if we should delete unhealthy nodes
+			for i := range 3 {
+				result := ExpectObjectReconciled(ctx, env.Client, healthController, nodes[i])
+				Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[i])
 				Expect(nodeClaim.DeletionTimestamp).To(BeNil())
 			}
