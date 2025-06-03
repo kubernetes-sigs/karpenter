@@ -18,6 +18,7 @@ package termination_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"

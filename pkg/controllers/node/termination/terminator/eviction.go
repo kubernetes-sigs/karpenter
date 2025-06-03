@@ -78,7 +78,7 @@ type Queue struct {
 
 func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	return &Queue{
-		source:     make(chan event.TypedGenericEvent[*corev1.Pod], 100),
+		source:     make(chan event.TypedGenericEvent[*corev1.Pod], 10000),
 		set:        sets.New[client.ObjectKey](),
 		kubeClient: kubeClient,
 		recorder:   recorder,
@@ -115,9 +115,7 @@ func (q *Queue) Add(pods ...*corev1.Pod) {
 		qk := client.ObjectKeyFromObject(pod)
 		if !q.set.Has(qk) {
 			q.set.Insert(qk)
-			go func() {
-				q.source <- event.TypedGenericEvent[*corev1.Pod]{Object: pod}
-			}()
+			q.source <- event.TypedGenericEvent[*corev1.Pod]{Object: pod}
 		}
 	}
 }
