@@ -156,13 +156,17 @@ func (c *Cluster) Synced(ctx context.Context) (synced bool) {
 
 	// If we haven't synced before, then we need to make sure that our internal cache is fully hydrated
 	// before we start doing operations against the state
-	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
+	// Because we get so many NodeClaims from this response, we are not DeepCopying the cached data here
+	// DO NOT MUTATE NodeClaims in this function as this will affect the underlying cached NodeClaim
+	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider, client.UnsafeDisableDeepCopy)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
 	nodeList := &corev1.NodeList{}
-	if err := c.kubeClient.List(ctx, nodeList); err != nil {
+	// Because we get so many Nodes from this response, we are not DeepCopying the cached data here
+	// DO NOT MUTATE Nodes in this function as this will affect the underlying cached Node
+	if err := c.kubeClient.List(ctx, nodeList, client.UnsafeDisableDeepCopy); err != nil {
 		log.FromContext(ctx).Error(err, "failed checking cluster state sync")
 		return false
 	}
@@ -409,7 +413,10 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 	}
 	for nodePoolName, pods := range npPods {
 		nodePool := &v1.NodePool{}
-		err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool)
+		if nodePoolName != "" {
+			// Swallow errors if we can't get the nodepool
+			_ = c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool)
+		}
 		for _, p := range pods {
 			nn := client.ObjectKeyFromObject(p)
 			c.podsSchedulableTimes.LoadOrStore(nn, now)
@@ -421,16 +428,14 @@ func (c *Cluster) MarkPodSchedulingDecisions(ctx context.Context, podErrors map[
 					PodSchedulingDecisionSeconds.Observe(c.clock.Since(ackTime).Seconds(), nil)
 				}
 			}
-			if err == nil {
-				// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
-				// then mark the time when we thought it can schedule to now.
-				if nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
-					c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
-				} else {
-					// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
-					// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
-					c.podHealthyNodePoolScheduledTime.Delete(nn)
-				}
+			// If the pod is scheduled to a nodePool and if the nodePool has NodeRegistrationHealthy=true
+			// then mark the time when we thought it can schedule to now.
+			if nodePoolName != "" && nodePool.StatusConditions().IsTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+				c.podHealthyNodePoolScheduledTime.LoadOrStore(nn, c.clock.Now())
+			} else {
+				// If the pod was scheduled to a healthy nodePool earlier but is now getting scheduled to an
+				// unhealthy one then we need to delete its entry from the map because it will not schedule successfully
+				c.podHealthyNodePoolScheduledTime.Delete(nn)
 			}
 		}
 	}

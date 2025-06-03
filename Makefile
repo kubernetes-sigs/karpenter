@@ -15,10 +15,10 @@ help: ## Display help
 presubmit: verify test licenses vulncheck ## Run all steps required for code to be checked in
 
 install-kwok: ## Install kwok provider
-	UNINSTALL_KWOK=false ./hack/install-kwok.sh
+	./hack/install-kwok.sh
 
 uninstall-kwok: ## Uninstall kwok provider
-	UNINSTALL_KWOK=true ./hack/install-kwok.sh
+	UNINSTALL=true ./hack/install-kwok.sh
 
 build-with-kind: # build with kind assumes the image will be uploaded directly onto the kind control plane, without an image repository
 	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build sigs.k8s.io/karpenter/kwok))

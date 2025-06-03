@@ -6,8 +6,8 @@ require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/awslabs/operatorpkg v0.0.0-20250425180727-b22281cd8057
-	github.com/docker/docker v28.1.1+incompatible
-	github.com/go-logr/logr v1.4.2
+	github.com/docker/docker v28.2.2+incompatible
+	github.com/go-logr/logr v1.4.3
 	github.com/imdario/mergo v0.3.16
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/onsi/ginkgo/v2 v2.23.4

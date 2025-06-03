@@ -258,6 +258,9 @@ var _ = Describe("NodeClaim", func() {
 				},
 			})
 			env.ExpectStatusUpdated(nodeClass)
+			env.ExpectBlockNodeClassStatus(nodeClass)
+			// TODO: better not to have this but this suite runs quickly as is and this solves for multiple cloudproviders
+			time.Sleep(10 * time.Second)
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				Spec: v1.NodeClaimSpec{
 					Requirements: requirements,

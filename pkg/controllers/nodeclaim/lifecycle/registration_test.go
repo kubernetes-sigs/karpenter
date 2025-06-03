@@ -19,10 +19,12 @@ package lifecycle_test
 import (
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
 	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -128,6 +130,42 @@ var _ = Describe("Registration", func() {
 
 		node = ExpectExists(ctx, env.Client, node)
 		ExpectOwnerReferenceExists(node, nodeClaim)
+	})
+	It("should not add the owner reference to the Node when the Node already has the owner reference", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.Node(test.NodeOptions{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         object.GVK(nodeClaim).GroupVersion().String(),
+						Kind:               object.GVK(nodeClaim).Kind,
+						Name:               nodeClaim.Name,
+						UID:                nodeClaim.UID,
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
+				},
+			},
+			ProviderID: nodeClaim.Status.ProviderID,
+			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
+		})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+
+		node = ExpectExists(ctx, env.Client, node)
+		ExpectOwnerReferenceExists(node, nodeClaim)
+		Expect(lo.CountBy(node.OwnerReferences, func(o metav1.OwnerReference) bool {
+			return o.APIVersion == object.GVK(nodeClaim).GroupVersion().String() && o.Kind == object.GVK(nodeClaim).Kind && o.UID == nodeClaim.UID
+		})).To(Equal(1))
 	})
 	It("should sync the karpenter.sh/registered label to the Node and remove the karpenter.sh/unregistered taint when the Node comes online", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
