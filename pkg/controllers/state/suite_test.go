@@ -1805,6 +1805,7 @@ var _ = Describe("Taints", func() {
 		It("should not consider ephemeral taints on a managed node that isn't initialized", func() {
 			node.Spec.Taints = []corev1.Taint{
 				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute},
 				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
@@ -1823,6 +1824,7 @@ var _ = Describe("Taints", func() {
 			node = ExpectExists(ctx, env.Client, node)
 			node.Spec.Taints = []corev1.Taint{
 				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute},
 				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
@@ -1832,9 +1834,10 @@ var _ = Describe("Taints", func() {
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 			stateNode := ExpectStateNodeExists(cluster, node)
-			Expect(stateNode.Taints()).To(HaveLen(3))
+			Expect(stateNode.Taints()).To(HaveLen(4))
 			Expect(stateNode.Taints()).To(ContainElements(
 				corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute},
 				corev1.Taint{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				corev1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			))
@@ -1883,6 +1886,7 @@ var _ = Describe("Taints", func() {
 		It("should consider ephemeral taints on an unmanaged node that isn't initialized", func() {
 			node.Spec.Taints = []corev1.Taint{
 				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute},
 				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
@@ -1890,9 +1894,10 @@ var _ = Describe("Taints", func() {
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 			stateNode := ExpectStateNodeExists(cluster, node)
-			Expect(stateNode.Taints()).To(HaveLen(3))
+			Expect(stateNode.Taints()).To(HaveLen(4))
 			Expect(stateNode.Taints()).To(ContainElements(
 				corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute},
 				corev1.Taint{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				corev1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			))
@@ -1904,6 +1909,7 @@ var _ = Describe("Taints", func() {
 			node = ExpectExists(ctx, env.Client, node)
 			node.Spec.Taints = []corev1.Taint{
 				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute},
 				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
@@ -1912,9 +1918,10 @@ var _ = Describe("Taints", func() {
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 			stateNode := ExpectStateNodeExists(cluster, node)
-			Expect(stateNode.Taints()).To(HaveLen(3))
+			Expect(stateNode.Taints()).To(HaveLen(4))
 			Expect(stateNode.Taints()).To(ContainElements(
 				corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+				corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute},
 				corev1.Taint{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				corev1.Taint{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			))

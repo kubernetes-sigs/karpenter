@@ -2036,6 +2036,27 @@ var _ = Context("Scheduling", func() {
 				node2 := ExpectScheduled(ctx, env.Client, secondPod)
 				Expect(node1.Name).To(Equal(node2.Name))
 			})
+			It("should assume pod will schedule to a node with ephemeral taint node.kubernetes.io/not-ready:NoExecute when the node is uninitialized", func() {
+				ExpectApplied(ctx, env.Client, nodePool)
+				initialPod := test.UnschedulablePod()
+				bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+				ExpectScheduled(ctx, env.Client, initialPod)
+
+				// delete the pod so that the node is empty
+				ExpectDeleted(ctx, env.Client, initialPod)
+				node1 := bindings.Get(initialPod).Node
+				node1.Spec.Taints = []corev1.Taint{{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute}}
+				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1.NodeInitializedLabelKey: "true"})
+
+				ExpectApplied(ctx, env.Client, node1)
+				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+				opts := test.PodOptions{Tolerations: []corev1.Toleration{{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule}}}
+				secondPod := test.UnschedulablePod(opts)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
+				node2 := ExpectScheduled(ctx, env.Client, secondPod)
+				Expect(node1.Name).To(Equal(node2.Name))
+			})
 			It("should not assume pod will schedule to a tainted node", func() {
 				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
 					Limits: map[corev1.ResourceName]resource.Quantity{
