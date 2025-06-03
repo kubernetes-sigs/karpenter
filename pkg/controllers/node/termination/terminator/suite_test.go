@@ -108,19 +108,19 @@ var _ = Describe("Eviction/Queue", func() {
 
 	Context("Eviction API", func() {
 		It("should succeed with no event when the pod is not found", func() {
-			Expect(queue.Evict(ctx, pod)).To(BeNil())
+			Expect(queue.Evict(ctx, pod)).To(Succeed())
 			Expect(recorder.Events()).To(HaveLen(0))
 		})
 		It("should succeed with no event when the pod UID conflicts", func() {
 			ExpectApplied(ctx, env.Client, pod, node)
 			pod.UID = uuid.NewUUID()
-			Expect(queue.Evict(ctx, pod)).To(BeNil())
+			Expect(queue.Evict(ctx, pod)).To(Succeed())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "409"})
 			Expect(recorder.Events()).To(HaveLen(0))
 		})
 		It("should succeed with an evicted event when there are no PDBs", func() {
 			ExpectApplied(ctx, env.Client, pod, node)
-			Expect(queue.Evict(ctx, pod)).To(BeNil())
+			Expect(queue.Evict(ctx, pod)).To(Succeed())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
@@ -135,7 +135,7 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
 			ExpectApplied(ctx, env.Client, pdb, pod, node)
-			Expect(queue.Evict(ctx, pod)).ToNot(BeNil())
+			Expect(queue.Evict(ctx, pod)).ToNot(Succeed())
 			Expect(recorder.Calls(events.FailedDraining)).To(Equal(1))
 		})
 		It("should fail when two PDBs refer to the same pod", func() {
@@ -144,7 +144,7 @@ var _ = Describe("Eviction/Queue", func() {
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
 			})
 			ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
-			Expect(queue.Evict(ctx, pod)).ToNot(BeNil())
+			Expect(queue.Evict(ctx, pod)).ToNot(Succeed())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "500"})
 		})
 		It("should ensure that calling Evict() is valid while making Add() calls", func() {
@@ -155,7 +155,7 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should increment PodsDrainedTotal metric when a pod is evicted", func() {
 			ExpectApplied(ctx, env.Client, pod, node)
-			Expect(queue.Evict(ctx, pod)).To(BeNil())
+			Expect(queue.Evict(ctx, pod)).To(Succeed())
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
@@ -178,7 +178,7 @@ var _ = Describe("Eviction/Queue", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
-			Expect(queue.Evict(ctx, pod)).To(BeNil())
+			Expect(queue.Evict(ctx, pod)).To(Succeed())
 
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: "SpotInterruption"})
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})

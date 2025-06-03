@@ -78,7 +78,7 @@ type Queue struct {
 
 func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	return &Queue{
-		source:     make(chan event.TypedGenericEvent[*corev1.Pod]),
+		source:     make(chan event.TypedGenericEvent[*corev1.Pod], 100),
 		set:        sets.New[client.ObjectKey](),
 		kubeClient: kubeClient,
 		recorder:   recorder,
@@ -148,7 +148,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 func (q *Queue) Evict(ctx context.Context, pod *corev1.Pod) error {
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)))
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: pod.Namespace, Name: pod.Name}},
+		pod,
 		&policyv1.Eviction{
 			DeleteOptions: &metav1.DeleteOptions{
 				Preconditions: &metav1.Preconditions{
