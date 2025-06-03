@@ -186,7 +186,11 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim, pod, pdb)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+
+               		// We only reconcile once since this label should be applied before draining the node
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			_ = ExpectObjectReconcileFailed(ctx, env.Client, queue, pod)
+
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Labels[corev1.LabelNodeExcludeBalancers]).Should(Equal("karpenter"))
 		})
@@ -360,7 +364,7 @@ var _ = Describe("Termination", func() {
 			Expect(queue.Has(podNoEvict)).To(BeTrue())
 
 			// Attempt to evict the pod, but fail to do so
-			ExpectObjectReconciled(ctx, env.Client, queue, podNoEvict)
+			_ = ExpectObjectReconcileFailed(ctx, env.Client, queue, podNoEvict)
 
 			// Expect podNoEvict to fail eviction due to PDB, and be retried
 			Expect(queue.Has(podNoEvict)).To(BeTrue())
