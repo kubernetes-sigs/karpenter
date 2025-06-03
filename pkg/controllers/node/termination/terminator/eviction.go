@@ -156,7 +156,6 @@ func (q *Queue) Evict(ctx context.Context, pod *corev1.Pod) error {
 				},
 			},
 		}); err != nil {
-		fmt.Printf("I Hit an error! %s\n", err.Error())
 		var apiStatus apierrors.APIStatus
 		if errors.As(err, &apiStatus) {
 			code := apiStatus.Status().Code
@@ -169,7 +168,6 @@ func (q *Queue) Evict(ctx context.Context, pod *corev1.Pod) error {
 			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L160
 			// 409 - The pod exists, but it is not the same pod that we initiated the eviction on
 			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L318
-			fmt.Printf("Error is an acceptable one\n")
 			return nil
 		}
 		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
