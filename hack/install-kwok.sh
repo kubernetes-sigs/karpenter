@@ -26,6 +26,8 @@ alphabet=( {a..z} )
 # set the number of partitions to 1. Currently only one partition is supported. 
 : "${PARTITION_COUNT:=1}"
 : "${UNINSTALL:=false}"
+: "${CPU_RESOURCES:=2}"
+: "${MEMORY_RESOURCES:=4Gi}"
 
 # allow it to schedule to critical addons, but not schedule onto kwok nodes.
 mkdir "${BASE}/deployment"
@@ -50,6 +52,22 @@ spec:
                 operator: DoesNotExist
 EOF
 
+cat <<EOF > "${BASE}/deployment/resources.yaml"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kwok-controller
+spec:
+  template:
+    spec:
+      containers:
+      - name: kwok-controller
+        resources:
+          limits:
+            cpu: $CPU_RESOURCES
+            memory: $MEMORY_RESOURCES
+EOF
+
 curl -s -o "${BASE}/deployment/deployment.yaml" "https://raw.githubusercontent.com/kubernetes-sigs/kwok/refs/tags/${KWOK_RELEASE}/kustomize/kwok/deployment.yaml"
 # TODO: Simplify the kustomize to only use one copy of the RBAC that all
 # controllers can use.  
@@ -64,6 +82,7 @@ cat <<EOF > "${BASE}/deployment/kustomization.yaml"
   - deployment.yaml
   patches:
   - path: tolerate-all.yaml
+  - path: resources.yaml
   labels:
   - includeSelectors: true
     pairs:
@@ -133,7 +152,6 @@ do
   echo " - ./${alphabet[i]}" >> "${HOME_DIR}/kustomization.yaml"
 done
 
-echo "${HOME_DIR}/kwok.yaml"
 kubectl kustomize "${HOME_DIR}" > "${HOME_DIR}/kwok.yaml"
 
 # v0.4.0 added in stage CRDs which are necessary for pod/node initialization
