@@ -459,7 +459,6 @@ var _ = Describe("Termination", func() {
 				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
 				ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 				for _, pod := range podGroup {
-					Expect(queue.Has(pod)).To(BeFalse())
 					ExpectObjectReconciled(ctx, env.Client, queue, pod)
 				}
 				// Start draining the pod group, but don't complete it yet
@@ -543,6 +542,7 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
+			ExpectObjectReconciled(ctx, env.Client, queue, podEvict)
 
 			// Expect mirror pod to not be queued for eviction
 			Expect(queue.Has(podNoEvict)).To(BeFalse())
@@ -746,7 +746,8 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, pod)
 
 			// Trigger eviction queue with the pod key still in it
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			Expect(queue.Has(pod)).To(BeTrue())
+			queue.Add(pod)
 
 			Consistently(func(g Gomega) {
 				g.Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
