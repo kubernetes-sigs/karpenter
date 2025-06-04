@@ -127,7 +127,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	// If Karpenter restarts or fails with an error during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates that are not in the orchestration queue before continuing.
 	outdatedNodes := lo.Filter(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
-		return !c.queue.HasAny(s.ProviderID()) && !s.Deleted()
+		return !c.queue.HasAny(s) && !s.Deleted()
 	})
 	c.cluster.UnmarkForDeletion(lo.Map(outdatedNodes, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {

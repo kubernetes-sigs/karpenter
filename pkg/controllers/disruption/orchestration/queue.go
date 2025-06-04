@@ -23,21 +23,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/awslabs/operatorpkg/serrors"
-	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
@@ -56,6 +61,10 @@ const (
 )
 
 type Command struct {
+	// We need a k8s object to represent each command
+	// This approach assumes that no nodeclaim will be in the disruption queue twice.
+	KeyNodeClaim *v1.NodeClaim
+
 	Replacements      []Replacement
 	candidates        []*state.StateNode
 	timeAdded         time.Time           // timeAdded is used to track timeouts
@@ -114,6 +123,10 @@ func (c *Command) Reason() string {
 		lo.Ternary(len(c.Replacements) > 0, "replace", "delete"))
 }
 
+func (c *Command) Candidates() []*state.StateNode {
+	return c.candidates
+}
+
 type UnrecoverableError struct {
 	error
 }
@@ -131,16 +144,15 @@ func IsUnrecoverableError(err error) bool {
 }
 
 type Queue struct {
-	workqueue.TypedRateLimitingInterface[*Command]
-
-	mu                  sync.RWMutex
-	providerIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
-
-	kubeClient  client.Client
-	recorder    events.Recorder
-	cluster     *state.Cluster
-	clock       clock.Clock
-	provisioner *provisioning.Provisioner
+	sync.RWMutex
+	providerIDToCommand  map[string]*Command // providerID -> command, maps a candidate to its command
+	nodeClaimsInQueueSet sets.Set[string]
+	source               chan event.TypedGenericEvent[*v1.NodeClaim]
+	kubeClient           client.Client
+	recorder             events.Recorder
+	cluster              *state.Cluster
+	clock                clock.Clock
+	provisioner          *provisioning.Provisioner
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
@@ -150,17 +162,14 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	queue := &Queue{
 		// nolint:staticcheck
 		// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
-		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig(
-			workqueue.NewTypedItemExponentialFailureRateLimiter[*Command](queueBaseDelay, queueMaxDelay),
-			workqueue.TypedRateLimitingQueueConfig[*Command]{
-				Name: "disruption.workqueue",
-			}),
-		providerIDToCommand: map[string]*Command{},
-		kubeClient:          kubeClient,
-		recorder:            recorder,
-		cluster:             cluster,
-		clock:               clock,
-		provisioner:         provisioner,
+		source:               make(chan event.TypedGenericEvent[*v1.NodeClaim], 10000),
+		providerIDToCommand:  map[string]*Command{},
+		nodeClaimsInQueueSet: make(sets.Set[string]),
+		kubeClient:           kubeClient,
+		recorder:             recorder,
+		cluster:              cluster,
+		clock:                clock,
+		provisioner:          provisioner,
 	}
 	return queue
 }
@@ -168,6 +177,9 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 // NewCommand creates a command key and adds in initial data for the orchestration queue.
 func NewCommand(replacements []string, candidates []*state.StateNode, id types.UID, reason v1.DisruptionReason, consolidationType string) *Command {
 	return &Command{
+		// For now we are using the first candidate in a list of candidates to represent the command
+		// This only works if a given node is only ever in the queue once.
+		KeyNodeClaim: candidates[0].NodeClaim,
 		Replacements: lo.Map(replacements, func(name string, _ int) Replacement {
 			return Replacement{name: name}
 		}),
@@ -181,24 +193,19 @@ func NewCommand(replacements []string, candidates []*state.StateNode, id types.U
 func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
-		WatchesRawSource(singleton.Source()).
-		Complete(singleton.AsReconciler(q))
+		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).
+		WithOptions(controller.Options{
+			RateLimiter:             reasonable.RateLimiter(),
+			MaxConcurrentReconciles: 100,
+		}).
+		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }
 
-func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
+func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "disruption.queue")
-
-	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
-	// get call, but since we're popping items off the queue synchronously retrying, there should be
-	// no synchonization issues.
-	if q.Len() == 0 {
-		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
-	}
-
-	// Get command from queue. This waits until queue is non-empty.
-	cmd, shutdown := q.TypedRateLimitingInterface.Get()
-	if shutdown {
-		panic("unexpected failure, disruption queue has shut down")
+	cmd, exists := q.providerIDToCommand[nodeClaim.Status.ProviderID]
+	if !exists {
+		return reconcile.Result{}, fmt.Errorf("no command found for nodeclaim %s", nodeClaim.Name)
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues(cmd.LogValues()...))
 
@@ -207,10 +214,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		if !IsUnrecoverableError(err) {
 			// store the error that is causing us to fail, so we can bubble it up later if this times out.
 			cmd.lastError = err
-			// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
-			q.TypedRateLimitingInterface.Done(cmd)
-			q.TypedRateLimitingInterface.AddRateLimited(cmd)
-			return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+			return reconcile.Result{Requeue: true}, nil
 		}
 		// If the command failed, bail on the action.
 		// 1. Emit metrics for launch failures
@@ -233,7 +237,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
-	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+	return reconcile.Result{}, nil
 }
 
 // waitOrTerminate will wait until launched nodeclaims are ready.
@@ -305,53 +309,57 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 // Add adds commands to the Queue
 // Each command added to the queue should already be validated and ready for execution.
 func (q *Queue) Add(cmd *Command) error {
-	providerIDs := lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
-		return s.ProviderID()
-	})
 	// First check if we can add the command.
-	if q.HasAny(providerIDs...) {
+	if q.HasAny(cmd.candidates...) {
 		return fmt.Errorf("candidate is being disrupted")
 	}
 
+	q.Lock()
+	defer q.Unlock()
 	cmd.timeAdded = q.clock.Now()
-	q.mu.Lock()
-	for _, candidate := range cmd.candidates {
-		q.providerIDToCommand[candidate.ProviderID()] = cmd
+	for _, c := range cmd.candidates {
+		q.nodeClaimsInQueueSet.Insert(c.NodeClaim.Status.ProviderID)
 	}
-	q.mu.Unlock()
-	q.TypedRateLimitingInterface.Add(cmd)
+	q.providerIDToCommand[cmd.KeyNodeClaim.Status.ProviderID] = cmd
+	q.source <- event.TypedGenericEvent[*v1.NodeClaim]{Object: cmd.KeyNodeClaim}
 	return nil
 }
 
 // HasAny checks to see if the candidate is part of an currently executing command.
-func (q *Queue) HasAny(ids ...string) bool {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
+func (q *Queue) HasAny(candidates ...*state.StateNode) bool {
+	q.RLock()
+	defer q.RUnlock()
 
 	// If the mapping has at least one of the candidates' providerIDs, return true.
-	_, ok := lo.Find(ids, func(id string) bool {
-		_, ok := q.providerIDToCommand[id]
-		return ok
+	_, ok := lo.Find(candidates, func(n *state.StateNode) bool {
+		return q.nodeClaimsInQueueSet.Has(n.ProviderID())
 	})
 	return ok
+}
+
+// Used for testing, gets the commands in the current queue
+func (q *Queue) GetCommands() []*Command {
+	q.RLock()
+	defer q.RUnlock()
+
+	return lo.Values(q.providerIDToCommand)
 }
 
 // Remove fully clears the queue of all references of a hash/command
 func (q *Queue) Remove(cmd *Command) {
 	// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
-	q.TypedRateLimitingInterface.Done(cmd)
-	q.TypedRateLimitingInterface.Forget(cmd)
 	q.cluster.UnmarkForDeletion(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 	// Remove all candidates linked to the command
-	q.mu.Lock()
-	for _, candidate := range cmd.candidates {
-		delete(q.providerIDToCommand, candidate.ProviderID())
+	q.Lock()
+	defer q.Unlock()
+	delete(q.providerIDToCommand, cmd.KeyNodeClaim.Status.ProviderID)
+	for _, c := range cmd.candidates {
+		q.nodeClaimsInQueueSet.Delete(c.NodeClaim.Status.ProviderID)
 	}
-	q.mu.Unlock()
 }
 
 func (q *Queue) IsEmpty() bool {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
+	q.RLock()
+	defer q.RUnlock()
 	return len(q.providerIDToCommand) == 0
 }
