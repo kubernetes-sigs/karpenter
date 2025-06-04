@@ -25,12 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/client-go/util/workqueue"
-	clockiface "k8s.io/utils/clock"
-
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -99,7 +95,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
-	queue = NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
 	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
@@ -119,7 +115,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
-	*queue = lo.FromPtr(NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov))
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov))
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -442,7 +438,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		wg.Wait()
 
 		// Process the item so that the nodes can be deleted.
-		ExpectSingletonReconciled(ctx, queue)
+		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -463,8 +459,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		hangCreateClient := newHangCreateClient(env.Client)
 		defer hangCreateClient.Stop()
 
+		q := disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
 		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
-		q := NewTestingQueue(hangCreateClient, recorder, cluster, fakeClock, p)
 		dc := disruption.NewController(fakeClock, env.Client, p, cloudProvider, recorder, cluster, q)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -668,7 +664,7 @@ var _ = Describe("Disruption Taints", func() {
 		cluster.DeleteNodeClaim(createdNodeClaim[0].Name)
 		wg.Wait()
 
-		ExpectSingletonReconciled(ctx, queue)
+		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
@@ -2268,14 +2264,6 @@ func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, wg *sync
 			}
 		}
 	}()
-}
-
-func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clockiface.Clock,
-	provisioner *provisioning.Provisioner) *disruption.Queue {
-
-	q := disruption.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
-	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface[*disruption.Command](workqueue.TypedQueueConfig[*disruption.Command]{Name: "disruption.workqueue"})
-	return q
 }
 
 type hangCreateClient struct {
