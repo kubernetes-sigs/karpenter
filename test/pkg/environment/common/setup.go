@@ -144,7 +144,15 @@ func (env *Environment) PrintCluster() {
 func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {
 	time.Sleep(time.Second) // wait one second to let the caches get up-to-date for deletion
 	wg := sync.WaitGroup{}
+	version, err := env.KubeClient.Discovery().ServerVersion()
+	Expect(err).To(BeNil())
 	for _, obj := range append(cleanableObjects, env.DefaultNodeClass.DeepCopy()) {
+		if version.Minor < "30" &&
+			obj.GetObjectKind().GroupVersionKind().Kind == "ValidatingAdmissionPolicy" &&
+			obj.GetObjectKind().GroupVersionKind().Kind == "ValidatingAdmissionPolicyBinding" {
+			continue
+		}
+
 		wg.Add(1)
 		go func(obj client.Object) {
 			defer wg.Done()
