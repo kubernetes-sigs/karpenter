@@ -1,8 +1,11 @@
 # See the OWNERS docs: https://git.k8s.io/community/contributors/guide/owners.md
+# This file just uses aliases defined in OWNERS_ALIASES.
 
 approvers:
-  - sig-autoscaling-leads
-  - karpenter-maintainers
-
+  - karpenter-approvers
 reviewers:
   - karpenter-reviewers
+
+# TODO(maxcao13) add component metadata when we know what it will be
+# component:
+# subcomponent:
