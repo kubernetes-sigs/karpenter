@@ -248,6 +248,92 @@ var _ = Describe("Pod Metrics", func() {
 		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_startup_duration_seconds", nil)
 		Expect(found).To(BeTrue())
 	})
+	It("should update the pod startup and unstarted time metrics when the pod has succeeded", func() {
+		p := test.Pod()
+		p.Status.Phase = corev1.PodPending
+
+		fakeClock.Step(1 * time.Hour)
+		cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{}, map[string][]*corev1.Pod{"n1": {p}}, map[string][]*corev1.Pod{"nc1": {p}})
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will add pod to pending pods and unscheduled pods set
+		_, found := FindMetricWithLabelValues("karpenter_pods_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		// Pod has now succeeded but readiness condition is set to false because the pod is now completed
+		p.Status.Phase = corev1.PodSucceeded
+		p.Status.Conditions = []corev1.PodCondition{
+			{Type: corev1.PodReady, Status: corev1.ConditionFalse, LastTransitionTime: metav1.Now()},
+			{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: metav1.Now()},
+		}
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will check if the pod was scheduled and completed
+		_, found = FindMetricWithLabelValues("karpenter_pods_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_startup_duration_seconds", nil)
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_startup_duration_seconds", nil)
+		Expect(found).To(BeTrue())
+	})
+	It("should update the pod startup and unstarted time metrics when the pod has failed", func() {
+		p := test.Pod()
+		p.Status.Phase = corev1.PodPending
+
+		fakeClock.Step(1 * time.Hour)
+		cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{}, map[string][]*corev1.Pod{"n1": {p}}, map[string][]*corev1.Pod{"nc1": {p}})
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will add pod to pending pods and unscheduled pods set
+		_, found := FindMetricWithLabelValues("karpenter_pods_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeTrue())
+
+		// Pod has now failed and readiness condition is set to false
+		p.Status.Phase = corev1.PodFailed
+		p.Status.Conditions = []corev1.PodCondition{
+			{Type: corev1.PodReady, Status: corev1.ConditionFalse, LastTransitionTime: metav1.Now()},
+			{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: metav1.Now()},
+		}
+		ExpectApplied(ctx, env.Client, p)
+		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(p)) //This will check if the pod was scheduled and completed
+		_, found = FindMetricWithLabelValues("karpenter_pods_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_unstarted_time_seconds", map[string]string{
+			"name":      p.GetName(),
+			"namespace": p.GetNamespace(),
+		})
+		Expect(found).To(BeFalse())
+
+		_, found = FindMetricWithLabelValues("karpenter_pods_startup_duration_seconds", nil)
+		Expect(found).To(BeTrue())
+		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_startup_duration_seconds", nil)
+		Expect(found).To(BeTrue())
+	})
 	It("should create and delete provisioning undecided metrics based on scheduling simulatinos", func() {
 		p := test.Pod()
 		p.Status.Phase = corev1.PodPending

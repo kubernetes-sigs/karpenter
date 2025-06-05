@@ -31,6 +31,8 @@ import (
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -127,6 +129,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	outdatedNodes := lo.Filter(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
 		return !c.queue.HasAny(s.ProviderID()) && !s.Deleted()
 	})
+	c.cluster.UnmarkForDeletion(lo.Map(outdatedNodes, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {
 		if errors.IsConflict(err) {
 			return reconcile.Result{Requeue: true}, nil
@@ -204,19 +207,21 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	commandID := uuid.NewUUID()
 	log.FromContext(ctx).WithValues(append([]any{"command-id", string(commandID), "reason", strings.ToLower(string(m.Reason()))}, cmd.LogValues()...)...).Info("disrupting node(s)")
 
+	c.cluster.MarkForDeletion(lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })...)
+
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
-	if err := c.MarkDisrupted(ctx, m, cmd.candidates...); err != nil {
-		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", err), "command-id", commandID)
+	markedCandidates, markDisruptedErr := c.MarkDisrupted(ctx, m, cmd.candidates...)
+	// If we get a failure marking some nodes as disrupted, if we are launching replacements, we shouldn't continue
+	// with disrupting the candidates. If it's just a delete operation, we can proceed
+	if markDisruptedErr != nil && len(cmd.replacements) > 0 {
+		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", markDisruptedErr), "command-id", commandID)
 	}
 
-	var nodeClaimNames []string
-	var err error
-	if len(cmd.replacements) > 0 {
-		if nodeClaimNames, err = c.createReplacementNodeClaims(ctx, m, cmd); err != nil {
-			// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
-			// we don't want to disrupt workloads with no way to provision new nodes for them.
-			return serrors.Wrap(fmt.Errorf("launching replacement nodeclaim, %w", err), "command-id", commandID)
-		}
+	nodeClaimNames, err := c.createReplacementNodeClaims(ctx, m, cmd)
+	if err != nil {
+		// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
+		// we don't want to disrupt workloads with no way to provision new nodes for them.
+		return serrors.Wrap(fmt.Errorf("launching replacement nodeclaim, %w", err), "command-id", commandID)
 	}
 
 	// Nominate each node for scheduling and emit pod nomination events
@@ -230,20 +235,17 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	// the node is cleaned up.
 	schedulingResults.Record(log.IntoContext(ctx, operatorlogging.NopLogger), c.recorder, c.cluster)
 
-	statenodes := lo.Map(cmd.candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
-	if err := c.queue.Add(orchestration.NewCommand(nodeClaimNames, statenodes, commandID, m.Reason(), m.ConsolidationType())); err != nil {
-		providerIDs := lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
-		c.cluster.UnmarkForDeletion(providerIDs...)
-		return serrors.Wrap(fmt.Errorf("adding command to queue, %w", err), "command-id", commandID)
+	stateNodes := lo.Map(markedCandidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
+	if err = c.queue.Add(orchestration.NewCommand(nodeClaimNames, stateNodes, commandID, m.Reason(), m.ConsolidationType())); err != nil {
+		return multierr.Append(markDisruptedErr, serrors.Wrap(fmt.Errorf("adding command to queue, %w", err), "command-id", commandID))
 	}
-
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
 	DecisionsPerformedTotal.Inc(map[string]string{
 		decisionLabel:          string(cmd.Decision()),
 		metrics.ReasonLabel:    strings.ToLower(string(m.Reason())),
 		ConsolidationTypeLabel: m.ConsolidationType(),
 	})
-	return nil
+	return markDisruptedErr
 }
 
 // createReplacementNodeClaims creates replacement NodeClaims
@@ -259,28 +261,36 @@ func (c *Controller) createReplacementNodeClaims(ctx context.Context, m Method, 
 	return nodeClaimNames, nil
 }
 
-func (c *Controller) MarkDisrupted(ctx context.Context, m Method, candidates ...*Candidate) error {
-	stateNodes := lo.Map(candidates, func(c *Candidate, _ int) *state.StateNode {
-		return c.StateNode
-	})
-	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, true, stateNodes...); err != nil {
-		return serrors.Wrap(fmt.Errorf("tainting nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
-	}
-
-	providerIDs := lo.Map(candidates, func(c *Candidate, _ int) string { return c.ProviderID() })
-	c.cluster.MarkForDeletion(providerIDs...)
-
-	return multierr.Combine(lo.Map(candidates, func(candidate *Candidate, _ int) error {
+func (c *Controller) MarkDisrupted(ctx context.Context, m Method, candidates ...*Candidate) ([]*Candidate, error) {
+	errs := make([]error, len(candidates))
+	workqueue.ParallelizeUntil(ctx, len(candidates), len(candidates), func(i int) {
+		if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, true, candidates[i].StateNode); err != nil {
+			errs[i] = serrors.Wrap(fmt.Errorf("tainting nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
+			return
+		}
 		// refresh nodeclaim before updating status
 		nodeClaim := &v1.NodeClaim{}
-
-		if err := c.kubeClient.Get(ctx, client.ObjectKeyFromObject(candidate.NodeClaim), nodeClaim); err != nil {
-			return client.IgnoreNotFound(err)
+		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
+			return c.kubeClient.Get(ctx, client.ObjectKeyFromObject(candidates[i].NodeClaim), nodeClaim)
+		}); err != nil {
+			errs[i] = client.IgnoreNotFound(err)
+			return
 		}
 		stored := nodeClaim.DeepCopy()
 		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(m.Reason()), string(m.Reason()))
-		return client.IgnoreNotFound(c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)))
-	})...)
+		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error { return c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)) }); err != nil {
+			errs[i] = client.IgnoreNotFound(err)
+			return
+		}
+	})
+	var markedCandidates []*Candidate
+	for i := range errs {
+		if errs[i] != nil {
+			continue
+		}
+		markedCandidates = append(markedCandidates, candidates[i])
+	}
+	return markedCandidates, multierr.Combine(errs...)
 }
 
 func (c *Controller) recordRun(s string) {
