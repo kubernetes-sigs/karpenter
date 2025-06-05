@@ -28,6 +28,7 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -286,17 +287,28 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	// then the termination controller will handle the eventual deletion of the nodes.
 	errs := make([]error, len(cmd.candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.candidates), len(cmd.candidates), func(i int) {
+		candidate := cmd.candidates[i]
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
 			return q.kubeClient.Delete(ctx, cmd.candidates[i].NodeClaim)
 		}); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-		q.recorder.Publish(disruptionevents.Terminating(cmd.candidates[i].Node, cmd.candidates[i].NodeClaim, cmd.Reason())...)
+		q.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, cmd.Reason())...)
 		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 			metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.reason)),
-			metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
+			metrics.NodePoolLabel:     candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
+		})
+		pods := &corev1.PodList{}
+		if err := q.kubeClient.List(ctx, pods, client.MatchingFields{"spec.nodeName": candidate.Node.Name}); err != nil {
+			errs[i] = fmt.Errorf("listing pods on node %s, %w", candidate.Node.Name, err)
+			return
+		}
+		metrics.PodsDisruptedTotal.Add(float64(len(pods.Items)), map[string]string{
+			metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.reason)),
+			metrics.NodePoolLabel:     candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
 		})
 	})
 	// If there were any deletion failures, we should requeue.
