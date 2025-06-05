@@ -747,6 +747,8 @@ var _ = Describe("Termination", func() {
 
 			// Trigger eviction queue with the pod key still in it
 			Expect(queue.Has(pod)).To(BeTrue())
+			// Still need to attempt to add it to verify that the new pod
+			// won't get evicted
 			queue.Add(pod)
 
 			Consistently(func(g Gomega) {

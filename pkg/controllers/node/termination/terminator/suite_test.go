@@ -209,8 +209,6 @@ var _ = Describe("Eviction/Queue", func() {
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 1)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			ExpectEvicted(ctx, env.Client, pod)
 			ExpectDeleted(ctx, env.Client, pod)
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
 		})

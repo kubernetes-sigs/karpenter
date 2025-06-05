@@ -131,14 +131,13 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	ctx = injection.WithControllerName(ctx, q.Name())
 
 	// Evict the pod
-	err := q.Evict(ctx, pod)
-	if err != nil {
+	if err := q.Evict(ctx, pod); err != nil {
 		return reconcile.Result{}, err
 	}
 
 	q.Lock()
+	defer q.Unlock()
 	q.set.Delete(client.ObjectKeyFromObject(pod))
-	q.Unlock()
 	return reconcile.Result{}, nil
 }
 
@@ -175,12 +174,11 @@ func (q *Queue) Evict(ctx context.Context, pod *corev1.Pod) error {
 			}}, serrors.Wrap(fmt.Errorf("evicting pod violates a PDB"), "Pod", klog.KRef(pod.Namespace, pod.Name))))
 			return err
 		}
-		log.FromContext(ctx).Error(err, "failed evicting pod")
 		return err
 	}
 	NodesEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
 	reason := evictionReason(ctx, pod, q.kubeClient)
-	q.recorder.Publish(terminatorevents.EvictPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: pod.Name, Namespace: pod.Namespace}}, reason))
+	q.recorder.Publish(terminatorevents.EvictPod(pod, reason))
 	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: reason})
 	return nil
 }
