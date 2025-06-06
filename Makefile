@@ -115,11 +115,33 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 		fi;}
 	actionlint -oneline
 
+openshift-verify: ## Verify code on OpenShift Prow CI. A stripped down copy of the "verify" target.
+	go mod tidy && go mod vendor && go mod verify
+	go generate ./...
+	hack/validation/taint.sh
+	hack/validation/requirements.sh
+	hack/validation/labels.sh
+	hack/validation/status.sh
+	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
+	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756
+	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
+	hack/boilerplate.sh
+	go vet ./...
+	golangci-lint run
+	@git diff --quiet ||\
+		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
+		if [ "${CI}" = true ]; then\
+			exit 1;\
+		fi;}
+
 download: ## Recursively "go mod download" on all directories where go.mod exists
 	$(foreach dir,$(MOD_DIRS),cd $(dir) && go mod download $(newline))
 
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
+
+openshift-toolchain: ## Install developer toolchain for OpenShift CI.
+	./hack/openshift-toolchain.sh
 
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
