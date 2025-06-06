@@ -70,7 +70,7 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) erro
 		}
 		return fmt.Errorf("deleting node, %w", err)
 	}
-	return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance terminated"))
+	return nil
 }
 
 func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1.NodeClaim, error) {

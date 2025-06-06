@@ -172,22 +172,57 @@ func (r Requirements) IsCompatible(requirements Requirements, options ...option.
 }
 
 // Compatible ensures the provided requirements can loosely be met.
-func (r Requirements) Compatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) error {
+func (r Requirements) Compatible(requirements Requirements, options ...option.Function[CompatibilityOptions]) (errs error) {
 	opts := option.Resolve(options...)
 
 	// Custom Labels must intersect, but if not defined are denied.
-	for key := range requirements {
-		if opts.AllowUndefined.Has(key) {
-			continue
-		}
+	for key := range requirements.Keys().Difference(opts.AllowUndefined) {
 		if operator := requirements.Get(key).Operator(); r.Has(key) || operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
 			continue
 		}
-		// break early so we only report the first error
-		return fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined))
+		errs = multierr.Append(errs, fmt.Errorf("label %q does not have known values%s", key, labelHint(r, key, opts.AllowUndefined)))
 	}
 	// Well Known Labels must intersect, but if not defined, are allowed.
-	return r.Intersects(requirements)
+	return multierr.Append(errs, r.Intersects(requirements))
+}
+
+// editDistance is an implementation of edit distance from Algorithms/DPV
+func editDistance(s, t string) int {
+	min := func(a, b, c int) int {
+		m := a
+		if b < m {
+			m = b
+		}
+		if c < m {
+			m = c
+		}
+		return m
+	}
+
+	m := len(s)
+	n := len(t)
+	if m == 0 {
+		return n
+	}
+	if n == 0 {
+		return m
+	}
+	prevRow := make([]int, n)
+	curRow := make([]int, n)
+	for j := 1; j < n; j++ {
+		prevRow[j] = j
+	}
+	for i := 1; i < m; i++ {
+		for j := 1; j < n; j++ {
+			diff := 0
+			if s[i] != t[j] {
+				diff = 1
+			}
+			curRow[j] = min(prevRow[j]+1, curRow[j-1]+1, prevRow[j-1]+diff)
+		}
+		prevRow, curRow = curRow, prevRow
+	}
+	return prevRow[n-1]
 }
 
 func getSuffix(key string) string {
@@ -197,7 +232,7 @@ func getSuffix(key string) string {
 
 func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) string {
 	for wellKnown := range allowedUndefined {
-		if strings.Contains(wellKnown, key) {
+		if strings.Contains(wellKnown, key) || editDistance(key, wellKnown) < len(wellKnown)/5 {
 			return fmt.Sprintf(" (typo of %q?)", wellKnown)
 		}
 		if strings.HasSuffix(wellKnown, getSuffix(key)) {
@@ -205,7 +240,7 @@ func labelHint(r Requirements, key string, allowedUndefined sets.Set[string]) st
 		}
 	}
 	for existing := range r {
-		if strings.Contains(existing, key) {
+		if strings.Contains(existing, key) || editDistance(key, existing) < len(existing)/5 {
 			return fmt.Sprintf(" (typo of %q?)", existing)
 		}
 		if strings.HasSuffix(existing, getSuffix(key)) {
@@ -249,7 +284,8 @@ func (r Requirements) Intersects(requirements Requirements) (errs error) {
 	for key := range r.intersectKeys(requirements) {
 		existing := r.Get(key)
 		incoming := requirements.Get(key)
-		if !existing.HasIntersection(incoming) {
+		// There must be some value, except
+		if existing.Intersection(incoming).Len() == 0 {
 			// where the incoming requirement has operator { NotIn, DoesNotExist }
 			if operator := incoming.Operator(); operator == corev1.NodeSelectorOpNotIn || operator == corev1.NodeSelectorOpDoesNotExist {
 				// and the existing requirement has operator { NotIn, DoesNotExist }

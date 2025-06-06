@@ -1,17 +1,18 @@
-# See the OWNERS_ALIASES docs: https://git.k8s.io/community/contributors/guide/owners.md#OWNERS_ALIASES
+# See the OWNERS_ALIASES docs: https://git.k8s.io/community/contributors/guide/owners.md#owners_aliases
 
 aliases:
-  karpenter-approvers:
-  - elmiko
-  - enxebre
-  - jkyros
-  - joelsmith
-  - maxcao13
-  - muraee
+  sig-autoscaling-leads:
+    - mwielgus
+    - maciekpytel
+    - gjtempleton
+  karpenter-maintainers:
+    - ellistarn
+    - jonathan-innis
+    - tzneal
+    - bwagner5
+    - njtran
   karpenter-reviewers:
-  - elmiko
-  - enxebre
-  - jkyros
-  - joelsmith
-  - maxcao13
-  - muraee
+    - jackfrancis
+    - tallaxes
+    - engedaam
+    - jmdeal

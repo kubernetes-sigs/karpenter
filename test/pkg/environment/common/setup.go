@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -51,6 +52,7 @@ var (
 		&v1.NodePoolList{},
 		&corev1.NodeList{},
 		&v1.NodeClaimList{},
+		&v1alpha1.KWOKNodeClassList{},
 	}
 	CleanableObjects = []client.Object{
 		&corev1.Pod{},
@@ -65,6 +67,7 @@ var (
 		&schedulingv1.PriorityClass{},
 		&corev1.Node{},
 		&v1.NodeClaim{},
+		&v1alpha1.KWOKNodeClass{},
 	}
 )
 
@@ -95,7 +98,7 @@ func (env *Environment) ExpectCleanCluster() {
 		Expect(pods.Items[i].Namespace).ToNot(Equal("default"),
 			fmt.Sprintf("expected no pods in the `default` namespace, found %s/%s", pods.Items[i].Namespace, pods.Items[i].Name))
 	}
-	for _, obj := range []client.Object{&v1.NodePool{}, env.DefaultNodeClass.DeepCopy()} {
+	for _, obj := range []client.Object{&v1.NodePool{}, &v1alpha1.KWOKNodeClass{}} {
 		metaList := &metav1.PartialObjectMetadataList{}
 		gvk := lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme()))
 		metaList.SetGroupVersionKind(gvk)
@@ -122,9 +125,7 @@ func (env *Environment) AfterEach() {
 }
 
 func (env *Environment) PrintCluster() {
-	nodeClassList := unstructured.UnstructuredList{}
-	nodeClassList.SetGroupVersionKind(env.DefaultNodeClass.GroupVersionKind())
-	for _, obj := range append(ObjectListsToPrint, nodeClassList.DeepCopy()) {
+	for _, obj := range ObjectListsToPrint {
 		gvk := lo.Must(apiutil.GVKForObject(obj, env.Client.Scheme()))
 		By(fmt.Sprintf("printing %s(s)", gvk.Kind))
 		list := &unstructured.UnstructuredList{}
@@ -141,7 +142,7 @@ func (env *Environment) PrintCluster() {
 func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {
 	time.Sleep(time.Second) // wait one second to let the caches get up-to-date for deletion
 	wg := sync.WaitGroup{}
-	for _, obj := range append(cleanableObjects, env.DefaultNodeClass.DeepCopy()) {
+	for _, obj := range cleanableObjects {
 		wg.Add(1)
 		go func(obj client.Object) {
 			defer wg.Done()
@@ -162,7 +163,7 @@ func (env *Environment) CleanupObjects(cleanableObjects ...client.Object) {
 				// If the deletes eventually succeed, we should have no elements here at the end of the test
 				g.Expect(env.Client.List(env, metaList, client.HasLabels([]string{test.DiscoveryLabel}), client.Limit(1))).To(Succeed())
 				g.Expect(metaList.Items).To(HaveLen(0))
-			}).WithTimeout(10 * time.Minute).Should(Succeed())
+			}).Should(Succeed())
 		}(obj)
 	}
 	wg.Wait()

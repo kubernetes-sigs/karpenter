@@ -74,13 +74,13 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "node.health")
+	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef(node.Namespace, node.Name)))
 
 	// Validate that the node is owned by us
 	nodeClaim, err := nodeutils.NodeClaimForNode(ctx, c.kubeClient, node)
 	if err != nil {
 		return reconcile.Result{}, nodeutils.IgnoreDuplicateNodeClaimError(nodeutils.IgnoreNodeClaimNotFoundError(err))
 	}
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 
 	// If a nodeclaim does has a nodepool label, validate the nodeclaims inside the nodepool are healthy (i.e bellow the allowed threshold)
 	// In the case of standalone nodeclaim, validate the nodes inside the cluster are healthy before proceeding
@@ -136,15 +136,9 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
 	log.FromContext(ctx).V(1).Info("deleting unhealthy node")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       metrics.UnhealthyReason,
+		metrics.ReasonLabel:       pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
-	})
-	NodeClaimsUnhealthyDisruptedTotal.Inc(map[string]string{
-		Condition:                 pretty.ToSnakeCase(string(unhealthyNodeCondition.Type)),
-		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
-		ImageID:                   nodeClaim.Status.ImageID,
 	})
 	return reconcile.Result{}, nil
 }
@@ -232,6 +226,6 @@ func (c *Controller) publishNodePoolHealthEvent(ctx context.Context, node *corev
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: npName}, np); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	c.recorder.Publish(NodeRepairBlocked(node, nodeClaim, np, fmt.Sprintf("more than %s nodes are unhealthy in the nodepool", allowedUnhealthyPercent.String()))...)
+	c.recorder.Publish(NodeRepairBlocked(node, nodeClaim, np, fmt.Sprintf("more then %s nodes are unhealthy in the nodepool", allowedUnhealthyPercent.String()))...)
 	return nil
 }

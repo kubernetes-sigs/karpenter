@@ -97,7 +97,6 @@ var _ = BeforeEach(func() {
 		fakeClock.Step(1 * time.Minute)
 	}
 	fakeClock.SetTime(time.Now())
-	state.PodSchedulingDecisionSeconds.Reset()
 })
 
 var _ = AfterSuite(func() {
@@ -152,9 +151,6 @@ var _ = Describe("Provisioning", func() {
 				// We expect to have waiters on the fakeClock since this is still within the batch idle duration of 5s.
 				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod.UID)
-
-				time.Sleep(time.Second) // give the process time to iterate on the batching section
-
 				// Step the clock again by 3s to just cross the batch idle duration. We should be able to get out of the
 				// provisioning loop because the same pod will not cause the idle duration to reset.
 				fakeClock.Step(3 * time.Second)
@@ -195,15 +191,12 @@ var _ = Describe("Provisioning", func() {
 				// We expect to have waiters on the fakeClock since this is still within the batch idle duration of 5s.
 				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
 				prov.Trigger(pod2.UID)
-
-				time.Sleep(time.Second) // give the process time to iterate on the batching section
-
-				// Step the clock by 3s as we expect provisioning to not happen until another 5s because the
+				// Step the clock by 5s as we expect provisioning to not happen until another 5s because the
 				// batch idle duration was reset due to a new pod being added.
-				fakeClock.Step(3 * time.Second)
+				fakeClock.Step(5 * time.Second)
 				Consistently(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeTrue())
-				// Stepping the clock again by 3s. We should be able to get out of the
-				// provisioning loop at this point (since we have exceeded the idle duration)
+				// Stepping the clock again by 2s. We should be able to get out of the
+				// provisioning loop at this point
 				fakeClock.Step(3 * time.Second)
 				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeFalse())
 			}()
@@ -230,20 +223,6 @@ var _ = Describe("Provisioning", func() {
 		Expect(env.Client.List(ctx, nodes)).To(Succeed())
 		Expect(len(nodes.Items)).To(Equal(0))
 		ExpectNotScheduled(ctx, env.Client, pod)
-	})
-	It("should mark pod as unschedulable if there are no valid nodepools", func() {
-		nodePool := test.NodePool()
-		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectDeletionTimestampSet(ctx, env.Client, nodePool)
-		pod := test.UnschedulablePod()
-		cluster.AckPods(pod)
-		nn := client.ObjectKeyFromObject(pod)
-		// Provisioning should fail here since there are no valid nodePools to schedule the pod
-		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-		ExpectNotScheduled(ctx, env.Client, pod)
-		Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
-		Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeFalse())
-		ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 1, nil)
 	})
 	It("should provision nodes for pods with supported node selectors", func() {
 		nodePool := test.NodePool()

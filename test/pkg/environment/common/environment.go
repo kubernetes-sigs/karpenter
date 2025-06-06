@@ -18,10 +18,7 @@ package common
 
 import (
 	"context"
-	_ "embed"
-	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"strconv"
@@ -33,35 +30,27 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	serializeryaml "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/yaml"
 
+	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
+	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 )
 
 type ContextKey string
 
-const GitRefContextKey = ContextKey("gitRef")
-
-// I need to add the the default kwok nodeclass path
-// That way it's not defined in code but we use it when we initialize the nodeclass
-var (
-	//go:embed default_kowknodeclass.yaml
-	defaultNodeClass []byte
-	//go:embed default_nodepool.yaml
-	defaultNodePool []byte
-	nodeClassPath   = flag.String("default-nodeclass", "", "Pass in a default cloud specific node class")
-	nodePoolPath    = flag.String("default-nodepool", "", "Pass in a default karpenter nodepool")
+const (
+	GitRefContextKey = ContextKey("gitRef")
 )
 
 type Environment struct {
@@ -73,7 +62,6 @@ type Environment struct {
 	Config                *rest.Config
 	KubeClient            kubernetes.Interface
 	Monitor               *Monitor
-	DefaultNodeClass      *unstructured.Unstructured
 
 	OutputDir         string
 	StartingNodeCount int
@@ -91,7 +79,7 @@ func NewEnvironment(t *testing.T) *Environment {
 	// Get the output dir if it's set
 	outputDir, _ := os.LookupEnv("OUTPUT_DIR")
 
-	gomega.SetDefaultEventuallyTimeout(10 * time.Minute)
+	gomega.SetDefaultEventuallyTimeout(5 * time.Minute)
 	gomega.SetDefaultEventuallyPollingInterval(1 * time.Second)
 	return &Environment{
 		Context:               ctx,
@@ -102,7 +90,6 @@ func NewEnvironment(t *testing.T) *Environment {
 		Monitor:               NewMonitor(ctx, client),
 		TimeIntervalCollector: debug.NewTimestampCollector(),
 		OutputDir:             outputDir,
-		DefaultNodeClass:      decodeNodeClass(),
 	}
 }
 
@@ -157,38 +144,42 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 	return c
 }
 
-func (env *Environment) DefaultNodePool(nodeClass client.Object) *v1.NodePool {
-	nodePool := &v1.NodePool{}
-	if lo.FromPtr(nodePoolPath) == "" {
-		nodePool = object.Unmarshal[v1.NodePool](defaultNodePool)
-	} else {
-		file := lo.Must1(os.ReadFile(lo.FromPtr(nodePoolPath)))
-		lo.Must0(yaml.Unmarshal(file, nodePool))
+func (env *Environment) DefaultNodeClass() *v1alpha1.KWOKNodeClass {
+	return &v1alpha1.KWOKNodeClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: test.RandomName(),
+		},
 	}
-
-	// Update to use the provided default nodeclass
-	nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
-		Kind:  env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Kind,
-		Group: env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Group,
-		Name:  env.DefaultNodeClass.GetName(),
-	}
-
-	return nodePool
 }
 
-func decodeNodeClass() *unstructured.Unstructured {
-	// Open the file
-	if lo.FromPtr(nodeClassPath) == "" {
-		return object.Unmarshal[unstructured.Unstructured](defaultNodeClass)
+func (env *Environment) DefaultNodePool(nodeClass *v1alpha1.KWOKNodeClass) *v1.NodePool {
+	nodePool := test.NodePool()
+	nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
+		Name:  nodeClass.Name,
+		Kind:  object.GVK(nodeClass).Kind,
+		Group: object.GVK(nodeClass).Group,
 	}
-
-	file := lo.Must1(os.Open(lo.FromPtr(nodeClassPath)))
-	content := lo.Must1(io.ReadAll(file))
-
-	decoder := serializeryaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
-	u := &unstructured.Unstructured{}
-	_, gvk, _ := decoder.Decode(content, nil, u)
-	u.SetGroupVersionKind(lo.FromPtr(gvk))
-
-	return u
+	nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+		{
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+				Key:      corev1.LabelOSStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{string(corev1.Linux)},
+			},
+		},
+		{
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{v1.CapacityTypeOnDemand},
+			},
+		},
+	}
+	nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
+	nodePool.Spec.Template.Spec.ExpireAfter.Duration = nil
+	nodePool.Spec.Limits = v1.Limits(corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("1000"),
+		corev1.ResourceMemory: resource.MustParse("1000Gi"),
+	})
+	return nodePool
 }
