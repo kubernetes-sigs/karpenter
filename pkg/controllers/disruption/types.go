@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -60,10 +61,10 @@ type CandidateFilter func(context.Context, *Candidate) bool
 type Candidate struct {
 	*state.StateNode
 	instanceType      *cloudprovider.InstanceType
-	nodePool          *v1.NodePool
+	NodePool          *v1.NodePool
 	zone              string
 	capacityType      string
-	disruptionCost    float64
+	DisruptionCost    float64
 	reschedulablePods []*corev1.Pod
 }
 
@@ -89,8 +90,8 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	instanceTypeMap := nodePoolToInstanceTypesMap[nodePoolName]
 	// skip any candidates where we can't determine the nodePool
 	if nodePool == nil || instanceTypeMap == nil {
-		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("NodePool %q not found", nodePoolName))...)
-		return nil, fmt.Errorf("nodepool %q not found", nodePoolName)
+		recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, fmt.Sprintf("NodePool not found (NodePool=%s)", nodePoolName))...)
+		return nil, serrors.Wrap(fmt.Errorf("nodepool not found"), "NodePool", klog.KRef("", nodePoolName))
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
 	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
@@ -105,14 +106,14 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		}
 	}
 	return &Candidate{
-		StateNode:         node.DeepCopy(),
+		StateNode:         node,
 		instanceType:      instanceType,
-		nodePool:          nodePool,
+		NodePool:          nodePool,
 		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],
 		zone:              node.Labels()[corev1.LabelTopologyZone],
 		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
 		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
-		disruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
+		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 	}, nil
 }
 
@@ -138,6 +139,10 @@ func (c Command) Decision() Decision {
 	default:
 		return NoOpDecision
 	}
+}
+
+func (c Command) Candidates() []*Candidate {
+	return c.candidates
 }
 
 func (c Command) LogValues() []any {

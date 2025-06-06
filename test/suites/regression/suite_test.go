@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package perf_test
+package integration_test
 
 import (
 	"fmt"
@@ -23,8 +23,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
@@ -35,7 +35,7 @@ import (
 )
 
 var nodePool *v1.NodePool
-var nodeClass client.Object
+var nodeClass *unstructured.Unstructured
 var env *common.Environment
 
 var testLabels = map[string]string{
@@ -43,34 +43,35 @@ var testLabels = map[string]string{
 }
 var labelSelector = labels.SelectorFromSet(testLabels)
 
-func TestPerf(t *testing.T) {
+func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {
 		env = common.NewEnvironment(t)
-		debug.BeforeSuite(env.Context, env.Config, env.Client)
 	})
 	AfterSuite(func() {
 		// Write out the timestamps from our tests
 		if err := debug.WriteTimestamps(env.OutputDir, env.TimeIntervalCollector); err != nil {
 			log.FromContext(env).Info(fmt.Sprintf("Failed to write timestamps to files, %s", err))
 		}
-		debug.AfterSuite(env.Context, env.Config, env.Client)
 		env.Stop()
 	})
-	RunSpecs(t, "Perf")
+	RunSpecs(t, "Regression")
 }
 
 var _ = BeforeEach(func() {
 	env.BeforeEach()
 	nodeClass = env.DefaultNodeClass.DeepCopy()
+	nodeClass.SetName(fmt.Sprintf("%s-%s", nodeClass.GetName(), test.RandomName()))
 	nodePool = env.DefaultNodePool(nodeClass)
-	test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-		NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-			Key:      v1alpha1.InstanceSizeLabelKey,
-			Operator: corev1.NodeSelectorOpLt,
-			Values:   []string{"32"},
-		},
-	})
+	if env.IsDefaultNodeClassKWOK() {
+		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+				Key:      v1alpha1.InstanceSizeLabelKey,
+				Operator: corev1.NodeSelectorOpLt,
+				Values:   []string{"32"},
+			},
+		})
+	}
 	// no limits!!! to the moon!!!
 	nodePool.Spec.Limits = v1.Limits{}
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}

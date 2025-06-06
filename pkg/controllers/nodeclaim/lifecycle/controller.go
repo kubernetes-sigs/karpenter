@@ -171,24 +171,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 //nolint:gocyclo
 func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	// setting the deletion timestamp will bump the generation, so we need to
-	// perform a no-op for whatever the status condition is currently set to
-	// so that we bump the observed generation to the latest and prevent the nodeclaim
-	// root status from entering an `Unknown` state
-	stored := nodeClaim.DeepCopy()
-	for _, condition := range nodeClaim.Status.Conditions {
-		if nodeClaim.StatusConditions().IsDependentCondition(condition.Type) {
-			nodeClaim.StatusConditions().Set(condition)
-		}
-	}
-	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
-		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
-			}
-			return reconcile.Result{}, err
-		}
-	}
 	if !controllerutil.ContainsFinalizer(nodeClaim, v1.TerminationFinalizer) {
 		return reconcile.Result{}, nil
 	}
@@ -199,7 +181,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		return reconcile.Result{}, fmt.Errorf("adding nodeclaim terminationGracePeriod annotation, %w", err)
 	}
 
-	// Only delete Nodes if the NodeClaim has not been registered. Deleting Node's without the termination finalizer
+	// Only delete Nodes if the NodeClaim has been registered. Deleting Nodes without the termination finalizer
 	// may result in leaked leases due to a kubelet bug until k8s 1.29. The Node should be garbage collected after the
 	// instance is terminated by CCM.
 	// Upstream Kubelet Fix: https://github.com/kubernetes/kubernetes/pull/119661
@@ -244,7 +226,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
 		})
 	}
-	stored = nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
+	stored := nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
 	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch

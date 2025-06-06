@@ -98,6 +98,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	state.PodSchedulingDecisionSeconds.Reset()
+	pscheduling.DefaultTerminationGracePeriod = nil
 })
 
 var _ = AfterSuite(func() {
@@ -214,11 +215,60 @@ var _ = Describe("Provisioning", func() {
 	It("should provision nodes", func() {
 		ExpectApplied(ctx, env.Client, test.NodePool())
 		pod := test.UnschedulablePod()
+		cluster.AckPods(pod)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		nodes := &corev1.NodeList{}
 		Expect(env.Client.List(ctx, nodes)).To(Succeed())
 		Expect(len(nodes.Items)).To(Equal(1))
 		ExpectScheduled(ctx, env.Client, pod)
+		ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 1, nil)
+	})
+	It("Should provision nodes for multiple pods", func() {
+		ExpectApplied(ctx, env.Client, test.NodePool())
+		pods := test.UnschedulablePods(test.PodOptions{}, 100)
+		cluster.AckPods(pods...)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+		nodes := &corev1.NodeList{}
+		Expect(env.Client.List(ctx, nodes)).To(Succeed())
+		Expect(len(nodes.Items)).ToNot(Equal(0))
+		ExpectPodsScheduled(ctx, env.Client, pods...)
+		ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 100, nil)
+	})
+	It("should expect nodeclaim terminationGracePeriod to be the global value when the nodepool terminationGracePeriod is not set", func() {
+		nodePool := test.NodePool()
+		pscheduling.DefaultTerminationGracePeriod = &metav1.Duration{Duration: 98 * time.Hour}
+		ExpectApplied(ctx, env.Client, nodePool)
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectScheduled(ctx, env.Client, pod)
+		nodeClaims := &v1.NodeClaimList{}
+		Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+		Expect(len(nodeClaims.Items)).To(Equal(1))
+		Expect(nodeClaims.Items[0].Spec.TerminationGracePeriod.Duration).To(BeNumerically("==", 98*time.Hour))
+	})
+	It("should expect nodeclaim terminationGracePeriod to be the nil when the nodepool terminationGracePeriod and global terminationGracePeriod is not set", func() {
+		nodePool := test.NodePool()
+		ExpectApplied(ctx, env.Client, nodePool)
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectScheduled(ctx, env.Client, pod)
+		nodeClaims := &v1.NodeClaimList{}
+		Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+		Expect(len(nodeClaims.Items)).To(Equal(1))
+		Expect(nodeClaims.Items[0].Spec.TerminationGracePeriod).To(BeNil())
+	})
+	It("should respect terminationGracePeriod value set on the nodePool over global terminationGracePeriod", func() {
+		nodePool := test.NodePool()
+		nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 223 * time.Hour}
+		pscheduling.DefaultTerminationGracePeriod = &metav1.Duration{Duration: 47 * time.Hour}
+		ExpectApplied(ctx, env.Client, nodePool)
+		pod := test.UnschedulablePod()
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		ExpectScheduled(ctx, env.Client, pod)
+		nodeClaims := &v1.NodeClaimList{}
+		Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+		Expect(len(nodeClaims.Items)).To(Equal(1))
+		Expect(nodeClaims.Items[0].Spec.TerminationGracePeriod.Duration).To(BeNumerically("==", 223*time.Hour))
 	})
 	It("should ignore NodePools that are deleting", func() {
 		nodePool := test.NodePool()
@@ -427,6 +477,7 @@ var _ = Describe("Provisioning", func() {
 
 		nodeClaim := &v1.NodeClaim{}
 		Expect(env.Client.Get(ctx, types.NamespacedName{Name: nodeClaims[0]}, nodeClaim)).To(Succeed())
+		Expect(cluster.PodNodeClaimMapping(client.ObjectKeyFromObject(pod))).To(BeEquivalentTo(nodeClaim.Name))
 
 		Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodePoolHashAnnotationKey, hash))
 	})
@@ -626,12 +677,20 @@ var _ = Describe("Provisioning", func() {
 
 	Context("Resource Limits", func() {
 		It("should not schedule when limits are exceeded", func() {
-			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+			nodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Limits: v1.Limits(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("20")}),
 				},
-				Status: v1.NodePoolStatus{
-					Resources: corev1.ResourceList{
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			cluster.UpdateNodeClaim(test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
 						corev1.ResourceCPU: resource.MustParse("100"),
 					},
 				},
@@ -788,6 +847,24 @@ var _ = Describe("Provisioning", func() {
 			allocatable := instanceTypeMap[node.Labels[corev1.LabelInstanceTypeStable]].Capacity
 			Expect(*allocatable.Cpu()).To(Equal(resource.MustParse("4")))
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
+		})
+		It("should account for daemonset hostports", func() {
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+				test.DaemonSetOptions{PodOptions: test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
+					HostPorts:            []int32{8080},
+				}},
+			))
+			pod := test.UnschedulablePod(
+				test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
+					HostPorts:            []int32{8080},
+				},
+			)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			// Expect that the host port will be blocked by a compatible daemonset
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
 		})
 		It("should account for daemonsets (with startup taint)", func() {
 			nodePool := test.NodePool(v1.NodePool{
@@ -2177,6 +2254,260 @@ var _ = Describe("Provisioning", func() {
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Spec.Taints).To(ContainElement(corev1.Taint{Key: "foo", Value: "bar", Effect: corev1.TaintEffectPreferNoSchedule}))
 			})
+			DescribeTable("should ignore node preferredDuringSchedulingIgnoredDuringExecution affinity", func(topologyKey string) {
+				pod1 := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "foo",
+						},
+					},
+					PodPreferences: []corev1.WeightedPodAffinityTerm{},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("2"),
+						},
+					},
+				})
+				nodePreferencePod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "baz",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+					// Create a nodePreference that can't be satisfied
+					NodePreferences: []corev1.NodeSelectorRequirement{
+						{
+							Key:      topologyKey,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"value-1"},
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, nodePreferencePod)
+
+				pod1Node := ExpectScheduled(ctx, env.Client, pod1)
+				podNodePreferenceNode := ExpectScheduled(ctx, env.Client, nodePreferencePod)
+
+				Expect(pod1Node.Name).To(Equal(podNodePreferenceNode.Name))
+			},
+				Entry(corev1.LabelTopologyZone, corev1.LabelTopologyZone),
+				Entry(corev1.LabelHostname, corev1.LabelHostname),
+			)
+		})
+		Context("Ignore Preferences", func() {
+			BeforeEach(func() {
+				ctx = options.ToContext(ctx, test.Options(test.OptionsFields{PreferencePolicy: lo.ToPtr(options.PreferencePolicyIgnore)}))
+			})
+			It("should ignore node affinity preferences", func() {
+				zone1Pod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "foo",
+						},
+					},
+					NodeSelector: map[string]string{
+						corev1.LabelTopologyZone: "test-zone-1",
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("2"),
+						},
+					},
+				})
+				zone2Pods := test.UnschedulablePods(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "bar",
+						},
+					},
+					NodeSelector: map[string]string{
+						corev1.LabelTopologyZone: "test-zone-2",
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("3"),
+						},
+					},
+				}, 2)
+				// Create an affinity pod that has a preference to schedule in the zone2Pod
+				// Without considering the preference, we would schedule the pod to the zone1Pod's node
+				// because the number of pods on that node should be lower than the zone2Pod's
+				nodeAffinityPod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "baz",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+					NodePreferences: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-2"},
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], nodeAffinityPod)
+
+				zone1Node := ExpectScheduled(ctx, env.Client, zone1Pod)
+				zone2Node := ExpectScheduled(ctx, env.Client, zone2Pods[0])
+				ExpectScheduled(ctx, env.Client, zone2Pods[1])
+				nodeAffinityPodNode := ExpectScheduled(ctx, env.Client, nodeAffinityPod)
+
+				Expect(nodeAffinityPodNode.Name).To(Equal(zone1Node.Name))
+				Expect(nodeAffinityPodNode.Name).ToNot(Equal(zone2Node.Name))
+			})
+			DescribeTable("should ignore topologySpreadConstraint preferences", func(topologyKey string) {
+				opts := test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "foo"},
+					},
+					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+						{
+							MaxSkew:           1,
+							TopologyKey:       topologyKey,
+							WhenUnsatisfiable: corev1.ScheduleAnyway,
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app": "foo",
+								},
+							},
+						},
+					},
+				}
+				pods := test.UnschedulablePods(opts, 5)
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+				// If we were respecting preferences, we would add these pods on separate nodes
+				// Because we are ignoring them, we will schedule them all on the same node
+				nodeNames := sets.New[string]()
+				for _, p := range pods {
+					nodeNames.Insert(ExpectScheduled(ctx, env.Client, p).Name)
+				}
+				Expect(nodeNames).To(HaveLen(1))
+			},
+				Entry(corev1.LabelTopologyZone, corev1.LabelTopologyZone),
+				Entry(corev1.LabelTopologyZone, corev1.LabelHostname),
+			)
+			DescribeTable("should ignore pod anti-affinity preferences", func(topologyKey string) {
+				opts := test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "foo"},
+					},
+					PodAntiPreferences: []corev1.WeightedPodAffinityTerm{
+						{
+							Weight: 1,
+							PodAffinityTerm: corev1.PodAffinityTerm{
+								TopologyKey: topologyKey,
+								LabelSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"app": "foo",
+									},
+								},
+							},
+						},
+					},
+				}
+				pods := test.UnschedulablePods(opts, 5)
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+				// If we were respecting preferences, we would add these pods on separate nodes
+				// Because we are ignoring them, we will schedule them all on the same node
+				nodeNames := sets.New[string]()
+				for _, p := range pods {
+					nodeNames.Insert(ExpectScheduled(ctx, env.Client, p).Name)
+				}
+				Expect(nodeNames).To(HaveLen(1))
+			},
+				Entry(corev1.LabelTopologyZone, corev1.LabelTopologyZone),
+				Entry(corev1.LabelTopologyZone, corev1.LabelHostname),
+			)
+			DescribeTable("should ignore pod affinity preferences", func(topologyKey string) {
+				zone1Pod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "foo",
+						},
+					},
+					NodeSelector: map[string]string{
+						corev1.LabelTopologyZone: "test-zone-1",
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("2"),
+						},
+					},
+				})
+				zone2Pods := test.UnschedulablePods(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "bar",
+						},
+					},
+					NodeSelector: map[string]string{
+						corev1.LabelTopologyZone: "test-zone-2",
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("3"),
+						},
+					},
+				}, 2)
+				// Create an affinity pod that has a preference to schedule in the zone2Pod
+				// Without considering the preference, we would schedule the pod to the zone1Pod's node
+				// because the number of pods on that node should be lower than the zone2Pod's
+				affinityPod := test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "baz",
+						},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+					PodPreferences: []corev1.WeightedPodAffinityTerm{
+						{
+							Weight: 1,
+							PodAffinityTerm: corev1.PodAffinityTerm{
+								TopologyKey: topologyKey,
+								LabelSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"app": "bar",
+									},
+								},
+							},
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], affinityPod)
+
+				zone1Node := ExpectScheduled(ctx, env.Client, zone1Pod)
+				zone2Node := ExpectScheduled(ctx, env.Client, zone2Pods[0])
+				ExpectScheduled(ctx, env.Client, zone2Pods[0])
+				affinityPodNode := ExpectScheduled(ctx, env.Client, affinityPod)
+
+				Expect(affinityPodNode.Name).To(Equal(zone1Node.Name))
+				Expect(affinityPodNode.Name).ToNot(Equal(zone2Node.Name))
+			},
+				Entry(corev1.LabelTopologyZone, corev1.LabelTopologyZone),
+				Entry(corev1.LabelTopologyZone, corev1.LabelHostname),
+			)
 		})
 	})
 	Context("Multiple NodePools", func() {

@@ -45,6 +45,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
+	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 )
@@ -132,12 +133,12 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 		node := o.(*corev1.Node)
 		return []string{strconv.FormatBool(node.Spec.Unschedulable)}
 	}))
-	lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.taints[*].karpenter.sh/disruption", func(o client.Object) []string {
+	lo.Must0(cache.IndexField(ctx, &corev1.Node{}, "spec.taints[*].karpenter.sh/disrupted", func(o client.Object) []string {
 		node := o.(*corev1.Node)
-		t, _ := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
+		_, found := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
 			return t.Key == v1.DisruptedTaintKey
 		})
-		return []string{t.Value}
+		return []string{lo.Ternary(found, "true", "false")}
 	}))
 	lo.Must0(cache.IndexField(ctx, &v1.NodeClaim{}, "status.conditions[*].type", func(o client.Object) []string {
 		nodeClaim := o.(*v1.NodeClaim)
@@ -157,7 +158,7 @@ func NewClient(ctx context.Context, config *rest.Config) client.Client {
 	return c
 }
 
-func (env *Environment) DefaultNodePool(nodeClass client.Object) *v1.NodePool {
+func (env *Environment) DefaultNodePool(nodeClass *unstructured.Unstructured) *v1.NodePool {
 	nodePool := &v1.NodePool{}
 	if lo.FromPtr(nodePoolPath) == "" {
 		nodePool = object.Unmarshal[v1.NodePool](defaultNodePool)
@@ -168,12 +169,18 @@ func (env *Environment) DefaultNodePool(nodeClass client.Object) *v1.NodePool {
 
 	// Update to use the provided default nodeclass
 	nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
-		Kind:  env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Kind,
-		Group: env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Group,
-		Name:  env.DefaultNodeClass.GetName(),
+		Kind:  nodeClass.GetObjectKind().GroupVersionKind().Kind,
+		Group: nodeClass.GetObjectKind().GroupVersionKind().Group,
+		Name:  nodeClass.GetName(),
 	}
-
+	nodePool.ObjectMeta.Labels = lo.Assign(nodePool.ObjectMeta.Labels, map[string]string{test.DiscoveryLabel: "unspecified"})
+	nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{test.DiscoveryLabel: "unspecified"})
+	nodePool.ObjectMeta.Name = fmt.Sprintf("%s-%s", nodePool.GetName(), test.RandomName())
 	return nodePool
+}
+
+func (env *Environment) IsDefaultNodeClassKWOK() bool {
+	return env.DefaultNodeClass.GetObjectKind().GroupVersionKind().Kind == "KWOKNodeClass"
 }
 
 func decodeNodeClass() *unstructured.Unstructured {

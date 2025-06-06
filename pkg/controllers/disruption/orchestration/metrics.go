@@ -26,7 +26,7 @@ import (
 
 const (
 	voluntaryDisruptionSubsystem = "voluntary_disruption"
-	consolidationTypeLabel       = "consolidation_type"
+	ConsolidationTypeLabel       = "consolidation_type"
 	decisionLabel                = "decision"
 )
 
@@ -39,6 +39,6 @@ var (
 			Name:      "queue_failures_total",
 			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
 		},
-		[]string{decisionLabel, metrics.ReasonLabel, consolidationTypeLabel},
+		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
 )

@@ -84,12 +84,12 @@ func NewNodeClaim(
 	nodeClaimTemplate *NodeClaimTemplate,
 	topology *Topology,
 	daemonResources corev1.ResourceList,
+	hostPortUsage *scheduling.HostPortUsage,
 	instanceTypes []*cloudprovider.InstanceType,
 	reservationManager *ReservationManager,
 	reservedOfferingMode ReservedOfferingMode,
 ) *NodeClaim {
 	hostname := fmt.Sprintf("hostname-placeholder-%04d", atomic.AddInt64(&nodeID, 1))
-	topology.Register(corev1.LabelHostname, hostname)
 	template := *nodeClaimTemplate
 	template.Requirements = scheduling.NewRequirements()
 	template.Requirements.Add(nodeClaimTemplate.Requirements.Values()...)
@@ -98,7 +98,7 @@ func NewNodeClaim(
 	template.Spec.Resources.Requests = daemonResources
 	return &NodeClaim{
 		NodeClaimTemplate:    template,
-		hostPortUsage:        scheduling.NewHostPortUsage(),
+		hostPortUsage:        hostPortUsage,
 		topology:             topology,
 		daemonResources:      daemonResources,
 		hostname:             hostname,
@@ -108,32 +108,35 @@ func NewNodeClaim(
 	}
 }
 
-func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData) error {
+// CanAdd returns whether the pod can be added to the NodeClaim
+// based on the taints/tolerations, host port compatibility,
+// requirements, resources, reserved capacity reservations, and topology requirements
+func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
 	// exposed host ports on the node
 	hostPorts := scheduling.GetHostPorts(pod)
 	if err := n.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
-		return fmt.Errorf("checking host port usage, %w", err)
+		return nil, nil, nil, fmt.Errorf("checking host port usage, %w", err)
 	}
 	nodeClaimRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
 
 	// Check NodeClaim Affinity Requirements
 	if err := nodeClaimRequirements.Compatible(podData.Requirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return fmt.Errorf("incompatible requirements, %w", err)
+		return nil, nil, nil, fmt.Errorf("incompatible requirements, %w", err)
 	}
 	nodeClaimRequirements.Add(podData.Requirements.Values()...)
 
 	// Check Topology Requirements
 	topologyRequirements, err := n.topology.AddRequirements(pod, n.NodeClaimTemplate.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
 
@@ -144,24 +147,30 @@ func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData) 
 	if err != nil {
 		// We avoid wrapping this err because calling String() on InstanceTypeFilterError is an expensive operation
 		// due to calls to resources.Merge and stringifying the nodeClaimRequirements
-		return err
+		return nil, nil, nil, err
 	}
-
-	reservedOfferings, err := n.reserveOfferings(ctx, remaining, nodeClaimRequirements)
+	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
+	return nodeClaimRequirements, remaining, ofs, nil
+}
 
+// Add updates the NodeClaim to schedule the pod to this NodeClaim, updating
+// the NodeClaim with new requirements, instance types, and offerings to reserve
+// based on the pod scheduling
+func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements scheduling.Requirements, instanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering) {
 	// Update node
 	n.Pods = append(n.Pods, pod)
-	n.InstanceTypeOptions = remaining
-	n.Spec.Resources.Requests = requests
+	n.InstanceTypeOptions = instanceTypes
+	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 	n.Requirements = nodeClaimRequirements
+	n.topology.Register(corev1.LabelHostname, n.hostname)
 	n.topology.Record(pod, n.NodeClaim.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
-	n.hostPortUsage.Add(pod, hostPorts)
-	n.releaseReservedOfferings(n.reservedOfferings, reservedOfferings)
-	n.reservedOfferings = reservedOfferings
-	return nil
+	n.hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
+	n.reservationManager.Reserve(n.hostname, offeringsToReserve...)
+	n.releaseReservedOfferings(n.reservedOfferings, offeringsToReserve)
+	n.reservedOfferings = offeringsToReserve
 }
 
 // releaseReservedOfferings releases all offerings which are present in the current reserved offerings, but are not
@@ -183,7 +192,7 @@ func (n *NodeClaim) releaseReservedOfferings(current, updated cloudprovider.Offe
 // to reserve compatible offerings when some were available.
 //
 //nolint:gocyclo
-func (n *NodeClaim) reserveOfferings(
+func (n *NodeClaim) offeringsToReserve(
 	ctx context.Context,
 	instanceTypes []*cloudprovider.InstanceType,
 	nodeClaimRequirements scheduling.Requirements,
@@ -208,7 +217,7 @@ func (n *NodeClaim) reserveOfferings(
 			// Note that reservation is an idempotent operation - if we have previously successfully reserved an offering for
 			// this host, this operation is guaranteed to succeed. We may also succeed to make reservations for offerings which
 			// failed in previous iterations if other NodeClaims have released them since the last attempt.
-			if n.reservationManager.Reserve(n.hostname, o) {
+			if n.reservationManager.CanReserve(n.hostname, o) {
 				reservedOfferings = append(reservedOfferings, o)
 			}
 		}
@@ -230,11 +239,6 @@ func (n *NodeClaim) reserveOfferings(
 		}
 	}
 	return reservedOfferings, nil
-}
-
-func (n *NodeClaim) Destroy() {
-	n.topology.Unregister(corev1.LabelHostname, n.hostname)
-	n.reservationManager.Release(n.hostname, n.reservedOfferings...)
 }
 
 // FinalizeScheduling is called once all scheduling has completed and allows the node to perform any cleanup
@@ -372,6 +376,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		requirementsAndOffering: false,
 		fitsAndOffering:         false,
 
+		requirements:   requirements,
 		podRequests:    podRequests,
 		daemonRequests: daemonRequests,
 	}

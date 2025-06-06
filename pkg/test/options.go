@@ -38,9 +38,11 @@ type OptionsFields struct {
 	LeaderElectionName      *string
 	LeaderElectionNamespace *string
 	MemoryLimit             *int64
+	CPURequests             *int64
 	LogLevel                *string
 	LogOutputPaths          *string
 	LogErrorOutputPaths     *string
+	PreferencePolicy        *options.PreferencePolicy
 	BatchMaxDuration        *time.Duration
 	BatchIdleDuration       *time.Duration
 	FeatureGates            FeatureGates
@@ -69,11 +71,13 @@ func Options(overrides ...OptionsFields) *options.Options {
 		EnableProfiling:       lo.FromPtrOr(opts.EnableProfiling, false),
 		DisableLeaderElection: lo.FromPtrOr(opts.DisableLeaderElection, false),
 		MemoryLimit:           lo.FromPtrOr(opts.MemoryLimit, -1),
+		CPURequests:           lo.FromPtrOr(opts.CPURequests, 5000), // use 5 threads to enforce parallelism
 		LogLevel:              lo.FromPtrOr(opts.LogLevel, ""),
 		LogOutputPaths:        lo.FromPtrOr(opts.LogOutputPaths, "stdout"),
 		LogErrorOutputPaths:   lo.FromPtrOr(opts.LogErrorOutputPaths, "stderr"),
 		BatchMaxDuration:      lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
 		BatchIdleDuration:     lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
+		PreferencePolicy:      lo.FromPtrOr(opts.PreferencePolicy, options.PreferencePolicyRespect),
 		FeatureGates: options.FeatureGates{
 			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
 			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, false),

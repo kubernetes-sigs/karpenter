@@ -18,6 +18,7 @@ package disruption
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -37,10 +38,14 @@ const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
 	consolidation
+	Validator
 }
 
-func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidation {
-	return &MultiNodeConsolidation{consolidation: consolidation}
+func NewMultiNodeConsolidation(c consolidation) *MultiNodeConsolidation {
+	return &MultiNodeConsolidation{
+		consolidation: c,
+		Validator:     NewMultiConsolidationValidator(c),
+	}
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
@@ -61,7 +66,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	for _, candidate := range candidates {
 		// If there's disruptions allowed for the candidate's nodepool,
 		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.nodePool.Name] == 0 {
+		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
 			constrainedByBudgets = true
 			continue
 		}
@@ -73,7 +78,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		}
 		// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
 		disruptableCandidates = append(disruptableCandidates, candidate)
-		disruptionBudgetMapping[candidate.nodePool.Name]--
+		disruptionBudgetMapping[candidate.NodePool.Name]--
 	}
 
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.
@@ -95,7 +100,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, scheduling.Results{}, nil
 	}
 
-	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue, m.Reason()).IsValid(ctx, cmd, consolidationTTL); err != nil {
+	if cmd, err = m.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
 			return Command{}, scheduling.Results{}, nil
@@ -107,6 +112,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
 // NodeClaims are sorted by increasing disruption order which correlates to likelihood of being able to consolidate the node
+// nolint:gocyclo
 func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, scheduling.Results, error) {
 	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {
@@ -120,23 +126,26 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	lastSavedCommand := Command{}
 	lastSavedResults := scheduling.Results{}
 	// Set a timeout
-	timeout := m.clock.Now().Add(MultiNodeConsolidationTimeoutDuration)
-	// binary search to find the maximum number of NodeClaims we can terminate
+	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
+	defer cancel()
 	for min <= max {
-		if m.clock.Now().After(timeout) {
-			ConsolidationTimeoutsTotal.Inc(map[string]string{consolidationTypeLabel: m.ConsolidationType()})
-			if lastSavedCommand.candidates == nil {
-				log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
-			} else {
-				log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("stopping multi-node consolidation after timeout, returning last valid command")
-			}
-			return lastSavedCommand, lastSavedResults, nil
-		}
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
-		cmd, results, err := m.computeConsolidation(ctx, candidatesToConsolidate...)
+		// Pass the timeout context to ensure sub-operations can be canceled
+		cmd, results, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
+		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
+				if lastSavedCommand.candidates == nil {
+					log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
+					return Command{}, scheduling.Results{}, nil
+				}
+				log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("stopping multi-node consolidation after timeout, returning last valid command")
+				return lastSavedCommand, lastSavedResults, nil
+
+			}
 			return Command{}, scheduling.Results{}, err
 		}
 
