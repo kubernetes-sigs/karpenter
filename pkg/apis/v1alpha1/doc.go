@@ -14,11 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1
+// +k8s:openapi-gen=true
+// +k8s:deepcopy-gen=package,register
+// +k8s:defaulter-gen=TypeMeta
+// +groupName=karpenter.sh
+package v1alpha1 // doc.go is discovered by codegen
 
 import (
-	"context"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
+
+	"sigs.k8s.io/karpenter/pkg/apis"
 )
 
-// SetDefaults for the NodePool
-func (in *NodePool) SetDefaults(_ context.Context) {}
+func init() {
+	gv := schema.GroupVersion{Group: apis.Group, Version: "v1alpha1"}
+	v1.AddToGroupVersion(scheme.Scheme, gv)
+	scheme.Scheme.AddKnownTypes(gv,
+		&NodeOverlay{},
+		&NodeOverlayList{},
+	)
+}
