@@ -33,7 +33,7 @@ import (
 )
 
 var _ = Describe("Performance", func() {
-	var replicas = 6
+	var replicas = 100
 
 	Context("Provisioning", func() {
 		It("should do simple provisioning", func() {
@@ -86,7 +86,7 @@ var _ = Describe("Performance", func() {
 				nodeClaims := &v1.NodeClaimList{}
 				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1.ConditionTypeDrifted})).To(Succeed())
 				g.Expect(len(nodeClaims.Items)).To(Equal(0))
-			}).WithTimeout(10 * time.Minute).Should(Succeed())
+			}).WithTimeout(3 * time.Minute).Should(Succeed())
 			env.TimeIntervalCollector.End("Drift")
 		})
 		It("should do complex provisioning", func() {
@@ -148,7 +148,7 @@ var _ = Describe("Performance", func() {
 				nodeClaims := &v1.NodeClaimList{}
 				g.Expect(env.Client.List(env, nodeClaims, client.MatchingFields{"status.conditions[*].type": v1.ConditionTypeDrifted})).To(Succeed())
 				g.Expect(len(nodeClaims.Items)).To(Equal(0))
-			}).WithTimeout(10 * time.Minute).Should(Succeed())
+			}).WithTimeout(3 * time.Minute).Should(Succeed())
 			env.TimeIntervalCollector.End("Drift")
 		})
 	})

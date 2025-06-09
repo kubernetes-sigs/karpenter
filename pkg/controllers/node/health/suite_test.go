@@ -360,11 +360,7 @@ var _ = Describe("Node Health", func() {
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
-				metrics.ReasonLabel:   metrics.UnhealthyReason,
-				metrics.NodePoolLabel: nodePool.Name,
-			})
-			ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
-				health.Condition:      pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
+				metrics.ReasonLabel:   pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
 				metrics.NodePoolLabel: nodePool.Name,
 			})
 		})

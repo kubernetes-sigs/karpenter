@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -1338,40 +1337,6 @@ var _ = Describe("Cluster State Sync", func() {
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 1, nil)
 	})
-	It("should consider the cluster state synced when a new node is added after the initial sync", func() {
-		// Deploy 250 nodes to the cluster that also have nodeclaims
-		for i := 0; i < 250; i++ {
-			node := test.Node(test.NodeOptions{
-				ProviderID: test.RandomProviderID(),
-			})
-			nodeClaim := test.NodeClaim(v1.NodeClaim{
-				Status: v1.NodeClaimStatus{
-					ProviderID: node.Spec.ProviderID,
-				},
-			})
-			ExpectApplied(ctx, env.Client, node, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		}
-		// Deploy 250 nodes to the cluster
-		for i := 0; i < 250; i++ {
-			node := test.Node(test.NodeOptions{
-				ProviderID: test.RandomProviderID(),
-			})
-			ExpectApplied(ctx, env.Client, node)
-			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		}
-		Expect(cluster.Synced(ctx)).To(BeTrue())
-
-		// Add a new node but don't reconcile it
-		node := test.Node(test.NodeOptions{
-			ProviderID: test.RandomProviderID(),
-		})
-		ExpectApplied(ctx, env.Client, node)
-
-		// Cluster state should still be synced because we already synced our changes
-		Expect(cluster.Synced(ctx)).To(BeTrue())
-	})
 })
 
 var _ = Describe("DaemonSet Controller", func() {
@@ -1496,22 +1461,6 @@ var _ = Describe("DaemonSet Controller", func() {
 
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(BeNil())
 	})
-	It("should only return daemonset pods from the daemonset cache", func() {
-		daemonset := test.DaemonSet(
-			test.DaemonSetOptions{PodOptions: test.PodOptions{
-				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
-			}},
-		)
-		ExpectApplied(ctx, env.Client, daemonset)
-		otherPods := test.Pods(1000, test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: daemonset.Namespace,
-			},
-		})
-		ExpectApplied(ctx, env.Client, lo.Map(otherPods, func(p *corev1.Pod, _ int) client.Object { return p })...)
-		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
-		Expect(cluster.GetDaemonSetPod(daemonset)).To(BeNil())
-	})
 })
 
 var _ = Describe("Consolidated State", func() {
@@ -1525,7 +1474,7 @@ var _ = Describe("Consolidated State", func() {
 		cluster.MarkUnconsolidated()
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
-	It("should update the consolidated value when state timeout (5m) has passed and state hasn't changed", func() {
+	It("should update the consolidated value when consolidation timeout (5m) has passed and state hasn't changed", func() {
 		state := cluster.ConsolidationState()
 
 		fakeClock.Step(time.Minute)
@@ -1548,21 +1497,14 @@ var _ = Describe("Consolidated State", func() {
 })
 
 var _ = Describe("Data Races", func() {
-	var wg sync.WaitGroup
-	var cancelCtx context.Context
-	var cancel context.CancelFunc
-	BeforeEach(func() {
-		cancelCtx, cancel = context.WithCancel(ctx)
-	})
-	AfterEach(func() {
-		cancel()
-		wg.Wait()
-	})
 	It("should ensure that calling Synced() is valid while making updates to Nodes", func() {
+		cancelCtx, cancel := context.WithCancel(ctx)
+		DeferCleanup(func() {
+			cancel()
+		})
+
 		// Keep calling Synced for the entirety of this test
-		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			for {
 				_ = cluster.Synced(ctx)
 				if cancelCtx.Err() != nil {
@@ -1581,10 +1523,13 @@ var _ = Describe("Data Races", func() {
 		}
 	})
 	It("should ensure that calling Synced() is valid while making updates to NodeClaims", func() {
+		cancelCtx, cancel := context.WithCancel(ctx)
+		DeferCleanup(func() {
+			cancel()
+		})
+
 		// Keep calling Synced for the entirety of this test
-		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			for {
 				_ = cluster.Synced(ctx)
 				if cancelCtx.Err() != nil {

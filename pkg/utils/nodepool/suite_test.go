@@ -18,13 +18,12 @@ package nodepool_test
 
 import (
 	"context"
-	"math/rand/v2"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	"github.com/samber/lo/mutable"
+	"golang.org/x/exp/rand"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -62,14 +61,13 @@ var _ = Describe("NodePoolUtils", func() {
 	Context("OrderByWeight", func() {
 		It("should order the NodePools by weight", func() {
 			// Generate 10 NodePools that have random weights, some might have the same weights
-			nps := lo.Times(10, func(_ int) *v1.NodePool {
+			nps := lo.Shuffle(lo.Times(10, func(_ int) *v1.NodePool {
 				return test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
-						Weight: lo.ToPtr[int32](int32(rand.IntN(100) + 1)), //nolint:gosec
+						Weight: lo.ToPtr[int32](int32(rand.Intn(100) + 1)), //nolint:gosec
 					},
 				})
-			})
-			mutable.Shuffle(nps)
+			}))
 			nodepoolutils.OrderByWeight(nps)
 
 			lastWeight := 101 // This is above the allowed weight values
@@ -80,14 +78,13 @@ var _ = Describe("NodePoolUtils", func() {
 		})
 		It("should order the NodePools by name when the weights are the same", func() {
 			// Generate 10 NodePools with the same weight
-			nps := lo.Times(10, func(_ int) *v1.NodePool {
+			nps := lo.Shuffle(lo.Times(10, func(_ int) *v1.NodePool {
 				return test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
 						Weight: lo.ToPtr[int32](10),
 					},
 				})
-			})
-			mutable.Shuffle(nps)
+			}))
 			nodepoolutils.OrderByWeight(nps)
 
 			lastName := "zzzzzzzzzzzzzzzzzzzzzzzz" // large string value

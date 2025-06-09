@@ -5,13 +5,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-logr/logr"
 	"github.com/google/btree"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
-
 	"sigs.k8s.io/controller-runtime/pkg/internal/metrics"
 )
 
@@ -38,7 +36,6 @@ type Opts[T comparable] struct {
 	// limiter with an initial delay of five milliseconds and a max delay of 1000 seconds.
 	RateLimiter    workqueue.TypedRateLimiter[T]
 	MetricProvider workqueue.MetricsProvider
-	Log            logr.Logger
 }
 
 // Opt allows to configure a PriorityQueue.
@@ -60,7 +57,6 @@ func New[T comparable](name string, o ...Opt[T]) PriorityQueue[T] {
 	}
 
 	pq := &priorityqueue[T]{
-		log:         opts.Log,
 		items:       map[T]*item[T]{},
 		queue:       btree.NewG(32, less[T]),
 		becameReady: sets.Set[T]{},
@@ -79,7 +75,6 @@ func New[T comparable](name string, o ...Opt[T]) PriorityQueue[T] {
 	}
 
 	go pq.spin()
-	go pq.logState()
 	if _, ok := pq.metrics.(noMetrics[T]); !ok {
 		go pq.updateUnfinishedWorkLoop()
 	}
@@ -88,7 +83,6 @@ func New[T comparable](name string, o ...Opt[T]) PriorityQueue[T] {
 }
 
 type priorityqueue[T comparable] struct {
-	log logr.Logger
 	// lock has to be acquired for any access any of items, queue, addedCounter
 	// or becameReady
 	lock  sync.Mutex
@@ -133,29 +127,28 @@ func (w *priorityqueue[T]) AddWithOpts(o AddOpts, items ...T) {
 	defer w.lock.Unlock()
 
 	for _, key := range items {
-		after := o.After
 		if o.RateLimited {
-			rlAfter := w.rateLimiter.When(key)
-			if after == 0 || rlAfter < after {
-				after = rlAfter
+			after := w.rateLimiter.When(key)
+			if o.After == 0 || after < o.After {
+				o.After = after
 			}
 		}
 
 		var readyAt *time.Time
-		if after > 0 {
-			readyAt = ptr.To(w.now().Add(after))
+		if o.After > 0 {
+			readyAt = ptr.To(w.now().Add(o.After))
 			w.metrics.retry()
 		}
 		if _, ok := w.items[key]; !ok {
 			item := &item[T]{
-				Key:          key,
-				AddedCounter: w.addedCounter,
-				Priority:     o.Priority,
-				ReadyAt:      readyAt,
+				key:          key,
+				addedCounter: w.addedCounter,
+				priority:     o.Priority,
+				readyAt:      readyAt,
 			}
 			w.items[key] = item
 			w.queue.ReplaceOrInsert(item)
-			if item.ReadyAt == nil {
+			if item.readyAt == nil {
 				w.metrics.add(key)
 			}
 			w.addedCounter++
@@ -165,15 +158,15 @@ func (w *priorityqueue[T]) AddWithOpts(o AddOpts, items ...T) {
 		// The b-tree de-duplicates based on ordering and any change here
 		// will affect the order - Just delete and re-add.
 		item, _ := w.queue.Delete(w.items[key])
-		if o.Priority > item.Priority {
-			item.Priority = o.Priority
+		if o.Priority > item.priority {
+			item.priority = o.Priority
 		}
 
-		if item.ReadyAt != nil && (readyAt == nil || readyAt.Before(*item.ReadyAt)) {
-			if readyAt == nil && !w.becameReady.Has(key) {
+		if item.readyAt != nil && (readyAt == nil || readyAt.Before(*item.readyAt)) {
+			if readyAt == nil {
 				w.metrics.add(key)
 			}
-			item.ReadyAt = readyAt
+			item.readyAt = readyAt
 		}
 
 		w.queue.ReplaceOrInsert(item)
@@ -217,14 +210,14 @@ func (w *priorityqueue[T]) spin() {
 			// track what we want to delete and do it after we are done ascending.
 			var toDelete []*item[T]
 			w.queue.Ascend(func(item *item[T]) bool {
-				if item.ReadyAt != nil {
-					if readyAt := item.ReadyAt.Sub(w.now()); readyAt > 0 {
+				if item.readyAt != nil {
+					if readyAt := item.readyAt.Sub(w.now()); readyAt > 0 {
 						nextReady = w.tick(readyAt)
 						return false
 					}
-					if !w.becameReady.Has(item.Key) {
-						w.metrics.add(item.Key)
-						w.becameReady.Insert(item.Key)
+					if !w.becameReady.Has(item.key) {
+						w.metrics.add(item.key)
+						w.becameReady.Insert(item.key)
 					}
 				}
 
@@ -235,16 +228,16 @@ func (w *priorityqueue[T]) spin() {
 				}
 
 				// Item is locked, we can not hand it out
-				if w.locked.Has(item.Key) {
+				if w.locked.Has(item.key) {
 					return true
 				}
 
-				w.metrics.get(item.Key)
-				w.locked.Insert(item.Key)
+				w.metrics.get(item.key)
+				w.locked.Insert(item.key)
 				w.waiters.Add(-1)
-				delete(w.items, item.Key)
+				delete(w.items, item.key)
 				toDelete = append(toDelete, item)
-				w.becameReady.Delete(item.Key)
+				w.becameReady.Delete(item.key)
 				w.get <- *item
 
 				return true
@@ -275,7 +268,7 @@ func (w *priorityqueue[T]) GetWithPriority() (_ T, priority int, shutdown bool) 
 	w.notifyItemOrWaiterAdded()
 	item := <-w.get
 
-	return item.Key, item.Priority, w.shutdown.Load()
+	return item.key, item.priority, w.shutdown.Load()
 }
 
 func (w *priorityqueue[T]) Get() (item T, shutdown bool) {
@@ -323,7 +316,7 @@ func (w *priorityqueue[T]) Len() int {
 
 	var result int
 	w.queue.Ascend(func(item *item[T]) bool {
-		if item.ReadyAt == nil || item.ReadyAt.Compare(w.now()) <= 0 {
+		if item.readyAt == nil || item.readyAt.Compare(w.now()) <= 0 {
 			result++
 			return true
 		}
@@ -333,64 +326,36 @@ func (w *priorityqueue[T]) Len() int {
 	return result
 }
 
-func (w *priorityqueue[T]) logState() {
-	t := time.Tick(10 * time.Second)
-	for {
-		select {
-		case <-w.done:
-			return
-		case <-t:
-		}
-
-		// Log level may change at runtime, so keep the
-		// loop going even if a given level is currently
-		// not enabled.
-		if !w.log.V(5).Enabled() {
-			continue
-		}
-		w.lock.Lock()
-		items := make([]*item[T], 0, len(w.items))
-		w.queue.Ascend(func(item *item[T]) bool {
-			items = append(items, item)
-			return true
-		})
-		w.lock.Unlock()
-
-		w.log.V(5).Info("workqueue_items", "items", items)
-	}
-}
-
 func less[T comparable](a, b *item[T]) bool {
-	if a.ReadyAt == nil && b.ReadyAt != nil {
+	if a.readyAt == nil && b.readyAt != nil {
 		return true
 	}
-	if b.ReadyAt == nil && a.ReadyAt != nil {
+	if b.readyAt == nil && a.readyAt != nil {
 		return false
 	}
-	if a.ReadyAt != nil && b.ReadyAt != nil && !a.ReadyAt.Equal(*b.ReadyAt) {
-		return a.ReadyAt.Before(*b.ReadyAt)
+	if a.readyAt != nil && b.readyAt != nil && !a.readyAt.Equal(*b.readyAt) {
+		return a.readyAt.Before(*b.readyAt)
 	}
-	if a.Priority != b.Priority {
-		return a.Priority > b.Priority
+	if a.priority != b.priority {
+		return a.priority > b.priority
 	}
 
-	return a.AddedCounter < b.AddedCounter
+	return a.addedCounter < b.addedCounter
 }
 
 type item[T comparable] struct {
-	Key          T          `json:"key"`
-	AddedCounter uint64     `json:"addedCounter"`
-	Priority     int        `json:"priority"`
-	ReadyAt      *time.Time `json:"readyAt,omitempty"`
+	key          T
+	addedCounter uint64
+	priority     int
+	readyAt      *time.Time
 }
 
 func (w *priorityqueue[T]) updateUnfinishedWorkLoop() {
-	t := time.Tick(500 * time.Millisecond) // borrowed from workqueue: https://github.com/kubernetes/kubernetes/blob/67a807bf142c7a2a5ecfdb2a5d24b4cdea4cc79c/staging/src/k8s.io/client-go/util/workqueue/queue.go#L182
-	for {
-		select {
-		case <-w.done:
+	t := time.NewTicker(500 * time.Millisecond) // borrowed from workqueue: https://github.com/kubernetes/kubernetes/blob/67a807bf142c7a2a5ecfdb2a5d24b4cdea4cc79c/staging/src/k8s.io/client-go/util/workqueue/queue.go#L182
+	defer t.Stop()
+	for range t.C {
+		if w.shutdown.Load() {
 			return
-		case <-t:
 		}
 		w.metrics.updateUnfinishedWork()
 	}

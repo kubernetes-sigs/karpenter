@@ -165,28 +165,28 @@ fieldLoop:
 		switch f := t.Field(i); f.Name {
 		case genid.SizeCache_goname, genid.SizeCacheA_goname:
 			if f.Type == sizecacheType {
-				si.sizecacheOffset = offsetOf(f)
+				si.sizecacheOffset = offsetOf(f, mi.Exporter)
 				si.sizecacheType = f.Type
 			}
 		case genid.WeakFields_goname, genid.WeakFieldsA_goname:
 			if f.Type == weakFieldsType {
-				si.weakOffset = offsetOf(f)
+				si.weakOffset = offsetOf(f, mi.Exporter)
 				si.weakType = f.Type
 			}
 		case genid.UnknownFields_goname, genid.UnknownFieldsA_goname:
 			if f.Type == unknownFieldsAType || f.Type == unknownFieldsBType {
-				si.unknownOffset = offsetOf(f)
+				si.unknownOffset = offsetOf(f, mi.Exporter)
 				si.unknownType = f.Type
 			}
 		case genid.ExtensionFields_goname, genid.ExtensionFieldsA_goname, genid.ExtensionFieldsB_goname:
 			if f.Type == extensionFieldsType {
-				si.extensionOffset = offsetOf(f)
+				si.extensionOffset = offsetOf(f, mi.Exporter)
 				si.extensionType = f.Type
 			}
 		case "lazyFields", "XXX_lazyUnmarshalInfo":
-			si.lazyOffset = offsetOf(f)
+			si.lazyOffset = offsetOf(f, mi.Exporter)
 		case "XXX_presence":
-			si.presenceOffset = offsetOf(f)
+			si.presenceOffset = offsetOf(f, mi.Exporter)
 		default:
 			for _, s := range strings.Split(f.Tag.Get("protobuf"), ",") {
 				if len(s) > 0 && strings.Trim(s, "0123456789") == "" {
