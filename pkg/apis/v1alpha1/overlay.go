@@ -28,12 +28,12 @@ type NodeOverlaySpec struct {
 	// Requirements are layered with GetLabels and applied to every node.
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt' or 'Lt' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
-	// +kubebuilder:validation:XValidation:message="requirements with 'minValues' must have at least that many values specified in the 'values' field",rule="self.all(x, (x.operator == 'In' && has(x.minValues)) ? x.values.size() >= x.minValues : true)"
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
 	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
 	// UPDATE WORDING: PricePercent modifies the price of the simulated node (PriceAdjustment + (Price * PricePercent / 100)).
 	// Update Validation
+	// +kubebuilder:default:="100%"
 	// +optional
 	PriceAdjustment string `json:"priceAdjustment,omitempty"`
 	// Capacity adds extended resource to instances types based on the selector provided
@@ -59,7 +59,8 @@ type NodeOverlay struct {
 
 	// +kubebuilder:validation:XValidation:message="need to define a capacity or priceAdjustment field ",rule="has(self.capacity) || has(self.priceAdjustment)"
 	// +required
-	Spec NodeOverlaySpec `json:"spec"`
+	Spec   NodeOverlaySpec   `json:"spec"`
+	Status NodeOverlayStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
