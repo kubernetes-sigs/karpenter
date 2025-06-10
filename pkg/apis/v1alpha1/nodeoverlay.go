@@ -25,19 +25,26 @@ import (
 )
 
 type NodeOverlaySpec struct {
-	// Requirements are layered with GetLabels and applied to every node.
+	// Requirements constrain when this NodeOverlay is applied during scheduling simulation.
+	// These requirements can match:
+	// - Well-known labels (e.g., node.kubernetes.io/instance-type, karpenter.sh/nodepool)
+	// - Custom labels from NodePool's spec.template.labels
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt' or 'Lt' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
 	// +kubebuilder:validation:MaxItems:=100
 	// +optional
 	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
-	// UPDATE WORDING: PricePercent modifies the price of the simulated node (PriceAdjustment + (Price * PricePercent / 100)).
-	// Update Validation
-	// +kubebuilder:validation:Pattern=`^(-?\d*\.?\d+|-?\d+\.?\d*$|\d*\.?\d+%|\d+\.?\d*%)$`
+	// PriceAdjustment specifies a price changes for matching instance types. Accepts either:
+	// - A fixed price modifier (e.g., -0.5, 1.2)
+	// - A percentage modifier (e.g., 90% to decrease by 10%, 115% to increase by 15%)
+	// Note: Percentage values must be positive. The adjustment is applied to whatever price unit is in use.
+	// +kubebuilder:validation:Pattern=`^(-?\d*\.?\d+$|\d*\.?\d+%)$`
 	// +kubebuilder:default:="100%"
 	// +optional
 	PriceAdjustment string `json:"priceAdjustment,omitempty"`
-	// Capacity adds extended resource to instances types based on the selector provided
+	// Capacity that will add extended resources only, and not replace any existing resources on the nodes.
+	// These extended resources will be appended to the node's existing resource list.
+	// Note: This field does not modify or override standard resources like CPU, memory, ephemeral-storage, or pods.
 	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))"
 	// +optional
 	Capacity v1.ResourceList `json:"capacity,omitempty"`
@@ -55,6 +62,9 @@ type NodeOverlaySpec struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
 // +kubebuilder:resource:path=nodeoverlays,scope=Cluster,categories=karpenter
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
+// +kubebuilder:printcolumn:name="Weight",type="integer",JSONPath=".spec.weight",priority=1,description=""
 type NodeOverlay struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

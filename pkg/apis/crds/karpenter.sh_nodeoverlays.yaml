@@ -16,7 +16,18 @@ spec:
     singular: nodeoverlay
   scope: Cluster
   versions:
-    - name: v1alpha1
+    - additionalPrinterColumns:
+        - jsonPath: .status.conditions[?(@.type=="Ready")].status
+          name: Ready
+          type: string
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+        - jsonPath: .spec.weight
+          name: Weight
+          priority: 1
+          type: integer
+      name: v1alpha1
       schema:
         openAPIV3Schema:
           properties:
@@ -46,7 +57,10 @@ spec:
                       - type: string
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
-                  description: Capacity adds extended resource to instances types based on the selector provided
+                  description: |-
+                    Capacity that will add extended resources only, and not replace any existing resources on the nodes.
+                    These extended resources will be appended to the node's existing resource list.
+                    Note: This field does not modify or override standard resources like CPU, memory, ephemeral-storage, or pods.
                   type: object
                   x-kubernetes-validations:
                     - message: invalid resource restricted
@@ -54,12 +68,18 @@ spec:
                 priceAdjustment:
                   default: 100%
                   description: |-
-                    UPDATE WORDING: PricePercent modifies the price of the simulated node (PriceAdjustment + (Price * PricePercent / 100)).
-                    Update Validation
-                  pattern: ^(-?\d*\.?\d+|-?\d+\.?\d*$|\d*\.?\d+%|\d+\.?\d*%)$
+                    PriceAdjustment specifies a price changes for matching instance types. Accepts either:
+                    - A fixed price modifier (e.g., -0.5, 1.2)
+                    - A percentage modifier (e.g., 90% to decrease by 10%, 115% to increase by 15%)
+                    Note: Percentage values must be positive. The adjustment is applied to whatever price unit is in use.
+                  pattern: ^(-?\d*\.?\d+$|\d*\.?\d+%)$
                   type: string
                 requirements:
-                  description: Requirements are layered with GetLabels and applied to every node.
+                  description: |-
+                    Requirements constrain when this NodeOverlay is applied during scheduling simulation.
+                    These requirements can match:
+                    - Well-known labels (e.g., node.kubernetes.io/instance-type, karpenter.sh/nodepool)
+                    - Custom labels from NodePool's spec.template.labels
                   items:
                     description: |-
                       A node selector requirement is a selector that contains values, a key, and an operator
@@ -192,3 +212,4 @@ spec:
           type: object
       served: true
       storage: true
+      subresources: {}
