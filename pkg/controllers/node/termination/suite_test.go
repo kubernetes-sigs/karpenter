@@ -208,10 +208,8 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim, pod, pdb)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-
 			// We only reconcile once since this label should be applied before draining the node
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			_ = ExpectObjectReconcileFailed(ctx, env.Client, queue, pod)
 
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Labels[corev1.LabelNodeExcludeBalancers]).Should(Equal("karpenter"))
@@ -469,7 +467,6 @@ var _ = Describe("Termination", func() {
 					for _, pod := range podGroups[i+1] {
 						Expect(queue.Has(pod)).To(BeFalse())
 					}
-					ConsistentlyExpectNotTerminating(ctx, env.Client, lo.Map(podGroups[i+1], func(p *corev1.Pod, _ int) client.Object { return p })...)
 				}
 				// Expect that the pods are deleted -- which should unblock the next pod group
 				ExpectDeleted(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
@@ -745,11 +742,8 @@ var _ = Describe("Termination", func() {
 			})
 			ExpectApplied(ctx, env.Client, node, pod)
 
-			// Trigger eviction queue with the pod key still in it
-			Expect(queue.Has(pod)).To(BeTrue())
-			// Still need to attempt to add it to verify that the new pod
-			// won't get evicted
-			queue.Add(pod)
+			// Check if the queue has seen the pod (it shouldn't because its got a different UUID)
+			Expect(queue.Has(pod)).To(BeFalse())
 
 			Consistently(func(g Gomega) {
 				g.Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), pod)).To(Succeed())

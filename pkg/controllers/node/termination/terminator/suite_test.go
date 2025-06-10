@@ -149,8 +149,18 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should ensure that calling Evict() is valid while making Add() calls", func() {
 			// Ensure that we add enough pods to the queue while we are pulling items off of the queue (enough to trigger a DATA RACE)
-			for i := 0; i < 10000; i++ {
-				queue.Add(test.Pod())
+			pods := test.Pods(1000)
+
+			for _, pod := range pods {
+				go func() {
+					for {
+						queue.Add(pod)
+					}
+				}()
+			}
+
+			for _, pod = range pods {
+				ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			}
 		})
 		It("should increment PodsDrainedTotal metric when a pod is evicted", func() {
@@ -205,11 +215,13 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should delete a pod with less than terminationGracePeriodSeconds remaining before nodeTerminationTime", func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
-			ExpectApplied(ctx, env.Client, pod, node)
+			// overwrite the node name or the delete does not succeed
+			pod.Spec.NodeName = ""
+			ExpectApplied(ctx, env.Client, pod)
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 1)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
-			ExpectDeleted(ctx, env.Client, pod)
+			ExpectNotFound(ctx, env.Client, pod)
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
 		})
 	})

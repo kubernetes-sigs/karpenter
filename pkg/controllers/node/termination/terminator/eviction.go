@@ -21,14 +21,16 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
-	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -50,6 +52,11 @@ import (
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
+const (
+	evictionQueueBaseDelay = 100 * time.Millisecond
+	evictionQueueMaxDelay  = 10 * time.Second
+)
+
 type NodeDrainError struct {
 	error
 }
@@ -66,11 +73,23 @@ func IsNodeDrainError(err error) bool {
 	return errors.As(err, &nodeDrainErr)
 }
 
+type QueueKey struct {
+	types.NamespacedName
+	UID types.UID
+}
+
+func NewQueueKey(pod *corev1.Pod) QueueKey {
+	return QueueKey{
+		NamespacedName: client.ObjectKeyFromObject(pod),
+		UID:            pod.UID,
+	}
+}
+
 type Queue struct {
 	sync.Mutex
 
 	source chan event.TypedGenericEvent[*corev1.Pod]
-	set    sets.Set[client.ObjectKey]
+	set    sets.Set[QueueKey]
 
 	kubeClient client.Client
 	recorder   events.Recorder
@@ -79,7 +98,7 @@ type Queue struct {
 func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	return &Queue{
 		source:     make(chan event.TypedGenericEvent[*corev1.Pod], 10000),
-		set:        sets.New[client.ObjectKey](),
+		set:        sets.New[QueueKey](),
 		kubeClient: kubeClient,
 		recorder:   recorder,
 	}
@@ -100,7 +119,10 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 			},
 		})).
 		WithOptions(controller.Options{
-			RateLimiter:             reasonable.RateLimiter(),
+			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
+				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](evictionQueueBaseDelay, evictionQueueMaxDelay),
+				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
+			),
 			MaxConcurrentReconciles: 100,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
@@ -112,7 +134,7 @@ func (q *Queue) Add(pods ...*corev1.Pod) {
 	defer q.Unlock()
 
 	for _, pod := range pods {
-		qk := client.ObjectKeyFromObject(pod)
+		qk := NewQueueKey(pod)
 		if !q.set.Has(qk) {
 			q.set.Insert(qk)
 			q.source <- event.TypedGenericEvent[*corev1.Pod]{Object: pod}
@@ -124,7 +146,7 @@ func (q *Queue) Has(pod *corev1.Pod) bool {
 	q.Lock()
 	defer q.Unlock()
 
-	return q.set.Has(client.ObjectKeyFromObject(pod))
+	return q.set.Has(NewQueueKey(pod))
 }
 
 func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
@@ -137,7 +159,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 
 	q.Lock()
 	defer q.Unlock()
-	q.set.Delete(client.ObjectKeyFromObject(pod))
+	q.set.Delete(NewQueueKey(pod))
 	return reconcile.Result{}, nil
 }
 
