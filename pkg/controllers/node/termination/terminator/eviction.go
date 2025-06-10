@@ -152,6 +152,10 @@ func (q *Queue) Has(pod *corev1.Pod) bool {
 func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, q.Name())
 
+	if !q.Has(pod) {
+		//This is a different pod than in the queue, we should exit without evicting
+		return reconcile.Result{}, nil
+	}
 	// Evict the pod
 	if err := q.Evict(ctx, pod); err != nil {
 		return reconcile.Result{}, err
@@ -190,10 +194,12 @@ func (q *Queue) Evict(ctx context.Context, pod *corev1.Pod) error {
 			return nil
 		}
 		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
-			q.recorder.Publish(terminatorevents.NodeFailedToDrain(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
-				Name:      pod.Name,
-				Namespace: pod.Namespace,
-			}}, serrors.Wrap(fmt.Errorf("evicting pod violates a PDB"), "Pod", klog.KRef(pod.Namespace, pod.Name))))
+			node, err2 := podutils.NodeForPod(ctx, q.kubeClient, pod)
+			if err2 != nil {
+				log.FromContext(ctx).V(1).Error(err2, "pod has no node")
+				return err
+			}
+			q.recorder.Publish(terminatorevents.NodeFailedToDrain(node, serrors.Wrap(fmt.Errorf("evicting pod violates a PDB"), "Pod", klog.KRef(pod.Namespace, pod.Name))))
 			return err
 		}
 		return err
