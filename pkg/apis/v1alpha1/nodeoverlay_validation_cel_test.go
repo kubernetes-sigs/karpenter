@@ -51,22 +51,6 @@ var _ = Describe("CEL/Validation", func() {
 			},
 		}
 	})
-
-	It("should define either a priceAdjustment or capacity", func() {
-		nodeOverlay.Spec.PriceAdjustment = ""
-		nodeOverlay.Spec.Capacity = nil
-		Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
-
-		nodeOverlay.Spec.PriceAdjustment = "1%"
-		nodeOverlay.Spec.Capacity = nil
-		Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
-
-		nodeOverlay.Spec.PriceAdjustment = ""
-		nodeOverlay.Spec.Capacity = corev1.ResourceList{
-			corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
-		}
-		Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
-	})
 	Context("Requirements", func() {
 		It("should succeed for valid requirement keys", func() {
 			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
@@ -99,8 +83,8 @@ var _ = Describe("CEL/Validation", func() {
 			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
 				{Key: v1.NodePoolLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{randomdata.SillyName()}},
 			}
-			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
-			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should fail at runtime for requirement keys that are too long", func() {
 			oldnodeOverlay := nodeOverlay.DeepCopy()
@@ -218,25 +202,25 @@ var _ = Describe("CEL/Validation", func() {
 			nodeOverlay.Spec.PriceAdjustment = "123%"
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
-		It("should allow for integer value for ", func() {
+		It("should not allow percentage less then 0%", func() {
+			nodeOverlay.Spec.PriceAdjustment = "-1%"
+			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+		})
+		It("should allow integer value", func() {
 			nodeOverlay.Spec.PriceAdjustment = "43"
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
-		It("should only allow whole number percentage value ", func() {
-			nodeOverlay.Spec.PriceAdjustment = "343.5%"
-			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
-		})
-		It("should limit percentage value to be no less then 1%", func() {
-			nodeOverlay.Spec.PriceAdjustment = "0.5%"
-			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
-		})
-		It("should allow percentage greater then 100%", func() {
-			nodeOverlay.Spec.PriceAdjustment = "123%"
+		It("should allow negative integer value", func() {
+			nodeOverlay.Spec.PriceAdjustment = "-43"
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
-		It("should not allow for float value", func() {
+		It("should allow float value", func() {
 			nodeOverlay.Spec.PriceAdjustment = "34.43"
-			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+		})
+		It("should allow negative float value", func() {
+			nodeOverlay.Spec.PriceAdjustment = "-34.43"
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 	})
 	Context("Capacity", func() {
@@ -245,30 +229,35 @@ var _ = Describe("CEL/Validation", func() {
 				corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should not allow cpu resources override", func() {
 			nodeOverlay.Spec.Capacity = corev1.ResourceList{
 				corev1.ResourceCPU: resource.MustParse("1"),
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
 		It("should not allow memory resources override", func() {
 			nodeOverlay.Spec.Capacity = corev1.ResourceList{
 				corev1.ResourceMemory: resource.MustParse("34Gi"),
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
 		It("should not allow ephemeral-storage resources override", func() {
 			nodeOverlay.Spec.Capacity = corev1.ResourceList{
 				corev1.ResourceEphemeralStorage: resource.MustParse("34Gi"),
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
 		It("should not allow pod resources override", func() {
 			nodeOverlay.Spec.Capacity = corev1.ResourceList{
 				corev1.ResourcePods: resource.MustParse("324"),
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
 	})
 })

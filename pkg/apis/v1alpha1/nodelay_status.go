@@ -24,7 +24,7 @@ import (
 
 const (
 	// ConditionTypeValidationSucceeded = "ValidationSucceeded" condition indicates that the
-	// runtime-based configuration is valid for this NodeOverlay
+	// runtime-based configuration is valid and conflict for this NodeOverlay
 	ConditionTypeValidationSucceeded = "ValidationSucceeded"
 )
 

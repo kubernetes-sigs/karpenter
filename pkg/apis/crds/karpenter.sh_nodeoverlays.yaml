@@ -48,11 +48,15 @@ spec:
                     x-kubernetes-int-or-string: true
                   description: Capacity adds extended resource to instances types based on the selector provided
                   type: object
+                  x-kubernetes-validations:
+                    - message: invalid resource restricted
+                      rule: self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))
                 priceAdjustment:
                   default: 100%
                   description: |-
                     UPDATE WORDING: PricePercent modifies the price of the simulated node (PriceAdjustment + (Price * PricePercent / 100)).
                     Update Validation
+                  pattern: ^(-?\d*\.?\d+|-?\d+\.?\d*$|\d*\.?\d+%|\d+\.?\d*%)$
                   type: string
                 requirements:
                   description: Requirements are layered with GetLabels and applied to every node.
@@ -122,12 +126,7 @@ spec:
                   maximum: 100
                   minimum: 1
                   type: integer
-              required:
-                - requirements
               type: object
-              x-kubernetes-validations:
-                - message: 'need to define a capacity or priceAdjustment field '
-                  rule: has(self.capacity) || has(self.priceAdjustment)
             status:
               description: NodeOverlayStatus defines the observed state of NodeOverlay
               properties:

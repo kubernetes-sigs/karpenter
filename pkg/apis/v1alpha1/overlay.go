@@ -29,14 +29,16 @@ type NodeOverlaySpec struct {
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt' or 'Lt' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
 	// +kubebuilder:validation:MaxItems:=100
-	// +required
+	// +optional
 	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
 	// UPDATE WORDING: PricePercent modifies the price of the simulated node (PriceAdjustment + (Price * PricePercent / 100)).
 	// Update Validation
+	// +kubebuilder:validation:Pattern=`^(-?\d*\.?\d+|-?\d+\.?\d*$|\d*\.?\d+%|\d+\.?\d*%)$`
 	// +kubebuilder:default:="100%"
 	// +optional
 	PriceAdjustment string `json:"priceAdjustment,omitempty"`
 	// Capacity adds extended resource to instances types based on the selector provided
+	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))"
 	// +optional
 	Capacity v1.ResourceList `json:"capacity,omitempty"`
 	// Weight is the priority given to the nodeoverlay while overriding node attributes. A higher
@@ -57,8 +59,6 @@ type NodeOverlay struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// +kubebuilder:validation:XValidation:message="need to define a capacity or priceAdjustment field ",rule="has(self.capacity) || has(self.priceAdjustment)"
-	// +required
 	Spec   NodeOverlaySpec   `json:"spec"`
 	Status NodeOverlayStatus `json:"status,omitempty"`
 }

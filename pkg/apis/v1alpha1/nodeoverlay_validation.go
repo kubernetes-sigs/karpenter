@@ -31,9 +31,8 @@ import (
 )
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
-func (in *NodeOverlay) RuntimeValidate(ctx context.Context) (errs error) {
-	errs = multierr.Combine(in.Spec.validateRequirements(ctx))
-	return errs
+func (in *NodeOverlay) RuntimeValidate(ctx context.Context) error {
+	return multierr.Combine(in.Spec.validateRequirements(ctx), in.Spec.validateCapacity())
 }
 
 // This function is used by the NodeClaim validation webhook to verify the nodepool requirements.
@@ -43,6 +42,15 @@ func (in *NodeOverlaySpec) validateRequirements(ctx context.Context) (errs error
 	for _, requirement := range in.Requirements {
 		if err := ValidateRequirement(ctx, requirement); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("invalid value: %w in requirements, restricted", err))
+		}
+	}
+	return errs
+}
+
+func (in *NodeOverlaySpec) validateCapacity() (errs error) {
+	for n := range in.Capacity {
+		if v1.WellKnownResources.Has(n) {
+			errs = multierr.Append(errs, fmt.Errorf("invalid capacity: %s in resource, restricted", n))
 		}
 	}
 	return errs
