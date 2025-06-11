@@ -2583,6 +2583,435 @@ var _ = Describe("Provisioning", func() {
 			})
 		})
 	})
+
+	Context("AutoRelaxMinValues", func() {
+		AfterEach(func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{AutoRelaxMinValues: lo.ToPtr(false)}}))
+		})
+
+		Context("with instance type requirements", func() {
+			var defaultNodePool *v1.NodePool
+
+			BeforeEach(func() {
+				// Create a nodepool with instance type minValues requirement
+				defaultNodePool = test.NodePool(v1.NodePool{
+					Spec: v1.NodePoolSpec{
+						Weight: lo.ToPtr(int32(100)),
+						Template: v1.NodeClaimTemplate{
+							Spec: v1.NodeClaimTemplateSpec{
+								Requirements: []v1.NodeSelectorRequirementWithMinValues{
+									{
+										NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+											Key:      corev1.LabelInstanceTypeStable,
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
+										},
+										MinValues: lo.ToPtr(3),
+									},
+								},
+							},
+						},
+					},
+				})
+			})
+
+			Context("with AutoRelaxMinValues disabled", func() {
+				BeforeEach(func() {
+					// Disable AutoRelaxMinValues feature gate
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{AutoRelaxMinValues: lo.ToPtr(false)}}))
+				})
+
+				It("should not schedule when minValues requirement is not met", func() {
+					// Create only two instance types, which doesn't meet the minValues=3 requirement
+					var instanceTypes []*cloudprovider.InstanceType
+					opts1 := fake.InstanceTypeOptions{
+						Name:             "instance-type-1",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
+								Price:        0.52,
+							},
+						},
+					}
+
+					opts2 := fake.InstanceTypeOptions{
+						Name:             "instance-type-2",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
+								Price:        0.52,
+							},
+						},
+					}
+
+					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
+					cloudProvider.InstanceTypes = instanceTypes
+
+					ExpectApplied(ctx, env.Client, defaultNodePool)
+					pod := test.UnschedulablePod(test.PodOptions{
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("0.9"),
+							corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+						},
+					})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					ExpectNotScheduled(ctx, env.Client, pod)
+				})
+			})
+
+			Context("with AutoRelaxMinValues enabled", func() {
+				BeforeEach(func() {
+					// Enable AutoRelaxMinValues feature gate
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{AutoRelaxMinValues: lo.ToPtr(true)}}))
+				})
+
+				It("should schedule even when minValues requirement is not met", func() {
+					// Create only two instance types, which doesn't meet the minValues=3 requirement
+					var instanceTypes []*cloudprovider.InstanceType
+					opts1 := fake.InstanceTypeOptions{
+						Name:             "instance-type-1",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
+								Price:        0.52,
+							},
+						},
+					}
+
+					opts2 := fake.InstanceTypeOptions{
+						Name:             "instance-type-2",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
+								Price:        0.52,
+							},
+						},
+					}
+
+					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
+					cloudProvider.InstanceTypes = instanceTypes
+
+					ExpectApplied(ctx, env.Client, defaultNodePool)
+					pod := test.UnschedulablePod(test.PodOptions{
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("0.9"),
+							corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+						},
+					})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
+					Expect(node.Annotations[v1.NodeClaimMinValuesAutoRelaxedAnnotationKey]).To(Equal("true"))
+				})
+
+				It("should only relax minValues when all nodepools are exhausted", func() {
+					var instanceTypes []*cloudprovider.InstanceType
+					opts1 := fake.InstanceTypeOptions{
+						Name:             "instance-type-1",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
+								Price:        0.52,
+							},
+						},
+					}
+
+					opts2 := fake.InstanceTypeOptions{
+						Name:             "instance-type-2",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
+								Price:        0.52,
+							},
+						},
+					}
+
+					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
+					cloudProvider.InstanceTypes = instanceTypes
+
+					ExpectApplied(ctx, env.Client, defaultNodePool)
+
+					nodePoolWithNoMinValues := test.NodePool(v1.NodePool{
+						Spec: v1.NodePoolSpec{
+							Weight: lo.ToPtr(int32(10)),
+							Template: v1.NodeClaimTemplate{
+								Spec: v1.NodeClaimTemplateSpec{
+									Requirements: []v1.NodeSelectorRequirementWithMinValues{
+										{
+											NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+												Key:      corev1.LabelInstanceTypeStable,
+												Operator: corev1.NodeSelectorOpIn,
+												Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
+											},
+										},
+									},
+								},
+							},
+						},
+					})
+
+					ExpectApplied(ctx, env.Client, nodePoolWithNoMinValues)
+
+					pod := test.UnschedulablePod(test.PodOptions{
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("0.9"),
+							corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+						},
+					})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
+					Expect(node.Annotations).ToNot(HaveKey(v1.NodeClaimMinValuesAutoRelaxedAnnotationKey))
+					// Ensure that the nodepool with no minValues was chosen
+					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(nodePoolWithNoMinValues.Name))
+				})
+
+				It("should choose nodepool with higher weight when relaxing minValues", func() {
+					var instanceTypes []*cloudprovider.InstanceType
+					opts1 := fake.InstanceTypeOptions{
+						Name:             "instance-type-1",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
+								Price:        0.52,
+							},
+						},
+					}
+
+					opts2 := fake.InstanceTypeOptions{
+						Name:             "instance-type-2",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
+								Price:        0.52,
+							},
+						},
+					}
+
+					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
+					cloudProvider.InstanceTypes = instanceTypes
+
+					ExpectApplied(ctx, env.Client, defaultNodePool)
+
+					lowerWeightNodePool := test.NodePool(v1.NodePool{
+						Spec: v1.NodePoolSpec{
+							Weight: lo.ToPtr(int32(10)),
+							Template: v1.NodeClaimTemplate{
+								Spec: v1.NodeClaimTemplateSpec{
+									Requirements: []v1.NodeSelectorRequirementWithMinValues{
+										{
+											NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+												Key:      corev1.LabelInstanceTypeStable,
+												Operator: corev1.NodeSelectorOpIn,
+												Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
+											},
+											MinValues: lo.ToPtr(3),
+										},
+									},
+								},
+							},
+						},
+					})
+
+					ExpectApplied(ctx, env.Client, lowerWeightNodePool)
+
+					pod := test.UnschedulablePod(test.PodOptions{
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("0.9"),
+							corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+						},
+					})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
+					Expect(node.Annotations[v1.NodeClaimMinValuesAutoRelaxedAnnotationKey]).To(Equal("true"))
+					// Ensure that the nodepool with higher weight was chosen
+					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(defaultNodePool.Name))
+				})
+			})
+		})
+
+		Context("with zone requirements", func() {
+			var nodePool *v1.NodePool
+
+			BeforeEach(func() {
+				// Create a nodepool with zone minValues requirement
+				nodePool = test.NodePool(v1.NodePool{
+					Spec: v1.NodePoolSpec{
+						Template: v1.NodeClaimTemplate{
+							Spec: v1.NodeClaimTemplateSpec{
+								Requirements: []v1.NodeSelectorRequirementWithMinValues{
+									{
+										NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+											Key:      corev1.LabelTopologyZone,
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
+										},
+										MinValues: lo.ToPtr(3),
+									},
+								},
+							},
+						},
+					},
+				})
+			})
+
+			Context("with AutoRelaxMinValues disabled", func() {
+				BeforeEach(func() {
+					// Disable AutoRelaxMinValues feature gate
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{AutoRelaxMinValues: lo.ToPtr(false)}}))
+				})
+
+				It("should not schedule when zone minValues requirement is not met", func() {
+					// Create instance types with only two zones, which doesn't meet the minValues=3 requirement
+					var instanceTypes []*cloudprovider.InstanceType
+					opts1 := fake.InstanceTypeOptions{
+						Name:             "instance-type-1",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+					}
+					opts1.Offerings = []*cloudprovider.Offering{
+						{
+							Available:    true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+							Price:        0.52,
+						},
+						{
+							Available:    true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
+							Price:        0.54,
+						},
+					}
+					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+					cloudProvider.InstanceTypes = instanceTypes
+
+					ExpectApplied(ctx, env.Client, nodePool)
+					pod := test.UnschedulablePod(test.PodOptions{
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("0.9"),
+							corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+						},
+					})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					ExpectNotScheduled(ctx, env.Client, pod)
+				})
+			})
+
+			Context("with AutoRelaxMinValues enabled", func() {
+				BeforeEach(func() {
+					// Enable AutoRelaxMinValues feature gate
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{AutoRelaxMinValues: lo.ToPtr(true)}}))
+				})
+
+				It("should schedule even when zone minValues requirement is not met", func() {
+					// Create instance types with only two zones, which doesn't meet the minValues=3 requirement
+					var instanceTypes []*cloudprovider.InstanceType
+					opts1 := fake.InstanceTypeOptions{
+						Name:             "instance-type-1",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+					}
+					opts1.Offerings = []*cloudprovider.Offering{
+						{
+							Available:    true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+							Price:        0.52,
+						},
+						{
+							Available:    true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
+							Price:        0.54,
+						},
+					}
+					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+					cloudProvider.InstanceTypes = instanceTypes
+
+					ExpectApplied(ctx, env.Client, nodePool)
+					pod := test.UnschedulablePod(test.PodOptions{
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("0.9"),
+							corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+						},
+					})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
+					Expect(node.Labels[corev1.LabelTopologyZone]).To(Or(Equal("test-zone-1"), Equal("test-zone-2")))
+					Expect(node.Annotations[v1.NodeClaimMinValuesAutoRelaxedAnnotationKey]).To(Equal("true"))
+				})
+			})
+		})
+	})
 })
 
 func ExpectNodeClaimRequirements(nodeClaim *v1.NodeClaim, requirements ...corev1.NodeSelectorRequirement) {

@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -224,11 +225,12 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 
 // Truncate truncates the InstanceTypes based on the passed-in requirements
 // It returns an error if it isn't possible to truncate the instance types on maxItems without violating minValues
-func (its InstanceTypes) Truncate(requirements scheduling.Requirements, maxItems int) (InstanceTypes, error) {
+func (its InstanceTypes) Truncate(ctx context.Context, requirements scheduling.Requirements, maxItems int) (InstanceTypes, error) {
 	truncatedInstanceTypes := lo.Slice(its.OrderByPrice(requirements), 0, maxItems)
 	// Only check for a validity of NodeClaim if its requirement has minValues in it.
 	if requirements.HasMinValues() {
-		if _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil {
+		// If minValues is NOT met for any of the requirement across InstanceTypes, then still allow it if fallback is enabled.
+		if _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil && !options.FromContext(ctx).FeatureGates.AutoRelaxMinValues {
 			return its, fmt.Errorf("validating minValues, %w", err)
 		}
 	}

@@ -230,12 +230,6 @@ var _ = Describe("Validation", func() {
 			}
 			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 		})
-		It("should error when minValues is greater than the number of unique values specified within In operator", func() {
-			nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
-				{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"insance-type-1"}}, MinValues: lo.ToPtr(2)},
-			}
-			Expect(env.Client.Create(ctx, nodeClaim)).ToNot(Succeed())
-		})
 		It("should error when requirements is greater than 100", func() {
 			var req []NodeSelectorRequirementWithMinValues
 			for i := 0; i < 101; i++ {
