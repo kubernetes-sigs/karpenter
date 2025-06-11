@@ -28,7 +28,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -38,6 +37,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
+	karpentertesting "sigs.k8s.io/karpenter/pkg/utils/testing"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
@@ -49,7 +49,7 @@ var cloudProvider *fake.CloudProvider
 var recorder events.Recorder
 
 func TestReadyTimeout(t *testing.T) {
-	ctx = TestContextWithLogger(t)
+	ctx = karpentertesting.TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "ReadyTimeout")
 }

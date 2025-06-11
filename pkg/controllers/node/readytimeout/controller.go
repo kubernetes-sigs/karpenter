@@ -121,7 +121,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, err
 		}
 		if !clusterHealthy {
-			c.recorder.Publish(NodeReadyTimeoutRecoveryBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more than %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
+			c.recorder.Publish(NodeReadyTimeoutRecoveryBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more than %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String())))
 			return reconcile.Result{}, nil
 		}
 	}
@@ -152,7 +152,7 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
 	})
-	c.recorder.Publish(NodeReadyTimeoutRecovery(node, nodeClaim, nodeAge)...)
+	c.recorder.Publish(NodeReadyTimeoutRecovery(node, nodeClaim, nodeAge))
 	return reconcile.Result{}, nil
 }
 
@@ -206,6 +206,6 @@ func (c *Controller) publishNodePoolHealthEvent(ctx context.Context, node *corev
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: npName}, np); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	c.recorder.Publish(NodeReadyTimeoutRecoveryBlocked(node, nodeClaim, np, fmt.Sprintf("more than %s nodes are unhealthy in the nodepool", allowedUnhealthyPercent.String()))...)
+	c.recorder.Publish(NodeReadyTimeoutRecoveryBlocked(node, nodeClaim, np, fmt.Sprintf("more than %s nodes are unhealthy in the nodepool", allowedUnhealthyPercent.String())))
 	return nil
 } 
