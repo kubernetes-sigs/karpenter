@@ -95,4 +95,16 @@ var (
 			NodePoolLabel,
 		},
 	)
+	NodeReadyTimeoutRecoveredTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: NodeSubsystem,
+			Name:      "ready_timeout_recovered_total",
+			Help:      "Number of nodes recovered due to ready timeout in total by Karpenter. Labeled by owning nodepool.",
+		},
+		[]string{
+			NodePoolLabel,
+		},
+	)
 )
