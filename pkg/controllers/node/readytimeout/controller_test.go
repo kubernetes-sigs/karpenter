@@ -27,9 +27,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
-	karpentertesting "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 // Test the core timeout logic without requiring full k8s infrastructure
@@ -83,17 +81,13 @@ func TestTimeoutLogic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup test context following K8s testing best practices
-			ctx := karpentertesting.TestContextWithLogger(t)
-			
-			// Setup options
+			// Setup options for feature gate testing
 			opts := test.Options(test.OptionsFields{
 				FeatureGates: test.FeatureGates{
 					NodeReadyTimeoutRecovery: lo.ToPtr(tt.featureGate),
 				},
 				NodeReadyTimeout: lo.ToPtr(tt.timeout),
 			})
-			ctx = options.ToContext(ctx, opts)
 
 			// Create test node condition
 			readyStatus := corev1.ConditionFalse
