@@ -101,7 +101,11 @@ spec:
                   divisor: 1m
                   resource: requests.cpu
             - name: FEATURE_GATES
-              value: "SpotToSpotConsolidation={{ .Values.settings.featureGates.spotToSpotConsolidation }},NodeRepair={{ .Values.settings.featureGates.nodeRepair }}"
+              value: "SpotToSpotConsolidation={{ .Values.settings.featureGates.spotToSpotConsolidation }},NodeRepair={{ .Values.settings.featureGates.nodeRepair }},NodeReadyTimeoutRecovery={{ .Values.settings.featureGates.nodeReadyTimeoutRecovery }}"
+          {{- with .Values.settings.nodeReadyTimeout }}
+            - name: NODE_READY_TIMEOUT
+              value: "{{ . }}"
+          {{- end }}
           {{- with .Values.settings.batchMaxDuration }}
             - name: BATCH_MAX_DURATION
               value: "{{ . }}"

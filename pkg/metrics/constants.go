@@ -31,9 +31,10 @@ const (
 	CapacityTypeLabel = "capacity_type"
 
 	// Reasons for CREATE/DELETE shared metrics
-	ProvisionedReason = "provisioned"
-	ExpiredReason     = "expired"
-	UnhealthyReason   = "unhealthy"
+	ProvisionedReason    = "provisioned"
+	ExpiredReason        = "expired"
+	UnhealthyReason      = "unhealthy"
+	ReadyTimeoutReason   = "ready_timeout"
 )
 
 // DurationBuckets returns a []float64 of default threshold values for duration histograms.

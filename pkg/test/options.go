@@ -45,13 +45,15 @@ type OptionsFields struct {
 	PreferencePolicy        *options.PreferencePolicy
 	BatchMaxDuration        *time.Duration
 	BatchIdleDuration       *time.Duration
+	NodeReadyTimeout        *time.Duration
 	FeatureGates            FeatureGates
 }
 
 type FeatureGates struct {
-	NodeRepair              *bool
-	ReservedCapacity        *bool
-	SpotToSpotConsolidation *bool
+	NodeRepair               *bool
+	ReservedCapacity         *bool
+	SpotToSpotConsolidation  *bool
+	NodeReadyTimeoutRecovery *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -77,11 +79,13 @@ func Options(overrides ...OptionsFields) *options.Options {
 		LogErrorOutputPaths:   lo.FromPtrOr(opts.LogErrorOutputPaths, "stderr"),
 		BatchMaxDuration:      lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
 		BatchIdleDuration:     lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
+		NodeReadyTimeout:      lo.FromPtrOr(opts.NodeReadyTimeout, 10*time.Minute),
 		PreferencePolicy:      lo.FromPtrOr(opts.PreferencePolicy, options.PreferencePolicyRespect),
 		FeatureGates: options.FeatureGates{
-			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
-			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, false),
-			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
+			NodeRepair:               lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
+			ReservedCapacity:         lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, false),
+			SpotToSpotConsolidation:  lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
+			NodeReadyTimeoutRecovery: lo.FromPtrOr(opts.FeatureGates.NodeReadyTimeoutRecovery, false),
 		},
 	}
 }

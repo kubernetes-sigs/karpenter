@@ -78,15 +78,18 @@ var _ = Describe("Options", func() {
 	Context("FeatureGates", func() {
 		DescribeTable(
 			"should successfully parse well formed feature gate strings",
-			func(str string, spotToSpotConsolidationVal bool) {
+			func(str string, spotToSpotConsolidationVal bool, nodeReadyTimeoutRecoveryVal bool) {
 				gates, err := options.ParseFeatureGates(str)
 				Expect(err).To(BeNil())
 				Expect(gates.SpotToSpotConsolidation).To(Equal(spotToSpotConsolidationVal))
+				Expect(gates.NodeReadyTimeoutRecovery).To(Equal(nodeReadyTimeoutRecoveryVal))
 			},
-			Entry("basic true", "SpotToSpotConsolidation=true", true),
-			Entry("basic false", "SpotToSpotConsolidation=false", false),
-			Entry("with whitespace", "SpotToSpotConsolidation\t= false", false),
-			Entry("multiple values", "Hello=true,SpotToSpotConsolidation=false,World=true", false),
+			Entry("basic true", "SpotToSpotConsolidation=true", true, false),
+			Entry("basic false", "SpotToSpotConsolidation=false", false, false),
+			Entry("with whitespace", "SpotToSpotConsolidation\t= false", false, false),
+			Entry("multiple values", "Hello=true,SpotToSpotConsolidation=false,World=true", false, false),
+			Entry("node ready timeout recovery true", "NodeReadyTimeoutRecovery=true", false, true),
+			Entry("multiple feature gates", "SpotToSpotConsolidation=true,NodeReadyTimeoutRecovery=true", true, true),
 		)
 	})
 
@@ -111,9 +114,10 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:        lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(time.Second),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(false),
-					NodeRepair:              lo.ToPtr(false),
-					SpotToSpotConsolidation: lo.ToPtr(false),
+					ReservedCapacity:         lo.ToPtr(false),
+					NodeRepair:               lo.ToPtr(false),
+					SpotToSpotConsolidation:  lo.ToPtr(false),
+					NodeReadyTimeoutRecovery: lo.ToPtr(false),
 				},
 			}))
 		})
@@ -138,7 +142,7 @@ var _ = Describe("Options", func() {
 				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
-				"--feature-gates", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true",
+				"--feature-gates", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true,NodeReadyTimeoutRecovery=true",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -158,9 +162,10 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(true),
-					NodeRepair:              lo.ToPtr(true),
-					SpotToSpotConsolidation: lo.ToPtr(true),
+					ReservedCapacity:         lo.ToPtr(true),
+					NodeRepair:               lo.ToPtr(true),
+					SpotToSpotConsolidation:  lo.ToPtr(true),
+					NodeReadyTimeoutRecovery: lo.ToPtr(true),
 				},
 			}))
 		})
@@ -181,7 +186,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true,NodeReadyTimeoutRecovery=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -205,9 +210,10 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(true),
-					NodeRepair:              lo.ToPtr(true),
-					SpotToSpotConsolidation: lo.ToPtr(true),
+					ReservedCapacity:         lo.ToPtr(true),
+					NodeRepair:               lo.ToPtr(true),
+					SpotToSpotConsolidation:  lo.ToPtr(true),
+					NodeReadyTimeoutRecovery: lo.ToPtr(true),
 				},
 			}))
 		})
@@ -223,7 +229,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true,NodeReadyTimeoutRecovery=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -252,9 +258,10 @@ var _ = Describe("Options", func() {
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(true),
-					NodeRepair:              lo.ToPtr(true),
-					SpotToSpotConsolidation: lo.ToPtr(true),
+					ReservedCapacity:         lo.ToPtr(true),
+					NodeRepair:               lo.ToPtr(true),
+					SpotToSpotConsolidation:  lo.ToPtr(true),
+					NodeReadyTimeoutRecovery: lo.ToPtr(true),
 				},
 			}))
 		})
@@ -311,4 +318,5 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.ReservedCapacity).To(Equal(optsB.FeatureGates.ReservedCapacity))
 	Expect(optsA.FeatureGates.NodeRepair).To(Equal(optsB.FeatureGates.NodeRepair))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
+	Expect(optsA.FeatureGates.NodeReadyTimeoutRecovery).To(Equal(optsB.FeatureGates.NodeReadyTimeoutRecovery))
 }
