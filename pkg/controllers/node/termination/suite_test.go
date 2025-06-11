@@ -391,8 +391,8 @@ var _ = Describe("Termination", func() {
 			// Expect podNoEvict to be added to the queue
 			Expect(queue.Has(podNoEvict)).To(BeTrue())
 
-			// Attempt to evict the pod, but fail to do so
-			_ = ExpectObjectReconcileFailed(ctx, env.Client, queue, podNoEvict)
+			// Attempt to evict the pod
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, queue, podNoEvict))
 
 			// Expect podNoEvict to fail eviction due to PDB, and be retried
 			Expect(queue.Has(podNoEvict)).To(BeTrue())
@@ -805,8 +805,8 @@ var _ = Describe("Termination", func() {
 			// The pod should be deleted 60 seconds before the node's TGP expires
 			fakeClock.Step(175 * time.Second)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			ExpectDeleted(ctx, env.Client, pod)
+			pod = ExpectExists(ctx, env.Client, pod)
+			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
 
 		})
 		Context("VolumeAttachments", func() {

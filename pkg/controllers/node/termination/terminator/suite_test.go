@@ -98,7 +98,6 @@ var _ = Describe("Eviction/Queue", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: testLabels,
 			},
-			NodeName: "my-node",
 		})
 		node = test.Node(test.NodeOptions{ObjectMeta: metav1.ObjectMeta{Name: pod.Spec.NodeName, Namespace: pod.Namespace}, ProviderID: "my-provider"})
 
@@ -130,11 +129,12 @@ var _ = Describe("Eviction/Queue", func() {
 				MaxUnavailable: &intstr.IntOrString{IntVal: 1},
 			})
 			ExpectApplied(ctx, env.Client, pod, node)
-			Expect(queue.Evict(ctx, pod)).To(BeNil())
+			Expect(queue.Evict(ctx, pod)).To(Succeed())
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
 			ExpectApplied(ctx, env.Client, pdb, pod, node)
+			ExpectManualBinding(ctx, env.Client, pod, node)
 			Expect(queue.Evict(ctx, pod)).ToNot(Succeed())
 			Expect(recorder.Calls(events.FailedDraining)).To(Equal(1))
 		})
@@ -150,10 +150,15 @@ var _ = Describe("Eviction/Queue", func() {
 		It("should ensure that calling Evict() is valid while making Add() calls", func() {
 			// Ensure that we add enough pods to the queue while we are pulling items off of the queue (enough to trigger a DATA RACE)
 			pods := test.Pods(1000)
+			cancelContext, cancelFunc := context.WithCancel(ctx)
+			defer cancelFunc()
 
 			for _, pod := range pods {
 				go func() {
 					for {
+						if cancelContext.Err() != nil {
+							return
+						}
 						queue.Add(pod)
 					}
 				}()
@@ -162,6 +167,7 @@ var _ = Describe("Eviction/Queue", func() {
 			for _, pod = range pods {
 				ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			}
+
 		})
 		It("should increment PodsDrainedTotal metric when a pod is evicted", func() {
 			ExpectApplied(ctx, env.Client, pod, node)
@@ -188,6 +194,7 @@ var _ = Describe("Eviction/Queue", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
 			Expect(queue.Evict(ctx, pod)).To(Succeed())
 
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: "SpotInterruption"})
@@ -215,8 +222,6 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should delete a pod with less than terminationGracePeriodSeconds remaining before nodeTerminationTime", func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
-			// overwrite the node name or the delete does not succeed
-			pod.Spec.NodeName = ""
 			ExpectApplied(ctx, env.Client, pod)
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 1)

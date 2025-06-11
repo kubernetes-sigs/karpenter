@@ -153,11 +153,17 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 	ctx = injection.WithControllerName(ctx, q.Name())
 
 	if !q.Has(pod) {
-		//This is a different pod than in the queue, we should exit without evicting
+		//This is a different pod than the one the queue, we should exit without evicting
+		//This race happens when a pod is replaced with one that has the same namespace and name
+		//but a different UID after the original pod is added to the queue but before the
+		//controller can reconcile on it
 		return reconcile.Result{}, nil
 	}
 	// Evict the pod
 	if err := q.Evict(ctx, pod); err != nil {
+		if apierrors.IsTooManyRequests(err) {
+			return reconcile.Result{RequeueAfter: evictionQueueBaseDelay}, nil
+		}
 		return reconcile.Result{}, err
 	}
 
@@ -169,7 +175,6 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 
 // Evict returns nil if successful eviction call, and an error if there was an eviction-related error
 func (q *Queue) Evict(ctx context.Context, pod *corev1.Pod) error {
-	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Pod", klog.KRef(pod.Namespace, pod.Name)))
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		pod,
 		&policyv1.Eviction{
