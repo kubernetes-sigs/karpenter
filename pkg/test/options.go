@@ -52,6 +52,7 @@ type FeatureGates struct {
 	NodeRepair              *bool
 	ReservedCapacity        *bool
 	SpotToSpotConsolidation *bool
+	AutoRelaxMinValues      *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -82,6 +83,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
 			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, false),
 			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
+			AutoRelaxMinValues:      lo.FromPtrOr(opts.FeatureGates.AutoRelaxMinValues, false),
 		},
 	}
 }
