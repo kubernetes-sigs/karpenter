@@ -24,6 +24,7 @@ import (
 	"time"
 
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -2732,6 +2733,10 @@ var _ = Describe("Provisioning", func() {
 					node := ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
 					Expect(node.Annotations[v1.NodeClaimMinValuesAutoRelaxedAnnotationKey]).To(Equal("true"))
+
+					ExpectMetricCounterValue(metrics.NodeClaimsCreatedWithMinValuesAutoRelaxedTotal, 1, map[string]string{
+						metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey],
+					})
 				})
 
 				It("should only relax minValues when all nodepools are exhausted", func() {
@@ -2887,6 +2892,10 @@ var _ = Describe("Provisioning", func() {
 					Expect(node.Annotations[v1.NodeClaimMinValuesAutoRelaxedAnnotationKey]).To(Equal("true"))
 					// Ensure that the nodepool with higher weight was chosen
 					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(defaultNodePool.Name))
+
+					ExpectMetricCounterValue(metrics.NodeClaimsCreatedWithMinValuesAutoRelaxedTotal, 1, map[string]string{
+						metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey],
+					})
 				})
 			})
 		})
@@ -3008,6 +3017,10 @@ var _ = Describe("Provisioning", func() {
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
 					Expect(node.Labels[corev1.LabelTopologyZone]).To(Or(Equal("test-zone-1"), Equal("test-zone-2")))
 					Expect(node.Annotations[v1.NodeClaimMinValuesAutoRelaxedAnnotationKey]).To(Equal("true"))
+
+					ExpectMetricCounterValue(metrics.NodeClaimsCreatedWithMinValuesAutoRelaxedTotal, 1, map[string]string{
+						metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey],
+					})
 				})
 			})
 		})

@@ -404,11 +404,18 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 
 	log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
 		Info("created nodeclaim")
+
 	metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
 		metrics.ReasonLabel:       options.Reason,
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	})
+
+	if val, ok := nodeClaim.Annotations[v1.NodeClaimMinValuesAutoRelaxedAnnotationKey]; ok && val == "true" {
+		metrics.NodeClaimsCreatedWithMinValuesAutoRelaxedTotal.Inc(map[string]string{
+			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
+		})
+	}
 	// Update the nodeclaim manually in state to avoid eventual consistency delay races with our watcher.
 	// This is essential to avoiding races where disruption can create a replacement node, then immediately
 	// requeue. This can race with controller-runtime's internal cache as it watches events on the cluster
