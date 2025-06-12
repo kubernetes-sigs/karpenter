@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -228,13 +227,12 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		multiErr = multierr.Combine(multiErr, state.ClearNodeClaimsCondition(ctx, q.kubeClient, v1.ConditionTypeDisruptionReason, cmd.candidates...))
 		// Log the error
-		log.FromContext(ctx).WithValues("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
-			return s.Name()
-		}), ",")).Error(multiErr, "failed terminating nodes while executing a disruption command")
+		log.FromContext(ctx).Error(multiErr, "failed terminating nodes while executing a disruption command")
+	} else {
+		log.FromContext(ctx).V(1).Info("command succeeded")
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
-	log.FromContext(ctx).V(1).Info("command succeeded")
 	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
