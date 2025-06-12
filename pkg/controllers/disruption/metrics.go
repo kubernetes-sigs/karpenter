@@ -98,4 +98,14 @@ var (
 		},
 		[]string{metrics.NodePoolLabel, metrics.ReasonLabel},
 	)
+	DisruptionQueueFailuresTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "queue_failures_total",
+			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
+		},
+		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+	)
 )
