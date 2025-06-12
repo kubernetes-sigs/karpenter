@@ -28,7 +28,7 @@ import (
 func NodeForPod(ctx context.Context, c client.Client, p *corev1.Pod) (*corev1.Node, error) {
 	node := &corev1.Node{}
 	if err := c.Get(ctx, client.ObjectKey{Name: p.Spec.NodeName}, node); err != nil {
-		return nil, fmt.Errorf("listing nodes, %w", err)
+		return nil, fmt.Errorf("getting node, %w", err)
 	}
 	return node, nil
 }

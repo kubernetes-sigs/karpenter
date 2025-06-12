@@ -160,21 +160,6 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		return reconcile.Result{}, nil
 	}
 	// Evict the pod
-	if err := q.Evict(ctx, pod); err != nil {
-		if apierrors.IsTooManyRequests(err) {
-			return reconcile.Result{RequeueAfter: evictionQueueBaseDelay}, nil
-		}
-		return reconcile.Result{}, err
-	}
-
-	q.Lock()
-	defer q.Unlock()
-	q.set.Delete(NewQueueKey(pod))
-	return reconcile.Result{}, nil
-}
-
-// Evict returns nil if successful eviction call, and an error if there was an eviction-related error
-func (q *Queue) Evict(ctx context.Context, pod *corev1.Pod) error {
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		pod,
 		&policyv1.Eviction{
@@ -191,29 +176,33 @@ func (q *Queue) Evict(ctx context.Context, pod *corev1.Pod) error {
 		}
 		// status codes for the eviction API are defined here:
 		// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#how-api-initiated-eviction-works
-		if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
-			// 404 - The pod no longer exists
-			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L160
-			// 409 - The pod exists, but it is not the same pod that we initiated the eviction on
-			// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L318
-			return nil
-		}
-		if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
-			node, err2 := podutils.NodeForPod(ctx, q.kubeClient, pod)
-			if err2 != nil {
-				log.FromContext(ctx).V(1).Error(err2, "pod has no node")
-				return err
+		// 404 - The pod no longer exists
+		// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L160
+		// 409 - The pod exists, but it is not the same pod that we initiated the eviction on
+		// https://github.com/kubernetes/kubernetes/blob/ad19beaa83363de89a7772f4d5af393b85ce5e61/pkg/registry/core/pod/storage/eviction.go#L318
+		if !(apierrors.IsNotFound(err) || apierrors.IsConflict(err)) {
+			// The pod exists and is the same pod, we need to continue
+			if apierrors.IsTooManyRequests(err) { // 429 - PDB violation
+				node, err2 := podutils.NodeForPod(ctx, q.kubeClient, pod)
+				if err2 != nil {
+					return reconcile.Result{}, err2
+				}
+				q.recorder.Publish(terminatorevents.NodeFailedToDrain(node, serrors.Wrap(fmt.Errorf("evicting pod violates a PDB"), "Pod", klog.KRef(pod.Namespace, pod.Name))))
+				return reconcile.Result{RequeueAfter: evictionQueueBaseDelay}, nil
 			}
-			q.recorder.Publish(terminatorevents.NodeFailedToDrain(node, serrors.Wrap(fmt.Errorf("evicting pod violates a PDB"), "Pod", klog.KRef(pod.Namespace, pod.Name))))
-			return err
+			// Its not a PDB, we should requeue
+			return reconcile.Result{}, err
 		}
-		return err
 	}
 	NodesEvictionRequestsTotal.Inc(map[string]string{CodeLabel: "200"})
 	reason := evictionReason(ctx, pod, q.kubeClient)
 	q.recorder.Publish(terminatorevents.EvictPod(pod, reason))
 	PodsDrainedTotal.Inc(map[string]string{ReasonLabel: reason})
-	return nil
+
+	q.Lock()
+	defer q.Unlock()
+	q.set.Delete(NewQueueKey(pod))
+	return reconcile.Result{}, nil
 }
 
 func evictionReason(ctx context.Context, pod *corev1.Pod, kubeClient client.Client) string {
