@@ -188,8 +188,6 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 	commandID := uuid.NewUUID()
 	log.FromContext(ctx).WithValues(append([]any{"command-id", string(commandID), "reason", strings.ToLower(string(m.Reason()))}, cmd.LogValues()...)...).Info("disrupting node(s)")
 
-	c.cluster.MarkForDeletion(lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })...)
-
 	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
 	markedCandidates, markDisruptedErr := c.MarkDisrupted(ctx, m, cmd.candidates...)
 	// If we get a failure marking some nodes as disrupted, if we are launching replacements, we shouldn't continue
@@ -204,6 +202,14 @@ func (c *Controller) executeCommand(ctx context.Context, m Method, cmd Command, 
 		// we don't want to disrupt workloads with no way to provision new nodes for them.
 		return serrors.Wrap(fmt.Errorf("launching replacement nodeclaim, %w", err), "command-id", commandID)
 	}
+
+	// IMPORTANT
+	// We must MarkForDeletion AFTER we launch the replacements and not before
+	// The reason for this is to avoid producing double-launches
+	// If we MarkForDeletion before we create replacements, it's possible for the provisioner
+	// to recognize that it needs to launch capacity for terminating pods, causing us to launch
+	// capacity for these pods twice instead of just once
+	c.cluster.MarkForDeletion(lo.Map(cmd.candidates, func(c *Candidate, _ int) string { return c.ProviderID() })...)
 
 	// Nominate each node for scheduling and emit pod nomination events
 	// We emit all nominations before we exit the disruption loop as
@@ -242,6 +248,7 @@ func (c *Controller) createReplacementNodeClaims(ctx context.Context, m Method, 
 	return nodeClaimNames, nil
 }
 
+// MarkDisrupted taints the node and adds the Disrupted condition to the NodeClaim for a candidate that is about to be disrupted
 func (c *Controller) MarkDisrupted(ctx context.Context, m Method, candidates ...*Candidate) ([]*Candidate, error) {
 	errs := make([]error, len(candidates))
 	workqueue.ParallelizeUntil(ctx, len(candidates), len(candidates), func(i int) {
