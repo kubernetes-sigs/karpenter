@@ -10,7 +10,7 @@ This is problematic because some users have nodes that take longer that time to 
 
 
 ## Configuration
-### Option 1 (Preferred):
+### Option 1:
 #### Introduce a configuration registeration TTL to NodeClass and propagate it to the NodeClaim
 
 We will keep a default for all nodes at 15 minute TTL however in the cases that the NodeClass would be used with GPUs or known to take a longer time to register, we will expose a new configuration registerationTTL. We will allow users to configure their own TTL without presets
@@ -24,7 +24,7 @@ spec:
 
 1. When evaluating liveness, check if NodeClaim contains a registerationTTL if so utilize that TTL instead of the default
 
-### Option 2:
+### Option 2 (Preferred):
 #### Introduce a configuration registeration TTL to Node Pool then propagate to node claim
 
 We would introduce the new argument in Node Pool and perform similar propagation of the argument to Node Claim
