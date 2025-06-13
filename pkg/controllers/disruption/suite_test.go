@@ -516,7 +516,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		go ExpectSingletonReconciled(ctx, dc)
 		Eventually(func(g Gomega) {
 			g.Expect(hangCreateClient.HasWaiter()).To(BeTrue())
-		}).Should(Succeed())
+		}, time.Second*5).Should(Succeed())
 
 		// If our code works correctly, the provisioner should not try to create a new NodeClaim since we shouldn't have marked
 		// our nodes for disruption until the new NodeClaims have been successfully launched
@@ -663,11 +663,9 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectDeleted(ctx, env.Client, createdNodeClaim[0])
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, createdNodeClaim[0])
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
+		cluster.DeleteNodeClaim(createdNodeClaim[0].Name)
 		wg.Wait()
 
-		// Increment the clock so that the nodeclaim deletion isn't caught by the
-		// eventual consistency delay.
-		fakeClock.Step(6 * time.Second)
 		ExpectSingletonReconciled(ctx, queue)
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
