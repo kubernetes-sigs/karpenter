@@ -32,8 +32,10 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -68,7 +70,12 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.health").
-		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
+		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				return !equality.Semantic.DeepEqual(e.ObjectOld.(*corev1.Node).Status.Conditions, e.ObjectNew.(*corev1.Node).Status.Conditions)
+			},
+			DeleteFunc: func(e event.DeleteEvent) bool { return true },
+		})).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
@@ -104,7 +111,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 		if !nodePoolHealthy {
-			return reconcile.Result{}, c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName)
+			return reconcile.Result{RequeueAfter: 5 * time.Minute}, c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName)
 		}
 	} else {
 		clusterHealthy, err := c.isClusterHealthy(ctx)
@@ -113,7 +120,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 		}
 		if !clusterHealthy {
 			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
-			return reconcile.Result{}, nil
+			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 		}
 	}
 	// For unhealthy past the tolerationDisruption window we can forcefully terminate the node
