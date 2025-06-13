@@ -81,7 +81,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, err
 	}
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
-	if queue.HasAny(node.ProviderID()) {
+	if queue.HasAny(node) {
 		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above

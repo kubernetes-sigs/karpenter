@@ -22,9 +22,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"k8s.io/client-go/util/workqueue"
-
-	"sigs.k8s.io/karpenter/pkg/events"
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
@@ -48,8 +45,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
-
-	clockiface "k8s.io/utils/clock"
 )
 
 var ctx context.Context
@@ -86,7 +81,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
-	queue = NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	queue = orchestration.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
 })
 
 var _ = AfterSuite(func() {
@@ -94,7 +89,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = BeforeEach(func() {
-	*queue = lo.FromPtr(NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov))
+	*queue = lo.FromPtr(orchestration.NewQueue(env.Client, recorder, cluster, fakeClock, prov))
 	recorder.Reset() // Reset the events that we captured during the run
 	cluster.Reset()
 	cloudProvider.Reset()
@@ -176,7 +171,7 @@ var _ = Describe("Queue", func() {
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
 
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 
 			// Update state
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
@@ -190,7 +185,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			Expect(queue.Add(orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type"))).To(BeNil())
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 		})
 		It("should untaint nodes when a command times out", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
@@ -202,7 +197,7 @@ var _ = Describe("Queue", func() {
 			// Step the clock to trigger the timeout.
 			fakeClock.Step(11 * time.Minute)
 
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
 			Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 		})
@@ -213,7 +208,7 @@ var _ = Describe("Queue", func() {
 
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 
 			// Get the command
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
@@ -224,7 +219,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
 				[]*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
 
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 
 			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, cmd.Reason())
@@ -251,21 +246,21 @@ var _ = Describe("Queue", func() {
 			cmd := orchestration.NewCommand(replacements, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
 
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
 
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode2}, []*v1.NodeClaim{replacementNodeClaim2})
 
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd.Replacements[1].Initialized).To(BeTrue())
 
@@ -280,7 +275,7 @@ var _ = Describe("Queue", func() {
 			cmd := orchestration.NewCommand([]string{}, []*state.StateNode{stateNode}, "", "test-method", "fake-type")
 			Expect(queue.Add(cmd)).To(BeNil())
 
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 
 			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, cmd.Reason())
 			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
@@ -310,7 +305,7 @@ var _ = Describe("Queue", func() {
 			Expect(queue.Add(cmd2)).To(BeNil())
 
 			// Reconcile the first command and expect nothing to be initialized
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeFalse())
@@ -319,14 +314,14 @@ var _ = Describe("Queue", func() {
 			// Make the first command's node initialized
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
 			// Reconcile the second command and expect nothing to be initialized
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, cmd2.KeyNodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim2).Message)).To(BeTrue())
 
 			// Reconcile the first command and expect the replacement to be initialized
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, cmd.KeyNodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeFalse())
 
@@ -337,7 +332,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode2}, []*v1.NodeClaim{replacementnodeClaim2})
 
 			// Reconcile the second command and expect the replacement to be initialized
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, cmd2.KeyNodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeTrue())
 
@@ -348,13 +343,3 @@ var _ = Describe("Queue", func() {
 
 	})
 })
-
-func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clockiface.Clock,
-	provisioner *provisioning.Provisioner) *orchestration.Queue {
-
-	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
-	// nolint:staticcheck
-	// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
-	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface[*orchestration.Command](workqueue.TypedQueueConfig[*orchestration.Command]{Name: "disruption.workqueue"})
-	return q
-}
