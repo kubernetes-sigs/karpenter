@@ -197,7 +197,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			}
 
 			// Call ComputeCommand which should process all nodepools
-			_, _, _ = consolidation.ComputeCommand(ctx, budgetMapping, candidates...)
+			_, _ = consolidation.ComputeCommand(ctx, budgetMapping, candidates...)
 
 			// Verify nodePool2 is no longer marked as timed out
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeFalse())
@@ -216,7 +216,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				nodePool3.Name: 30,
 			}
 
-			_, _, _ = consolidation.ComputeCommand(ctx, budgetMapping, candidates...)
+			_, _ = consolidation.ComputeCommand(ctx, budgetMapping, candidates...)
 
 			// Verify all nodepools are marked as timed out
 			// since we timed out before processing any candidates

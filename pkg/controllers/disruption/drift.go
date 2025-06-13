@@ -21,6 +21,7 @@ import (
 	"errors"
 	"sort"
 
+	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -56,7 +57,7 @@ func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
@@ -83,7 +84,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return Command{}, scheduling.Results{}, err
+			return Command{}, err
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
@@ -92,11 +93,12 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		}
 
 		return Command{
-			candidates:   []*Candidate{candidate},
-			replacements: results.NewNodeClaims,
-		}, results, nil
+			Candidates:   []*Candidate{candidate},
+			Replacements: lo.Map(results.NewNodeClaims, func(n *scheduling.NodeClaim, _ int) *Replacement { return &Replacement{NodeClaim: n} }),
+			Results:      results,
+		}, nil
 	}
-	return Command{}, scheduling.Results{}, nil
+	return Command{}, nil
 }
 
 func (d *Drift) Reason() v1.DisruptionReason {
