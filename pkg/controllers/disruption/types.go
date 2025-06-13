@@ -176,7 +176,7 @@ func (c Command) LogValues() []any {
 		"disrupted-node-count", len(candidateNodes),
 		"replacement-node-count", len(replacementNodes),
 		"pod-count", podCount,
-		"disrupted-nodes", candidateNodes,
-		"replacement-nodes", replacementNodes,
+		"disrupted-nodes", pretty.Slice(lo.Map(candidateNodes, func(i interface{}, _ int) string { return pretty.Concise(i) }), 20),
+		"replacement-nodes", pretty.Slice(lo.Map(replacementNodes, func(i interface{}, _ int) string { return pretty.Concise(i) }), 20),
 	}
 }
