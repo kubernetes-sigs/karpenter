@@ -257,7 +257,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
 			// In this case, the error is unrecoverable, so don't requeue.
-			if apierrors.IsNotFound(err) && q.clock.Since(cmd.timeAdded) > time.Second*5 {
+			if apierrors.IsNotFound(err) && !q.cluster.NodeClaimExists(cmd.Replacements[i].name) {
 				return NewUnrecoverableError(fmt.Errorf("replacement was deleted, %w", err))
 			}
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
