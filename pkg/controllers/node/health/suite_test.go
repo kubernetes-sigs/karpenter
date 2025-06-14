@@ -204,28 +204,28 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime))
 		})
-		It("should return the requeue interval for the condition closest to its terminationDuration", func() {
-			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
-				{
-					ConditionType:      "BadNode",
-					ConditionStatus:    corev1.ConditionFalse,
-					TolerationDuration: 60 * time.Minute,
-				},
-				{
-					ConditionType:      "ValidUnhealthyCondition",
-					ConditionStatus:    corev1.ConditionFalse,
-					TolerationDuration: 30 * time.Minute,
+		It("should return the requeue interval for the condition closest to its terminationDuration using NodePool configuration", func() {
+			// Configure NodePool with specific repair policies
+			nodePool.Spec.Repair = &v1.RepairSpec{
+				DefaultTolerationDuration: lo.ToPtr(metav1.Duration{Duration: 45 * time.Minute}),
+				Policies: []v1.RepairPolicy{
+					{
+						ConditionType:      "ValidUnhealthyCondition",
+						Status:             corev1.ConditionFalse,
+						TolerationDuration: lo.ToPtr(metav1.Duration{Duration: 30 * time.Minute}),
+					},
 				},
 			}
+			
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "ValidUnhealthyCondition",
 				Status: corev1.ConditionFalse,
-				// We expect the last transition for HealthyNode condition to wait 30 minutes
+				// We expect the last transition for ValidUnhealthyCondition to wait 30 minutes (from NodePool policy)
 				LastTransitionTime: metav1.Time{Time: time.Now()},
 			}, corev1.NodeCondition{
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
-				// We expect the last transition for HealthyNode condition to wait 30 minutes
+				// We expect the last transition for BadNode to wait 45 minutes (from NodePool default)
 				LastTransitionTime: metav1.Time{Time: time.Now()},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)

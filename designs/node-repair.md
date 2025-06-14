@@ -18,11 +18,10 @@ The alpha implementation will not consider these features:
 
   - Disruption Budgets
   - Customer-Defined Conditions
-  - Customer-Defined Remediation Time
 
 The team does not have enough data to determine the right level of configuration that users will utilize. The opinionated mechanism would be responsible for defining unhealthy notes. The advantage of creating the mechanism would be to reduce the configuration burden for customers. **The feature will be gated under an alpha NodeRepair=true feature flag. This will  allow for additional feedback from customers. Additional feedback can support features that were originally considered out of scope for the Alpha stage.**
 
-## Recommendation: CloudProvider-Defined RepairPolicies
+## Recommendation: CloudProvider-Defined RepairPolicies with NodePool-Configurable TolerationDuration
 
 ```
 type RepairStatement struct {
@@ -30,48 +29,101 @@ type RepairStatement struct {
     Type metav1.ConditionType 
     // Status condition of when a node is unhealthy
     Status metav1.ConditionStatus
-    // TolerationDuration is the duration the controller will wait
-    // before attempting to terminate nodes that are marked for repair.
-    TolerationDuration time.Duration
+}
+
+type RepairPolicy struct {
+    // ConditionType specifies the node condition to monitor
+    ConditionType metav1.ConditionType
+    // Status specifies the condition status that indicates unhealthy state
+    Status metav1.ConditionStatus
+    // TolerationDuration is the duration to wait before attempting to terminate 
+    // nodes that match this repair policy. If not specified, defaults to the 
+    // cloud provider's recommended duration for this condition type.
+    TolerationDuration *metav1.Duration
+}
+
+type NodePoolSpec struct {
+    // ... existing fields ...
+    
+    // Repair defines the repair policies for nodes in this NodePool
+    Repair *RepairSpec
+}
+
+type RepairSpec struct {
+    // Policies defines the repair policies for different node conditions.
+    // These policies override the default tolerationDuration from the CloudProvider.
+    Policies []RepairPolicy
+    
+    // DefaultTolerationDuration is the default duration to wait before repairing
+    // nodes for any condition not explicitly configured in Policies.
+    // If not specified, uses the CloudProvider's default durations.
+    DefaultTolerationDuration *metav1.Duration
 }
 
 type CloudProvider interface {
   ...
-    // RepairPolicy is for CloudProviders to define a set Unhealthy condition for Karpenter 
-    // to monitor on the node. Customer will need 
-    RepairPolicy() []v1.RepairPolicy
+    // RepairPolicy is for CloudProviders to define a set of unhealthy conditions for Karpenter 
+    // to monitor on the node. The TolerationDuration can be overridden by NodePool configuration.
+    RepairPolicy() []RepairStatement
   ...
 }
 ```
 
-The RepairPolicy will contain a set of statements that the Karpenter controller will use to watch node conditions. On any given node, multiple node conditions may exist simultaneously. In those cases, we will chose the shortest `TolerationDuration` for a given condition. The cloud provider can define compatibility with any node diagnostic agent, and track a list of node unhealthy condition types. The `TolerationDuration` will wait until a unhealthy state has passed the duration and is considered terminal:
+The RepairPolicy will contain a set of statements that the Karpenter controller will use to watch node conditions. The CloudProvider defines which conditions to monitor, while the NodePool configuration specifies the TolerationDuration for each condition. On any given node, multiple node conditions may exist simultaneously. In those cases, we will choose the shortest `TolerationDuration` for a given condition. 
 
+The resolution order for TolerationDuration is:
+1. NodePool-specific RepairPolicy for the condition type
+2. NodePool's DefaultTolerationDuration 
+3. CloudProvider's recommended default duration
+
+The controller workflow:
 1. A diagnostic agent will add a status condition on a node 
-2. Karpenter will reconcile nodes and match unhealthy conditions with repair policy statements
-3. Node Health controller will forcefully terminate the the NodeClaim once the node has been in an unhealthy state for the duration specified by the TolerationDuration
+2. Karpenter will reconcile nodes and match unhealthy conditions with repair policy statements from the CloudProvider
+3. Karpenter will determine the TolerationDuration using the NodePool's repair configuration
+4. Node Health controller will forcefully terminate the NodeClaim once the node has been in an unhealthy state for the determined duration
 
 ### Example
 
-The example will look at the supporting Node Problem Detector for the AWS Karpenter Provider:
+#### CloudProvider Implementation
+The CloudProvider defines which conditions to monitor but no longer specifies durations:
 ```
 func (c *CloudProvider) RepairPolicy() []cloudprovider.RepairStatement {
-    return cloudprovider.RepairStatement{
+    return []cloudprovider.RepairStatement{
         {
-            Type: "Ready"
+            Type: "Ready",
             Status: corev1.ConditionFalse,
-            TrolorationDuration: "30m"
         },
         {
-            Type: "NetworkUnavailable"
+            Type: "NetworkUnavailable",
             Status: corev1.ConditionTrue,
-            TrolorationDuration: "10m"
         },
         ...
     }
 }
 ```
 
-In the example above, the AWS Karpenter Provider supports monitoring and terminating two node status conditions of the Kubelet Ready condition and the NPD  NetworkUnavailable condition. Below are the two cases of when we will act on nodes:
+#### NodePool Configuration
+Users can configure repair policies in their NodePool:
+```
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: default
+spec:
+  # ... other fields ...
+  repair:
+    defaultTolerationDuration: 30m
+    policies:
+    - conditionType: Ready
+      status: "False" 
+      tolerationDuration: 45m
+    - conditionType: NetworkUnavailable
+      status: "True"
+      tolerationDuration: 10m
+```
+
+#### Node Repair Scenarios
+In the example above, the NodePool configures different toleration durations for different conditions. Below are the cases of when we will act on nodes:
 
 ```
 apiVersion: v1
@@ -79,38 +131,32 @@ kind: Node
 metadata:
   ...
 status:
-  condition:
+  conditions:
     - lastHeartbeatTime: "2024-11-01T16:29:49Z"
       lastTransitionTime: "2024-11-01T15:02:48Z"
       message: no connection
       reason: Network is not available
-      status: "False"
+      status: "True"
       type: NetworkUnavailable
     ...
     
-- The Node here will be eligible for node repair after at `2024-11-01T15:12:48Z`    
+- The Node here will be eligible for node repair at `2024-11-01T15:12:48Z` (10m after transition)
 ---
 apiVersion: v1
 kind: Node
 metadata:
   ...
 status:
-  condition:
+  conditions:
     - lastHeartbeatTime: "2024-11-01T16:29:49Z"
       lastTransitionTime: "2024-11-01T15:02:48Z"
-      message: kubelet is posting ready status
-      reason: KubeletReady
-      status: "False"
-      type: NetworkUnavailable
-    - lastHeartbeatTime: "2024-11-01T16:29:49Z"
-      lastTransitionTime: "2024-11-01T15:02:48Z"
-      message: kubelet is posting ready status
+      message: kubelet is posting ready status  
       reason: KubeletReady
       status: "False"
       type: Ready
     ...
     
-- The Node here will be eligible for node repair after at `2024-11-01T15:32:48Z`    
+- The Node here will be eligible for node repair at `2024-11-01T15:47:48Z` (45m after transition)
 ```
 
 
@@ -125,5 +171,6 @@ There are additional features we will consider including after the initial itera
 * Disruption controls (budgets, terminationGracePeriod) for unhealthy nodes 
 * Node Reboot (instead of replacement)
 * Configuration surface for graceful vs forceful termination 
-* Additional consideration for the availability zone resiliency 
+* Additional consideration for the availability zone resiliency
+* Customer-defined node conditions for repair (beyond CloudProvider-defined conditions) 
 

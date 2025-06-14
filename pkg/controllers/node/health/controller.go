@@ -82,7 +82,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim)))
 
-	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(node)
+	unhealthyNodeCondition, policyTerminationDuration := c.findUnhealthyConditions(ctx, node, nodeClaim)
 	if unhealthyNodeCondition == nil {
 		return reconcile.Result{}, nil
 	}
@@ -149,22 +149,65 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 
 // Find a node with a condition that matches one of the unhealthy conditions defined by the cloud provider
 // If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration
-func (c *Controller) findUnhealthyConditions(node *corev1.Node) (nc *corev1.NodeCondition, cpTerminationDuration time.Duration) {
+func (c *Controller) findUnhealthyConditions(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim) (nc *corev1.NodeCondition, terminationDuration time.Duration) {
 	requeueTime := time.Time{}
-	for _, policy := range c.cloudProvider.RepairPolicies() {
+	
+	// Get NodePool for repair configuration
+	var nodePool *v1.NodePool
+	if nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]; found {
+		nodePool = &v1.NodePool{}
+		if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
+			log.FromContext(ctx).Error(err, "failed to get nodepool for repair configuration")
+		}
+	}
+	
+	for _, statement := range c.cloudProvider.RepairPolicies() {
 		// check the status and the type on the condition
-		nodeCondition := nodeutils.GetCondition(node, policy.ConditionType)
-		if nodeCondition.Status == policy.ConditionStatus {
-			terminationTime := nodeCondition.LastTransitionTime.Add(policy.TolerationDuration)
+		nodeCondition := nodeutils.GetCondition(node, statement.ConditionType)
+		if nodeCondition.Status == statement.ConditionStatus {
+			// Determine TolerationDuration using NodePool configuration
+			duration := c.getTolerationDuration(statement, nodePool)
+			terminationTime := nodeCondition.LastTransitionTime.Add(duration)
 			// Determine requeue time
 			if requeueTime.IsZero() || requeueTime.After(terminationTime) {
 				nc = lo.ToPtr(nodeCondition)
-				cpTerminationDuration = policy.TolerationDuration
+				terminationDuration = duration
 				requeueTime = terminationTime
 			}
 		}
 	}
-	return nc, cpTerminationDuration
+	return nc, terminationDuration
+}
+
+// getTolerationDuration resolves the toleration duration in order of priority:
+// 1. NodePool-specific RepairPolicy for the condition type
+// 2. NodePool's DefaultTolerationDuration 
+// 3. CloudProvider's default duration (30 minutes as fallback)
+func (c *Controller) getTolerationDuration(statement cloudprovider.RepairStatement, nodePool *v1.NodePool) time.Duration {
+	// Default fallback duration
+	defaultDuration := 30 * time.Minute
+	
+	// If no NodePool or no repair config, use default
+	if nodePool == nil || nodePool.Spec.Repair == nil {
+		return defaultDuration
+	}
+	
+	// Check for condition-specific policy in NodePool
+	for _, policy := range nodePool.Spec.Repair.Policies {
+		if policy.ConditionType == statement.ConditionType && policy.Status == statement.ConditionStatus {
+			if policy.TolerationDuration != nil {
+				return policy.TolerationDuration.Duration
+			}
+		}
+	}
+	
+	// Check for default duration in NodePool
+	if nodePool.Spec.Repair.DefaultTolerationDuration != nil {
+		return nodePool.Spec.Repair.DefaultTolerationDuration.Duration
+	}
+	
+	// Fallback to default
+	return defaultDuration
 }
 
 func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeClaim *v1.NodeClaim) error {
@@ -206,9 +249,9 @@ func (c *Controller) areNodesHealthy(ctx context.Context, opts ...client.ListOpt
 		return false, err
 	}
 	unhealthyNodeCount := lo.CountBy(nodeList.Items, func(node corev1.Node) bool {
-		_, found := lo.Find(c.cloudProvider.RepairPolicies(), func(policy cloudprovider.RepairPolicy) bool {
-			nodeCondition := nodeutils.GetCondition(lo.ToPtr(node), policy.ConditionType)
-			return nodeCondition.Status == policy.ConditionStatus
+		_, found := lo.Find(c.cloudProvider.RepairPolicies(), func(statement cloudprovider.RepairStatement) bool {
+			nodeCondition := nodeutils.GetCondition(lo.ToPtr(node), statement.ConditionType)
+			return nodeCondition.Status == statement.ConditionStatus
 		})
 		return found
 	})
