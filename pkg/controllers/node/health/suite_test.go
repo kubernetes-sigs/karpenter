@@ -215,7 +215,7 @@ var _ = Describe("Node Health", func() {
 					},
 				},
 			}
-			
+
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "ValidUnhealthyCondition",
 				Status: corev1.ConditionFalse,

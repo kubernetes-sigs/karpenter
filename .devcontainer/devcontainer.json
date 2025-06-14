@@ -1,0 +1,29 @@
+{
+    "name": "Karpenter Development",
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+
+
+    "features": {
+        "ghcr.io/devcontainers/features/go:1": {
+            "version": "1.24"
+          },
+        "ghcr.io/devcontainers/features/git:1": {},
+        "ghcr.io/devcontainers-extra/features/kubectl-asdf:2": {},
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "installZsh": false,
+            "installOhMyZsh": false,
+            "upgradePackages": false,
+            "username": "automatic",
+            "userUid": "automatic",
+            "userGid": "automatic"
+        }
+    },
+
+    "onCreateCommand": "make toolchain",
+
+    "remoteUser": "root",
+
+    "settings": {
+        "extensions.ignoreRecommendations": true
+    }
+} 

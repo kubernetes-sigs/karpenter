@@ -151,7 +151,7 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 // If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration
 func (c *Controller) findUnhealthyConditions(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim) (nc *corev1.NodeCondition, terminationDuration time.Duration) {
 	requeueTime := time.Time{}
-	
+
 	// Get NodePool for repair configuration
 	var nodePool *v1.NodePool
 	if nodePoolName, found := nodeClaim.Labels[v1.NodePoolLabelKey]; found {
@@ -160,7 +160,7 @@ func (c *Controller) findUnhealthyConditions(ctx context.Context, node *corev1.N
 			log.FromContext(ctx).Error(err, "failed to get nodepool for repair configuration")
 		}
 	}
-	
+
 	for _, statement := range c.cloudProvider.RepairPolicies() {
 		// check the status and the type on the condition
 		nodeCondition := nodeutils.GetCondition(node, statement.ConditionType)
@@ -181,17 +181,17 @@ func (c *Controller) findUnhealthyConditions(ctx context.Context, node *corev1.N
 
 // getTolerationDuration resolves the toleration duration in order of priority:
 // 1. NodePool-specific RepairPolicy for the condition type
-// 2. NodePool's DefaultTolerationDuration 
+// 2. NodePool's DefaultTolerationDuration
 // 3. CloudProvider's default duration (30 minutes as fallback)
 func (c *Controller) getTolerationDuration(statement cloudprovider.RepairStatement, nodePool *v1.NodePool) time.Duration {
 	// Default fallback duration
 	defaultDuration := 30 * time.Minute
-	
+
 	// If no NodePool or no repair config, use default
 	if nodePool == nil || nodePool.Spec.Repair == nil {
 		return defaultDuration
 	}
-	
+
 	// Check for condition-specific policy in NodePool
 	for _, policy := range nodePool.Spec.Repair.Policies {
 		if policy.ConditionType == statement.ConditionType && policy.Status == statement.ConditionStatus {
@@ -200,12 +200,12 @@ func (c *Controller) getTolerationDuration(statement cloudprovider.RepairStateme
 			}
 		}
 	}
-	
+
 	// Check for default duration in NodePool
 	if nodePool.Spec.Repair.DefaultTolerationDuration != nil {
 		return nodePool.Spec.Repair.DefaultTolerationDuration.Duration
 	}
-	
+
 	// Fallback to default
 	return defaultDuration
 }

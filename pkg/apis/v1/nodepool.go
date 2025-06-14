@@ -135,7 +135,7 @@ type RepairSpec struct {
 	// These policies override the default tolerationDuration from the CloudProvider.
 	// +optional
 	Policies []RepairPolicy `json:"policies,omitempty"`
-	
+
 	// DefaultTolerationDuration is the default duration to wait before repairing
 	// nodes for any condition not explicitly configured in Policies.
 	// If not specified, uses the CloudProvider's default durations.
@@ -152,8 +152,8 @@ type RepairPolicy struct {
 	// Status specifies the condition status that indicates unhealthy state
 	// +required
 	Status v1.ConditionStatus `json:"status"`
-	// TolerationDuration is the duration to wait before attempting to terminate 
-	// nodes that match this repair policy. If not specified, defaults to the 
+	// TolerationDuration is the duration to wait before attempting to terminate
+	// nodes that match this repair policy. If not specified, defaults to the
 	// cloud provider's recommended duration for this condition type.
 	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
 	// +kubebuilder:validation:Type="string"
