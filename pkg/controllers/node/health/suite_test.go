@@ -113,6 +113,39 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
+		It("should delete an unhealthy node and record metrics", func() {
+			unhealthyCondition := corev1.NodeCondition{
+				Type:               "KubeletReady",
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+			}
+			node.Status.Conditions = append(node.Status.Conditions, unhealthyCondition)
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{{
+				ConditionType:      unhealthyCondition.Type,
+				ConditionStatus:    unhealthyCondition.Status,
+				TolerationDuration: 30 * time.Minute,
+			}}
+			fakeClock.Step(60 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			ExpectObjectReconciled(ctx, env.Client, healthController, node)
+
+			nc := ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nc.DeletionTimestamp).ToNot(BeNil())
+
+			// Check metrics
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel:       metrics.UnhealthyReason,
+				metrics.NodePoolLabel:     nodePool.Name,
+				metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
+			})
+			ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+				health.Condition:          pretty.ToSnakeCase(string(unhealthyCondition.Type)),
+				metrics.NodePoolLabel:     nodePool.Name,
+				metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
+				health.ImageID:            nodeClaim.Status.ImageID,
+			})
+		})
 		It("should not delete node when unhealthy type does not match cloud provider passed in value", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "FakeHealthyNode",
