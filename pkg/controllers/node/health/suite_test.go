@@ -31,6 +31,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/health"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
@@ -160,7 +161,7 @@ var _ = Describe("Node Health", func() {
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -176,7 +177,7 @@ var _ = Describe("Node Health", func() {
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -193,7 +194,7 @@ var _ = Describe("Node Health", func() {
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -204,7 +205,21 @@ var _ = Describe("Node Health", func() {
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime))
 		})
 		It("should return the requeue interval for the condition closest to its terminationDuration using NodePool configuration", func() {
-			// Configure NodePool with specific repair policies
+			// Configure CloudProvider with specific repair policies
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+				{
+					ConditionType:      "ValidUnhealthyCondition",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 30 * time.Minute,
+				},
+				{
+					ConditionType:      "BadNode",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 45 * time.Minute,
+				},
+			}
+
+			// Configure NodePool with the same specific repair policies
 			nodePool.Spec.Repair = &v1.RepairSpec{
 				DefaultTolerationDuration: lo.ToPtr(metav1.Duration{Duration: 45 * time.Minute}),
 				Policies: []v1.RepairPolicy{
@@ -216,37 +231,57 @@ var _ = Describe("Node Health", func() {
 				},
 			}
 
-			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
-				Type:   "ValidUnhealthyCondition",
-				Status: corev1.ConditionFalse,
-				// We expect the last transition for ValidUnhealthyCondition to wait 30 minutes (from NodePool policy)
-				LastTransitionTime: metav1.Time{Time: time.Now()},
-			}, corev1.NodeCondition{
-				Type:   "BadNode",
-				Status: corev1.ConditionFalse,
-				// We expect the last transition for BadNode to wait 45 minutes (from NodePool default)
-				LastTransitionTime: metav1.Time{Time: time.Now()},
-			})
+			// Create node conditions at the current fakeClock time
+			currentTime := fakeClock.Now()
+			fmt.Println("=== Test Debug Info ===")
+			fmt.Printf("Current time: %s\n", currentTime)
+
+			// Add only the ValidUnhealthyCondition with the shorter toleration duration
+			node.Status.Conditions = append(node.Status.Conditions,
+				corev1.NodeCondition{
+					Type:               "ValidUnhealthyCondition",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: currentTime},
+				},
+			)
+
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
+			// Advance 27 minutes - should be 3 minutes from ValidUnhealthyCondition triggering
 			fakeClock.Step(27 * time.Minute)
+			fmt.Printf("After step, time is: %s\n", fakeClock.Now())
+			fmt.Printf("Expected time until termination: %s\n", time.Minute*3)
 
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
-			fmt.Println(result.RequeueAfter.String())
+			fmt.Printf("Actual RequeueAfter: %s\n", result.RequeueAfter)
+
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
 		})
 		It("should return the requeue interval for the time between now and when the nodeClaim termination time", func() {
+			// Make sure the cloud provider has the right repair policies
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+				{
+					ConditionType:      "BadNode",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 30 * time.Minute,
+				},
+			}
+
+			// Create node condition at the current fakeClock time
+			currentTime := fakeClock.Now()
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
+				LastTransitionTime: metav1.Time{Time: currentTime},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
+			// Step forward 27 minutes, leaving 3 minutes until termination
 			fakeClock.Step(27 * time.Minute)
 
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
+			// The requeue time should be 3 minutes (180 seconds)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
 		})
 	})

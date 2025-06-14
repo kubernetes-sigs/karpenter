@@ -90,7 +90,18 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 	// If the Node is unhealthy, but has not reached its full toleration disruption
 	// requeue at the termination time of the unhealthy node
 	terminationTime := unhealthyNodeCondition.LastTransitionTime.Add(policyTerminationDuration)
+
+	// Debug logging
+	log.FromContext(ctx).Info("Debug info",
+		"now", c.clock.Now(),
+		"terminationTime", terminationTime,
+		"policyDuration", policyTerminationDuration,
+		"lastTransitionTime", unhealthyNodeCondition.LastTransitionTime,
+		"timeUntilTermination", terminationTime.Sub(c.clock.Now()),
+		"conditionType", unhealthyNodeCondition.Type)
+
 	if c.clock.Now().Before(terminationTime) {
+		// Calculate the time between now and the termination time using the controller's clock
 		return reconcile.Result{RequeueAfter: terminationTime.Sub(c.clock.Now())}, nil
 	}
 
@@ -150,7 +161,7 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 // Find a node with a condition that matches one of the unhealthy conditions defined by the cloud provider
 // If there are multiple unhealthy status condition we will requeue based on the condition closest to its terminationDuration
 func (c *Controller) findUnhealthyConditions(ctx context.Context, node *corev1.Node, nodeClaim *v1.NodeClaim) (nc *corev1.NodeCondition, terminationDuration time.Duration) {
-	requeueTime := time.Time{}
+	var earliestTerminationTime time.Time
 
 	// Get NodePool for repair configuration
 	var nodePool *v1.NodePool
@@ -168,14 +179,24 @@ func (c *Controller) findUnhealthyConditions(ctx context.Context, node *corev1.N
 			// Determine TolerationDuration using NodePool configuration
 			duration := c.getTolerationDuration(statement, nodePool)
 			terminationTime := nodeCondition.LastTransitionTime.Add(duration)
-			// Determine requeue time
-			if requeueTime.IsZero() || requeueTime.After(terminationTime) {
+
+			// Determine requeue time - find the condition with the earliest termination time
+			if earliestTerminationTime.IsZero() || terminationTime.Before(earliestTerminationTime) {
 				nc = lo.ToPtr(nodeCondition)
 				terminationDuration = duration
-				requeueTime = terminationTime
+				earliestTerminationTime = terminationTime
 			}
 		}
 	}
+
+	if nc != nil {
+		log.FromContext(ctx).Info("Found unhealthy condition",
+			"conditionType", nc.Type,
+			"duration", terminationDuration,
+			"terminationTime", earliestTerminationTime,
+			"timeUntilTermination", earliestTerminationTime.Sub(c.clock.Now()))
+	}
+
 	return nc, terminationDuration
 }
 
