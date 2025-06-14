@@ -73,7 +73,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 		cloudProvider: cloudProvider,
 		recorder:      recorder,
 
-		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Minute, time.Second*10), recorder: recorder},
+		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Hour, time.Minute), recorder: recorder},
 		registration:   &Registration{kubeClient: kubeClient, recorder: recorder},
 		initialization: &Initialization{kubeClient: kubeClient},
 		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},

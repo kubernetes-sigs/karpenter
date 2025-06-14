@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -314,9 +315,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		}
 
 		// Get a set of the node claim names so that it's easy to check if a new one is made
-		nodeClaimNames := lo.SliceToMap(nodeClaims, func(nc *v1.NodeClaim) (string, struct{}) {
-			return nc.Name, struct{}{}
-		})
+		nodeClaimNames := sets.New(lo.Map(nodeClaims, func(nc *v1.NodeClaim, _ int) string { return nc.Name })...)
 		ExpectSingletonReconciled(ctx, disruptionController)
 
 		// Expect a replace action
@@ -324,11 +323,10 @@ var _ = Describe("Simulate Scheduling", func() {
 		ncs := ExpectNodeClaims(ctx, env.Client)
 		// which would create one more node claim
 		Expect(len(ncs)).To(Equal(11))
-		nc, new := lo.Find(ncs, func(nc *v1.NodeClaim) bool {
-			_, ok := nodeClaimNames[nc.Name]
-			return !ok
+		nc, ok := lo.Find(ncs, func(nc *v1.NodeClaim) bool {
+			return !nodeClaimNames.Has(nc.Name)
 		})
-		Expect(new).To(BeTrue())
+		Expect(ok).To(BeTrue())
 		// which needs to be deployed
 		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
@@ -337,11 +335,10 @@ var _ = Describe("Simulate Scheduling", func() {
 		// Another replacement disruption action
 		ncs = ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(12))
-		nc, new = lo.Find(ncs, func(nc *v1.NodeClaim) bool {
-			_, ok := nodeClaimNames[nc.Name]
-			return !ok
+		nc, ok = lo.Find(ncs, func(nc *v1.NodeClaim) bool {
+			return !nodeClaimNames.Has(nc.Name)
 		})
-		Expect(new).To(BeTrue())
+		Expect(ok).To(BeTrue())
 		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
@@ -350,11 +347,10 @@ var _ = Describe("Simulate Scheduling", func() {
 		// One more replacement disruption action
 		ncs = ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(13))
-		nc, new = lo.Find(ncs, func(nc *v1.NodeClaim) bool {
-			_, ok := nodeClaimNames[nc.Name]
-			return !ok
+		nc, ok = lo.Find(ncs, func(nc *v1.NodeClaim) bool {
+			return !nodeClaimNames.Has(nc.Name)
 		})
-		Expect(new).To(BeTrue())
+		Expect(ok).To(BeTrue())
 		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
@@ -459,6 +455,74 @@ var _ = Describe("Simulate Scheduling", func() {
 		Expect(nodes).To(HaveLen(1))
 		Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
 		Expect(nodes[0].Name).ToNot(Equal(node.Name))
+	})
+	It("should ensure that we do not duplicate capacity for disrupted nodes with provisioning", func() {
+		// We create a client that hangs Create() so that when we try to create replacements
+		// we give ourselves time to check that we wouldn't provision additional capacity before the replacements are made
+		hangCreateClient := newHangCreateClient(env.Client)
+		defer hangCreateClient.Stop()
+
+		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
+		dc := disruption.NewController(fakeClock, env.Client, p, cloudProvider, recorder, cluster, queue)
+
+		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey:            nodePool.Name,
+					corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+					v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+					corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+				Allocatable: map[corev1.ResourceName]resource.Quantity{
+					corev1.ResourceCPU:  resource.MustParse("32"),
+					corev1.ResourcePods: resource.MustParse("100"),
+				},
+			},
+		})
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+		labels := map[string]string{
+			"app": "test",
+		}
+		// create our RS so we can link a pod to it
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+		pod := test.Pod(test.PodOptions{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
+				}}})
+
+		ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
+
+		// bind the pods to the node
+		ExpectManualBinding(ctx, env.Client, pod, node)
+
+		// inform cluster state about nodes and nodeclaims
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+		// Expect the disruption controller to attempt to create a replacement and hang creation when we try to create the replacement
+		go ExpectSingletonReconciled(ctx, dc)
+		Eventually(func(g Gomega) {
+			g.Expect(hangCreateClient.HasWaiter()).To(BeTrue())
+		}, time.Second*5).Should(Succeed())
+
+		// If our code works correctly, the provisioner should not try to create a new NodeClaim since we shouldn't have marked
+		// our nodes for disruption until the new NodeClaims have been successfully launched
+		results, err := prov.Schedule(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(results.NewNodeClaims).To(BeEmpty())
 	})
 })
 
@@ -599,11 +663,9 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectDeleted(ctx, env.Client, createdNodeClaim[0])
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, createdNodeClaim[0])
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
+		cluster.DeleteNodeClaim(createdNodeClaim[0].Name)
 		wg.Wait()
 
-		// Increment the clock so that the nodeclaim deletion isn't caught by the
-		// eventual consistency delay.
-		fakeClock.Step(6 * time.Second)
 		ExpectSingletonReconciled(ctx, queue)
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -1745,7 +1807,7 @@ var _ = Describe("Candidate Filtering", func() {
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
-		Expect(err).ToNot((HaveOccurred()))
+		Expect(err).ToNot(HaveOccurred())
 	})
 	It("should consider candidates that have an instance type that cannot be resolved", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -2102,8 +2164,8 @@ func mostExpensiveInstanceWithZone(zone string) *cloudprovider.InstanceType {
 }
 
 //nolint:unparam
-func fromInt(i int) *intstr.IntOrString {
-	v := intstr.FromInt(i)
+func fromInt(i int32) *intstr.IntOrString {
+	v := intstr.FromInt32(i)
 	return &v
 }
 
@@ -2211,4 +2273,29 @@ func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster
 	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
 	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface[*orchestration.Command](workqueue.TypedQueueConfig[*orchestration.Command]{Name: "disruption.workqueue"})
 	return q
+}
+
+type hangCreateClient struct {
+	client.Client
+	hasWaiter atomic.Bool
+	stop      chan struct{}
+}
+
+func newHangCreateClient(c client.Client) *hangCreateClient {
+	return &hangCreateClient{Client: c, stop: make(chan struct{})}
+}
+
+func (h *hangCreateClient) HasWaiter() bool {
+	return h.hasWaiter.Load()
+}
+
+func (h *hangCreateClient) Stop() {
+	close(h.stop)
+}
+
+func (h *hangCreateClient) Create(_ context.Context, _ client.Object, _ ...client.CreateOption) error {
+	h.hasWaiter.Store(true)
+	<-h.stop
+	h.hasWaiter.Store(false)
+	return nil
 }
