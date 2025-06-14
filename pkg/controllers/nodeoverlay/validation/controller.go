@@ -34,6 +34,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
+type conflict struct {
+	price     bool
+	capacity  bool
+	resources []string
+}
+
 // Controller for reconciling on node overlay resources
 type Controller struct {
 	kubeClient client.Client
@@ -61,17 +67,27 @@ func (c *Controller) Reconcile(ctx context.Context, nodeOverlay *v1alpha1.NodeOv
 		return o.Name != nodeOverlay.Name
 	})
 
-	nodeOverlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+	conflictMessage := ""
 	conflictingOverlays := c.hasConflictingRequirements(nodeOverlay, lo.Filter(overlays.Items, func(o v1alpha1.NodeOverlay, _ int) bool { return o.Name != nodeOverlay.Name }))
 	for _, o := range conflictingOverlays {
-		if nodeOverlay.Spec.PriceAdjustment != o.Spec.PriceAdjustment {
-			nodeOverlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", fmt.Sprintf("conflict on the priceAdjustment with overlay: %s", o.Name))
-			break
+		conflict, err := c.areConflictingOverlay(ctx, nodeOverlay, o)
+		if err != nil {
+			return reconcile.Result{}, err
 		}
-		if resources := findConflictingResources(nodeOverlay.Spec.Capacity, o.Spec.Capacity); len(resources) != 0 {
-			nodeOverlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", fmt.Sprintf("conflict on the capacity with overlay: %s on resource: %s", o.Name, resources))
-			break
+		if conflict != nil {
+			if conflict.price {
+				conflictMessage = fmt.Sprintf("%s, conflict on the priceAdjustment with overlay: %s", conflictMessage, o.Name)
+			}
+			if conflict.capacity {
+				conflictMessage = fmt.Sprintf("%s, conflict on the capacity with overlay: %s on resource: %s", conflictMessage, o.Name, conflict.resources)
+			}
 		}
+	}
+
+	if conflictMessage != "" {
+		nodeOverlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", conflictMessage)
+	} else {
+		nodeOverlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 	}
 
 	if !equality.Semantic.DeepEqual(stored, nodeOverlay) {
@@ -89,6 +105,32 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		For(&v1alpha1.NodeOverlay{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
+}
+
+func (c *Controller) areConflictingOverlay(ctx context.Context, currentOverlay *v1alpha1.NodeOverlay, possibleOverlayToUpdate v1alpha1.NodeOverlay) (*conflict, error) {
+	stored := possibleOverlayToUpdate.DeepCopy()
+	conf := &conflict{
+		price:    false,
+		capacity: false,
+	}
+
+	if currentOverlay.Spec.PriceAdjustment != possibleOverlayToUpdate.Spec.PriceAdjustment {
+		possibleOverlayToUpdate.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", fmt.Sprintf("conflict on the priceAdjustment with overlay: %s", currentOverlay.Name))
+		conf.price = true
+	}
+	if resources := findConflictingResources(currentOverlay.Spec.Capacity, possibleOverlayToUpdate.Spec.Capacity); len(resources) != 0 {
+		possibleOverlayToUpdate.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", fmt.Sprintf("conflict on the capacity with overlay: %s on resource: %s", currentOverlay.Name, resources))
+		conf.capacity = true
+		conf.resources = resources
+	}
+
+	if !equality.Semantic.DeepEqual(stored, possibleOverlayToUpdate) {
+		if err := c.kubeClient.Status().Patch(ctx, &possibleOverlayToUpdate, client.MergeFrom(stored)); err != nil {
+			return nil, client.IgnoreNotFound(err)
+		}
+	}
+
+	return lo.Ternary(conf.price || conf.capacity, conf, nil), nil
 }
 
 // findConflictingRequirements checks if any node overlays with the same weight have conflicting requirements

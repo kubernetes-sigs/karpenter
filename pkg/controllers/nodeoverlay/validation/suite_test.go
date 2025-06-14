@@ -474,4 +474,7 @@ var _ = Describe("Validation", func() {
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
 	})
+
+	// Need to add testing for multiple node overlay being applied and validation
+	// taking into effect
 })
