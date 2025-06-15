@@ -18,7 +18,6 @@ package disruption_test
 
 import (
 	"context"
-	"time"
 
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -76,7 +75,7 @@ func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim,
 	return v
 }
 
-func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
+func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command) (disruption.Command, error) {
 	if t.blocked {
 		blockingBudget(t.nodes, t.nodeClaims, t.nodePool)
 	}
@@ -86,7 +85,7 @@ func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Co
 	if t.nominated {
 		nominated(t.nodes, t.nodeClaims)
 	}
-	return t.emptiness.Validate(ctx, cmd, 0)
+	return t.emptiness.Validate(ctx, cmd)
 }
 
 type TestConsolidationValidator struct {
@@ -130,7 +129,7 @@ func NewTestConsolidationValidator(cluster *state.Cluster, nodePool *v1.NodePool
 	return v
 }
 
-func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
+func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruption.Command) (disruption.Command, error) {
 	stateNodes := t.cluster.Nodes()
 	nodes := make([]*corev1.Node, len(stateNodes))
 	nodeClaims := make([]*v1.NodeClaim, len(stateNodes))
@@ -147,7 +146,7 @@ func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruptio
 	if t.nominated {
 		nominated(nodes, nodeClaims)
 	}
-	return t.consolidation.Validate(ctx, cmd, 0)
+	return t.consolidation.Validate(ctx, cmd)
 }
 
 func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
