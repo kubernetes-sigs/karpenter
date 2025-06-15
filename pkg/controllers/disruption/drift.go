@@ -21,33 +21,20 @@ import (
 	"errors"
 	"sort"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
 )
 
 // Drift is a subreconciler that deletes drifted candidates.
 type Drift struct {
-	kubeClient  client.Client
-	cluster     *state.Cluster
-	provisioner *provisioning.Provisioner
-	recorder    events.Recorder
+	consolidation
 }
 
-func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, recorder events.Recorder) *Drift {
-	return &Drift{
-		kubeClient:  kubeClient,
-		cluster:     cluster,
-		provisioner: provisioner,
-		recorder:    recorder,
-	}
+func NewDrift(c consolidation) *Drift {
+	return &Drift{consolidation: c}
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
