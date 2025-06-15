@@ -257,9 +257,9 @@ var _ = Describe("Node Health", func() {
 				DefaultTolerationDuration: lo.ToPtr(metav1.Duration{Duration: 45 * time.Minute}),
 				Policies: []v1.RepairPolicy{
 					{
-						ConditionType:      "ValidUnhealthyCondition",
-						Status:             corev1.ConditionFalse,
-						TolerationDuration: lo.ToPtr(metav1.Duration{Duration: 30 * time.Minute}),
+						ConditionType: "ValidUnhealthyCondition",
+						Status:        corev1.ConditionFalse,
+						Toleration:    lo.ToPtr(metav1.Duration{Duration: 30 * time.Minute}),
 					},
 				},
 			}

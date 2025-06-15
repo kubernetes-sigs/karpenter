@@ -216,8 +216,8 @@ func (c *Controller) getTolerationDuration(statement cloudprovider.RepairStateme
 	// Check for condition-specific policy in NodePool
 	for _, policy := range nodePool.Spec.Repair.Policies {
 		if policy.ConditionType == statement.ConditionType && policy.Status == statement.ConditionStatus {
-			if policy.TolerationDuration != nil {
-				return policy.TolerationDuration.Duration
+			if policy.Toleration != nil {
+				return policy.Toleration.Duration
 			}
 		}
 	}

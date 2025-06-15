@@ -152,13 +152,13 @@ type RepairPolicy struct {
 	// Status specifies the condition status that indicates unhealthy state
 	// +required
 	Status v1.ConditionStatus `json:"status"`
-	// TolerationDuration is the duration to wait before attempting to terminate
+	// Toleration is the duration to wait before attempting to terminate
 	// nodes that match this repair policy. If not specified, defaults to the
 	// cloud provider's recommended duration for this condition type.
 	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
 	// +kubebuilder:validation:Type="string"
 	// +optional
-	TolerationDuration *metav1.Duration `json:"tolerationDuration,omitempty"`
+	Toleration *metav1.Duration `json:"toleration,omitempty"`
 }
 
 // DisruptionReason defines valid reasons for disruption budgets.
