@@ -96,6 +96,7 @@ var _ = Describe("Node Health", func() {
 
 		// Reset the metrics collectors
 		metrics.NodeClaimsDisruptedTotal.Reset()
+		metrics.PodsDisruptedTotal.Reset()
 	})
 
 	Context("Reconciliation", func() {
@@ -347,6 +348,9 @@ var _ = Describe("Node Health", func() {
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when unhealthy", func() {
+			pod1 := test.Pod(test.PodOptions{NodeName: node.Name})
+			pod2 := test.Pod(test.PodOptions{NodeName: node.Name})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod1, pod2)
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "BadNode",
 				Status:             corev1.ConditionFalse,
@@ -367,6 +371,12 @@ var _ = Describe("Node Health", func() {
 				health.Condition:      pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
 				metrics.NodePoolLabel: nodePool.Name,
 			})
+			ExpectMetricCounterValue(metrics.PodsDisruptedTotal, 2, map[string]string{
+				metrics.ReasonLabel:       metrics.UnhealthyReason,
+				metrics.NodePoolLabel:     nodePool.Name,
+				metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+			})
+
 		})
 	})
 })

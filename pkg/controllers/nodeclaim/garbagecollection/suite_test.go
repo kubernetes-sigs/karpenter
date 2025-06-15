@@ -37,6 +37,7 @@ import (
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
 	nodeclaimlifcycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -219,5 +220,47 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectSingletonReconciled(ctx, garbageCollectionController)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
+	})
+	It("should count disrupted pods when deleting NodeClaim", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+		nodeClaim, node, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
+		Expect(err).ToNot(HaveOccurred())
+
+		// Create pods on the node
+		pod1 := test.Pod(test.PodOptions{NodeName: node.Name})
+		pod2 := test.Pod(test.PodOptions{NodeName: node.Name})
+		ExpectApplied(ctx, env.Client, pod1, pod2)
+
+		// Mark the node as NotReady after the launch
+		ExpectMakeNodesNotReady(ctx, env.Client, node)
+
+		// Step forward to move past the cache eventual consistency timeout
+		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+
+		// Delete the nodeClaim from the cloudprovider
+		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
+
+		// Reset metrics before test
+		metrics.NodeClaimsDisruptedTotal.Reset()
+		metrics.PodsDisruptedTotal.Reset()
+
+		// Expect the NodeClaim to be removed and metrics to be updated
+		ExpectSingletonReconciled(ctx, garbageCollectionController)
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
+
+		ExpectMetricCounterValue(metrics.PodsDisruptedTotal, 2, map[string]string{
+			metrics.ReasonLabel:       "garbage_collected",
+			metrics.NodePoolLabel:     nodePool.Name,
+			metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+		})
 	})
 })
