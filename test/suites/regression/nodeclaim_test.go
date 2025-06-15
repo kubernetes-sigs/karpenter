@@ -247,8 +247,6 @@ var _ = Describe("NodeClaim", func() {
 			env.EventuallyExpectNotFound(nodeClaim)
 		})
 		It("should delete a NodeClaim if it references a NodeClass that isn't Ready", func() {
-			nodeClass = env.InvalidNodeClass.DeepCopy()
-			time.Sleep(10 * time.Second)
 			env.ExpectCreated(nodeClass)
 			By("Validating the NodeClass status condition has been reconciled")
 			Eventually(func(g Gomega) {
