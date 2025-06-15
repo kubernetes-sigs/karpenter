@@ -740,8 +740,6 @@ var _ = Describe("Drift", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("should untaint nodes when drift replacement fails", func() {
-			cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to untaint
-
 			labels := map[string]string{
 				"app": "test",
 			}
@@ -773,12 +771,17 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			var wg sync.WaitGroup
-			ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
-			// Wait > 5 seconds for eventual consistency hack in orchestration.Queue
-			fakeClock.Step(5*time.Second + time.Nanosecond*1)
+			// Simulate the new NodeClaim being created and then deleted
+			newNodeClaim, ok := lo.Find(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim) bool {
+				return nc.Name != nodeClaim.Name
+			})
+			Expect(ok).To(BeTrue())
+			ExpectDeleted(ctx, env.Client, newNodeClaim)
+			cluster.DeleteNodeClaim(newNodeClaim.Name)
+
 			ExpectSingletonReconciled(ctx, queue)
 			// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
 			node = ExpectExists(ctx, env.Client, node)

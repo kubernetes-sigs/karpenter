@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -229,13 +228,12 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
 		multiErr = multierr.Combine(multiErr, state.ClearNodeClaimsCondition(ctx, q.kubeClient, v1.ConditionTypeDisruptionReason, cmd.candidates...))
 		// Log the error
-		log.FromContext(ctx).WithValues("nodes", strings.Join(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
-			return s.Name()
-		}), ",")).Error(multiErr, "failed terminating nodes while executing a disruption command")
+		log.FromContext(ctx).Error(multiErr, "failed terminating nodes while executing a disruption command")
+	} else {
+		log.FromContext(ctx).V(1).Info("command succeeded")
 	}
 	// If command is complete, remove command from queue.
 	q.Remove(cmd)
-	log.FromContext(ctx).V(1).Info("command succeeded")
 	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
@@ -260,7 +258,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
 			// In this case, the error is unrecoverable, so don't requeue.
-			if apierrors.IsNotFound(err) && q.clock.Since(cmd.timeAdded) > time.Second*5 {
+			if apierrors.IsNotFound(err) && !q.cluster.NodeClaimExists(cmd.Replacements[i].name) {
 				return NewUnrecoverableError(fmt.Errorf("replacement was deleted, %w", err))
 			}
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
