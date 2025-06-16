@@ -31,8 +31,25 @@ N/A
 We will keep a default for all nodes at 15 minute TTL however in the cases that the NodeClass would be used with GPUs or known to take a longer time to register, we will expose a new configuration registerationTTL. We will allow users to configure their own TTL without presets
 
 ```yaml
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  annotations:
+    karpenter.sh/nodepool-hash: "13817533045586861872"
+    karpenter.sh/nodepool-hash-version: v3
+  creationTimestamp: "2025-02-12T17:59:44Z"
+  name: example-nodepool
 spec:
-  registerationTTL:  30m
+  disruption: {}
+    consolidateAfter: 5m
+    consolidationPolicy: WhenEmptyOrUnderutilized
+  limits:
+    nodes: "800"
+  template:
+    metadata: {}
+    spec:
+      expireAfter: 288h0m0s
+      registrationTTL: 20m
 ```
 
 #### Evaluation conditions 
