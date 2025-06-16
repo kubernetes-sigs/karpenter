@@ -21,15 +21,6 @@ Furthermore, this variable will not be considered when evaluating drift, as it i
 
 Lastly, we will move registrationTTL to fully be in NodePool CRD and default it to 15m.
 
-#### Concerns
-
-N/A
-
-### Option 2:
-#### Introduce a configuration registeration TTL to NodeClass and propagate it to the NodeClaim
-
-We will keep a default for all nodes at 15 minute TTL however in the cases that the NodeClass would be used with GPUs or known to take a longer time to register, we will expose a new configuration registerationTTL. We will allow users to configure their own TTL without presets
-
 ```yaml
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -51,6 +42,15 @@ spec:
       expireAfter: 288h0m0s
       registrationTTL: 20m # New variable
 ```
+
+#### Concerns
+
+N/A
+
+### Option 2:
+#### Introduce a configuration registeration TTL to NodeClass and propagate it to the NodeClaim
+
+We will keep a default for all nodes at 15 minute TTL however in the cases that the NodeClass would be used with GPUs or known to take a longer time to register, we will expose a new configuration registerationTTL. We will allow users to configure their own TTL without presets
 
 #### Evaluation conditions 
 
