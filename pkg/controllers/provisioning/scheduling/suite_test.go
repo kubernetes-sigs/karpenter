@@ -2365,6 +2365,125 @@ var _ = Context("Scheduling", func() {
 				// must create a new node
 				Expect(node1.Name).ToNot(Equal(node2.Name))
 			})
+			It("Should properly handle DaemonSet resources with Node Affinity for `karpenter.sh/initialized` and `karpenter.sh/registered`", func() {
+
+				// This test verifies that when DaemonSets are configured with node affinity for the "karpenter.sh/initialized"
+				// and "karpenter.sh/registered" labels, nodes are launched with properly calculated
+				// daemonOverhead. (Issue #2116)
+
+				// Daemonset with node affinity for `karpenter.sh/initialized`
+				ds1 := test.DaemonSet(
+					test.DaemonSetOptions{
+						PodOptions: test.PodOptions{
+							NodeRequirements: []corev1.NodeSelectorRequirement{
+								{
+									Key:      v1.NodeInitializedLabelKey,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"true"},
+								},
+							},
+							ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+								corev1.ResourceCPU: resource.MustParse("1"),
+							}},
+						},
+					},
+				)
+				ExpectApplied(ctx, env.Client, nodePool, ds1)
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(ds1), ds1)).To(Succeed())
+
+				// Daemonset with node affinity for `karpenter.sh/registered`
+				ds2 := test.DaemonSet(
+					test.DaemonSetOptions{
+						PodOptions: test.PodOptions{
+							NodeRequirements: []corev1.NodeSelectorRequirement{
+								{
+									Key:      v1.NodeRegisteredLabelKey,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"true"},
+								},
+							},
+							ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+								corev1.ResourceCPU: resource.MustParse("1"),
+							}},
+						},
+					},
+				)
+				ExpectApplied(ctx, env.Client, nodePool, ds2)
+				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(ds2), ds2)).To(Succeed())
+
+				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
+					Limits: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU: resource.MustParse("2"),
+					},
+				}}
+				initialPod := test.UnschedulablePod(opts)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+				node1 := ExpectScheduled(ctx, env.Client, initialPod)
+
+				// create our daemonset pod and manually bind it to the node
+				ds1Pod := test.UnschedulablePod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						}},
+				})
+				ds1Pod.OwnerReferences = append(ds1Pod.OwnerReferences, metav1.OwnerReference{
+					APIVersion:         "apps/v1",
+					Kind:               "DaemonSet",
+					Name:               ds1.Name,
+					UID:                ds1.UID,
+					Controller:         lo.ToPtr(true),
+					BlockOwnerDeletion: lo.ToPtr(true),
+				})
+				ExpectApplied(ctx, env.Client, nodePool, ds1Pod)
+
+				ds2Pod := test.UnschedulablePod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						}},
+				})
+				ds2Pod.OwnerReferences = append(ds2Pod.OwnerReferences, metav1.OwnerReference{
+					APIVersion:         "apps/v1",
+					Kind:               "DaemonSet",
+					Name:               ds2.Name,
+					UID:                ds2.UID,
+					Controller:         lo.ToPtr(true),
+					BlockOwnerDeletion: lo.ToPtr(true),
+				})
+				ExpectApplied(ctx, env.Client, nodePool, ds2Pod)
+
+				// delete the pod so that the node is empty
+				ExpectDeleted(ctx, env.Client, initialPod)
+				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+				cluster.ForEachNode(func(f *state.StateNode) bool {
+					dsRequests := f.DaemonSetRequests()
+					available := f.Available()
+					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
+					// When daemonOverhead is considered for both ds1 and ds2, a 16 CPU Node is launched,
+					// whereas when only one or neither is considered, only a 4 CPU Node is launched.
+					// no pods so we have the full (16 cpu - 100m overhead)
+					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
+					return true
+				})
+
+				// manually bind the daemonset pods to the node
+				ExpectManualBinding(ctx, env.Client, ds1Pod, node1)
+				ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(ds1Pod))
+
+				ExpectManualBinding(ctx, env.Client, ds2Pod, node1)
+				ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(ds2Pod))
+
+				cluster.ForEachNode(func(f *state.StateNode) bool {
+					dsRequests := f.DaemonSetRequests()
+					available := f.Available()
+					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 2))
+					// only the DS pods are bound, so available is reduced by two and the DS requested is incremented by two
+					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 13.9))
+					return true
+				})
+			})
 
 		})
 		// nolint:gosec
