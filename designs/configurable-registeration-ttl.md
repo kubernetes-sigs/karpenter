@@ -49,7 +49,7 @@ spec:
     metadata: {}
     spec:
       expireAfter: 288h0m0s
-      registrationTTL: 20m
+      registrationTTL: 20m # New variable
 ```
 
 #### Evaluation conditions 
