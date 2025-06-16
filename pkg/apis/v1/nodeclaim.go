@@ -79,9 +79,11 @@ type NodeClaimSpec struct {
 	// before terminating a node that hasn't registered during TTL time.
 	// If left undefined, the controller will use the default 15m for the node to register.
 	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
+	// +kubebuilder:default:="15m"
 	// +kubebuilder:validation:Type="string"
+	// +kubebuilder:validation:Schemaless
 	// +optional
-	RegistrationTTL *metav1.Duration `json:"registrationTTL,omitempty"`
+	RegistrationTTL NillableDuration `json:"registrationTTL,omitempty" hash:"ignore"`
 }
 
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
