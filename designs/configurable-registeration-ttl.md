@@ -8,7 +8,6 @@ Karpenter currently hardcodes [registeration TTL](https://github.com/kubernetes-
 
 This is problematic because some users have nodes that take longer that time to register. As mentioned in the issue, nodes that run GPU can often take > 15 minutes to start up. 
 
-
 ## Configuration
 ### Option 1:
 #### Introduce a configuration registeration TTL to NodeClass and propagate it to the NodeClaim
@@ -27,7 +26,8 @@ spec:
 ### Option 2 (Preferred):
 #### Introduce a configuration registeration TTL to Node Pool then propagate to node claim
 
-We would introduce the new argument in Node Pool and perform similar propagation of the argument to Node Claim
+We would introduce the new argument in Node Pool and perform similar propagation of the argument to Node Claim. In addition, we won't consider this variable when evaluating drift as 
+this variable is only used duration registration. If a node needed a longer TTL then the node would have been killed by Karpenter and if it did register then the TTL didn't matter, so a change to this variable wouldn't require Drift to update.
 
 #### Concerns
 
