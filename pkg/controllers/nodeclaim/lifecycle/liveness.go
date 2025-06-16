@@ -41,7 +41,7 @@ type Liveness struct {
 
 // registrationTTL is a heuristic time that we expect the node to register within
 // If we don't see the node within this time, then we should delete the NodeClaim and try again
-const registrationTTL = time.Minute * 15
+var registrationTTL = time.Minute * 15
 
 func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	registered := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
@@ -50,6 +50,10 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	}
 	if registered == nil {
 		return reconcile.Result{Requeue: true}, nil
+	}
+
+	if nodeClaim.Spec.RegistrationTTL != nil {
+		registrationTTL = nodeClaim.Spec.RegistrationTTL.Duration
 	}
 	// If the Registered statusCondition hasn't gone True during the TTL since we first updated it, we should terminate the NodeClaim
 	// NOTE: ttl has to be stored and checked in the same place since l.clock can advance after the check causing a race
