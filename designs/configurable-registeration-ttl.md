@@ -21,15 +21,17 @@ spec:
 
 #### Evaluation conditions 
 
-1. When evaluating liveness, check if NodeClaim contains a registerationTTL if so utilize that TTL instead of the default
+1. When evaluating liveness, check if NodeClaim contains a registerationTTL if so utilize that TTL instead of the default. 
 
 ### Option 2 (Preferred):
 #### Introduce a configuration registeration TTL to Node Pool then propagate to node claim
 
-We would introduce the new argument in Node Pool and perform similar propagation of the argument to Node Claim. In addition, we won't consider this variable when evaluating drift as 
-this variable is only used duration registration. If a node needed a longer TTL then the node would have been killed by Karpenter and if it did register then the TTL didn't matter, so a change to this variable wouldn't require Drift to update.
+We propose introducing a new argument in the Node Pool and propagating it to the NodeClaim during its creation. When the liveness controller evaluates the registrationTTL, it will use the value specified in the NodeClaim.
+
+Importantly, even if the registrationTTL is updated on the NodePool during NodeClaim registration, we will continue to use the NodeClaim's registrationTTL. This approach ensures clarity by demonstrating that the NodeClaim relies on variables defined in its own spec.
+
+Furthermore, this variable will not be considered when evaluating drift, as it is only utilized during the registration process. If a node requires a longer TTL, it would have already been terminated by Karpenter. In cases where the node successfully registers, the TTL becomes irrelevant. Consequently, changes to this variable do not necessitate updates to the drift evaluation process.
 
 #### Concerns
 
-Although we already attempt to access the node pool for node pool registration health I don't believe this argument fits in Node Pools as it is some what tied to the way nodes are configured 
-which seems to be a NodeClass property rather than Node Pool
+N/A
