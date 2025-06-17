@@ -966,10 +966,12 @@ func ExpectNodeWithNodeClaimDraining(c client.Client, nodeName string) *corev1.N
 
 func ExpectNotRequeued(result reconcile.Result) {
 	GinkgoHelper()
+	//nolint:staticcheck
 	Expect(result.Requeue == false && result.RequeueAfter == time.Duration(0)).To(BeTrue())
 }
 
 func ExpectRequeued(result reconcile.Result) {
 	GinkgoHelper()
+	//nolint:staticcheck
 	Expect(result.Requeue || result.RequeueAfter != time.Duration(0)).To(BeTrue())
 }
