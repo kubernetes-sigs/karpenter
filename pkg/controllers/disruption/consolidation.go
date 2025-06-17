@@ -61,19 +61,33 @@ type consolidation struct {
 	cloudProvider          cloudprovider.CloudProvider
 	recorder               events.Recorder
 	lastConsolidationState time.Time
+	consolidationTTL       time.Duration
+}
+
+type ConsolidationOption func(*consolidation)
+
+func WithConsolidationTTL(ttl time.Duration) ConsolidationOption {
+	return func(c *consolidation) {
+		c.consolidationTTL = ttl
+	}
 }
 
 func MakeConsolidation(clock clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue) consolidation {
-	return consolidation{
-		queue:         queue,
-		clock:         clock,
-		cluster:       cluster,
-		kubeClient:    kubeClient,
-		provisioner:   provisioner,
-		cloudProvider: cloudProvider,
-		recorder:      recorder,
+	cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, queue *orchestration.Queue, opts ...ConsolidationOption) consolidation {
+	c := &consolidation{
+		queue:            queue,
+		clock:            clock,
+		cluster:          cluster,
+		kubeClient:       kubeClient,
+		provisioner:      provisioner,
+		cloudProvider:    cloudProvider,
+		recorder:         recorder,
+		consolidationTTL: consolidationTTL,
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return *c
 }
 
 // IsConsolidated returns true if nothing has changed since markConsolidated was called.

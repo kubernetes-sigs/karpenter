@@ -99,7 +99,7 @@ var _ = BeforeSuite(func() {
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
 	queue = NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
+	disruptionController = disruption.NewController(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
 })
 
 var _ = AfterSuite(func() {
@@ -462,8 +462,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		hangCreateClient := newHangCreateClient(env.Client)
 		defer hangCreateClient.Stop()
 
-		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
-		dc := disruption.NewController(fakeClock, env.Client, p, cloudProvider, recorder, cluster, queue)
+		prov := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
+		dc := disruption.NewController(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{

@@ -24,14 +24,8 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	"sigs.k8s.io/karpenter/pkg/events"
 )
 
 type ValidationError struct {
@@ -51,25 +45,15 @@ func IsValidationError(err error) bool {
 }
 
 type Validator interface {
-	Validate(context.Context, Command, time.Duration) (Command, error)
+	Validate(context.Context, Command) (Command, error)
 }
 
 // Validation is used to perform validation on a consolidation command.  It makes an assumption that when re-used, all
 // of the commands passed to IsValid were constructed based off of the same consolidation state.  This allows it to
 // skip the validation TTL for all but the first command.
-type validation struct {
-	clock         clock.Clock
-	cluster       *state.Cluster
-	kubeClient    client.Client
-	cloudProvider cloudprovider.CloudProvider
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	queue         *orchestration.Queue
-	reason        v1.DisruptionReason
-}
-
 type EmptinessValidator struct {
-	validation
+	consolidation
+	reason         v1.DisruptionReason
 	filter         CandidateFilter
 	validationType string
 }
@@ -77,22 +61,17 @@ type EmptinessValidator struct {
 func NewEmptinessValidator(c consolidation) *EmptinessValidator {
 	e := &Emptiness{consolidation: c}
 	return &EmptinessValidator{
-		validation: validation{
-			clock:         c.clock,
-			cluster:       c.cluster,
-			kubeClient:    c.kubeClient,
-			provisioner:   c.provisioner,
-			cloudProvider: c.cloudProvider,
-			recorder:      c.recorder,
-			queue:         c.queue,
-			reason:        v1.DisruptionReasonEmpty,
-		},
+		consolidation:  c,
+		reason:         v1.DisruptionReasonEmpty,
 		filter:         e.ShouldDisrupt,
 		validationType: e.ConsolidationType(),
 	}
 }
 
-func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command, _ time.Duration) (Command, error) {
+func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command) (Command, error) {
+	if err := waitForValidationPeriod(ctx, e.clock, e.consolidationTTL); err != nil {
+		return Command{}, err
+	}
 	validatedCandidates, err := e.validateCandidates(ctx, cmd.candidates...)
 	if err != nil {
 		return Command{}, err
@@ -102,7 +81,8 @@ func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command, _ time.D
 }
 
 type ConsolidationValidator struct {
-	validation
+	consolidation
+	reason         v1.DisruptionReason
 	filter         CandidateFilter
 	validationType string
 }
@@ -110,16 +90,8 @@ type ConsolidationValidator struct {
 func NewSingleConsolidationValidator(c consolidation) *ConsolidationValidator {
 	s := &SingleNodeConsolidation{consolidation: c}
 	return &ConsolidationValidator{
-		validation: validation{
-			clock:         c.clock,
-			cluster:       c.cluster,
-			kubeClient:    c.kubeClient,
-			provisioner:   c.provisioner,
-			cloudProvider: c.cloudProvider,
-			recorder:      c.recorder,
-			queue:         c.queue,
-			reason:        v1.DisruptionReasonUnderutilized,
-		},
+		consolidation:  c,
+		reason:         v1.DisruptionReasonUnderutilized,
 		filter:         s.ShouldDisrupt,
 		validationType: s.ConsolidationType(),
 	}
@@ -128,23 +100,15 @@ func NewSingleConsolidationValidator(c consolidation) *ConsolidationValidator {
 func NewMultiConsolidationValidator(c consolidation) *ConsolidationValidator {
 	m := &MultiNodeConsolidation{consolidation: c}
 	return &ConsolidationValidator{
-		validation: validation{
-			clock:         c.clock,
-			cluster:       c.cluster,
-			kubeClient:    c.kubeClient,
-			provisioner:   c.provisioner,
-			cloudProvider: c.cloudProvider,
-			recorder:      c.recorder,
-			queue:         c.queue,
-			reason:        v1.DisruptionReasonUnderutilized,
-		},
+		consolidation:  c,
+		reason:         v1.DisruptionReasonUnderutilized,
 		filter:         m.ShouldDisrupt,
 		validationType: m.ConsolidationType(),
 	}
 }
 
-func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, validationPeriod time.Duration) (Command, error) {
-	if err := c.isValid(ctx, cmd, validationPeriod); err != nil {
+func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command) (Command, error) {
+	if err := c.isValid(ctx, cmd, c.consolidationTTL); err != nil {
 		return Command{}, err
 	}
 	return cmd, nil
@@ -153,12 +117,8 @@ func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, vali
 func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
 	var err error
 	// TODO: see if this check can be removed, as written, consolidation tests begin hanging with its removal
-	if validationPeriod > 0 {
-		select {
-		case <-ctx.Done():
-			return errors.New("context canceled")
-		case <-c.clock.After(validationPeriod):
-		}
+	if err := waitForValidationPeriod(ctx, c.clock, validationPeriod); err != nil {
+		return err
 	}
 	validatedCandidates, err := c.validateCandidates(ctx, cmd.candidates...)
 	if err != nil {
@@ -250,12 +210,12 @@ func (c *ConsolidationValidator) validateCandidates(ctx context.Context, candida
 }
 
 // ValidateCommand validates a command for a Method
-func (v *validation) validateCommand(ctx context.Context, cmd Command, candidates []*Candidate) error {
+func (c *ConsolidationValidator) validateCommand(ctx context.Context, cmd Command, candidates []*Candidate) error {
 	// None of the chosen candidate are valid for execution, so retry
 	if len(candidates) == 0 {
 		return NewValidationError(fmt.Errorf("no candidates"))
 	}
-	results, err := SimulateScheduling(ctx, v.kubeClient, v.cluster, v.provisioner, candidates...)
+	results, err := SimulateScheduling(ctx, c.kubeClient, c.cluster, c.provisioner, candidates...)
 	if err != nil {
 		return fmt.Errorf("simluating scheduling, %w", err)
 	}
@@ -308,5 +268,16 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 	// Now we know:
 	// - current scheduling simulation says to create a new node with types T = {T_0, T_1, ..., T_n}
 	// - our lifecycle command says to create a node with types {U_0, U_1, ..., U_n} where U is a subset of T
+	return nil
+}
+
+func waitForValidationPeriod(ctx context.Context, clock clock.Clock, validationPeriod time.Duration) error {
+	if validationPeriod > 0 {
+		select {
+		case <-ctx.Done():
+			return errors.New("context canceled")
+		case <-clock.After(validationPeriod):
+		}
+	}
 	return nil
 }
