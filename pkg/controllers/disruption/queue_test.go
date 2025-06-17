@@ -140,7 +140,7 @@ var _ = Describe("Queue", func() {
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
-			Expect(queue.HasAny(stateNode)).To(BeTrue()) // Expect the command to still be in the queue
+			Expect(queue.HasAny(stateNode.ProviderID())).To(BeTrue()) // Expect the command to still be in the queue
 		})
 		It("should not return an error when the NodeClaim doesn't exist but the NodeCliam is in cluster state", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
@@ -171,7 +171,7 @@ var _ = Describe("Queue", func() {
 
 			cluster.UpdateNodeClaim(replacementNodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
-			Expect(queue.HasAny(stateNode)).To(BeTrue()) // Expect the command to still be in the queue
+			Expect(queue.HasAny(stateNode.ProviderID())).To(BeTrue()) // Expect the command to still be in the queue
 		})
 		It("should untaint nodes when a command times out", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)

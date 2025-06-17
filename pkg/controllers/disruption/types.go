@@ -75,7 +75,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 	var err error
 	var pods []*corev1.Pod
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
-	if queue.HasAny(node) {
+	if queue.HasAny(node.ProviderID()) {
 		return nil, fmt.Errorf("candidate is already being disrupted")
 	}
 	if err = node.ValidateNodeDisruptable(); err != nil {

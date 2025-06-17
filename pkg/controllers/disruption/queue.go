@@ -24,13 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
+	"golang.org/x/time/rate"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -59,9 +58,10 @@ import (
 )
 
 const (
-	queueBaseDelay   = 1 * time.Second
-	queueMaxDelay    = 10 * time.Second
-	maxRetryDuration = 10 * time.Minute
+	queueBaseDelay          = 1 * time.Second
+	queueMaxDelay           = 10 * time.Second
+	maxRetryDuration        = 10 * time.Minute
+	maxConcurrentReconciles = 100
 )
 
 type UnrecoverableError struct {
@@ -82,14 +82,13 @@ func IsUnrecoverableError(err error) bool {
 
 type Queue struct {
 	sync.RWMutex
-	providerIDToCommand  map[string]*Command // providerID -> command, maps a candidate to its command
-	nodeClaimsInQueueSet sets.Set[string]
-	source               chan event.TypedGenericEvent[*v1.NodeClaim]
-	kubeClient           client.Client
-	recorder             events.Recorder
-	cluster              *state.Cluster
-	clock                clock.Clock
-	provisioner          *provisioning.Provisioner
+	providerIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
+	source              chan event.TypedGenericEvent[*v1.NodeClaim]
+	kubeClient          client.Client
+	recorder            events.Recorder
+	cluster             *state.Cluster
+	clock               clock.Clock
+	provisioner         *provisioning.Provisioner
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
@@ -99,14 +98,13 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	queue := &Queue{
 		// nolint:staticcheck
 		// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
-		source:               make(chan event.TypedGenericEvent[*v1.NodeClaim], 10000),
-		providerIDToCommand:  map[string]*Command{},
-		nodeClaimsInQueueSet: make(sets.Set[string]),
-		kubeClient:           kubeClient,
-		recorder:             recorder,
-		cluster:              cluster,
-		clock:                clock,
-		provisioner:          provisioner,
+		source:              make(chan event.TypedGenericEvent[*v1.NodeClaim], 10000),
+		providerIDToCommand: map[string]*Command{},
+		kubeClient:          kubeClient,
+		recorder:            recorder,
+		cluster:             cluster,
+		clock:               clock,
+		provisioner:         provisioner,
 	}
 	return queue
 }
@@ -116,8 +114,11 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 		Named("disruption.queue").
 		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).
 		WithOptions(controller.Options{
-			RateLimiter:             reasonable.RateLimiter(),
-			MaxConcurrentReconciles: 100,
+			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
+				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](queueBaseDelay, queueMaxDelay),
+				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
+			),
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }
@@ -126,14 +127,15 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 	ctx = injection.WithControllerName(ctx, "disruption.queue")
 	cmd, exists := q.providerIDToCommand[nodeClaim.Status.ProviderID]
 	if !exists {
-		return reconcile.Result{}, fmt.Errorf("no command found for nodeclaim %s", nodeClaim.Name)
+		log.FromContext(ctx).Error(fmt.Errorf("no command found for nodeclaim %s", nodeClaim.Name), "")
+		return reconcile.Result{}, nil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues(cmd.LogValues()...))
 
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
-			return reconcile.Result{Requeue: true}, nil
+			return reconcile.Result{RequeueAfter: queueBaseDelay}, nil
 		}
 		// If the command failed, bail on the action.
 		// 1. Emit metrics for launch failures
@@ -282,7 +284,10 @@ func (q *Queue) createReplacementNodeClaims(ctx context.Context, cmd *Command) e
 // 3. Add Command to the queue to wait to delete the candidates.
 func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	// First check if we can add the command.
-	if q.HasAny(lo.Map(cmd.Candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })...) {
+	providerIDs := lo.Map(cmd.Candidates, func(c *Candidate, _ int) string {
+		return c.ProviderID()
+	})
+	if q.HasAny(providerIDs...) {
 		return fmt.Errorf("candidate is being disrupted")
 	}
 
@@ -320,9 +325,8 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 
 	q.Lock()
 	for _, c := range cmd.Candidates {
-		q.nodeClaimsInQueueSet.Insert(c.NodeClaim.Status.ProviderID)
+		q.providerIDToCommand[c.ProviderID()] = cmd
 	}
-	q.providerIDToCommand[cmd.KeyNodeClaim.Status.ProviderID] = cmd
 	q.source <- event.TypedGenericEvent[*v1.NodeClaim]{Object: cmd.KeyNodeClaim}
 	q.Unlock()
 
@@ -343,15 +347,17 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 }
 
 // HasAny checks to see if the candidate is part of an currently executing command.
-func (q *Queue) HasAny(candidates ...*state.StateNode) bool {
+func (q *Queue) HasAny(ids ...string) bool {
 	q.RLock()
 	defer q.RUnlock()
 
 	// If the mapping has at least one of the candidates' providerIDs, return true.
-	_, ok := lo.Find(candidates, func(n *state.StateNode) bool {
-		return q.nodeClaimsInQueueSet.Has(n.ProviderID())
-	})
-	return ok
+	for _, i := range ids {
+		if _, exists := q.providerIDToCommand[i]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func (q *Queue) GetCommands() []*Command {
@@ -369,9 +375,8 @@ func (q *Queue) CompleteCommand(cmd *Command) {
 	// Remove all candidates linked to the command
 	q.Lock()
 	defer q.Unlock()
-	delete(q.providerIDToCommand, cmd.KeyNodeClaim.Status.ProviderID)
 	for _, c := range cmd.Candidates {
-		q.nodeClaimsInQueueSet.Delete(c.NodeClaim.Status.ProviderID)
+		delete(q.providerIDToCommand, c.ProviderID())
 	}
 }
 

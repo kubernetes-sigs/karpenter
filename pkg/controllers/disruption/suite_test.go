@@ -459,9 +459,9 @@ var _ = Describe("Simulate Scheduling", func() {
 		hangCreateClient := newHangCreateClient(env.Client)
 		defer hangCreateClient.Stop()
 
-		q := disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
 		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
-		dc := disruption.NewController(fakeClock, env.Client, p, cloudProvider, recorder, cluster, q)
+		q := disruption.NewQueue(hangCreateClient, recorder, cluster, fakeClock, p)
+		dc := disruption.NewController(fakeClock, hangCreateClient, p, cloudProvider, recorder, cluster, q)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
