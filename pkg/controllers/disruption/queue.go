@@ -127,7 +127,7 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 	ctx = injection.WithControllerName(ctx, "disruption.queue")
 	cmd, exists := q.providerIDToCommand[nodeClaim.Status.ProviderID]
 	if !exists {
-		log.FromContext(ctx).Error(fmt.Errorf("no command found for nodeclaim %s", nodeClaim.Name), "")
+		log.FromContext(ctx).Error(fmt.Errorf("no command found", ), "")
 		return reconcile.Result{}, nil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues(cmd.LogValues()...))
