@@ -127,7 +127,7 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 	ctx = injection.WithControllerName(ctx, "disruption.queue")
 	cmd, exists := q.providerIDToCommand[nodeClaim.Status.ProviderID]
 	if !exists {
-		log.FromContext(ctx).Error(fmt.Errorf("no command found", ), "")
+		log.FromContext(ctx).Error(fmt.Errorf("no command found"), "")
 		return reconcile.Result{}, nil
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues(cmd.LogValues()...))
@@ -321,13 +321,14 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	// the node is cleaned up.
 	cmd.Results.Record(log.IntoContext(ctx, operatorlogging.NopLogger), q.recorder, q.cluster)
 
-	cmd.KeyNodeClaim = cmd.Candidates[0].NodeClaim
-
 	q.Lock()
 	for _, c := range cmd.Candidates {
 		q.providerIDToCommand[c.ProviderID()] = cmd
 	}
-	q.source <- event.TypedGenericEvent[*v1.NodeClaim]{Object: cmd.KeyNodeClaim}
+	// IMPORTANT
+	// We are adding the first nodeclaim in the list of candidates into the reconciliation queue
+	// This invariant SHOULD NOT be relied on anywhere else besides within this file.
+	q.source <- event.TypedGenericEvent[*v1.NodeClaim]{Object: cmd.Candidates[0].NodeClaim}
 	q.Unlock()
 
 	// IMPORTANT

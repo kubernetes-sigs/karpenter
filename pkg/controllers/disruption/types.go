@@ -140,7 +140,6 @@ type Command struct {
 	CreationTimestamp time.Time
 	ID                uuid.UUID
 
-	KeyNodeClaim *v1.NodeClaim
 	Results      scheduling.Results
 	Candidates   []*Candidate
 	Replacements []*Replacement
