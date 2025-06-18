@@ -387,14 +387,14 @@ var _ = Describe("Queue", func() {
 			// Make the first command's node initialized
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode1}, []*v1.NodeClaim{replacementNodeClaim1})
 			// Reconcile the second command and expect nothing to be initialized
-			ExpectObjectReconciled(ctx, env.Client, queue, cmd2.KeyNodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, queue, cmd2.Candidates[0].NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim1).Message)).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeFalse())
 			Expect(recorder.DetectedEvent(disruptionevents.WaitingOnReadiness(nodeClaim2).Message)).To(BeTrue())
 
 			// Reconcile the first command and expect the replacement to be initialized
-			ExpectObjectReconciled(ctx, env.Client, queue, cmd.KeyNodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeFalse())
 
@@ -405,7 +405,7 @@ var _ = Describe("Queue", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode2}, []*v1.NodeClaim{replacementNodeClaim2})
 
 			// Reconcile the second command and expect the replacement to be initialized
-			ExpectObjectReconciled(ctx, env.Client, queue, cmd2.KeyNodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, queue, cmd2.Candidates[0].NodeClaim)
 			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
 			Expect(cmd2.Replacements[0].Initialized).To(BeTrue())
 

@@ -295,7 +295,7 @@ var _ = Describe("Drift", func() {
 			// Execute all commands in the queue, only deleting 3 nodes
 			cmds := queue.GetCommands()
 			for _, cmd := range cmds {
-				ExpectObjectReconciled(ctx, env.Client, queue, cmd.KeyNodeClaim)
+				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
@@ -388,7 +388,7 @@ var _ = Describe("Drift", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(10))
 			for _, cmd := range cmds {
-				ExpectObjectReconciled(ctx, env.Client, queue, cmd.KeyNodeClaim)
+				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(20))
 			// These nodes will disrupt because of Drift instead of Emptiness because they are not marked consolidatable
@@ -455,7 +455,7 @@ var _ = Describe("Drift", func() {
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].KeyNodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
@@ -955,7 +955,7 @@ var _ = Describe("Drift", func() {
 			// Process the item so that the nodes can be deleted.
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].KeyNodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
