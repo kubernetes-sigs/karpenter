@@ -353,14 +353,17 @@ func (q *Queue) HasAny(ids ...string) bool {
 	defer q.RUnlock()
 
 	// If the mapping has at least one of the candidates' providerIDs, return true.
-	for _, i := range ids {
-		if _, exists := q.providerIDToCommand[i]; exists {
+	for _, id := range ids {
+		if _, exists := q.providerIDToCommand[id]; exists {
 			return true
 		}
 	}
 	return false
 }
 
+// For TESTING ONLY
+// This function is not thread safe as it returns pointers to commands.
+// If you edit these commands returned, you can create race conditions.
 func (q *Queue) GetCommands() []*Command {
 	q.RLock()
 	defer q.RUnlock()
