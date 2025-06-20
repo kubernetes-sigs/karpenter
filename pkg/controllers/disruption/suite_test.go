@@ -28,6 +28,8 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	clockiface "k8s.io/utils/clock"
 
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
@@ -49,7 +51,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
-	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -72,7 +73,7 @@ var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
-var queue *orchestration.Queue
+var queue *disruption.Queue
 var allKnownDisruptionReasons []v1.DisruptionReason
 
 var onDemandInstances []*cloudprovider.InstanceType
@@ -463,7 +464,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		defer hangCreateClient.Stop()
 
 		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
-		dc := disruption.NewController(fakeClock, env.Client, p, cloudProvider, recorder, cluster, queue)
+		q := NewTestingQueue(hangCreateClient, recorder, cluster, fakeClock, p)
+		dc := disruption.NewController(fakeClock, env.Client, p, cloudProvider, recorder, cluster, q)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1845,7 +1847,8 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
-		Expect(queue.Add(orchestration.NewCommand([]string{}, []*state.StateNode{cluster.Nodes()[0]}, "", "test-method", "fake-type"))).To(Succeed())
+		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.Nodes()[0]}}, Replacements: nil}
+		Expect(queue.StartCommand(ctx, cmd))
 
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
@@ -2268,10 +2271,10 @@ func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, wg *sync
 }
 
 func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clockiface.Clock,
-	provisioner *provisioning.Provisioner) *orchestration.Queue {
+	provisioner *provisioning.Provisioner) *disruption.Queue {
 
-	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
-	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface[*orchestration.Command](workqueue.TypedQueueConfig[*orchestration.Command]{Name: "disruption.workqueue"})
+	q := disruption.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
+	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface[*disruption.Command](workqueue.TypedQueueConfig[*disruption.Command]{Name: "disruption.workqueue"})
 	return q
 }
 
