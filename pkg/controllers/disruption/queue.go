@@ -14,12 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package orchestration
+package disruption
 
 import (
 	"context"
-	"errors"
+	stderrors "errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,7 +28,7 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
@@ -38,6 +39,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
@@ -55,65 +59,6 @@ const (
 	maxRetryDuration = 10 * time.Minute
 )
 
-type Command struct {
-	Replacements      []Replacement
-	candidates        []*state.StateNode
-	timeAdded         time.Time           // timeAdded is used to track timeouts
-	id                types.UID           // used for log tracking
-	reason            v1.DisruptionReason // used for metrics
-	consolidationType string              // used for metrics
-	lastError         error
-}
-
-func (c *Command) LogValues() []any {
-	candidateNodes := lo.Map(c.candidates, func(candidate *state.StateNode, _ int) interface{} {
-		return map[string]interface{}{
-			"Node":      klog.KObj(candidate.Node),
-			"NodeClaim": klog.KObj(candidate.NodeClaim),
-		}
-	})
-	replacementNodes := lo.Map(c.Replacements, func(replacement Replacement, _ int) interface{} {
-		return map[string]interface{}{
-			"NodeClaim": klog.KRef("", replacement.name),
-		}
-	})
-	return []any{
-		"command-id", c.id,
-		"reason", c.reason,
-		"decision", c.Decision(),
-		"disrupted-node-count", len(candidateNodes),
-		"replacement-node-count", len(replacementNodes),
-		"disrupted-nodes", candidateNodes,
-		"replacement-nodes", replacementNodes,
-	}
-}
-
-// Replacement wraps a NodeClaim name with an initialized field to save on readiness checks and identify
-// when a NodeClaim is first initialized for metrics and events.
-type Replacement struct {
-	name string
-	// Use a bool track if a node has already been initialized so we can fire metrics for intialization once.
-	// This intentionally does not capture nodes that go initialized then go NotReady after as other pods can
-	// schedule to this node as well.
-	Initialized bool
-}
-
-func (c *Command) Decision() string {
-	switch {
-	case len(c.candidates) > 0 && len(c.Replacements) > 0:
-		return "replace"
-	case len(c.candidates) > 0 && len(c.Replacements) == 0:
-		return "delete"
-	default:
-		return "no-op"
-	}
-}
-
-func (c *Command) Reason() string {
-	return fmt.Sprintf("%s/%s", c.reason,
-		lo.Ternary(len(c.Replacements) > 0, "replace", "delete"))
-}
-
 type UnrecoverableError struct {
 	error
 }
@@ -127,7 +72,7 @@ func IsUnrecoverableError(err error) bool {
 		return false
 	}
 	var unrecoverableError *UnrecoverableError
-	return errors.As(err, &unrecoverableError)
+	return stderrors.As(err, &unrecoverableError)
 }
 
 type Queue struct {
@@ -165,19 +110,6 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
-// NewCommand creates a command key and adds in initial data for the orchestration queue.
-func NewCommand(replacements []string, candidates []*state.StateNode, id types.UID, reason v1.DisruptionReason, consolidationType string) *Command {
-	return &Command{
-		Replacements: lo.Map(replacements, func(name string, _ int) Replacement {
-			return Replacement{name: name}
-		}),
-		candidates:        candidates,
-		reason:            reason,
-		consolidationType: consolidationType,
-		id:                id,
-	}
-}
-
 func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
@@ -205,8 +137,6 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	if err := q.waitOrTerminate(ctx, cmd); err != nil {
 		// If recoverable, re-queue and try again.
 		if !IsUnrecoverableError(err) {
-			// store the error that is causing us to fail, so we can bubble it up later if this times out.
-			cmd.lastError = err
 			// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
 			q.TypedRateLimitingInterface.Done(cmd)
 			q.TypedRateLimitingInterface.AddRateLimited(cmd)
@@ -216,35 +146,37 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		// 1. Emit metrics for launch failures
 		// 2. Ensure cluster state no longer thinks these nodes are deleting
 		// 3. Remove it from the Queue's internal data structure
-		failedLaunches := lo.Filter(cmd.Replacements, func(r Replacement, _ int) bool {
+		failedLaunches := lo.Filter(cmd.Replacements, func(r *Replacement, _ int) bool {
 			return !r.Initialized
 		})
 		DisruptionQueueFailuresTotal.Add(float64(len(failedLaunches)), map[string]string{
-			decisionLabel:          cmd.Decision(),
-			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.reason)),
-			ConsolidationTypeLabel: cmd.consolidationType,
+			decisionLabel:          string(cmd.Decision()),
+			metrics.ReasonLabel:    pretty.ToSnakeCase(string(cmd.Reason())),
+			ConsolidationTypeLabel: cmd.ConsolidationType(),
 		})
-		multiErr := multierr.Combine(err, cmd.lastError, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, cmd.candidates...))
-		multiErr = multierr.Combine(multiErr, state.ClearNodeClaimsCondition(ctx, q.kubeClient, v1.ConditionTypeDisruptionReason, cmd.candidates...))
+		stateNodes := lo.Map(cmd.Candidates, func(c *Candidate, _ int) *state.StateNode { return c.StateNode })
+		multiErr := multierr.Combine(err, state.RequireNoScheduleTaint(ctx, q.kubeClient, false, stateNodes...))
+		multiErr = multierr.Combine(multiErr, state.ClearNodeClaimsCondition(ctx, q.kubeClient, v1.ConditionTypeDisruptionReason, stateNodes...))
 		// Log the error
 		log.FromContext(ctx).Error(multiErr, "failed terminating nodes while executing a disruption command")
 	} else {
 		log.FromContext(ctx).V(1).Info("command succeeded")
+		cmd.Succeeded = true
 	}
-	// If command is complete, remove command from queue.
-	q.Remove(cmd)
+	q.CompleteCommand(cmd)
 	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
 // waitOrTerminate will wait until launched nodeclaims are ready.
 // Once the replacements are ready, it will terminate the candidates.
-// Will return true if the item in the queue should be re-queued. If a command has
-// timed out, this will return false.
 // nolint:gocyclo
-func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
-	if q.clock.Since(cmd.timeAdded) > maxRetryDuration {
-		return NewUnrecoverableError(serrors.Wrap(fmt.Errorf("command reached timeout"), "duration", q.clock.Since(cmd.timeAdded)))
-	}
+func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
+	// Wrap an error in an unrecoverable error if it timed out
+	defer func() {
+		if q.clock.Since(cmd.CreationTimestamp) > maxRetryDuration {
+			err = NewUnrecoverableError(serrors.Wrap(fmt.Errorf("command reached timeout, %w", err), "duration", q.clock.Since(cmd.CreationTimestamp)))
+		}
+	}()
 	waitErrs := make([]error, len(cmd.Replacements))
 	for i := range cmd.Replacements {
 		// If we know the node claim is Initialized, no need to check again.
@@ -253,11 +185,11 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		}
 		// Get the nodeclaim
 		nodeClaim := &v1.NodeClaim{}
-		if err := q.kubeClient.Get(ctx, types.NamespacedName{Name: cmd.Replacements[i].name}, nodeClaim); err != nil {
+		if err := q.kubeClient.Get(ctx, types.NamespacedName{Name: cmd.Replacements[i].Name}, nodeClaim); err != nil {
 			// The NodeClaim got deleted after an initial eventual consistency delay
 			// This means that there was an ICE error or the Node initializationTTL expired
 			// In this case, the error is unrecoverable, so don't requeue.
-			if apierrors.IsNotFound(err) && !q.cluster.NodeClaimExists(cmd.Replacements[i].name) {
+			if errors.IsNotFound(err) && !q.cluster.NodeClaimExists(cmd.Replacements[i].Name) {
 				return NewUnrecoverableError(fmt.Errorf("replacement was deleted, %w", err))
 			}
 			waitErrs[i] = fmt.Errorf("getting node claim, %w", err)
@@ -265,7 +197,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 		}
 		// We emitted this event when disruption was blocked on launching/termination.
 		// This does not block other forms of deprovisioning, but we should still emit this.
-		q.recorder.Publish(disruptionevents.Launching(nodeClaim, cmd.Reason()))
+		q.recorder.Publish(disruptionevents.Launching(nodeClaim, string(cmd.Reason())))
 		initializedStatus := nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized)
 		if !initializedStatus.IsTrue() {
 			q.recorder.Publish(disruptionevents.WaitingOnReadiness(nodeClaim))
@@ -282,19 +214,19 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	// All replacements have been provisioned.
 	// All we need to do now is get a successful delete call for each node claim,
 	// then the termination controller will handle the eventual deletion of the nodes.
-	errs := make([]error, len(cmd.candidates))
-	workqueue.ParallelizeUntil(ctx, len(cmd.candidates), len(cmd.candidates), func(i int) {
+	errs := make([]error, len(cmd.Candidates))
+	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
-			return q.kubeClient.Delete(ctx, cmd.candidates[i].NodeClaim)
+			return q.kubeClient.Delete(ctx, cmd.Candidates[i].NodeClaim)
 		}); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-		q.recorder.Publish(disruptionevents.Terminating(cmd.candidates[i].Node, cmd.candidates[i].NodeClaim, cmd.Reason())...)
+		q.recorder.Publish(disruptionevents.Terminating(cmd.Candidates[i].Node, cmd.Candidates[i].NodeClaim, string(cmd.Reason()))...)
 		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-			metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.reason)),
-			metrics.NodePoolLabel:     cmd.candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel: cmd.candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
+			metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.Reason())),
+			metrics.NodePoolLabel:     cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel: cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
 		})
 	})
 	// If there were any deletion failures, we should requeue.
@@ -302,24 +234,115 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) error {
 	return multierr.Combine(errs...)
 }
 
-// Add adds commands to the Queue
-// Each command added to the queue should already be validated and ready for execution.
-func (q *Queue) Add(cmd *Command) error {
-	providerIDs := lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string {
-		return s.ProviderID()
+// markDisrupted taints the node and adds the Disrupted condition to the NodeClaim for a candidate that is about to be disrupted
+func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, error) {
+	errs := make([]error, len(cmd.Candidates))
+	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
+		if err := state.RequireNoScheduleTaint(ctx, q.kubeClient, true, cmd.Candidates[i].StateNode); err != nil {
+			errs[i] = serrors.Wrap(fmt.Errorf("tainting nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
+			return
+		}
+		// refresh nodeclaim before updating status
+		nodeClaim := &v1.NodeClaim{}
+		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
+			return q.kubeClient.Get(ctx, client.ObjectKeyFromObject(cmd.Candidates[i].NodeClaim), nodeClaim)
+		}); err != nil {
+			errs[i] = client.IgnoreNotFound(err)
+			return
+		}
+		stored := nodeClaim.DeepCopy()
+		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(cmd.Reason()), string(cmd.Reason()))
+		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error { return q.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)) }); err != nil {
+			errs[i] = client.IgnoreNotFound(err)
+			return
+		}
 	})
+	var markedCandidates []*Candidate
+	for i := range errs {
+		if errs[i] != nil {
+			continue
+		}
+		markedCandidates = append(markedCandidates, cmd.Candidates[i])
+	}
+	return markedCandidates, multierr.Combine(errs...)
+}
+
+// createReplacementNodeClaims creates replacement NodeClaims
+func (q *Queue) createReplacementNodeClaims(ctx context.Context, cmd *Command) error {
+	nodeClaimNames, err := q.provisioner.CreateNodeClaims(ctx, lo.Map(cmd.Replacements, func(r *Replacement, _ int) *pscheduling.NodeClaim { return r.NodeClaim }), provisioning.WithReason(strings.ToLower(string(cmd.Reason()))))
+	if err != nil {
+		return err
+	}
+	if len(nodeClaimNames) != len(cmd.Replacements) {
+		// shouldn't ever occur since a partially failed CreateNodeClaims should return an error
+		return serrors.Wrap(fmt.Errorf("expected replacement count did not equal actual replacement count"), "expected-count", len(cmd.Replacements), "actual-count", len(nodeClaimNames))
+	}
+	for i, name := range nodeClaimNames {
+		cmd.Replacements[i].Name = name
+	}
+	return nil
+}
+
+// StartCommand will do the following:
+// 1. Taint candidate nodes
+// 2. Spin up replacement nodes
+// 3. Add Command to the queue to wait to delete the candidates.
+func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	// First check if we can add the command.
-	if q.HasAny(providerIDs...) {
+	if q.HasAny(lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.ProviderID() })...) {
 		return fmt.Errorf("candidate is being disrupted")
 	}
 
-	cmd.timeAdded = q.clock.Now()
+	log.FromContext(ctx).WithValues(append([]any{"command-id", cmd.ID, "reason", strings.ToLower(string(cmd.Reason()))}, cmd.LogValues()...)...).Info("disrupting node(s)")
+
+	// Cordon the old nodes before we launch the replacements to prevent new pods from scheduling to the old nodes
+	markedCandidates, markDisruptedErr := q.markDisrupted(ctx, cmd)
+	// If we get a failure marking some nodes as disrupted, if we are launching replacements, we shouldn't continue
+	// with disrupting the candidates. If it's just a delete operation, we can proceed
+	if markDisruptedErr != nil && len(cmd.Replacements) > 0 {
+		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", markDisruptedErr), "command-id", cmd.ID)
+	}
+
+	// Update the command to only consider the successfully MarkDisrupted candidates
+	cmd.Candidates = markedCandidates
+
+	if err := q.createReplacementNodeClaims(ctx, cmd); err != nil {
+		// If we failed to launch the replacement, don't disrupt.  If this is some permanent failure,
+		// we don't want to disrupt workloads with no way to provision new nodes for them.
+		return serrors.Wrap(fmt.Errorf("launching replacement nodeclaim, %w", err), "command-id", cmd.ID)
+	}
+
+	// Nominate each node for scheduling and emit pod nomination events
+	// We emit all nominations before we exit the disruption loop as
+	// we want to ensure that nodes that are nominated are respected in the subsequent
+	// disruption reconciliation. This is essential in correctly modeling multiple
+	// disruption commands in parallel.
+	// This will only nominate nodes for 2 * batchingWindow. Once the candidates are
+	// tainted with the Karpenter taint, the provisioning controller will continue
+	// to do scheduling simulations and nominate the pods on the candidate nodes until
+	// the node is cleaned up.
+	cmd.Results.Record(log.IntoContext(ctx, operatorlogging.NopLogger), q.recorder, q.cluster)
+
 	q.mu.Lock()
-	for _, candidate := range cmd.candidates {
+	for _, candidate := range cmd.Candidates {
 		q.providerIDToCommand[candidate.ProviderID()] = cmd
 	}
 	q.mu.Unlock()
+
+	// IMPORTANT
+	// We must MarkForDeletion AFTER we launch the replacements and not before
+	// The reason for this is to avoid producing double-launches
+	// If we MarkForDeletion before we create replacements, it's possible for the provisioner
+	// to recognize that it needs to launch capacity for terminating pods, causing us to launch
+	// capacity for these pods twice instead of just once
+	q.cluster.MarkForDeletion(lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.ProviderID() })...)
 	q.TypedRateLimitingInterface.Add(cmd)
+	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
+	DecisionsPerformedTotal.Inc(map[string]string{
+		decisionLabel:          string(cmd.Decision()),
+		metrics.ReasonLabel:    strings.ToLower(string(cmd.Reason())),
+		ConsolidationTypeLabel: cmd.ConsolidationType(),
+	})
 	return nil
 }
 
@@ -336,15 +359,17 @@ func (q *Queue) HasAny(ids ...string) bool {
 	return ok
 }
 
-// Remove fully clears the queue of all references of a hash/command
-func (q *Queue) Remove(cmd *Command) {
+// CompleteCommand fully clears the queue of all references of a hash/command
+func (q *Queue) CompleteCommand(cmd *Command) {
 	// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
 	q.TypedRateLimitingInterface.Done(cmd)
 	q.TypedRateLimitingInterface.Forget(cmd)
-	q.cluster.UnmarkForDeletion(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
+	if !cmd.Succeeded {
+		q.cluster.UnmarkForDeletion(lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.ProviderID() })...)
+	}
 	// Remove all candidates linked to the command
 	q.mu.Lock()
-	for _, candidate := range cmd.candidates {
+	for _, candidate := range cmd.Candidates {
 		delete(q.providerIDToCommand, candidate.ProviderID())
 	}
 	q.mu.Unlock()
