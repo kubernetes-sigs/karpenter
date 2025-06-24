@@ -23,6 +23,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 
@@ -413,6 +415,61 @@ var _ = Describe("Queue", func() {
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 			// And expect the nodeClaim and node to be deleted
 			ExpectNotFound(ctx, env.Client, nodeClaim2, node2)
+		})
+		It("should count disrupted pods when terminating nodes", func() {
+			// Create pods on the node that will be disrupted
+			pod1 := test.Pod(test.PodOptions{NodeName: node1.Name})
+			pod2 := test.Pod(test.PodOptions{NodeName: node1.Name})
+
+			ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool, pod1, pod2)
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+
+			// Reset metrics before test
+			metrics.NodeClaimsDisruptedTotal.Reset()
+			metrics.PodsDisruptedTotal.Reset()
+
+			nct := scheduling.NewNodeClaimTemplate(nodePool)
+			nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+			replacements := []*disruption.Replacement{
+				{
+					NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct},
+				},
+			}
+			cmd := &disruption.Command{
+				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				CreationTimestamp: fakeClock.Now(),
+				ID:                uuid.New(),
+				Results:           scheduling.Results{},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Replacements:      replacements,
+			}
+			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+
+			replacementNodeClaim := &v1.NodeClaim{}
+			Expect(env.Client.Get(ctx, types.NamespacedName{Name: cmd.Replacements[0].Name}, replacementNodeClaim))
+
+			replacementNodeClaim, replacementNode := ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, replacementNodeClaim)
+			ExpectSingletonReconciled(ctx, queue)
+
+			Expect(cmd.Replacements[0].Initialized).To(BeFalse())
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{replacementNode}, []*v1.NodeClaim{replacementNodeClaim})
+			ExpectSingletonReconciled(ctx, queue)
+			Expect(cmd.Replacements[0].Initialized).To(BeTrue())
+
+			terminatingEvents := disruptionevents.Terminating(node1, nodeClaim1, string(cmd.Reason()))
+			Expect(recorder.DetectedEvent(terminatingEvents[0].Message)).To(BeTrue())
+			Expect(recorder.DetectedEvent(terminatingEvents[1].Message)).To(BeTrue())
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim1)
+			ExpectNotFound(ctx, env.Client, nodeClaim1, node1)
+
+			// Verify pod disruption metrics
+			ExpectMetricCounterValue(metrics.PodsDisruptedTotal, 2, map[string]string{
+				metrics.ReasonLabel:       pretty.ToSnakeCase(string(cmd.Reason())),
+				metrics.NodePoolLabel:     nodePool.Name,
+				metrics.CapacityTypeLabel: nodeClaim1.Labels[v1.CapacityTypeLabelKey],
+			})
 		})
 	})
 })
