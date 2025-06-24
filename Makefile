@@ -24,12 +24,20 @@ build-with-kind: # build with kind assumes the image will be uploaded directly o
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d ":" -f 1))
 	$(eval IMG_TAG=latest) 
 
+# UPSTREAM: <carry>: add --insecure-registry to "ko build" and replace public repo pullspec with internal repo
+INTERNAL_REPO="image-registry.openshift-image-registry.svc:5000"
+.PHONY: build-with-openshift
+build-with-openshift: ## Build the Karpenter KWOK controller images using ko build for OpenShift cluster 
+	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build --insecure-registry sigs.k8s.io/karpenter/kwok))
+	$(eval IMG_REPOSITORY=$(shell echo $(INTERNAL_REPO)/$(shell echo $(CONTROLLER_IMG) | cut -d "/" -f 2-3 | cut -d "@" -f 1)))
+	$(eval IMG_TAG=latest)
+	
 build: ## Build the Karpenter KWOK controller images using ko build
 	$(eval CONTROLLER_IMG=$(shell $(WITH_GOFLAGS) KO_DOCKER_REPO="$(KWOK_REPO)" ko build -B sigs.k8s.io/karpenter/kwok))
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
-	
+ 
 apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	kubectl apply -f kwok/charts/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
@@ -39,6 +47,18 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 		--set serviceMonitor.enabled=true \
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true 
+
+# UPSTREAM: <carry>: duplicates apply-with-kind, but has openshift-specific dependency steps
+.PHONY: apply-with-openshift
+apply-with-openshift: openshift-verify build-with-openshift ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config OpenShift cluster
+	kubectl apply -f kwok/charts/crds
+	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
+		$(HELM_OPTS) \
+		--set controller.image.repository=$(IMG_REPOSITORY) \
+		--set controller.image.tag=$(IMG_TAG) \
+		--set serviceMonitor.enabled=true \
+		--set-string controller.env[0].name=ENABLE_PROFILING \
+		--set-string controller.env[0].value=true
 
 e2etests: ## Run the e2e suite against your local cluster
 	cd test && go test \
@@ -115,6 +135,8 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 		fi;}
 	actionlint -oneline
 
+# UPSTREAM: <carry>: duplicates verify, but removes unnecessary steps for downstream
+.PHONY: openshift-verify
 openshift-verify: ## Verify code on OpenShift Prow CI. A stripped down copy of the "verify" target.
 	go mod tidy && go mod vendor && go mod verify
 	go generate ./...
@@ -122,8 +144,8 @@ openshift-verify: ## Verify code on OpenShift Prow CI. A stripped down copy of t
 	hack/validation/requirements.sh
 	hack/validation/labels.sh
 	hack/validation/status.sh
-	@# Use perl instead of sed due to https://stackoverflow.com/questions/4247068/sed-command-with-i-option-failing-on-mac-but-works-on-linux
-	@# We need to do this "sed replace" until controller-tools fixes this parameterized types issue: https://github.com/kubernetes-sigs/controller-tools/issues/756
+	cp -r pkg/apis/crds kwok/charts
+	hack/kwok/requirements.sh
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
 	hack/boilerplate.sh
 	go vet ./...
@@ -140,6 +162,8 @@ download: ## Recursively "go mod download" on all directories where go.mod exist
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
 
+# UPSTREAM: <carry>: installs toolchain for OpenShift CI.
+.PHONY: openshift-toolchain
 openshift-toolchain: ## Install developer toolchain for OpenShift CI.
 	./hack/openshift-toolchain.sh
 

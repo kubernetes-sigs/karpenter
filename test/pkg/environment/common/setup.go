@@ -18,6 +18,7 @@ package common
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -93,6 +94,12 @@ func (env *Environment) ExpectCleanCluster() {
 	var pods corev1.PodList
 	Expect(env.Client.List(env.Context, &pods)).To(Succeed())
 	for i := range pods.Items {
+		// UPSTREAM: <carry>: ignore any pods that are pending to be scheduled in some openshift-* namespace
+		// This is a workaround for the fact that OpenShift core component pods sometimes start/restart and become pending,
+		// but upstream e2e test setup forces all nodes to be tainted, preventing these pods from being scheduled.
+		if strings.HasPrefix(pods.Items[i].Namespace, "openshift") {
+			continue
+		}
 		Expect(pod.IsProvisionable(&pods.Items[i])).To(BeFalse(),
 			fmt.Sprintf("expected to have no provisionable pods, found %s/%s", pods.Items[i].Namespace, pods.Items[i].Name))
 		Expect(pods.Items[i].Namespace).ToNot(Equal("default"),
