@@ -60,12 +60,14 @@ apply-with-openshift: openshift-verify build-with-openshift ## Deploy the kwok c
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true
 
+JUNIT_REPORT := $(if $(ARTIFACT_DIR), --ginkgo.junit-report="$(ARTIFACT_DIR)/junit_report.xml")
 e2etests: ## Run the e2e suite against your local cluster
 	cd test && go test \
 		-count 1 \
 		-timeout 30m \
 		-v \
 		./suites/$(shell echo $(TEST_SUITE) | tr A-Z a-z)/... \
+		$(JUNIT_REPORT) \
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.timeout=30m \
 		--ginkgo.grace-period=5m \
