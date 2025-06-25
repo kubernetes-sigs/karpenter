@@ -18,6 +18,7 @@ package termination_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -69,7 +70,7 @@ var _ = BeforeSuite(func() {
 
 	cloudProvider = fake.NewCloudProvider()
 	recorder = test.NewEventRecorder()
-	queue = terminator.NewTestingQueue(env.Client, recorder)
+	queue = terminator.NewQueue(env.Client, recorder)
 	terminationController = termination.NewController(fakeClock, env.Client, cloudProvider, terminator.NewTerminator(fakeClock, env.Client, queue, recorder), recorder)
 })
 
@@ -85,7 +86,7 @@ var _ = Describe("Termination", func() {
 	BeforeEach(func() {
 		fakeClock.SetTime(time.Now())
 		cloudProvider.Reset()
-		*queue = lo.FromPtr(terminator.NewTestingQueue(env.Client, recorder))
+		*queue = lo.FromPtr(terminator.NewQueue(env.Client, recorder))
 
 		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
@@ -112,6 +113,26 @@ var _ = Describe("Termination", func() {
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // VolumeDetachment
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // InstanceTerminationInitiation
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationValidation
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should delete nodes without nodeclaims", func() {
+			ExpectApplied(ctx, env.Client, node)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			// Drain + VolumeDetachment + InstanceTermination (skipped)
+			// We don't requeue because we're not updating the status condition of a NodeClaim
+			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			ExpectNotFound(ctx, env.Client, node)
+		})
+		It("should delete nodes with duplicate nodeclaims", func() {
+			nodeClaim2 := nodeClaim.DeepCopy()
+			nodeClaim.Name = fmt.Sprintf("%s-2", nodeClaim.Name)
+			ExpectApplied(ctx, env.Client, node, nodeClaim, nodeClaim2)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			// Drain + VolumeDetachment + InstanceTermination (skipped)
+			// We don't requeue because we're not updating the status condition of a NodeClaim
+			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
 			ExpectNotFound(ctx, env.Client, node)
 		})
 		It("should ignore nodes not managed by this Karpenter instance", func() {
@@ -188,7 +209,8 @@ var _ = Describe("Termination", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			// We only reconcile once since this label should be applied before draining the node
-			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
+
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			Expect(node.Labels[corev1.LabelNodeExcludeBalancers]).Should(Equal("karpenter"))
 		})
@@ -204,9 +226,10 @@ var _ = Describe("Termination", func() {
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			Expect(queue.Has(node, podSkip)).To(BeFalse())
-			ExpectSingletonReconciled(ctx, queue)
+			Expect(queue.Has(podSkip)).To(BeFalse())
+			ExpectObjectReconciled(ctx, env.Client, queue, podEvict)
 
 			// Expect node to exist and be draining
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
@@ -235,9 +258,10 @@ var _ = Describe("Termination", func() {
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			Expect(queue.Has(node, podSkip)).To(BeFalse())
-			ExpectSingletonReconciled(ctx, queue)
+			Expect(queue.Has(podSkip)).To(BeFalse())
+			ExpectObjectReconciled(ctx, env.Client, queue, podEvict)
 
 			// Expect node to exist and be draining
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
@@ -246,7 +270,7 @@ var _ = Describe("Termination", func() {
 			EventuallyExpectTerminating(ctx, env.Client, podEvict)
 			ExpectDeleted(ctx, env.Client, podEvict)
 
-			Expect(queue.Has(node, podSkip)).To(BeFalse())
+			Expect(queue.Has(podSkip)).To(BeFalse())
 
 			// Reconcile to delete node
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
@@ -268,7 +292,7 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, podEvict)
 
 			// Expect node to exist and be draining
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
@@ -296,8 +320,9 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim, pod)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
 
 			// Expect pod with no owner ref to be enqueued for eviction
 			EventuallyExpectTerminating(ctx, env.Client, pod)
@@ -364,13 +389,13 @@ var _ = Describe("Termination", func() {
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
 
 			// Expect podNoEvict to be added to the queue
-			Expect(queue.Has(node, podNoEvict)).To(BeTrue())
+			Expect(queue.Has(podNoEvict)).To(BeTrue())
 
-			// Attempt to evict the pod, but fail to do so
-			ExpectSingletonReconciled(ctx, queue)
+			// Attempt to evict the pod
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, queue, podNoEvict))
 
 			// Expect podNoEvict to fail eviction due to PDB, and be retried
-			Expect(queue.Has(node, podNoEvict)).To(BeTrue())
+			Expect(queue.Has(podNoEvict)).To(BeTrue())
 
 			// Delete pod to simulate successful eviction
 			ExpectDeleted(ctx, env.Client, podNoEvict)
@@ -431,18 +456,17 @@ var _ = Describe("Termination", func() {
 				}
 				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
 				ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
-				for range podGroup {
-					ExpectSingletonReconciled(ctx, queue)
+				for _, pod := range podGroup {
+					ExpectObjectReconciled(ctx, env.Client, queue, pod)
 				}
 				// Start draining the pod group, but don't complete it yet
 				EventuallyExpectTerminating(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
 
 				// Look at the next pod group and ensure that none of the pods have started terminating on it
 				if i != len(podGroups)-1 {
-					for range podGroups[i+1] {
-						ExpectSingletonReconciled(ctx, queue)
+					for _, pod := range podGroups[i+1] {
+						Expect(queue.Has(pod)).To(BeFalse())
 					}
-					ConsistentlyExpectNotTerminating(ctx, env.Client, lo.Map(podGroups[i+1], func(p *corev1.Pod, _ int) client.Object { return p })...)
 				}
 				// Expect that the pods are deleted -- which should unblock the next pod group
 				ExpectDeleted(ctx, env.Client, lo.Map(podGroup, func(p *corev1.Pod, _ int) client.Object { return p })...)
@@ -466,8 +490,9 @@ var _ = Describe("Termination", func() {
 			// Trigger Termination Controller
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation (non-critical)
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, podEvict)
 
 			// Expect node to exist and be draining
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
@@ -479,8 +504,8 @@ var _ = Describe("Termination", func() {
 			// Expect the critical pods to be evicted and deleted
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation (critical)
-			ExpectSingletonReconciled(ctx, queue)
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, podNodeCritical)
+			ExpectObjectReconciled(ctx, env.Client, queue, podClusterCritical)
 
 			EventuallyExpectTerminating(ctx, env.Client, podNodeCritical, podClusterCritical)
 			ExpectDeleted(ctx, env.Client, podNodeCritical)
@@ -514,10 +539,10 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, podEvict)
 
 			// Expect mirror pod to not be queued for eviction
-			Expect(queue.Has(node, podNoEvict)).To(BeFalse())
+			Expect(queue.Has(podNoEvict)).To(BeFalse())
 
 			// Expect podEvict to be enqueued for eviction then be successful
 			EventuallyExpectTerminating(ctx, env.Client, podEvict)
@@ -545,8 +570,8 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			ExpectSingletonReconciled(ctx, queue)
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, pods[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, pods[1])
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsUnknown()).To(BeTrue())
@@ -593,8 +618,8 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			ExpectSingletonReconciled(ctx, queue)
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, pods[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, pods[1])
 
 			// Expect the pods to be evicted
 			EventuallyExpectTerminating(ctx, env.Client, pods[0], pods[1])
@@ -623,8 +648,8 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			ExpectSingletonReconciled(ctx, queue)
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, pods[0])
+			ExpectObjectReconciled(ctx, env.Client, queue, pods[1])
 
 			// Expect the pods to be evicted
 			EventuallyExpectTerminating(ctx, env.Client, pods[0], pods[1])
@@ -654,7 +679,8 @@ var _ = Describe("Termination", func() {
 			// Before grace period, node should not delete
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+
 			ExpectNodeExists(ctx, env.Client, node.Name)
 			EventuallyExpectTerminating(ctx, env.Client, pod)
 
@@ -699,7 +725,7 @@ var _ = Describe("Termination", func() {
 			ExpectNotFound(ctx, env.Client, node)
 
 			// Expect that the old pod's key still exists in the queue
-			Expect(queue.Has(node, pod)).To(BeTrue())
+			Expect(queue.Has(pod)).To(BeTrue())
 
 			// Re-create the pod and node, it should now have the same name, but a different UUID
 			node = test.Node(test.NodeOptions{
@@ -716,8 +742,8 @@ var _ = Describe("Termination", func() {
 			})
 			ExpectApplied(ctx, env.Client, node, pod)
 
-			// Trigger eviction queue with the pod key still in it
-			ExpectSingletonReconciled(ctx, queue)
+			// Check if the queue has seen the pod (it shouldn't because its got a different UUID)
+			Expect(queue.Has(pod)).To(BeFalse())
 
 			Consistently(func(g Gomega) {
 				g.Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
@@ -743,6 +769,8 @@ var _ = Describe("Termination", func() {
 
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
+			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+
 			ExpectNodeExists(ctx, env.Client, node.Name)
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
@@ -779,6 +807,7 @@ var _ = Describe("Termination", func() {
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
+
 		})
 		Context("VolumeAttachments", func() {
 			It("should wait for volume attachments", func() {
@@ -923,29 +952,6 @@ var _ = Describe("Termination", func() {
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.GetHistogram().SampleCount)).To(BeNumerically("==", 1))
 		})
-		It("should update the eviction queueDepth metric when reconciling pods", func() {
-			minAvailable := intstr.FromInt32(0)
-			labelSelector := map[string]string{test.RandomName(): test.RandomName()}
-			pdb := test.PodDisruptionBudget(test.PDBOptions{
-				Labels: labelSelector,
-				// Don't let any pod evict
-				MinAvailable: &minAvailable,
-			})
-			ExpectApplied(ctx, env.Client, pdb, node, nodeClaim)
-			pods := test.Pods(5, test.PodOptions{NodeName: node.Name, ObjectMeta: metav1.ObjectMeta{
-				OwnerReferences: defaultOwnerRefs,
-				Labels:          labelSelector,
-			}})
-			ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
-
-			wqDepthBefore, _ := FindMetricWithLabelValues("workqueue_adds_total", map[string]string{"name": "eviction.workqueue"})
-			Expect(env.Client.Delete(ctx, node)).To(Succeed())
-			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Drain
-			wqDepthAfter, ok := FindMetricWithLabelValues("workqueue_adds_total", map[string]string{"name": "eviction.workqueue"})
-			Expect(ok).To(BeTrue())
-			Expect(lo.FromPtr(wqDepthAfter.GetCounter().Value) - lo.FromPtr(wqDepthBefore.GetCounter().Value)).To(BeNumerically("==", 5))
-		})
 	})
 })
 
@@ -960,10 +966,12 @@ func ExpectNodeWithNodeClaimDraining(c client.Client, nodeName string) *corev1.N
 
 func ExpectNotRequeued(result reconcile.Result) {
 	GinkgoHelper()
+	//nolint:staticcheck
 	Expect(result.Requeue == false && result.RequeueAfter == time.Duration(0)).To(BeTrue())
 }
 
 func ExpectRequeued(result reconcile.Result) {
 	GinkgoHelper()
+	//nolint:staticcheck
 	Expect(result.Requeue || result.RequeueAfter != time.Duration(0)).To(BeTrue())
 }
