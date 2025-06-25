@@ -180,7 +180,7 @@ var _ = Describe("Drift", func() {
 			})
 
 			// Execute command, deleting one node
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, driftedNodeClaim)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, driftedNodeClaim)
 
@@ -293,8 +293,9 @@ var _ = Describe("Drift", func() {
 				return lo.Contains(nc.Spec.Taints, v1.DisruptedNoScheduleTaint)
 			}))).To(Equal(3))
 			// Execute all commands in the queue, only deleting 3 nodes
-			for i := 0; i < 5; i++ {
-				ExpectSingletonReconciled(ctx, queue)
+			cmds := queue.GetCommands()
+			for _, cmd := range cmds {
+				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
@@ -384,8 +385,10 @@ var _ = Describe("Drift", func() {
 			}
 
 			// Delete 10 nodes, 1 node per nodepool, according to their budgets
-			for range 30 {
-				ExpectSingletonReconciled(ctx, queue)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(10))
+			for _, cmd := range cmds {
+				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 			}
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(20))
 			// These nodes will disrupt because of Drift instead of Emptiness because they are not marked consolidatable
@@ -450,7 +453,10 @@ var _ = Describe("Drift", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
@@ -551,7 +557,7 @@ var _ = Describe("Drift", func() {
 			// Process candidates
 			ExpectSingletonReconciled(ctx, disruptionController)
 			// Process the eligible candidate so that the node can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -668,7 +674,7 @@ var _ = Describe("Drift", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -730,7 +736,7 @@ var _ = Describe("Drift", func() {
 			// Process candidates
 			ExpectSingletonReconciled(ctx, disruptionController)
 			// Process the eligible candidate so that the node can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -740,8 +746,6 @@ var _ = Describe("Drift", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("should untaint nodes when drift replacement fails", func() {
-			cloudProvider.AllowedCreateCalls = 0 // fail the replacement and expect it to untaint
-
 			labels := map[string]string{
 				"app": "test",
 			}
@@ -773,13 +777,18 @@ var _ = Describe("Drift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			var wg sync.WaitGroup
-			ExpectNewNodeClaimsDeleted(ctx, env.Client, &wg, 1)
 			ExpectSingletonReconciled(ctx, disruptionController)
 			wg.Wait()
 
-			// Wait > 5 seconds for eventual consistency hack in orchestration.Queue
-			fakeClock.Step(5*time.Second + time.Nanosecond*1)
-			ExpectSingletonReconciled(ctx, queue)
+			// Simulate the new NodeClaim being created and then deleted
+			newNodeClaim, ok := lo.Find(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim) bool {
+				return nc.Name != nodeClaim.Name
+			})
+			Expect(ok).To(BeTrue())
+			ExpectDeleted(ctx, env.Client, newNodeClaim)
+			cluster.DeleteNodeClaim(newNodeClaim.Name)
+
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 			// We should have tried to create a new nodeClaim but failed to do so; therefore, we untainted the existing node
 			node = ExpectExists(ctx, env.Client, node)
 			Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
@@ -869,7 +878,7 @@ var _ = Describe("Drift", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -944,7 +953,10 @@ var _ = Describe("Drift", func() {
 			wg.Wait()
 
 			// Process the item so that the nodes can be deleted.
-			ExpectSingletonReconciled(ctx, queue)
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 

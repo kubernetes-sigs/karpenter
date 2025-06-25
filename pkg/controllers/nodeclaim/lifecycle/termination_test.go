@@ -165,6 +165,7 @@ var _ = Describe("Termination", func() {
 		// trigger nodeClaim Deletion that will make cloudProvider Delete and requeue reconciliation due to error
 		Expect(ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)).To(HaveOccurred())
 		result = ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will succeed
+		//nolint:staticcheck
 		Expect(result.Requeue).To(BeFalse())
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
