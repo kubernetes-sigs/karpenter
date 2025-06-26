@@ -221,7 +221,7 @@ type NodeClaimTemplateSpec struct {
 	// +kubebuilder:default:="15m"
 	// +kubebuilder:validation:Schemaless
 	// +optional
-	RegistrationTTL NillableDuration `json:"registrationTTL,omitempty" hash:"ignore"`
+	RegistrationTTL *metav1.Duration `json:"registrationTTL,omitempty" hash:"ignore"`
 }
 
 // This is used to convert between the NodeClaim's NodeClaimSpec to the Nodepool NodeClaimTemplate's NodeClaimSpec.

@@ -83,7 +83,7 @@ type NodeClaimSpec struct {
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +optional
-	RegistrationTTL NillableDuration `json:"registrationTTL,omitempty" hash:"ignore"`
+	RegistrationTTL *metav1.Duration `json:"registrationTTL,omitempty" hash:"ignore"`
 }
 
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
