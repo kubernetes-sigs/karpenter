@@ -111,49 +111,49 @@ func NewNodeClaim(
 // CanAdd returns whether the pod can be added to the NodeClaim
 // based on the taints/tolerations, host port compatibility,
 // requirements, resources, reserved capacity reservations, and topology requirements
-func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, err error) {
+func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, autoRelaxMinValues bool) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, minValuesAutoRelaxed bool, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, minValuesAutoRelaxed, err
 	}
 
 	// exposed host ports on the node
 	hostPorts := scheduling.GetHostPorts(pod)
 	if err := n.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
-		return nil, nil, nil, fmt.Errorf("checking host port usage, %w", err)
+		return nil, nil, nil, minValuesAutoRelaxed, fmt.Errorf("checking host port usage, %w", err)
 	}
 	nodeClaimRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
 
 	// Check NodeClaim Affinity Requirements
 	if err := nodeClaimRequirements.Compatible(podData.Requirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, fmt.Errorf("incompatible requirements, %w", err)
+		return nil, nil, nil, minValuesAutoRelaxed, fmt.Errorf("incompatible requirements, %w", err)
 	}
 	nodeClaimRequirements.Add(podData.Requirements.Values()...)
 
 	// Check Topology Requirements
 	topologyRequirements, err := n.topology.AddRequirements(pod, n.NodeClaimTemplate.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, minValuesAutoRelaxed, err
 	}
 	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, minValuesAutoRelaxed, err
 	}
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
 
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 
-	remaining, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, podData.Requests, n.daemonResources, requests)
+	remaining, minValuesAutoRelaxed, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, podData.Requests, n.daemonResources, requests, autoRelaxMinValues)
 	if err != nil {
 		// We avoid wrapping this err because calling String() on InstanceTypeFilterError is an expensive operation
 		// due to calls to resources.Merge and stringifying the nodeClaimRequirements
-		return nil, nil, nil, err
+		return nil, nil, nil, minValuesAutoRelaxed, err
 	}
 	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, minValuesAutoRelaxed, err
 	}
-	return nodeClaimRequirements, remaining, ofs, nil
+	return nodeClaimRequirements, remaining, ofs, minValuesAutoRelaxed, nil
 }
 
 // Add updates the NodeClaim to schedule the pod to this NodeClaim, updating
@@ -364,9 +364,10 @@ func (e InstanceTypeFilterError) Error() string {
 }
 
 //nolint:gocyclo
-func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, podRequests, daemonRequests, totalRequests corev1.ResourceList) (cloudprovider.InstanceTypes, error) {
+func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements, podRequests, daemonRequests, totalRequests corev1.ResourceList, autoRelaxMinValues bool) (cloudprovider.InstanceTypes, bool, error) {
 	// We hold the results of our scheduling simulation inside of this InstanceTypeFilterError struct
 	// to reduce the CPU load of having to generate the error string for a failed scheduling simulation
+	minValuesAutoRelaxed := false
 	err := InstanceTypeFilterError{
 		requirementsMet: false,
 		fits:            false,
@@ -419,14 +420,18 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		// We don't care about the minimum number of instance types that meet our requirements here, we only care if they meet our requirements.
 		_, err.minValuesIncompatibleErr = remaining.SatisfiesMinValues(requirements)
 		if err.minValuesIncompatibleErr != nil {
-			// If minValues is NOT met for any of the requirement across InstanceTypes, then return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes.
-			remaining = nil
+			if !autoRelaxMinValues {
+				// If AutoRelaxMinValues feature gate is disabled, return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes when min values is violated.
+				remaining = nil
+			} else {
+				minValuesAutoRelaxed = true
+			}
 		}
 	}
 	if len(remaining) == 0 {
-		return nil, err
+		return nil, minValuesAutoRelaxed, err
 	}
-	return remaining, nil
+	return remaining, minValuesAutoRelaxed, nil
 }
 
 func compatible(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements) bool {
