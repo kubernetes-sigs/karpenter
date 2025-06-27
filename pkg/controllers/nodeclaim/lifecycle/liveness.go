@@ -51,9 +51,14 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	if registered == nil {
 		return reconcile.Result{Requeue: true}, nil
 	}
+	nodeRegistrationTTL := registrationTTL
+	if nodeClaim.Spec.RegistrationTTL != nil {
+		nodeRegistrationTTL = nodeClaim.Spec.RegistrationTTL.Duration
+	}
+
 	// If the Registered statusCondition hasn't gone True during the TTL since we first updated it, we should terminate the NodeClaim
 	// NOTE: ttl has to be stored and checked in the same place since l.clock can advance after the check causing a race
-	if ttl := registrationTTL - l.clock.Since(registered.LastTransitionTime.Time); ttl > 0 {
+	if ttl := nodeRegistrationTTL - l.clock.Since(registered.LastTransitionTime.Time); ttl > 0 {
 		return reconcile.Result{RequeueAfter: ttl}, nil
 	}
 	if err := l.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
@@ -66,7 +71,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("terminating due to registration ttl")
+	log.FromContext(ctx).V(1).WithValues("ttl", nodeRegistrationTTL).Info("terminating due to registration ttl")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 		metrics.ReasonLabel:       "liveness",
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
