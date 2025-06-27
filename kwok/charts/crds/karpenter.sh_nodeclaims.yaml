@@ -117,7 +117,6 @@ spec:
                     - name
                   type: object
                 registrationTTL:
-                  default: 15m
                   description: |-
                     RegistrationTTL is the duration the controller will wait
                     before terminating a node that hasn't registered during TTL time.
