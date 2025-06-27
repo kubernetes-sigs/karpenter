@@ -51,6 +51,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	// If the Registered statusCondition hasn't gone True during the TTL since we first updated it, we should terminate the NodeClaim
 	// NOTE: ttl has to be stored and checked in the same place since l.clock can advance after the check causing a race
 	if ttl := registrationTTL - l.clock.Since(registered.LastTransitionTime.Time); ttl > 0 {
+		log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("requeueing due to registration ttl")
 		return reconcile.Result{RequeueAfter: ttl}, nil
 	}
 	if err := l.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
