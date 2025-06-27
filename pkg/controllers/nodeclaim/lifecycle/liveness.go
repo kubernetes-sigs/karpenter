@@ -18,6 +18,7 @@ package lifecycle
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 
@@ -38,6 +39,10 @@ type Liveness struct {
 	kubeClient client.Client
 }
 
+// registrationTTL is a heuristic time that we expect the node to register within
+// If we don't see the node within this time, then we should delete the NodeClaim and try again
+const registrationTTL = time.Minute * 15
+
 func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	registered := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
 	if registered.IsTrue() {
@@ -46,12 +51,14 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	if registered == nil {
 		return reconcile.Result{Requeue: true}, nil
 	}
+	nodeRegistrationTTL := registrationTTL
+	if nodeClaim.Spec.RegistrationTTL != nil {
+		nodeRegistrationTTL = nodeClaim.Spec.RegistrationTTL.Duration
+	}
 
-	registrationTTL := nodeClaim.Spec.RegistrationTTL.Duration
 	// If the Registered statusCondition hasn't gone True during the TTL since we first updated it, we should terminate the NodeClaim
 	// NOTE: ttl has to be stored and checked in the same place since l.clock can advance after the check causing a race
-	if ttl := registrationTTL - l.clock.Since(registered.LastTransitionTime.Time); ttl > 0 {
-		log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("requeueing due to registration ttl")
+	if ttl := nodeRegistrationTTL - l.clock.Since(registered.LastTransitionTime.Time); ttl > 0 {
 		return reconcile.Result{RequeueAfter: ttl}, nil
 	}
 	if err := l.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
