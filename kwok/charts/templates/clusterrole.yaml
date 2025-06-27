@@ -49,10 +49,10 @@ rules:
     verbs: ["get", "list", "watch"]
   # Write
   - apiGroups: ["karpenter.sh"]
-    resources: ["nodeclaims", "nodeclaims/status"]
+    resources: ["nodeclaims", "nodeclaims/status", "nodeclaims/finalizers"]
     verbs: ["create", "delete", "update", "patch"]
   - apiGroups: ["karpenter.sh"]
-    resources: ["nodepools", "nodepools/status"]
+    resources: ["nodepools", "nodepools/status", "nodepools/finalizers"]
     verbs: ["update", "patch"]
   - apiGroups: [""]
     resources: ["events"]
