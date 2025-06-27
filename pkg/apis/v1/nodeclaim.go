@@ -81,7 +81,6 @@ type NodeClaimSpec struct {
 	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
 	// +kubebuilder:default:="15m"
 	// +kubebuilder:validation:Type="string"
-	// +kubebuilder:validation:Schemaless
 	// +optional
 	RegistrationTTL *metav1.Duration `json:"registrationTTL,omitempty" hash:"ignore"`
 }
