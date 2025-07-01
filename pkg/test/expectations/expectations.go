@@ -364,7 +364,6 @@ func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *sta
 	for _, pod := range pods {
 		ExpectApplied(ctx, c, pod)
 	}
-	// TODO: Check the error on the provisioner scheduling round
 	results, _ := provisioner.Schedule(ctx)
 	return results
 }
