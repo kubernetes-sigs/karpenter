@@ -24,6 +24,7 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [Cluster API](https://github.com/kubernetes-sigs/karpenter-provider-cluster-api)
 - [GCP](https://github.com/cloudpilot-ai/karpenter-provider-gcp)
 - [Proxmox](https://github.com/sergelogvinov/karpenter-provider-proxmox)
+- [Oracle Cloud Infrastructure (OCI)](https://github.com/zoom/karpenter-oci)
 
 ## Community, discussion, contribution, and support
 
