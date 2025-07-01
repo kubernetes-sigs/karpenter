@@ -4300,7 +4300,7 @@ var _ = Context("Scheduling", func() {
 		})
 	})
 	Describe("NodePool requirements instance filtering", func() {
-		It("should return appropriate pod error when no compatible instance types exist", func() {
+		It("should return appropriate pod error when no available instance types exist", func() {
 			// First, verify the nodepool is ready and can schedule pods normally
 			ExpectApplied(ctx, env.Client, nodePool)
 			normalPod := test.UnschedulablePod()
@@ -4320,7 +4320,7 @@ var _ = Context("Scheduling", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// Create a pod that should fail to schedule due to being too large for the previously created node
-			// and no compatible instance types
+			// and no available instance types
 			pod := test.UnschedulablePod(test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod-filtered",
@@ -4344,7 +4344,7 @@ var _ = Context("Scheduling", func() {
 			for _, err := range results.PodErrors {
 				fmt.Println(results.PodErrors[pod])
 				ExpectNotScheduled(ctx, env.Client, pod)
-				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all compatible instance types"))
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
 			}
 		})
 		It("should handle multiple pods when requirements filter out all instance types", func() {
@@ -4377,7 +4377,7 @@ var _ = Context("Scheduling", func() {
 			Expect(results.PodErrors).To(HaveLen(3))
 			for pod, err := range results.PodErrors {
 				ExpectNotScheduled(ctx, env.Client, pod)
-				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all compatible instance types"))
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
 			}
 		})
 		It("should handle conflicting requirements that eliminate all instance types", func() {
@@ -4410,7 +4410,7 @@ var _ = Context("Scheduling", func() {
 			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(results.PodErrors).To(HaveLen(1))
 			for _, err := range results.PodErrors {
-				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all compatible instance types"))
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
 			}
 		})
 		It("should handle zone requirements that filter out all instance types", func() {
@@ -4436,7 +4436,7 @@ var _ = Context("Scheduling", func() {
 			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(results.PodErrors).To(HaveLen(1))
 			for _, err := range results.PodErrors {
-				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all compatible instance types"))
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
 			}
 		})
 	})

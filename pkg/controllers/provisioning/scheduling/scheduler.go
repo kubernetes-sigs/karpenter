@@ -444,7 +444,7 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 		return nil
 	}
 	if len(s.nodeClaimTemplates) == 0 {
-		return serrors.Wrap(fmt.Errorf("nodepool requirements filtered out all compatible instance types"), "Pod", klog.KRef("", pod.Name))
+		return serrors.Wrap(fmt.Errorf("nodepool requirements filtered out available instance types"), "Pod", klog.KRef("", pod.Name))
 	}
 	err := s.addToNewNodeClaim(ctx, pod)
 	if err == nil {
