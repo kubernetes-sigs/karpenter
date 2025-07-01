@@ -229,8 +229,8 @@ func (its InstanceTypes) Truncate(ctx context.Context, requirements scheduling.R
 	truncatedInstanceTypes := lo.Slice(its.OrderByPrice(requirements), 0, maxItems)
 	// Only check for a validity of NodeClaim if its requirement has minValues in it.
 	if requirements.HasMinValues() {
-		// If minValues is NOT met for any of the requirement across InstanceTypes, then still allow it if fallback is enabled.
-		if _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil && !options.FromContext(ctx).FeatureGates.AutoRelaxMinValues {
+		// If minValues is NOT met for any of the requirement across InstanceTypes, then still allow it if relaxation is enabled.
+		if _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil && options.FromContext(ctx).RelaxationPolicy != options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable {
 			return its, fmt.Errorf("validating minValues, %w", err)
 		}
 	}

@@ -133,7 +133,7 @@ func NewScheduler(
 	// Pre-filter instance types eligible for NodePools to reduce work done during scheduling loops for pods
 	templates := lo.FilterMap(nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
 		nct := NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions, _, _ = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{}, karpopts.FromContext(ctx).FeatureGates.AutoRelaxMinValues)
+		nct.InstanceTypeOptions, _, _ = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{}, karpopts.FromContext(ctx).RelaxationPolicy == karpopts.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable)
 		if len(nct.InstanceTypeOptions) == 0 {
 			recorder.Publish(NoCompatibleInstanceTypes(np))
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, nodepool requirements filtered out all instance types")
@@ -530,36 +530,29 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	var updatedInstanceTypes []*cloudprovider.InstanceType
 	var offeringsToReserve []*cloudprovider.Offering
 
-	// If AutoRelaxMinValues is enabled, we go through the nodepools twice - first with the fallback disabled and then with it enabled since we only want to relax the min values if there's no nodepool
-	// which the pod will schedule against without relaxing.
-	queueLength := lo.Ternary(karpopts.FromContext(ctx).FeatureGates.AutoRelaxMinValues, len(s.nodeClaimTemplates)*2, len(s.nodeClaimTemplates))
-
 	errs := make([]error, len(s.nodeClaimTemplates))
-	parallelizeUntil(s.numConcurrentReconciles, queueLength, func(i int) bool {
-		nodeClaimTemplateIndex := i % len(s.nodeClaimTemplates)
-		its := s.nodeClaimTemplates[nodeClaimTemplateIndex].InstanceTypeOptions
+	parallelizeUntil(s.numConcurrentReconciles, len(s.nodeClaimTemplates), func(i int) bool {
+		its := s.nodeClaimTemplates[i].InstanceTypeOptions
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
-		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[nodeClaimTemplateIndex].NodePoolName]; ok {
+		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
 			its = filterByRemainingResources(its, remaining)
 			if len(its) == 0 {
-				errs[nodeClaimTemplateIndex] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[nodeClaimTemplateIndex].NodePoolName))
+				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
 				return true
-			} else if len(s.nodeClaimTemplates[nodeClaimTemplateIndex].InstanceTypeOptions) != len(its) {
+			} else if len(s.nodeClaimTemplates[i].InstanceTypeOptions) != len(its) {
 				log.FromContext(ctx).V(1).WithValues(
-					"NodePool", klog.KRef("", s.nodeClaimTemplates[nodeClaimTemplateIndex].NodePoolName),
+					"NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName),
 				).Info(fmt.Sprintf(
 					"%d out of %d instance types were excluded because they would breach limits",
-					len(s.nodeClaimTemplates[nodeClaimTemplateIndex].InstanceTypeOptions)-len(its),
-					len(s.nodeClaimTemplates[nodeClaimTemplateIndex].InstanceTypeOptions),
+					len(s.nodeClaimTemplates[i].InstanceTypeOptions)-len(its),
+					len(s.nodeClaimTemplates[i].InstanceTypeOptions),
 				))
 			}
 		}
-		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[nodeClaimTemplateIndex], s.topology, s.daemonOverhead[s.nodeClaimTemplates[nodeClaimTemplateIndex]], s.daemonHostPortUsage[s.nodeClaimTemplates[nodeClaimTemplateIndex]], its, s.reservationManager, s.reservedOfferingMode)
-		// Enable relaxing min values only on the second pass.
-		autoRelaxMinValues := lo.Ternary(i >= len(s.nodeClaimTemplates), true, false)
-		r, its, ofs, minValuesAutoRelaxed, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], autoRelaxMinValues)
+		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
+		r, its, ofs, minValuesRelaxed, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], karpopts.FromContext(ctx).RelaxationPolicy == karpopts.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable)
 		if err != nil {
-			errs[nodeClaimTemplateIndex] = err
+			errs[i] = err
 
 			// If the pod is compatible with a NodePool with reserved offerings available, we shouldn't fall back to a NodePool
 			// with a lower weight. We could consider allowing "fallback" to NodePools with equal weight if they also have
@@ -590,8 +583,8 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 			return false
 		}
 
-		if minValuesAutoRelaxed {
-			nodeClaim.Annotations[v1.NodeClaimMinValuesAutoRelaxedAnnotationKey] = "true"
+		if minValuesRelaxed {
+			nodeClaim.Annotations[v1.NodeClaimPreferencesRelaxedAnnotationKey] = string(karpopts.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable)
 		}
 
 		newNodeClaim = nodeClaim

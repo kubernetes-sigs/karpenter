@@ -44,16 +44,17 @@ var (
 			CapacityTypeLabel,
 		},
 	)
-	NodeClaimsCreatedWithMinValuesAutoRelaxedTotal = opmetrics.NewPrometheusCounter(
+	NodeClaimsCreatedWithRelaxedPreferencesTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
-			Name:      "created_with_min_values_auto_relaxed_total",
-			Help:      "Number of nodeclaims created with min values auto relaxed in total by Karpenter. Labeled by the owning nodepool.",
+			Name:      "created_with_relaxed_preferences_total",
+			Help:      "Number of nodeclaims created with relaxed preferences in total by Karpenter. Labeled by the owning nodepool and reason for the relaxation.",
 		},
 		[]string{
 			NodePoolLabel,
+			RelaxationReasonLabel,
 		},
 	)
 	NodeClaimsTerminatedTotal = opmetrics.NewPrometheusCounter(
