@@ -37,6 +37,13 @@ const (
 	PreferencePolicyRespect PreferencePolicy = "Respect"
 )
 
+type RelaxationPolicy string
+
+const (
+	RelaxationPolicyDefault                         RelaxationPolicy = "Default"
+	RelaxationPolicyRelaxMinValuesWhenUnsatisfiable RelaxationPolicy = "RelaxMinValuesWhenUnsatisfiable"
+)
+
 var (
 	validLogLevels          = []string{"", "debug", "info", "error"}
 	validPreferencePolicies = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
@@ -52,7 +59,6 @@ type FeatureGates struct {
 	NodeRepair              bool
 	ReservedCapacity        bool
 	SpotToSpotConsolidation bool
-	AutoRelaxMinValues      bool
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -75,6 +81,8 @@ type Options struct {
 	BatchIdleDuration       time.Duration
 	preferencePolicyRaw     string
 	PreferencePolicy        PreferencePolicy
+	relaxationPolicyRaw     string
+	RelaxationPolicy        RelaxationPolicy
 	FeatureGates            FeatureGates
 }
 
@@ -113,7 +121,8 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=false,SpotToSpotConsolidation=false,AutoRelaxMinValues=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, and AutoRelaxMinValues")
+	fs.StringVar(&o.relaxationPolicyRaw, "relaxation-policy", env.WithDefaultString("RELAXATION_POLICY", string(RelaxationPolicyDefault)), "Relaxation policy for scheduling. Options include 'Default' for existing behavior or 'RelaxWhenMinValuesUnsatisfiable' where Karpenter relaxes min values when it isn't satisfied.")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=false,SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, and SpotToSpotConsolidation.")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -129,6 +138,9 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	if !lo.Contains(validPreferencePolicies, PreferencePolicy(o.preferencePolicyRaw)) {
 		return fmt.Errorf("validating cli flags / env vars, invalid PREFERENCE_POLICY %q", o.preferencePolicyRaw)
 	}
+	if !lo.Contains([]RelaxationPolicy{RelaxationPolicyDefault, RelaxationPolicyRelaxMinValuesWhenUnsatisfiable}, RelaxationPolicy(o.relaxationPolicyRaw)) {
+		return fmt.Errorf("validating cli flags / env vars, invalid MIN_VALUES_POLICY %q", o.relaxationPolicyRaw)
+	}
 	if o.CPURequests <= 0 {
 		return fmt.Errorf("validating cli flags / env vars, invalid CPU_REQUESTS %d, must be positive", o.CPURequests)
 	}
@@ -138,6 +150,7 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	}
 	o.FeatureGates = gates
 	o.PreferencePolicy = PreferencePolicy(o.preferencePolicyRaw)
+	o.RelaxationPolicy = RelaxationPolicy(o.relaxationPolicyRaw)
 	return nil
 }
 
@@ -162,9 +175,6 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap["ReservedCapacity"]; ok {
 		gates.ReservedCapacity = val
-	}
-	if val, ok := gateMap["AutoRelaxMinValues"]; ok {
-		gates.AutoRelaxMinValues = val
 	}
 
 	return gates, nil

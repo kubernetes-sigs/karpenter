@@ -411,9 +411,10 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
 	})
 
-	if val, ok := nodeClaim.Annotations[v1.NodeClaimMinValuesAutoRelaxedAnnotationKey]; ok && val == "true" {
-		metrics.NodeClaimsCreatedWithMinValuesAutoRelaxedTotal.Inc(map[string]string{
-			metrics.NodePoolLabel: nodeClaim.Labels[v1.NodePoolLabelKey],
+	if val, ok := nodeClaim.Annotations[v1.NodeClaimPreferencesRelaxedAnnotationKey]; ok {
+		metrics.NodeClaimsCreatedWithRelaxedPreferencesTotal.Inc(map[string]string{
+			metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.RelaxationReasonLabel: val,
 		})
 	}
 	// Update the nodeclaim manually in state to avoid eventual consistency delay races with our watcher.
