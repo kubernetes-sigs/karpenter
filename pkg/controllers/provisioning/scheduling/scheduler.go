@@ -130,6 +130,7 @@ func NewScheduler(
 		}
 	}
 	// Pre-filter instance types eligible for NodePools to reduce work done during scheduling loops for pods
+	// if no templates remain, we still want to build the scheduler so that Karpenter can ack pods which can schedule to existing and in-flight capacity
 	templates := lo.FilterMap(nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
 		nct := NewNodeClaimTemplate(np)
 		nct.InstanceTypeOptions, _ = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{})
@@ -441,6 +442,9 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// Pick existing node that we are about to create
 	if err := s.addToInflightNode(ctx, pod); err == nil {
 		return nil
+	}
+	if len(s.nodeClaimTemplates) == 0 {
+		return serrors.Wrap(fmt.Errorf("nodepool requirements filtered out all compatible instance types"), "Pod", klog.KRef("", pod.Name))
 	}
 	err := s.addToNewNodeClaim(ctx, pod)
 	if err == nil {
