@@ -4299,8 +4299,8 @@ var _ = Context("Scheduling", func() {
 			Expect(node.Labels).To(HaveKeyWithValue(v1.NodePoolLabelKey, nodePool.Name))
 		})
 	})
-	FDescribe("NodePool requirements instance filtering", func() {
-		FIt("should return appropriate pod error when no compatible instance types exist", func() {
+	Describe("NodePool requirements instance filtering", func() {
+		It("should return appropriate pod error when no compatible instance types exist", func() {
 			// First, verify the nodepool is ready and can schedule pods normally
 			ExpectApplied(ctx, env.Client, nodePool)
 			normalPod := test.UnschedulablePod()
