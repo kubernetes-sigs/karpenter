@@ -44,6 +44,19 @@ var (
 			CapacityTypeLabel,
 		},
 	)
+	NodeClaimsCreatedWithRelaxedPreferencesTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Subsystem: NodeClaimSubsystem,
+			Name:      "created_with_relaxed_preferences_total",
+			Help:      "Number of nodeclaims created with relaxed preferences in total by Karpenter. Labeled by the owning nodepool and reason for the relaxation.",
+		},
+		[]string{
+			NodePoolLabel,
+			RelaxationReasonLabel,
+		},
+	)
 	NodeClaimsTerminatedTotal = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{
