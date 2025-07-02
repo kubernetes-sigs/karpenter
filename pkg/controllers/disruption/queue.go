@@ -125,7 +125,9 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 
 func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "disruption.queue")
+	q.RLock()
 	cmd, exists := q.providerIDToCommand[nodeClaim.Status.ProviderID]
+	q.RUnlock()
 	if !exists {
 		log.FromContext(ctx).Error(fmt.Errorf("no command found"), "")
 		return reconcile.Result{}, nil
