@@ -26,7 +26,41 @@ import (
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate(ctx context.Context) (errs error) {
-	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist())
+	errs = multierr.Combine(
+		in.Spec.Template.validateLabels(),
+		in.Spec.Template.Spec.validateTaints(),
+		in.Spec.Template.Spec.validateRequirements(ctx),
+		in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(),
+		in.validateReplicasConstraints(),
+	)
+	return errs
+}
+
+// validateReplicasConstraints validates that when replicas is set, incompatible fields are not set
+func (in *NodePool) validateReplicasConstraints() (errs error) {
+	if in.Spec.Replicas == nil {
+		return nil
+	}
+
+	if in.Spec.Weight != nil {
+		errs = multierr.Append(errs, fmt.Errorf("weight cannot be specified when replicas is set"))
+	}
+
+	// We add kubebuilder defaults to consolidationPolicy, anything other than default is rejected
+	if in.Spec.Disruption.ConsolidationPolicy != ConsolidationPolicyWhenEmptyOrUnderutilized {
+		errs = multierr.Append(errs, fmt.Errorf("disruption.consolidationPolicy cannot be specified when replicas is set"))
+	}
+
+	// We add kubebuilder defaults to consolidateAfter, anything other than default is rejected
+	consolidateAfter := in.Spec.Disruption.ConsolidateAfter
+	if consolidateAfter.Duration != nil || len(consolidateAfter.Raw) > 0 {
+		errs = multierr.Append(errs, fmt.Errorf("disruption.consolidateAfter cannot be specified when replicas is set"))
+	}
+
+	if in.Spec.Limits != nil {
+		errs = multierr.Append(errs, fmt.Errorf("limits cannot be specified when replicas is set"))
+	}
+
 	return errs
 }
 
