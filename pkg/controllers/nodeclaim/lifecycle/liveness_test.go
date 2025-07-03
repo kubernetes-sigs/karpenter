@@ -72,6 +72,8 @@ var _ = Describe("Liveness", func() {
 			}
 			nodeClaim := test.NodeClaim(nodeClaimOpts...)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+			ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -124,7 +126,7 @@ var _ = Describe("Liveness", func() {
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
 	})
-	It("should delete the NodeClaim when the NodeClaim hasn't launched past the registration ttl", func() {
+	It("should delete the NodeClaim when the NodeClaim hasn't launched past the launch ttl", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -148,14 +150,8 @@ var _ = Describe("Liveness", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
-		fakeClock.Step(time.Minute * 20)
+		fakeClock.Step(time.Minute * 10)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
-		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
-			Type:    v1.ConditionTypeNodeRegistrationHealthy,
-			Status:  metav1.ConditionFalse,
-			Reason:  nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).Reason,
-			Message: nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).Message,
-		})
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
