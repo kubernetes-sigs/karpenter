@@ -49,9 +49,10 @@ type optionsKey struct{}
 type FeatureGates struct {
 	inputStr string
 
-	NodeRepair              bool
-	ReservedCapacity        bool
-	SpotToSpotConsolidation bool
+	NodeRepair                bool
+	ReservedCapacity          bool
+	SpotToSpotConsolidation   bool
+	DisableMetricsControllers bool
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -161,6 +162,9 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap["ReservedCapacity"]; ok {
 		gates.ReservedCapacity = val
+	}
+	if val, ok := gateMap["DisableMetricsControllers"]; ok {
+		gates.DisableMetricsControllers = val
 	}
 
 	return gates, nil
