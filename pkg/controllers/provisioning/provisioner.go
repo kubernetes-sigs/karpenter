@@ -315,7 +315,11 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	}
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
 
-	opts := []scheduler.Options{scheduler.DisableReservedCapacityFallback, scheduler.NumConcurrentReconciles(int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0)))}
+	opts := []scheduler.Options{
+		scheduler.DisableReservedCapacityFallback,
+		scheduler.NumConcurrentReconciles(int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))),
+		scheduler.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy),
+	}
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduler.IgnorePreferences)
 	}
@@ -405,16 +409,20 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 	log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
 		Info("created nodeclaim")
 
-	metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       options.Reason,
-		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-	})
-
-	if val, ok := nodeClaim.Annotations[v1.NodeClaimPreferencesRelaxedAnnotationKey]; ok {
-		metrics.NodeClaimsCreatedWithRelaxedPreferencesTotal.Inc(map[string]string{
+	if val, ok := nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]; ok {
+		metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
+			metrics.ReasonLabel:           options.Reason,
 			metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.RelaxationReasonLabel: val,
+			metrics.CapacityTypeLabel:     nodeClaim.Labels[v1.CapacityTypeLabelKey],
+			metrics.MinValuesRelaxedLabel: val,
+		})
+	} else {
+		// If annotation is missing for any reason, assume that min values wasn't relaxed.
+		metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
+			metrics.ReasonLabel:           options.Reason,
+			metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.CapacityTypeLabel:     nodeClaim.Labels[v1.CapacityTypeLabelKey],
+			metrics.MinValuesRelaxedLabel: "false",
 		})
 	}
 	// Update the nodeclaim manually in state to avoid eventual consistency delay races with our watcher.

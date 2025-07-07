@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -47,6 +48,8 @@ var _ = Describe("Instance Type Selection", func() {
 	}
 
 	BeforeEach(func() {
+		fmt.Println("Min Values Policy")
+		fmt.Println(options.FromContext(ctx).MinValuesPolicy)
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
@@ -916,7 +919,7 @@ var _ = Describe("Instance Type Selection", func() {
 			ExpectApplied(ctx, env.Client, pod2)
 			results, _ := prov.Schedule(ctx)
 			for _, v := range results.PodErrors {
-				Expect(v.Error()).To(ContainSubstring(`minValues requirement is not met for label (label=karpenter/numerical-value)`))
+				Expect(v.Error()).To(ContainSubstring(`minValues requirement is not met for label(s) (label(s)=[karpenter/numerical-value])`))
 			}
 			ExpectNotScheduled(ctx, env.Client, pod1)
 			ExpectNotScheduled(ctx, env.Client, pod2)

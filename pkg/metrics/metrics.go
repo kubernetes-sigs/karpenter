@@ -36,25 +36,13 @@ var (
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
 			Name:      "created_total",
-			Help:      "Number of nodeclaims created in total by Karpenter. Labeled by reason the nodeclaim was created and the owning nodepool.",
+			Help:      "Number of nodeclaims created in total by Karpenter. Labeled by reason the nodeclaim was created, the owning nodepool, the capacity type and if min values was relaxed for this nodeclaim.",
 		},
 		[]string{
 			ReasonLabel,
 			NodePoolLabel,
 			CapacityTypeLabel,
-		},
-	)
-	NodeClaimsCreatedWithRelaxedPreferencesTotal = opmetrics.NewPrometheusCounter(
-		crmetrics.Registry,
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: NodeClaimSubsystem,
-			Name:      "created_with_relaxed_preferences_total",
-			Help:      "Number of nodeclaims created with relaxed preferences in total by Karpenter. Labeled by the owning nodepool and reason for the relaxation.",
-		},
-		[]string{
-			NodePoolLabel,
-			RelaxationReasonLabel,
+			MinValuesRelaxedLabel,
 		},
 	)
 	NodeClaimsTerminatedTotal = opmetrics.NewPrometheusCounter(

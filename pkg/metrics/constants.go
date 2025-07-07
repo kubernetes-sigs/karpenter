@@ -29,7 +29,7 @@ const (
 	NodePoolLabel         = "nodepool"
 	ReasonLabel           = "reason"
 	CapacityTypeLabel     = "capacity_type"
-	RelaxationReasonLabel = "relaxation_reason"
+	MinValuesRelaxedLabel = "min_values_relaxed"
 
 	// Reasons for CREATE/DELETE shared metrics
 	ProvisionedReason = "provisioned"

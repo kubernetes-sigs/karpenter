@@ -2585,9 +2585,9 @@ var _ = Describe("Provisioning", func() {
 		})
 	})
 
-	Context("RelaxationPolicy", func() {
+	Context("MinValuesPolicy", func() {
 		AfterEach(func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{RelaxationPolicy: lo.ToPtr(options.RelaxationPolicyDefault)}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyStrict)}))
 		})
 
 		Context("with instance type requirements", func() {
@@ -2616,9 +2616,9 @@ var _ = Describe("Provisioning", func() {
 				})
 			})
 
-			Context("with RelaxationPolicy set to Default", func() {
+			Context("with MinValuesPolicy set to Strict", func() {
 				BeforeEach(func() {
-					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{RelaxationPolicy: lo.ToPtr(options.RelaxationPolicyDefault)}))
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyStrict)}))
 				})
 
 				It("should not schedule when minValues requirement is not met", func() {
@@ -2674,9 +2674,9 @@ var _ = Describe("Provisioning", func() {
 				})
 			})
 
-			Context("with RelaxationPolicy set to RelaxWhenMinValuesUnsatisfiable", func() {
+			Context("with MinValuesPolicy set to BestEffort", func() {
 				BeforeEach(func() {
-					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{RelaxationPolicy: lo.ToPtr(options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable)}))
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyBestEffort)}))
 				})
 
 				It("should schedule even when minValues requirement is not met", func() {
@@ -2729,13 +2729,25 @@ var _ = Describe("Provisioning", func() {
 
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
+					nodeClaim := cloudProvider.CreateCalls[0]
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
-					Expect(node.Annotations[v1.NodeClaimPreferencesRelaxedAnnotationKey]).To(Equal(string(options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable)))
+					Expect(node.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
 
-					ExpectMetricCounterValue(metrics.NodeClaimsCreatedWithRelaxedPreferencesTotal, 1, map[string]string{
-						metrics.NodePoolLabel:         node.Labels[v1.NodePoolLabelKey],
-						metrics.RelaxationReasonLabel: string(options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable),
+					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
+						metrics.ReasonLabel:           metrics.ProvisionedReason,
+						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
+						metrics.CapacityTypeLabel:     "",
+						metrics.MinValuesRelaxedLabel: "true",
 					})
+					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
+						v1.NodeSelectorRequirementWithMinValues{
+							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+								Key:      corev1.LabelInstanceTypeStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"instance-type-1", "instance-type-2"},
+							},
+							MinValues: lo.ToPtr(2),
+						}))
 				})
 
 				It("should relax minValues before falling back to other nodepools", func() {
@@ -2809,9 +2821,19 @@ var _ = Describe("Provisioning", func() {
 
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
+					nodeClaim := cloudProvider.CreateCalls[0]
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
-					Expect(node.Annotations).To(HaveKey(v1.NodeClaimPreferencesRelaxedAnnotationKey))
+					Expect(node.Annotations).To(HaveKey(v1.NodeClaimMinValuesRelaxedAnnotationKey))
 					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(defaultNodePool.Name))
+					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
+						v1.NodeSelectorRequirementWithMinValues{
+							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+								Key:      corev1.LabelInstanceTypeStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"instance-type-1", "instance-type-2"},
+							},
+							MinValues: lo.ToPtr(2),
+						}))
 				})
 
 				It("should choose nodepool with higher weight when relaxing minValues", func() {
@@ -2886,15 +2908,27 @@ var _ = Describe("Provisioning", func() {
 
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
+					nodeClaim := cloudProvider.CreateCalls[0]
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
-					Expect(node.Annotations[v1.NodeClaimPreferencesRelaxedAnnotationKey]).To(Equal(string(options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable)))
+					Expect(node.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
 					// Ensure that the nodepool with higher weight was chosen
 					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(defaultNodePool.Name))
 
-					ExpectMetricCounterValue(metrics.NodeClaimsCreatedWithRelaxedPreferencesTotal, 1, map[string]string{
-						metrics.NodePoolLabel:         node.Labels[v1.NodePoolLabelKey],
-						metrics.RelaxationReasonLabel: string(options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable),
+					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
+						metrics.ReasonLabel:           metrics.ProvisionedReason,
+						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
+						metrics.CapacityTypeLabel:     "",
+						metrics.MinValuesRelaxedLabel: "true",
 					})
+					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
+						v1.NodeSelectorRequirementWithMinValues{
+							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+								Key:      corev1.LabelInstanceTypeStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"instance-type-1", "instance-type-2"},
+							},
+							MinValues: lo.ToPtr(2),
+						}))
 				})
 			})
 		})
@@ -2924,9 +2958,9 @@ var _ = Describe("Provisioning", func() {
 				})
 			})
 
-			Context("with RelaxationPolicy set to Default", func() {
+			Context("with MinValuesPolicy set to Strict", func() {
 				BeforeEach(func() {
-					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{RelaxationPolicy: lo.ToPtr(options.RelaxationPolicyDefault)}))
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyStrict)}))
 				})
 
 				It("should not schedule when zone minValues requirement is not met", func() {
@@ -2969,9 +3003,9 @@ var _ = Describe("Provisioning", func() {
 				})
 			})
 
-			Context("with RelaxationPolicy set to RelaxWhenMinValuesUnsatisfiable", func() {
+			Context("with MinValuesPolicy set to BestEffort", func() {
 				BeforeEach(func() {
-					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{RelaxationPolicy: lo.ToPtr(options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable)}))
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyBestEffort)}))
 				})
 
 				It("should schedule even when zone minValues requirement is not met", func() {
@@ -3011,13 +3045,133 @@ var _ = Describe("Provisioning", func() {
 
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					node := ExpectScheduled(ctx, env.Client, pod)
+					nodeClaim := cloudProvider.CreateCalls[0]
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
 					Expect(node.Labels[corev1.LabelTopologyZone]).To(Or(Equal("test-zone-1"), Equal("test-zone-2")))
-					Expect(node.Annotations[v1.NodeClaimPreferencesRelaxedAnnotationKey]).To(Equal(string(options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable)))
+					Expect(node.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
 
-					ExpectMetricCounterValue(metrics.NodeClaimsCreatedWithRelaxedPreferencesTotal, 1, map[string]string{
-						metrics.NodePoolLabel:         node.Labels[v1.NodePoolLabelKey],
-						metrics.RelaxationReasonLabel: string(options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable),
+					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
+						metrics.ReasonLabel:           metrics.ProvisionedReason,
+						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
+						metrics.CapacityTypeLabel:     "",
+						metrics.MinValuesRelaxedLabel: "true",
+					})
+					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
+						v1.NodeSelectorRequirementWithMinValues{
+							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
+							},
+							MinValues: lo.ToPtr(2),
+						}))
+				})
+			})
+		})
+
+		Context("with both instance type and zone requirements", func() {
+			var defaultNodePool *v1.NodePool
+
+			BeforeEach(func() {
+				// Create a nodepool with instance type minValues requirement
+				defaultNodePool = test.NodePool(v1.NodePool{
+					Spec: v1.NodePoolSpec{
+						Weight: lo.ToPtr(int32(100)),
+						Template: v1.NodeClaimTemplate{
+							Spec: v1.NodeClaimTemplateSpec{
+								Requirements: []v1.NodeSelectorRequirementWithMinValues{
+									{
+										NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+											Key:      corev1.LabelInstanceTypeStable,
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"instance-type-1", "instance-type-2", "instance-type-3"},
+										},
+										MinValues: lo.ToPtr(3),
+									},
+									{
+										NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+											Key:      corev1.LabelTopologyZone,
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
+										},
+										MinValues: lo.ToPtr(3),
+									},
+								},
+							},
+						},
+					},
+				})
+			})
+
+			Context("with MinValuesPolicy set to BestEffort", func() {
+				BeforeEach(func() {
+					ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyBestEffort)}))
+				})
+
+				It("should schedule when minValues requirement is not met", func() {
+					var instanceTypes []*cloudprovider.InstanceType
+					opts1 := fake.InstanceTypeOptions{
+						Name:             "instance-type-1",
+						Architecture:     v1.ArchitectureArm64,
+						OperatingSystems: sets.New(string(corev1.Linux)),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+					}
+					opts1.Offerings = []*cloudprovider.Offering{
+						{
+							Available:    true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+							Price:        0.52,
+						},
+						{
+							Available:    true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
+							Price:        0.54,
+						},
+					}
+					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+					cloudProvider.InstanceTypes = instanceTypes
+
+					ExpectApplied(ctx, env.Client, defaultNodePool)
+					pod := test.UnschedulablePod(test.PodOptions{
+						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("0.9"),
+							corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+						},
+					})
+
+					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := ExpectScheduled(ctx, env.Client, pod)
+					nodeClaim := cloudProvider.CreateCalls[0]
+					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
+					Expect(node.Labels[corev1.LabelTopologyZone]).To(Or(Equal("test-zone-1"), Equal("test-zone-2")))
+					Expect(node.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
+					Expect(nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
+					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
+						v1.NodeSelectorRequirementWithMinValues{
+							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+								Key:      corev1.LabelInstanceTypeStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"instance-type-1"},
+							},
+							MinValues: lo.ToPtr(1),
+						},
+						v1.NodeSelectorRequirementWithMinValues{
+							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"test-zone-1", "test-zone-2", "test-zone-3"},
+							},
+							MinValues: lo.ToPtr(2),
+						}))
+
+					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
+						metrics.ReasonLabel:           metrics.ProvisionedReason,
+						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
+						metrics.CapacityTypeLabel:     "",
+						metrics.MinValuesRelaxedLabel: "true",
 					})
 				})
 			})

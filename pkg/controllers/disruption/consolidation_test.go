@@ -4904,7 +4904,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 	})
-	Context("RelaxationPolicy", func() {
+	Context("MinValuesPolicy", func() {
 		var nodePoolWithMinValues *v1.NodePool
 
 		BeforeEach(func() {
@@ -4944,11 +4944,11 @@ var _ = Describe("Consolidation", func() {
 
 		AfterEach(func() {
 			// Reset the relaxation policy to not pollute other tests.
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{RelaxationPolicy: lo.ToPtr(options.RelaxationPolicyDefault)}))
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyStrict)}))
 		})
 
-		It("should not consolidate a node by relaxing min values when policy is set to RelaxMinValuesWhenUnsatisfiable", func() {
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{RelaxationPolicy: lo.ToPtr(options.RelaxationPolicyRelaxMinValuesWhenUnsatisfiable)}))
+		It("should not consolidate a node by relaxing min values when policy is set to BestEffort", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyBestEffort)}))
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
