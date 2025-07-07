@@ -97,6 +97,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduling.IgnorePreferences)
 	}
+	opts = append(opts, scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy))
 	scheduler, err := provisioner.NewScheduler(
 		log.IntoContext(ctx, operatorlogging.NopLogger),
 		pods,

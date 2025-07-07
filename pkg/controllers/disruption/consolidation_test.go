@@ -4991,7 +4991,7 @@ var _ = Describe("Consolidation", func() {
 
 			// Expect Unconsolidatable events to be fired for min values violation.
 			Expect(lo.Filter(recorder.Events(), func(e events.Event, _ int) bool {
-				return strings.Contains(e.Message, "minValues requirement is not met for label (label=node.kubernetes.io/instance-type)")
+				return e.Reason == events.Unconsolidatable && strings.Contains(e.Message, "minValues requirement is not met for label(s) (label(s)=[node.kubernetes.io/instance-type])")
 			})).To(HaveLen(2))
 		})
 	})
