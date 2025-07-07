@@ -71,11 +71,15 @@ func (rm *ReservationManager) CanReserve(hostname string, offering *cloudprovide
 
 func (rm *ReservationManager) Reserve(hostname string, offerings ...*cloudprovider.Offering) {
 	for _, of := range offerings {
+		reservations, ok := rm.reservations[hostname]
+		if ok && reservations.Has(of.ReservationID()) {
+			continue
+		}
 		rm.capacity[of.ReservationID()] -= 1
 		if rm.capacity[of.ReservationID()] < 0 {
 			panic(fmt.Sprintf("attempted to over-reserve an offering with reservation id %q", of.ReservationID()))
 		}
-		if _, ok := rm.reservations[hostname]; !ok {
+		if !ok {
 			rm.reservations[hostname] = sets.New[string]()
 		}
 		rm.reservations[hostname].Insert(of.ReservationID())
