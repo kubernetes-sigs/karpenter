@@ -53,6 +53,7 @@ func NewReservationManager(instanceTypes map[string][]*cloudprovider.InstanceTyp
 	}
 }
 
+// Should always be idempotent
 func (rm *ReservationManager) CanReserve(hostname string, offering *cloudprovider.Offering) bool {
 	reservations, ok := rm.reservations[hostname]
 	if ok && reservations.Has(offering.ReservationID()) {
@@ -69,6 +70,7 @@ func (rm *ReservationManager) CanReserve(hostname string, offering *cloudprovide
 	return true
 }
 
+// Should always be idempotent
 func (rm *ReservationManager) Reserve(hostname string, offerings ...*cloudprovider.Offering) {
 	for _, of := range offerings {
 		reservations, ok := rm.reservations[hostname]
@@ -93,4 +95,16 @@ func (rm *ReservationManager) Release(hostname string, offerings ...*cloudprovid
 			rm.capacity[o.ReservationID()] += 1
 		}
 	}
+}
+
+func (rm *ReservationManager) HasReservation(hostname string, offering *cloudprovider.Offering) bool {
+	reservation, ok := rm.reservations[hostname]
+	if ok && reservation.Has(offering.ReservationID()) {
+		return true
+	}
+	return false
+}
+
+func (rm *ReservationManager) RemainingCapacity(offering *cloudprovider.Offering) int {
+	return rm.capacity[offering.ReservationID()]
 }
