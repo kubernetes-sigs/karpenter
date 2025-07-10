@@ -82,10 +82,10 @@ func IsDrainable(pod *corev1.Pod, clk clock.Clock) bool {
 		!IsOwnedByNode(pod)
 }
 
-// NeedsForcedEviction checks if a pod needs to be deleted with a smaller grace period ensuring that the pod:
+// IsPodEligibleForForcedEviction checks if a pod needs to be deleted with a reduced grace period ensuring that the pod:
 // - Is terminating
 // - Has a deletion timestamp that is after the node's grace period expiration time
-func NeedsForcedEviction(pod *corev1.Pod, nodeGracePeriodExpirationTime *time.Time) bool {
+func IsPodEligibleForForcedEviction(pod *corev1.Pod, nodeGracePeriodExpirationTime *time.Time) bool {
 	return nodeGracePeriodExpirationTime != nil &&
 		IsTerminating(pod) &&
 		pod.DeletionTimestamp.Time.After(*nodeGracePeriodExpirationTime)
