@@ -110,6 +110,8 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("stderr"),
 				BatchMaxDuration:        lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyRespect),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(false),
@@ -138,6 +140,8 @@ var _ = Describe("Options", func() {
 				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
+				"--preference-policy", "Ignore",
+				"--min-values-policy", "BestEffort",
 				"--feature-gates", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true",
 			)
 			Expect(err).To(BeNil())
@@ -157,6 +161,8 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyIgnore),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(true),
@@ -181,6 +187,8 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("PREFERENCE_POLICY", "Ignore")
+			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
 			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
@@ -204,6 +212,8 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyIgnore),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(true),
@@ -223,6 +233,8 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("PREFERENCE_POLICY", "Ignore")
+			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
 			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
@@ -233,6 +245,8 @@ var _ = Describe("Options", func() {
 				"--karpenter-service", "cli",
 				"--log-output-paths", "/etc/k8s/test",
 				"--log-error-output-paths", "/etc/k8s/testerror",
+				"--preference-policy", "Respect",
+				"--min-values-policy", "Strict",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -251,6 +265,8 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyRespect),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(true),

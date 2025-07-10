@@ -146,9 +146,9 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	remaining, unsatisfiableKeys, err := filterInstanceTypesByRequirements(n.InstanceTypeOptions, nodeClaimRequirements, podData.Requests, n.daemonResources, requests, relaxMinValues)
 	if relaxMinValues {
 		// Update min values on the requirements if they are relaxed
-		lo.ForEach(lo.Entries(unsatisfiableKeys), func(e lo.Entry[string, int], _ int) {
+		for _, e := range lo.Entries(unsatisfiableKeys) {
 			nodeClaimRequirements.Get(e.Key).MinValues = lo.ToPtr(e.Value)
-		})
+		}
 	}
 	if err != nil {
 		// We avoid wrapping this err because calling String() on InstanceTypeFilterError is an expensive operation

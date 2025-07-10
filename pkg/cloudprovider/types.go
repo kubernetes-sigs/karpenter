@@ -230,8 +230,10 @@ func (its InstanceTypes) Truncate(ctx context.Context, requirements scheduling.R
 	// Only check for a validity of NodeClaim if its requirement has minValues in it.
 	if requirements.HasMinValues() {
 		// If minValues is NOT met for any of the requirement across InstanceTypes, then only allow it if min values policy is set to BestEffort.
-		if _, _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil && options.FromContext(ctx).MinValuesPolicy != options.MinValuesPolicyBestEffort {
-			return its, fmt.Errorf("validating minValues, %w", err)
+		if options.FromContext(ctx).MinValuesPolicy != options.MinValuesPolicyBestEffort {
+			if _, _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil {
+				return its, fmt.Errorf("validating minValues, %w", err)
+			}
 		}
 	}
 	return truncatedInstanceTypes, nil
