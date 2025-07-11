@@ -58,6 +58,8 @@ var _ = Describe("Options", func() {
 		"LOG_ERROR_OUTPUT_PATHS",
 		"BATCH_MAX_DURATION",
 		"BATCH_IDLE_DURATION",
+		"PREFERENCE_POLICY",
+		"MIN_VALUES_POLICY",
 		"FEATURE_GATES",
 	}
 
@@ -324,6 +326,8 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.LogErrorOutputPaths).To(Equal(optsB.LogErrorOutputPaths))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
 	Expect(optsA.BatchIdleDuration).To(Equal(optsB.BatchIdleDuration))
+	Expect(optsA.PreferencePolicy).To(Equal(optsB.PreferencePolicy))
+	Expect(optsA.MinValuesPolicy).To(Equal(optsB.MinValuesPolicy))
 	Expect(optsA.FeatureGates.ReservedCapacity).To(Equal(optsB.FeatureGates.ReservedCapacity))
 	Expect(optsA.FeatureGates.NodeRepair).To(Equal(optsB.FeatureGates.NodeRepair))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
