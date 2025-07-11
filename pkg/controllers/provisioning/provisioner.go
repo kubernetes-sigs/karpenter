@@ -413,7 +413,6 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 		metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
 			metrics.ReasonLabel:           options.Reason,
 			metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel:     nodeClaim.Labels[v1.CapacityTypeLabelKey],
 			metrics.MinValuesRelaxedLabel: val,
 		})
 	} else {
@@ -421,7 +420,6 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 		metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
 			metrics.ReasonLabel:           options.Reason,
 			metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel:     nodeClaim.Labels[v1.CapacityTypeLabelKey],
 			metrics.MinValuesRelaxedLabel: "false",
 		})
 	}

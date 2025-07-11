@@ -36,12 +36,11 @@ var (
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
 			Name:      "created_total",
-			Help:      "Number of nodeclaims created in total by Karpenter. Labeled by reason the nodeclaim was created, the owning nodepool, the capacity type and if min values was relaxed for this nodeclaim.",
+			Help:      "Number of nodeclaims created in total by Karpenter. Labeled by reason the nodeclaim was created, the owning nodepool, and if min values was relaxed for this nodeclaim.",
 		},
 		[]string{
 			ReasonLabel,
 			NodePoolLabel,
-			CapacityTypeLabel,
 			MinValuesRelaxedLabel,
 		},
 	)
