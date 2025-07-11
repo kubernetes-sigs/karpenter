@@ -82,7 +82,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		MinValuesPolicy:       lo.FromPtrOr(opts.MinValuesPolicy, options.MinValuesPolicyStrict),
 		FeatureGates: options.FeatureGates{
 			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
-			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, false),
+			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, true),
 			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
 		},
 	}

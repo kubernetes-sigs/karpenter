@@ -19,7 +19,9 @@ package options_test
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -115,7 +117,7 @@ var _ = Describe("Options", func() {
 				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyRespect),
 				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(false),
+					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(false),
 					SpotToSpotConsolidation: lo.ToPtr(false),
 				},
@@ -144,7 +146,7 @@ var _ = Describe("Options", func() {
 				"--batch-idle-duration", "5s",
 				"--preference-policy", "Ignore",
 				"--min-values-policy", "BestEffort",
-				"--feature-gates", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true",
+				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -166,7 +168,7 @@ var _ = Describe("Options", func() {
 				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyIgnore),
 				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(true),
+					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
@@ -191,7 +193,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -217,7 +219,7 @@ var _ = Describe("Options", func() {
 				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyIgnore),
 				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(true),
+					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
@@ -237,7 +239,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -270,12 +272,40 @@ var _ = Describe("Options", func() {
 				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyRespect),
 				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(true),
+					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
 				},
 			}))
 		})
+
+		DescribeTable(
+			"should correctly set defaults when a subset of FeatureGates are specified",
+			func(gate string) {
+				expected, args := func() (options.FeatureGates, []string) {
+					expected := lo.ToPtr(options.DefaultFeatureGates())
+
+					// Use reflection to find the field for the gate and flip the value
+					gateField := reflect.ValueOf(expected).Elem().FieldByName(gate)
+					Expect(gateField.IsValid()).To(BeTrue())
+					Expect(gateField.Kind()).To(Equal(reflect.Bool))
+					expectedGateVal := !gateField.Bool()
+					gateField.SetBool(expectedGateVal)
+
+					return *expected, []string{"--feature-gates", fmt.Sprintf("%s=%t", gate, expectedGateVal)}
+				}()
+
+				fs = &options.FlagSet{
+					FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+				}
+				opts.AddFlags(fs)
+				Expect(opts.Parse(fs, args...)).To(Succeed())
+				Expect(opts.FeatureGates).To(Equal(expected))
+			},
+			Entry("when ReservedCapacity is overridden", "ReservedCapacity"),
+			Entry("when NodeRepair is overridden", "NodeRepair"),
+			Entry("when SpotToSpotConsolidation is overridden", "SpotToSpotConsolidation"),
+		)
 	})
 
 	DescribeTable(
