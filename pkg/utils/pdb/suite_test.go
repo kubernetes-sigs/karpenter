@@ -18,6 +18,7 @@ package pdb_test
 
 import (
 	"context"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -35,9 +36,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	karpenterv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
@@ -62,7 +63,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("CanEvictPods", func() {

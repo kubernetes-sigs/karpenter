@@ -19,6 +19,7 @@ package nodepool_test
 import (
 	"context"
 	"math/rand/v2"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -29,7 +30,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -55,7 +55,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("NodePoolUtils", func() {

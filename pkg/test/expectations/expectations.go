@@ -20,15 +20,16 @@ package expectations
 import (
 	"context"
 	"fmt"
+	"github.com/awslabs/operatorpkg/singleton"
 	"log"
 	"reflect"
 	"regexp"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"strings"
 	"sync"
 	"time"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
-	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
 	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
@@ -46,13 +47,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -103,17 +102,6 @@ func ExpectPodExists(ctx context.Context, c client.Client, name string, namespac
 func ExpectNodeExists(ctx context.Context, c client.Client, name string) *corev1.Node {
 	GinkgoHelper()
 	return ExpectExists(ctx, c, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
-}
-
-func ExpectNotFound(ctx context.Context, c client.Client, objects ...client.Object) {
-	GinkgoHelper()
-	for _, object := range objects {
-		Eventually(func() bool {
-			return errors.IsNotFound(c.Get(ctx, types.NamespacedName{Name: object.GetName(), Namespace: object.GetNamespace()}, object))
-		}, ReconcilerPropagationTime, RequestInterval).Should(BeTrue(), func() string {
-			return fmt.Sprintf("expected %s/%s to be deleted, but it still exists", lo.Must(apiutil.GVKForObject(object, scheme.Scheme)), client.ObjectKeyFromObject(object))
-		})
-	}
 }
 
 func ExpectScheduled(ctx context.Context, c client.Client, pod *corev1.Pod) *corev1.Node {
@@ -175,7 +163,7 @@ func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Objec
 		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}); !errors.IsNotFound(err) {
 			Expect(err).To(BeNil())
 		}
-		ExpectNotFound(ctx, c, object)
+		operatorpkg.ExpectNotFound(ctx, c, object)
 	}
 }
 
@@ -417,7 +405,7 @@ func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeC
 			if node.Spec.ProviderID == nodeClaim.Status.ProviderID {
 				Expect(c.Delete(ctx, node))
 				ExpectFinalizersRemoved(ctx, c, node)
-				ExpectNotFound(ctx, c, node)
+				operatorpkg.ExpectNotFound(ctx, c, node)
 			}
 		}
 	}

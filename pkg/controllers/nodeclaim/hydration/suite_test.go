@@ -24,13 +24,14 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/hydration"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -59,7 +60,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
 })
 
@@ -85,7 +86,7 @@ var _ = Describe("Hydration", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, hydrationController, nodeClaim)
 
-			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			value, ok := nodeClaim.Labels[v1.NodeClassLabelKey(nodeClassRef.GroupKind())]
 			Expect(ok).To(Equal(isNodeClaimManaged))
 			if isNodeClaimManaged {

@@ -24,7 +24,7 @@ import (
 	prometheusmodel "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 func TestOperator(t *testing.T) {
@@ -34,7 +34,7 @@ func TestOperator(t *testing.T) {
 
 var _ = Describe("Operator", func() {
 	It("should fire a metric with the build_info", func() {
-		m, found := FindMetricWithLabelValues("karpenter_build_info", map[string]string{})
+		m, found := localexp.FindMetricWithLabelValues("karpenter_build_info", map[string]string{})
 		Expect(found).To(BeTrue())
 
 		for _, label := range []string{"version", "goversion", "goarch", "commit"} {

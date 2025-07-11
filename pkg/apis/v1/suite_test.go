@@ -18,9 +18,9 @@ package v1_test
 
 import (
 	"context"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"testing"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -44,7 +44,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {

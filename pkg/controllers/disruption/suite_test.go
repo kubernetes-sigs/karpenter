@@ -44,6 +44,7 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -55,7 +56,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -156,7 +157,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
 
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()
@@ -199,7 +200,7 @@ var _ = Describe("Simulate Scheduling", func() {
 			ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 		}
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 		pod := test.Pod(test.PodOptions{
 			ResourceRequirements: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -211,27 +212,27 @@ var _ = Describe("Simulate Scheduling", func() {
 		})
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 		ExpectApplied(ctx, env.Client, pod)
-		ExpectManualBinding(ctx, env.Client, pod, nodes[0])
+		localexp.ExpectManualBinding(ctx, env.Client, pod, nodes[0])
 
 		nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, env.Client, cloudProvider)
 		Expect(err).To(Succeed())
 
 		// Mark all nodeclaims as marked for deletion
 		for i, nc := range nodeClaims {
-			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+			localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
 			cluster.MarkForDeletion(nodeClaims[i].Status.ProviderID)
 		}
 		cluster.UnmarkForDeletion(nodeClaims[0].Status.ProviderID)
 		// Mark all nodes as marked for deletion
 		for _, n := range nodes {
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+			localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 		}
 
 		pdbs, err := pdb.NewLimits(ctx, env.Client)
 		Expect(err).To(Succeed())
 
 		// Generate a candidate
-		stateNode := ExpectStateNodeExists(cluster, nodes[0])
+		stateNode := localexp.ExpectStateNodeExists(cluster, nodes[0])
 		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(Succeed())
 
@@ -268,7 +269,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		}
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 		// Create a pod for each node
 		pods := test.Pods(10, test.PodOptions{
@@ -295,19 +296,19 @@ var _ = Describe("Simulate Scheduling", func() {
 		for _, nc := range nodeClaims {
 			nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			ExpectApplied(ctx, env.Client, nc)
-			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
+			localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nc))
 		}
 		// Add a partition label into each node so we have 10 distinct scheduling requiments for each pod/node pair
 		for i, n := range nodes {
 			n.Labels = lo.Assign(n.Labels, map[string]string{"test-partition": fmt.Sprintf("%d", i)})
 			ExpectApplied(ctx, env.Client, n)
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
+			localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(n))
 		}
 
 		for i := range pods {
 			pods[i].Spec.NodeSelector = lo.Assign(pods[i].Spec.NodeSelector, map[string]string{"test-partition": fmt.Sprintf("%d", i)})
 			ExpectApplied(ctx, env.Client, pods[i])
-			ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
+			localexp.ExpectManualBinding(ctx, env.Client, pods[i], nodes[i])
 		}
 
 		// Get a set of the node claim names so that it's easy to check if a new one is made
@@ -316,7 +317,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// Expect a replace action
 		ExpectTaintedNodeCount(ctx, env.Client, 1)
-		ncs := ExpectNodeClaims(ctx, env.Client)
+		ncs := localexp.ExpectNodeClaims(ctx, env.Client)
 		// which would create one more node claim
 		Expect(len(ncs)).To(Equal(11))
 		nc, ok := lo.Find(ncs, func(nc *v1.NodeClaim) bool {
@@ -324,36 +325,36 @@ var _ = Describe("Simulate Scheduling", func() {
 		})
 		Expect(ok).To(BeTrue())
 		// which needs to be deployed
-		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
+		localexp.ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 		ExpectSingletonReconciled(ctx, disruptionController)
 
 		// Another replacement disruption action
-		ncs = ExpectNodeClaims(ctx, env.Client)
+		ncs = localexp.ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(12))
 		nc, ok = lo.Find(ncs, func(nc *v1.NodeClaim) bool {
 			return !nodeClaimNames.Has(nc.Name)
 		})
 		Expect(ok).To(BeTrue())
-		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
+		localexp.ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		ExpectSingletonReconciled(ctx, disruptionController)
 
 		// One more replacement disruption action
-		ncs = ExpectNodeClaims(ctx, env.Client)
+		ncs = localexp.ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(13))
 		nc, ok = lo.Find(ncs, func(nc *v1.NodeClaim) bool {
 			return !nodeClaimNames.Has(nc.Name)
 		})
 		Expect(ok).To(BeTrue())
-		ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
+		localexp.ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, nc)
 		nodeClaimNames[nc.Name] = struct{}{}
 
 		// Try one more time, but fail since the budgets only allow 3 disruptions.
 		ExpectSingletonReconciled(ctx, disruptionController)
 
-		ncs = ExpectNodeClaims(ctx, env.Client)
+		ncs = localexp.ExpectNodeClaims(ctx, env.Client)
 		Expect(len(ncs)).To(Equal(13))
 	})
 	It("can replace node with a local PV (ignoring hostname affinity)", func() {
@@ -424,10 +425,10 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectApplied(ctx, env.Client, ss, pod, nodeClaim, node, nodePool, storageClass, persistentVolume, persistentVolumeClaim)
 
 		// bind pods to node
-		ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -438,14 +439,14 @@ var _ = Describe("Simulate Scheduling", func() {
 		// Process the item so that the nodes can be deleted.
 		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 		// Cascade any deletion of the nodeClaim to the node
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+		localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 		// Expect that the new nodeClaim was created, and it's different than the original
 		// We should succeed in getting a replacement, since we assume that the node affinity requirement will be invalid
 		// once we spin-down the old node
 		ExpectNotFound(ctx, env.Client, nodeClaim, node)
-		nodeclaims := ExpectNodeClaims(ctx, env.Client)
-		nodes := ExpectNodes(ctx, env.Client)
+		nodeclaims := localexp.ExpectNodeClaims(ctx, env.Client)
+		nodes := localexp.ExpectNodes(ctx, env.Client)
 		Expect(nodeclaims).To(HaveLen(1))
 		Expect(nodes).To(HaveLen(1))
 		Expect(nodeclaims[0].Name).ToNot(Equal(nodeClaim.Name))
@@ -503,10 +504,10 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
 
 		// bind the pods to the node
-		ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		// Expect the disruption controller to attempt to create a replacement and hang creation when we try to create the replacement
 		go ExpectSingletonReconciled(ctx, dc)
@@ -596,15 +597,15 @@ var _ = Describe("Disruption Taints", func() {
 		node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDisruptionReason)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeClaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		ExpectSingletonReconciled(ctx, disruptionController)
-		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		node = localexp.ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 
-		nodeClaims := lo.Filter(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
+		nodeClaims := lo.Filter(localexp.ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
 			return nc.Status.ProviderID == node.Spec.ProviderID
 		})
 		Expect(nodeClaims).To(HaveLen(1))
@@ -621,10 +622,10 @@ var _ = Describe("Disruption Taints", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeClaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -632,29 +633,29 @@ var _ = Describe("Disruption Taints", func() {
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(1))
 
-		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		node = localexp.ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
-		nodeClaims := lo.Filter(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
+		nodeClaims := lo.Filter(localexp.ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
 			return nc.Status.ProviderID == node.Spec.ProviderID
 		})
 		Expect(nodeClaims).To(HaveLen(1))
 		Expect(nodeClaims[0].StatusConditions().Get(v1.ConditionTypeDisruptionReason)).ToNot(BeNil())
 		Expect(nodeClaims[0].StatusConditions().Get(v1.ConditionTypeDisruptionReason).IsTrue()).To(BeTrue())
 
-		createdNodeClaim := lo.Reject(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
+		createdNodeClaim := lo.Reject(localexp.ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
 			return nc.Name == nodeClaim.Name
 		})
 		ExpectDeleted(ctx, env.Client, createdNodeClaim[0])
-		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, createdNodeClaim[0])
+		localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, createdNodeClaim[0])
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
 		cluster.DeleteNodeClaim(createdNodeClaim[0].Name)
 
 		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
-		node = ExpectNodeExists(ctx, env.Client, node.Name)
+		node = localexp.ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
 
-		nodeClaims = lo.Filter(ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
+		nodeClaims = lo.Filter(localexp.ExpectNodeClaims(ctx, env.Client), func(nc *v1.NodeClaim, _ int) bool {
 			return nc.Status.ProviderID == node.Spec.ProviderID
 		})
 		Expect(nodeClaims).To(HaveLen(1))
@@ -694,14 +695,14 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		}
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	})
 	It("should not consider nodes that are not managed as part of disruption count", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		unmanaged := test.Node()
 		ExpectApplied(ctx, env.Client, unmanaged)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{unmanaged}, []*v1.NodeClaim{})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{unmanaged}, []*v1.NodeClaim{})
 		for _, reason := range allKnownDisruptionReasons {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
 			Expect(err).To(Succeed())
@@ -730,8 +731,8 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+		localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
 		for _, reason := range allKnownDisruptionReasons {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
@@ -762,8 +763,8 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		})
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+		localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
 		for _, reason := range allKnownDisruptionReasons {
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, reason)
@@ -779,12 +780,12 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		// Mark all nodeclaims as marked for deletion
 		for _, i := range nodeClaims {
 			Expect(env.Client.Delete(ctx, i)).To(Succeed())
-			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+			localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
 		}
 		// Mark all nodes as marked for deletion
 		for _, i := range nodes {
 			Expect(env.Client.Delete(ctx, i)).To(Succeed())
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+			localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
 		}
 
 		for _, reason := range allKnownDisruptionReasons {
@@ -804,11 +805,11 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 
 		// Mark all nodeclaims as marked for deletion
 		for _, i := range nodeClaims {
-			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+			localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
 		}
 		// Mark all nodes as marked for deletion
 		for _, i := range nodes {
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+			localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
 		}
 
 		for _, reason := range allKnownDisruptionReasons {
@@ -821,15 +822,15 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 		nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 		ExpectApplied(ctx, env.Client, nodePool)
 
-		ExpectMakeNodesNotReady(ctx, env.Client, nodes[0], nodes[1])
+		localexp.ExpectMakeNodesNotReady(ctx, env.Client, nodes[0], nodes[1])
 
 		// Mark all nodeclaims as marked for deletion
 		for _, i := range nodeClaims {
-			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
+			localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(i))
 		}
 		// Mark all nodes as marked for deletion
 		for _, i := range nodes {
-			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
+			localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(i))
 		}
 
 		for _, reason := range allKnownDisruptionReasons {
@@ -933,8 +934,8 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -971,8 +972,8 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1010,8 +1011,8 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1039,8 +1040,8 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.EventualDisruptionClass)
@@ -1071,8 +1072,8 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.EventualDisruptionClass)
@@ -1100,8 +1101,8 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1132,8 +1133,8 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
@@ -1164,8 +1165,8 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.EventualDisruptionClass)
@@ -1195,8 +1196,8 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
@@ -1227,8 +1228,8 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectDeletionTimestampSet(ctx, env.Client, pod)
 
@@ -1266,9 +1267,9 @@ var _ = Describe("Candidate Filtering", func() {
 			Phase: corev1.PodFailed,
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, podSucceeded, podFailed)
-		ExpectManualBinding(ctx, env.Client, podSucceeded, node)
-		ExpectManualBinding(ctx, env.Client, podFailed, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, podSucceeded, node)
+		localexp.ExpectManualBinding(ctx, env.Client, podFailed, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		c, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1291,7 +1292,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1371,9 +1372,9 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget)
-		ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
@@ -1418,9 +1419,9 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, pod, budget)
-		ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
@@ -1464,9 +1465,9 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, pod, budget)
-		ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
@@ -1497,8 +1498,8 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
 		Expect(err).ToNot(HaveOccurred())
@@ -1531,8 +1532,8 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget)
-		ExpectManualBinding(ctx, env.Client, pod, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
 		Expect(err).ToNot(HaveOccurred())
@@ -1572,10 +1573,10 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, succeededPod, failedPod, budget)
-		ExpectManualBinding(ctx, env.Client, succeededPod, node)
-		ExpectManualBinding(ctx, env.Client, failedPod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, succeededPod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, failedPod, node)
 
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
@@ -1609,11 +1610,11 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget)
-		ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 		ExpectDeletionTimestampSet(ctx, env.Client, pod)
 
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
@@ -1637,7 +1638,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, nil)
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, nil)
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1656,7 +1657,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nil, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nil, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1675,7 +1676,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
@@ -1696,10 +1697,10 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
-		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+		localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1718,7 +1719,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		cluster.MarkForDeletion(node.Spec.ProviderID)
 
@@ -1739,8 +1740,8 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-		ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+		localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+		localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1758,7 +1759,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1779,7 +1780,7 @@ var _ = Describe("Candidate Filtering", func() {
 		})
 		// Don't apply the NodePool
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		// Mock the NodePool not existing by removing it from the nodePool and nodePoolInstanceTypes maps
 		delete(nodePoolMap, nodePool.Name)
@@ -1802,7 +1803,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1819,7 +1820,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1836,7 +1837,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
@@ -1854,7 +1855,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		// Mock the InstanceType not existing by removing it from the nodePoolInstanceTypes map
 		delete(nodePoolInstanceTypeMap[nodePool.Name], mostExpensiveInstance.Name)
@@ -1875,7 +1876,7 @@ var _ = Describe("Candidate Filtering", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
 		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.Nodes()[0]}}, Replacements: nil}
@@ -1950,16 +1951,16 @@ var _ = Describe("Metrics", func() {
 		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodePool)
 
 		// bind pods to nodes
-		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-		ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
-		ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
-		ExpectManualBinding(ctx, env.Client, pods[3], nodes[1])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[1], nodes[0])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[3], nodes[1])
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 		ExpectSingletonReconciled(ctx, disruptionController)
 
-		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
+		localexp.ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "delete",
 			metrics.ReasonLabel: "drifted",
 		})
@@ -1973,16 +1974,16 @@ var _ = Describe("Metrics", func() {
 		ExpectApplied(ctx, env.Client, pods[0], pods[1], pods[2], pods[3], nodeClaim, node, nodePool)
 
 		// bind pods to nodes
-		ExpectManualBinding(ctx, env.Client, pods[0], node)
-		ExpectManualBinding(ctx, env.Client, pods[1], node)
-		ExpectManualBinding(ctx, env.Client, pods[2], node)
-		ExpectManualBinding(ctx, env.Client, pods[3], node)
+		localexp.ExpectManualBinding(ctx, env.Client, pods[0], node)
+		localexp.ExpectManualBinding(ctx, env.Client, pods[1], node)
+		localexp.ExpectManualBinding(ctx, env.Client, pods[2], node)
+		localexp.ExpectManualBinding(ctx, env.Client, pods[3], node)
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 		ExpectSingletonReconciled(ctx, disruptionController)
 
-		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
+		localexp.ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "replace",
 			metrics.ReasonLabel: "drifted",
 		})
@@ -2021,9 +2022,9 @@ var _ = Describe("Metrics", func() {
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
 
 		// bind pods to nodes
-		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-		ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
-		ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
@@ -2075,10 +2076,10 @@ var _ = Describe("Metrics", func() {
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
 
 		// bind pods to nodes
-		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-		ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
-		ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
-		ExpectManualBinding(ctx, env.Client, pods[3], nodes[2])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[3], nodes[2])
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
@@ -2130,13 +2131,13 @@ var _ = Describe("Metrics", func() {
 		ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], pods[3], nodeClaims[0], nodes[0], nodeClaims[1], nodes[1], nodeClaims[2], nodes[2], nodePool)
 
 		// bind pods to nodes
-		ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-		ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
-		ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
-		ExpectManualBinding(ctx, env.Client, pods[3], nodes[2])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+		localexp.ExpectManualBinding(ctx, env.Client, pods[3], nodes[2])
 
 		// inform cluster state about nodes and nodeclaims
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 		// create timeout in the past
 		timeoutCtx, cancel := context.WithTimeout(ctx, -disruption.MultiNodeConsolidationTimeoutDuration)
 		defer cancel()
@@ -2175,7 +2176,7 @@ func fromInt(i int32) *intstr.IntOrString {
 // ExpectTaintedNodeCount will assert the number of nodes and tainted nodes in the cluster and return the tainted nodes.
 func ExpectTaintedNodeCount(ctx context.Context, c client.Client, numTainted int) []*corev1.Node {
 	GinkgoHelper()
-	tainted := lo.Filter(ExpectNodes(ctx, c), func(n *corev1.Node, _ int) bool {
+	tainted := lo.Filter(localexp.ExpectNodes(ctx, c), func(n *corev1.Node, _ int) bool {
 		return lo.Contains(n.Spec.Taints, v1.DisruptedNoScheduleTaint)
 	})
 	Expect(len(tainted)).To(Equal(numTainted))
@@ -2186,7 +2187,7 @@ func ExpectTaintedNodeCount(ctx context.Context, c client.Client, numTainted int
 // during an ICE error on the created nodeClaim
 func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.WaitGroup, numNewNodeClaims int) {
 	GinkgoHelper()
-	existingNodeClaims := ExpectNodeClaims(ctx, c)
+	existingNodeClaims := localexp.ExpectNodeClaims(ctx, c)
 	existingNodeClaimNames := sets.NewString(lo.Map(existingNodeClaims, func(nc *v1.NodeClaim, _ int) string {
 		return nc.Name
 	})...)

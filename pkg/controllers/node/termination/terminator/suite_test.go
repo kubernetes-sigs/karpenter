@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	clock "k8s.io/utils/clock/testing"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
@@ -238,13 +239,13 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectExists(ctx, env.Client, pod)
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(0))
 		})
-		It("should delete a pod with less than terminationGracePeriodSeconds remaining before nodeTerminationTime", func() {
+		It("should delete a pod with less than terminationGracePeriodSeconds remaining before nodeTerminationTime", Focus, func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
-			ExpectApplied(ctx, env.Client, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod)
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 1)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
-			ExpectNotFound(ctx, env.Client, pod)
+			operatorpkg.ExpectNotFound(ctx, env.Client, pod)
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
 		})
 	})
