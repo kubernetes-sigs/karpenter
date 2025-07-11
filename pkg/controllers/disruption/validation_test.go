@@ -26,11 +26,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 func NewMethodsWithRealValidator() []disruption.Method {
@@ -183,7 +184,7 @@ func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruptio
 
 func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 	var pods []*corev1.Pod
-	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	rs := test.ReplicaSet()
 	ExpectApplied(ctx, env.Client, rs)
 	pods = test.Pods(1, test.PodOptions{
@@ -206,13 +207,13 @@ func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 				},
 			}}})
 	ExpectApplied(ctx, env.Client, pods[0])
-	ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+	localexp.ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
 	cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
 	Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
 }
 
 func blockingBudget(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool) {
-	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{
 		Nodes: "0%",
 	}}
@@ -220,7 +221,7 @@ func blockingBudget(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *
 }
 
 func nominated(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
-	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+	localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	for i := range nodes {
 		cluster.NominateNodeForPod(ctx, nodes[i].Spec.ProviderID)
 		cluster.NominateNodeForPod(ctx, nodes[i].Spec.ProviderID)

@@ -31,6 +31,7 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -39,7 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -72,7 +73,7 @@ var _ = AfterSuite(func() {
 
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
-	ExpectCleanedUp(ctx, env.Client)
+	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
 })
 
@@ -92,11 +93,11 @@ var _ = Describe("GarbageCollection", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		nodeClaim, node, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
+		nodeClaim, node, err := localexp.ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Mark the node as NotReady after the launch
-		ExpectMakeNodesNotReady(ctx, env.Client, node)
+		localexp.ExpectMakeNodesNotReady(ctx, env.Client, node)
 
 		// Step forward to move past the cache eventual consistency timeout
 		fakeClock.SetTime(time.Now().Add(time.Second * 20))
@@ -106,7 +107,7 @@ var _ = Describe("GarbageCollection", func() {
 
 		// Expect the NodeClaim to not be removed since there is a Node that exists that has a Ready "true" condition
 		ExpectSingletonReconciled(ctx, garbageCollectionController)
-		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("shouldn't delete the NodeClaim when the Node is there in a Ready state and the instance is gone", func() {
@@ -119,7 +120,7 @@ var _ = Describe("GarbageCollection", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		nodeClaim, _, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
+		nodeClaim, _, err := localexp.ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Step forward to move past the cache eventual consistency timeout
@@ -130,8 +131,8 @@ var _ = Describe("GarbageCollection", func() {
 
 		// Expect the NodeClaim to not be removed since there is a Node that exists that has a Ready "true" condition
 		ExpectSingletonReconciled(ctx, garbageCollectionController)
-		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectExists(ctx, env.Client, nodeClaim)
+		localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		localexp.ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should delete many NodeClaims when the Nodes are there in a NotReady state and the instances are gone", func() {
 		var nodeClaims []*v1.NodeClaim
@@ -150,11 +151,11 @@ var _ = Describe("GarbageCollection", func() {
 			ExpectApplied(ctx, env.Client, nodeClaims[i])
 			var node *corev1.Node
 			var err error
-			nodeClaims[i], node, err = ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaims[i])
+			nodeClaims[i], node, err = localexp.ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaims[i])
 			Expect(err).ToNot(HaveOccurred())
 
 			// Mark the node as NotReady after the launch
-			ExpectMakeNodesNotReady(ctx, env.Client, node)
+			localexp.ExpectMakeNodesNotReady(ctx, env.Client, node)
 		})
 
 		// Step forward to move past the cache eventual consistency timeout
@@ -171,7 +172,7 @@ var _ = Describe("GarbageCollection", func() {
 
 		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
 			defer GinkgoRecover()
-			ExpectFinalizersRemoved(ctx, env.Client, nodeClaims[i])
+			localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaims[i])
 		})
 		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(n *v1.NodeClaim, _ int) client.Object { return n })...)
 	})
@@ -184,7 +185,7 @@ var _ = Describe("GarbageCollection", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		nodeClaim, err := ExpectNodeClaimDeployedNoNode(ctx, env.Client, cloudProvider, nodeClaim)
+		nodeClaim, err := localexp.ExpectNodeClaimDeployedNoNode(ctx, env.Client, cloudProvider, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 
 		// Step forward to move past the cache eventual consistency timeout
@@ -195,8 +196,8 @@ var _ = Describe("GarbageCollection", func() {
 
 		// Expect the NodeClaim to not be removed since the NodeClaim isn't registered
 		ExpectSingletonReconciled(ctx, garbageCollectionController)
-		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectExists(ctx, env.Client, nodeClaim)
+		localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		localexp.ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("shouldn't delete the NodeClaim when the Node isn't there but the instance is there", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -207,7 +208,7 @@ var _ = Describe("GarbageCollection", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		nodeClaim, node, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
+		nodeClaim, node, err := localexp.ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 
 		Expect(env.Client.Delete(ctx, node)).To(Succeed())
@@ -217,7 +218,7 @@ var _ = Describe("GarbageCollection", func() {
 
 		// Reconcile the NodeClaim. It should not be deleted by this flow since it has never been registered
 		ExpectSingletonReconciled(ctx, garbageCollectionController)
-		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectExists(ctx, env.Client, nodeClaim)
+		localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		localexp.ExpectExists(ctx, env.Client, nodeClaim)
 	})
 })

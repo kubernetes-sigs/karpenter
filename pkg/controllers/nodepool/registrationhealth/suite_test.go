@@ -18,6 +18,8 @@ package registrationhealth_test
 
 import (
 	"context"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"testing"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/registrationhealth"
@@ -25,15 +27,14 @@ import (
 	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -59,7 +60,7 @@ var _ = BeforeSuite(func() {
 	controller = registrationhealth.NewController(env.Client, cloudProvider)
 })
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {
@@ -84,13 +85,13 @@ var _ = Describe("RegistrationHealth", func() {
 		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy)).To(BeNil())
 	})
 	It("should not set NodeRegistrationHealthy status condition on nodePool when nodeClass does not exist", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy)).To(BeNil())
 	})
 	It("should set NodeRegistrationHealthy status condition on nodePool as Unknown if the nodeClass observed generation doesn't match with that on nodePool", func() {
@@ -101,7 +102,7 @@ var _ = Describe("RegistrationHealth", func() {
 		nodeClass.Spec.Tags = map[string]string{"keyTag-1": "valueTag-1"}
 		ExpectApplied(ctx, env.Client, nodeClass)
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeTrue())
 		Expect(nodePool.Status.NodeClassObservedGeneration).To(Equal(int64(2)))
 	})
@@ -113,7 +114,7 @@ var _ = Describe("RegistrationHealth", func() {
 		nodePool.Spec.Limits = map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("14")}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeTrue())
 	})
 	It("should not set NodeRegistrationHealthy status condition on nodePool as Unknown if it is already set to true", func() {
@@ -121,7 +122,7 @@ var _ = Describe("RegistrationHealth", func() {
 		nodePool.Status.NodeClassObservedGeneration = int64(1)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeFalse())
 	})
 	It("should not set NodeRegistrationHealthy status condition on nodePool as Unknown if it is already set to false", func() {
@@ -129,7 +130,7 @@ var _ = Describe("RegistrationHealth", func() {
 		nodePool.Status.NodeClassObservedGeneration = int64(1)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
 		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeFalse())
 	})
 })

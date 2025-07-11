@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -37,7 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -104,7 +105,7 @@ var _ = BeforeEach(func() {
 var _ = AfterEach(func() {
 	cp.Reset()
 	nodeClaimDisruptionController.Reset()
-	ExpectCleanedUp(ctx, env.Client)
+	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("Disruption", func() {
@@ -125,20 +126,20 @@ var _ = Describe("Disruption", func() {
 		// set the lastPodEvent to 5 minutes in the past
 		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		localexp.ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 	})
 	It("should set multiple disruption conditions simultaneously", func() {
 		cp.Drifted = "drifted"
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		localexp.ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
 		// step forward to make the node empty
 		fakeClock.Step(60 * time.Second)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
@@ -149,10 +150,10 @@ var _ = Describe("Disruption", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		localexp.ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
