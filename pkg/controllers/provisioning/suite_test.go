@@ -2736,7 +2736,6 @@ var _ = Describe("Provisioning", func() {
 					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
 						metrics.ReasonLabel:           metrics.ProvisionedReason,
 						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
-						metrics.CapacityTypeLabel:     "",
 						metrics.MinValuesRelaxedLabel: "true",
 					})
 					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
@@ -2917,7 +2916,6 @@ var _ = Describe("Provisioning", func() {
 					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
 						metrics.ReasonLabel:           metrics.ProvisionedReason,
 						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
-						metrics.CapacityTypeLabel:     "",
 						metrics.MinValuesRelaxedLabel: "true",
 					})
 					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
@@ -3053,7 +3051,6 @@ var _ = Describe("Provisioning", func() {
 					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
 						metrics.ReasonLabel:           metrics.ProvisionedReason,
 						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
-						metrics.CapacityTypeLabel:     "",
 						metrics.MinValuesRelaxedLabel: "true",
 					})
 					Expect(nodeClaim.Spec.Requirements).To(ContainElements(
@@ -3170,7 +3167,6 @@ var _ = Describe("Provisioning", func() {
 					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
 						metrics.ReasonLabel:           metrics.ProvisionedReason,
 						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
-						metrics.CapacityTypeLabel:     "",
 						metrics.MinValuesRelaxedLabel: "true",
 					})
 				})
