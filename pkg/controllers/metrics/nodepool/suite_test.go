@@ -27,12 +27,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -92,10 +93,10 @@ var _ = Describe("Metrics", func() {
 				}
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
-			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+			localexp.ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 			for k, v := range limits {
-				m, found := FindMetricWithLabelValues("karpenter_nodepools_limit", map[string]string{
+				m, found := localexp.FindMetricWithLabelValues("karpenter_nodepools_limit", map[string]string{
 					"nodepool":      nodePool.GetName(),
 					"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
 				})
@@ -117,10 +118,10 @@ var _ = Describe("Metrics", func() {
 		nodePool.Status.Resources = resources
 
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		localexp.ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for k, v := range resources {
-			m, found := FindMetricWithLabelValues("karpenter_nodepools_usage", map[string]string{
+			m, found := localexp.FindMetricWithLabelValues("karpenter_nodepools_usage", map[string]string{
 				"nodepool":      nodePool.GetName(),
 				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
 			})
@@ -141,20 +142,20 @@ var _ = Describe("Metrics", func() {
 			corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		localexp.ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for _, name := range expectedMetrics {
-			_, found := FindMetricWithLabelValues(name, map[string]string{
+			_, found := localexp.FindMetricWithLabelValues(name, map[string]string{
 				"nodepool": nodePool.GetName(),
 			})
 			Expect(found).To(BeTrue())
 		}
 
 		ExpectDeleted(ctx, env.Client, nodePool)
-		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+		localexp.ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for _, name := range expectedMetrics {
-			_, found := FindMetricWithLabelValues(name, map[string]string{
+			_, found := localexp.FindMetricWithLabelValues(name, map[string]string{
 				"nodepool": nodePool.GetName(),
 			})
 			Expect(found).To(BeFalse())
