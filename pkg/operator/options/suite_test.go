@@ -58,6 +58,8 @@ var _ = Describe("Options", func() {
 		"LOG_ERROR_OUTPUT_PATHS",
 		"BATCH_MAX_DURATION",
 		"BATCH_IDLE_DURATION",
+		"PREFERENCE_POLICY",
+		"MIN_VALUES_POLICY",
 		"FEATURE_GATES",
 	}
 
@@ -110,6 +112,8 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("stderr"),
 				BatchMaxDuration:        lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyRespect),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(false),
@@ -138,6 +142,8 @@ var _ = Describe("Options", func() {
 				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
+				"--preference-policy", "Ignore",
+				"--min-values-policy", "BestEffort",
 				"--feature-gates", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true",
 			)
 			Expect(err).To(BeNil())
@@ -157,6 +163,8 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyIgnore),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(true),
@@ -181,6 +189,8 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("PREFERENCE_POLICY", "Ignore")
+			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
 			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
@@ -204,6 +214,8 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyIgnore),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(true),
@@ -223,6 +235,8 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
+			os.Setenv("PREFERENCE_POLICY", "Ignore")
+			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
 			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
@@ -233,6 +247,8 @@ var _ = Describe("Options", func() {
 				"--karpenter-service", "cli",
 				"--log-output-paths", "/etc/k8s/test",
 				"--log-error-output-paths", "/etc/k8s/testerror",
+				"--preference-policy", "Respect",
+				"--min-values-policy", "Strict",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -251,6 +267,8 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyRespect),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(true),
@@ -308,6 +326,8 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.LogErrorOutputPaths).To(Equal(optsB.LogErrorOutputPaths))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
 	Expect(optsA.BatchIdleDuration).To(Equal(optsB.BatchIdleDuration))
+	Expect(optsA.PreferencePolicy).To(Equal(optsB.PreferencePolicy))
+	Expect(optsA.MinValuesPolicy).To(Equal(optsB.MinValuesPolicy))
 	Expect(optsA.FeatureGates.ReservedCapacity).To(Equal(optsB.FeatureGates.ReservedCapacity))
 	Expect(optsA.FeatureGates.NodeRepair).To(Equal(optsB.FeatureGates.NodeRepair))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))

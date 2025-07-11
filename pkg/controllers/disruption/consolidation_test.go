@@ -4904,4 +4904,95 @@ var _ = Describe("Consolidation", func() {
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 	})
+	Context("MinValuesPolicy", func() {
+		var nodePoolWithMinValues *v1.NodePool
+
+		BeforeEach(func() {
+			// Create a nodepool with instance type minValues requirement
+			nodePoolWithMinValues = test.NodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Weight: lo.ToPtr(int32(100)),
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+										Key:      corev1.LabelInstanceTypeStable,
+										Operator: corev1.NodeSelectorOpIn,
+										Values: lo.Map(cloudProvider.InstanceTypes, func(it *cloudprovider.InstanceType, _ int) string {
+											return it.Name
+										}),
+									},
+									MinValues: lo.ToPtr(3),
+								},
+							},
+						},
+					},
+					Disruption: v1.Disruption{
+						ConsolidationPolicy: v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+						Budgets: []v1.Budget{{
+							Nodes: "100%",
+						}},
+						ConsolidateAfter: v1.MustParseNillableDuration("0s"),
+					},
+				},
+			})
+
+			// Update instance types to ensure that min values won't be satisfied.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{leastExpensiveInstance, mostExpensiveInstance}
+		})
+
+		AfterEach(func() {
+			// Reset the relaxation policy to not pollute other tests.
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyStrict)}))
+		})
+
+		It("should not consolidate a node by relaxing min values when policy is set to BestEffort", func() {
+			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyBestEffort)}))
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePoolWithMinValues.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveInstance.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveInstance.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("5"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
+			pods := test.Pods(1, test.PodOptions{})
+
+			ExpectApplied(ctx, env.Client, pods[0], nodeClaims[0], nodes[0], nodePoolWithMinValues)
+
+			// bind pods to node
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
+
+			fakeClock.Step(10 * time.Minute)
+			result, err := disruptionController.Reconcile(ctx)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+			// Validate that nothing changed.
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodeClaims(ctx, env.Client)[0].Name).To(Equal(nodeClaims[0].Name))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)[0].Name).To(Equal(nodes[0].Name))
+
+			// Expect Unconsolidatable events to be fired for min values violation.
+			Expect(lo.Filter(recorder.Events(), func(e events.Event, _ int) bool {
+				return e.Reason == events.Unconsolidatable && strings.Contains(e.Message, "minValues requirement is not met for label(s) (label(s)=[node.kubernetes.io/instance-type])")
+			})).To(HaveLen(2))
+		})
+	})
 })
