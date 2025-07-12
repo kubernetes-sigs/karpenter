@@ -1970,8 +1970,8 @@ var _ = Describe("Provisioning", func() {
 					},
 				})
 				ExpectApplied(ctx, env.Client, nodePool)
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-				ExpectNotScheduled(ctx, env.Client, pod)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				localexp.ExpectNotScheduled(ctx, env.Client, pod)
 			})
 			It("should relax multiple terms", func() {
 				pod := test.UnschedulablePod()
@@ -1991,8 +1991,8 @@ var _ = Describe("Provisioning", func() {
 				}}}}
 				// Success
 				ExpectApplied(ctx, env.Client, test.NodePool())
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-				node := ExpectScheduled(ctx, env.Client, pod)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := localexp.ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-1"))
 			})
 		})
@@ -2013,8 +2013,8 @@ var _ = Describe("Provisioning", func() {
 				}}}
 				// Success
 				ExpectApplied(ctx, env.Client, test.NodePool())
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-				ExpectScheduled(ctx, env.Client, pod)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				localexp.ExpectScheduled(ctx, env.Client, pod)
 			})
 			It("should relax to use lighter weights", func() {
 				pod := test.UnschedulablePod()
@@ -2046,8 +2046,8 @@ var _ = Describe("Provisioning", func() {
 					},
 				})
 				ExpectApplied(ctx, env.Client, nodePool)
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-				node := ExpectScheduled(ctx, env.Client, pod)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := localexp.ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
 			})
 			It("should tolerate PreferNoSchedule taint only after trying to relax Affinity terms", func() {
@@ -2075,8 +2075,8 @@ var _ = Describe("Provisioning", func() {
 					},
 				})
 				ExpectApplied(ctx, env.Client, nodePool)
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-				node := ExpectScheduled(ctx, env.Client, pod)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := localexp.ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Spec.Taints).To(ContainElement(corev1.Taint{Key: "foo", Value: "bar", Effect: corev1.TaintEffectPreferNoSchedule}))
 			})
 			DescribeTable("should ignore node preferredDuringSchedulingIgnoredDuringExecution affinity", func(topologyKey string) {
@@ -2114,10 +2114,10 @@ var _ = Describe("Provisioning", func() {
 					},
 				})
 				ExpectApplied(ctx, env.Client, test.NodePool())
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, nodePreferencePod)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, nodePreferencePod)
 
-				pod1Node := ExpectScheduled(ctx, env.Client, pod1)
-				podNodePreferenceNode := ExpectScheduled(ctx, env.Client, nodePreferencePod)
+				pod1Node := localexp.ExpectScheduled(ctx, env.Client, pod1)
+				podNodePreferenceNode := localexp.ExpectScheduled(ctx, env.Client, nodePreferencePod)
 
 				Expect(pod1Node.Name).To(Equal(podNodePreferenceNode.Name))
 			},
@@ -2183,12 +2183,12 @@ var _ = Describe("Provisioning", func() {
 					},
 				})
 				ExpectApplied(ctx, env.Client, test.NodePool())
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], nodeAffinityPod)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], nodeAffinityPod)
 
-				zone1Node := ExpectScheduled(ctx, env.Client, zone1Pod)
-				zone2Node := ExpectScheduled(ctx, env.Client, zone2Pods[0])
-				ExpectScheduled(ctx, env.Client, zone2Pods[1])
-				nodeAffinityPodNode := ExpectScheduled(ctx, env.Client, nodeAffinityPod)
+				zone1Node := localexp.ExpectScheduled(ctx, env.Client, zone1Pod)
+				zone2Node := localexp.ExpectScheduled(ctx, env.Client, zone2Pods[0])
+				localexp.ExpectScheduled(ctx, env.Client, zone2Pods[1])
+				nodeAffinityPodNode := localexp.ExpectScheduled(ctx, env.Client, nodeAffinityPod)
 
 				Expect(nodeAffinityPodNode.Name).To(Equal(zone1Node.Name))
 				Expect(nodeAffinityPodNode.Name).ToNot(Equal(zone2Node.Name))
@@ -2213,13 +2213,13 @@ var _ = Describe("Provisioning", func() {
 				}
 				pods := test.UnschedulablePods(opts, 5)
 				ExpectApplied(ctx, env.Client, test.NodePool())
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 
 				// If we were respecting preferences, we would add these pods on separate nodes
 				// Because we are ignoring them, we will schedule them all on the same node
 				nodeNames := sets.New[string]()
 				for _, p := range pods {
-					nodeNames.Insert(ExpectScheduled(ctx, env.Client, p).Name)
+					nodeNames.Insert(localexp.ExpectScheduled(ctx, env.Client, p).Name)
 				}
 				Expect(nodeNames).To(HaveLen(1))
 			},
@@ -2247,13 +2247,13 @@ var _ = Describe("Provisioning", func() {
 				}
 				pods := test.UnschedulablePods(opts, 5)
 				ExpectApplied(ctx, env.Client, test.NodePool())
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 
 				// If we were respecting preferences, we would add these pods on separate nodes
 				// Because we are ignoring them, we will schedule them all on the same node
 				nodeNames := sets.New[string]()
 				for _, p := range pods {
-					nodeNames.Insert(ExpectScheduled(ctx, env.Client, p).Name)
+					nodeNames.Insert(localexp.ExpectScheduled(ctx, env.Client, p).Name)
 				}
 				Expect(nodeNames).To(HaveLen(1))
 			},
@@ -2320,12 +2320,12 @@ var _ = Describe("Provisioning", func() {
 					},
 				})
 				ExpectApplied(ctx, env.Client, test.NodePool())
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], affinityPod)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], affinityPod)
 
-				zone1Node := ExpectScheduled(ctx, env.Client, zone1Pod)
-				zone2Node := ExpectScheduled(ctx, env.Client, zone2Pods[0])
-				ExpectScheduled(ctx, env.Client, zone2Pods[0])
-				affinityPodNode := ExpectScheduled(ctx, env.Client, affinityPod)
+				zone1Node := localexp.ExpectScheduled(ctx, env.Client, zone1Pod)
+				zone2Node := localexp.ExpectScheduled(ctx, env.Client, zone2Pods[0])
+				localexp.ExpectScheduled(ctx, env.Client, zone2Pods[0])
+				affinityPodNode := localexp.ExpectScheduled(ctx, env.Client, affinityPod)
 
 				Expect(affinityPodNode.Name).To(Equal(zone1Node.Name))
 				Expect(affinityPodNode.Name).ToNot(Equal(zone2Node.Name))
@@ -2340,8 +2340,8 @@ var _ = Describe("Provisioning", func() {
 			nodePool := test.NodePool()
 			ExpectApplied(ctx, env.Client, nodePool, test.NodePool())
 			pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.NodePoolLabelKey: nodePool.Name}})
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
+			localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := localexp.ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(nodePool.Name))
 		})
 		It("should schedule to a NodePool by labels", func() {
@@ -2356,8 +2356,8 @@ var _ = Describe("Provisioning", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, test.NodePool())
 			pod := test.UnschedulablePod(test.PodOptions{NodeSelector: nodePool.Spec.Template.Labels})
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
+			localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := localexp.ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(nodePool.Name))
 		})
 		It("should not match NodePool with PreferNoSchedule taint when other NodePool match", func() {
@@ -2372,8 +2372,8 @@ var _ = Describe("Provisioning", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, test.NodePool())
 			pod := test.UnschedulablePod()
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			node := ExpectScheduled(ctx, env.Client, pod)
+			localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := localexp.ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels[v1.NodePoolLabelKey]).ToNot(Equal(nodePool.Name))
 		})
 		Context("Weighted NodePools", func() {
@@ -2387,9 +2387,9 @@ var _ = Describe("Provisioning", func() {
 				pods := []*corev1.Pod{
 					test.UnschedulablePod(), test.UnschedulablePod(), test.UnschedulablePod(),
 				}
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 				for _, pod := range pods {
-					node := ExpectScheduled(ctx, env.Client, pod)
+					node := localexp.ExpectScheduled(ctx, env.Client, pod)
 					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(nodePools[2].GetName()))
 				}
 			})
@@ -2402,8 +2402,8 @@ var _ = Describe("Provisioning", func() {
 				}
 				ExpectApplied(ctx, env.Client, nodePools...)
 				pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.NodePoolLabelKey: targetedNodePool.Name}})
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-				node := ExpectScheduled(ctx, env.Client, pod)
+				localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := localexp.ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
 			})
 		})
@@ -2493,8 +2493,8 @@ var _ = Describe("Provisioning", func() {
 						},
 					})
 
-					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-					ExpectNotScheduled(ctx, env.Client, pod)
+					localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					localexp.ExpectNotScheduled(ctx, env.Client, pod)
 				})
 			})
 
@@ -2551,13 +2551,13 @@ var _ = Describe("Provisioning", func() {
 						},
 					})
 
-					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-					node := ExpectScheduled(ctx, env.Client, pod)
+					localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := localexp.ExpectScheduled(ctx, env.Client, pod)
 					nodeClaim := cloudProvider.CreateCalls[0]
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
 					Expect(node.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
 
-					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
+					localexp.ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
 						metrics.ReasonLabel:           metrics.ProvisionedReason,
 						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
 						metrics.MinValuesRelaxedLabel: "true",
@@ -2642,8 +2642,8 @@ var _ = Describe("Provisioning", func() {
 						},
 					})
 
-					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-					node := ExpectScheduled(ctx, env.Client, pod)
+					localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := localexp.ExpectScheduled(ctx, env.Client, pod)
 					nodeClaim := cloudProvider.CreateCalls[0]
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
 					Expect(node.Annotations).To(HaveKey(v1.NodeClaimMinValuesRelaxedAnnotationKey))
@@ -2729,15 +2729,15 @@ var _ = Describe("Provisioning", func() {
 						},
 					})
 
-					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-					node := ExpectScheduled(ctx, env.Client, pod)
+					localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := localexp.ExpectScheduled(ctx, env.Client, pod)
 					nodeClaim := cloudProvider.CreateCalls[0]
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
 					Expect(node.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
 					// Ensure that the nodepool with higher weight was chosen
 					Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(defaultNodePool.Name))
 
-					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
+					localexp.ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
 						metrics.ReasonLabel:           metrics.ProvisionedReason,
 						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
 						metrics.MinValuesRelaxedLabel: "true",
@@ -2820,8 +2820,8 @@ var _ = Describe("Provisioning", func() {
 						},
 					})
 
-					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-					ExpectNotScheduled(ctx, env.Client, pod)
+					localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					localexp.ExpectNotScheduled(ctx, env.Client, pod)
 				})
 			})
 
@@ -2865,14 +2865,14 @@ var _ = Describe("Provisioning", func() {
 						},
 					})
 
-					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-					node := ExpectScheduled(ctx, env.Client, pod)
+					localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := localexp.ExpectScheduled(ctx, env.Client, pod)
 					nodeClaim := cloudProvider.CreateCalls[0]
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
 					Expect(node.Labels[corev1.LabelTopologyZone]).To(Or(Equal("test-zone-1"), Equal("test-zone-2")))
 					Expect(node.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]).To(Equal("true"))
 
-					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
+					localexp.ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
 						metrics.ReasonLabel:           metrics.ProvisionedReason,
 						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
 						metrics.MinValuesRelaxedLabel: "true",
@@ -2963,8 +2963,8 @@ var _ = Describe("Provisioning", func() {
 						},
 					})
 
-					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-					node := ExpectScheduled(ctx, env.Client, pod)
+					localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+					node := localexp.ExpectScheduled(ctx, env.Client, pod)
 					nodeClaim := cloudProvider.CreateCalls[0]
 					Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("instance-type-1"))
 					Expect(node.Labels[corev1.LabelTopologyZone]).To(Or(Equal("test-zone-1"), Equal("test-zone-2")))
@@ -2988,7 +2988,7 @@ var _ = Describe("Provisioning", func() {
 							MinValues: lo.ToPtr(2),
 						}))
 
-					ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
+					localexp.ExpectMetricCounterValue(metrics.NodeClaimsCreatedTotal, 1, map[string]string{
 						metrics.ReasonLabel:           metrics.ProvisionedReason,
 						metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
 						metrics.MinValuesRelaxedLabel: "true",
