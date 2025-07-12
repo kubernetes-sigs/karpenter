@@ -358,6 +358,16 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	return bindings
 }
 
+func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) scheduling.Results {
+	GinkgoHelper()
+	// Persist objects
+	for _, pod := range pods {
+		ExpectApplied(ctx, c, pod)
+	}
+	results, _ := provisioner.Schedule(ctx)
+	return results
+}
+
 func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, error) {
 	GinkgoHelper()
 
