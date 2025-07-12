@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -87,16 +86,6 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	cmd := Command{
 		Candidates: empty,
 	}
-
-	// Empty Node Consolidation doesn't use Validation as we get to take advantage of cluster.IsNodeNominated.  This
-	// lets us avoid a scheduling simulation (which is performed periodically while pending pods exist and drives
-	// cluster.IsNodeNominated already).
-	select {
-	case <-ctx.Done():
-		return Command{}, errors.New("interrupted")
-	case <-e.clock.After(consolidationTTL):
-	}
-
 	validCmd, err := e.Validate(ctx, cmd, consolidationTTL)
 	if err != nil {
 		if IsValidationError(err) {
