@@ -42,11 +42,21 @@ type Liveness struct {
 // registrationTTL is a heuristic time that we expect the node to register within
 // If we don't see the node within this time, then we should delete the NodeClaim and try again
 const registrationTTL = time.Minute * 15
+const launchTTL = time.Minute * 5
 
 func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	registered := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
 	if registered.IsTrue() {
 		return reconcile.Result{}, nil
+	}
+	launched := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched)
+	if launched == nil {
+		return reconcile.Result{Requeue: true}, nil
+	}
+	if ttl := launchTTL - l.clock.Since(launched.LastTransitionTime.Time); ttl <= 0 {
+		if err := l.deleteNodeClaimForTTL(ctx, "launch_ttl", nodeClaim); err != nil {
+			return reconcile.Result{}, err
+		}
 	}
 	if registered == nil {
 		return reconcile.Result{Requeue: true}, nil
@@ -63,15 +73,9 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 		return reconcile.Result{}, err
 	}
 	// Delete the NodeClaim if we believe the NodeClaim won't register since we haven't seen the node
-	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+	if err := l.deleteNodeClaimForTTL(ctx, "liveness", nodeClaim); err != nil {
+		return reconcile.Result{}, err
 	}
-	log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("terminating due to registration ttl")
-	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       "liveness",
-		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-	})
 	return reconcile.Result{}, nil
 }
 
@@ -101,5 +105,18 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 			}
 		}
 	}
+	return nil
+}
+
+func (l *Liveness) deleteNodeClaimForTTL(ctx context.Context, reason string, nodeClaim *v1.NodeClaim) error {
+	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	log.FromContext(ctx).V(1).WithValues("ttl", registrationTTL).Info("terminating due to registration ttl")
+	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
+		metrics.ReasonLabel:       reason,
+		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
+		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
+	})
 	return nil
 }
