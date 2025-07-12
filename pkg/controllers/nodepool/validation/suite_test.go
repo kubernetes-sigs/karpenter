@@ -28,11 +28,12 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -57,7 +58,7 @@ var _ = BeforeSuite(func() {
 	nodePoolValidationController = NewController(env.Client, cp)
 })
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {
@@ -78,7 +79,7 @@ var _ = Describe("Counter", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
 	})
@@ -92,7 +93,7 @@ var _ = Describe("Counter", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
 		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
@@ -107,7 +108,7 @@ var _ = Describe("Counter", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
 		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
@@ -120,13 +121,13 @@ var _ = Describe("Counter", func() {
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsUnknown()).To(BeTrue())
 	})
 	It("should set the NodePoolValidationSucceeded status condition to true if nodePool healthy checks succeed", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
 		Expect(nodePool.StatusConditions().IsTrue(v1.ConditionTypeValidationSucceeded)).To(BeTrue())
@@ -135,7 +136,7 @@ var _ = Describe("Counter", func() {
 		nodePool.Spec.Template.Spec.Taints = []corev1.Taint{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Effect: corev1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
-		nodePool = ExpectExists(ctx, env.Client, nodePool)
+		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
 	})
