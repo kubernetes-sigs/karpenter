@@ -2036,6 +2036,33 @@ var _ = Context("Scheduling", func() {
 				node2 := ExpectScheduled(ctx, env.Client, secondPod)
 				Expect(node1.Name).To(Equal(node2.Name))
 			})
+			It("should assume pod will schedule to a node with ephemeral taint node.kubernetes.io/not-ready:NoExecute when the node is uninitialized", func() {
+				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings.
+				// The node will not be initialized but the initial pod will still be schedulable against the node
+				// because the node has node.kubernetes.io/not-ready:NoSchedule taint which is ephemeral.
+				nodePool.Spec.Template.Spec.Taints = []corev1.Taint{{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute}}
+				ExpectApplied(ctx, env.Client, nodePool)
+				initialPod := test.UnschedulablePod()
+				bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
+				ExpectScheduled(ctx, env.Client, initialPod)
+
+				// delete the pod so that the node is empty
+				ExpectDeleted(ctx, env.Client, initialPod)
+				node1 := bindings.Get(initialPod).Node
+				node1.Spec.Taints = []corev1.Taint{{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute}}
+				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1.NodeInitializedLabelKey: "true"})
+
+				ExpectApplied(ctx, env.Client, node1)
+				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
+
+				// We try to schedule another pod that only has one toleration. This should succeed because we consider node.kubernetes.io/not-ready:NoSchedule
+				// as ephemeral during provisioning as long as the node in uninitialized.
+				opts := test.PodOptions{Tolerations: []corev1.Toleration{{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule}}}
+				secondPod := test.UnschedulablePod(opts)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
+				node2 := ExpectScheduled(ctx, env.Client, secondPod)
+				Expect(node1.Name).To(Equal(node2.Name))
+			})
 			It("should not assume pod will schedule to a tainted node", func() {
 				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
 					Limits: map[corev1.ResourceName]resource.Quantity{
