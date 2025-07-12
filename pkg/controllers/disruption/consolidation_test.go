@@ -4704,19 +4704,25 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, pods[0], nodeClaims[0], nodes[0], nodePoolWithMinValues)
 
 			// bind pods to node
-			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			localexp.ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
 
 			// inform cluster state about nodes and nodeclaims
+<<<<<<< HEAD
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
+=======
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
+
+			fakeClock.Step(10 * time.Minute)
+>>>>>>> ec89cf5 (tests: moving expectations to use operatorpkg when it exists over there)
 			result, err := disruptionController.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
 			// Validate that nothing changed.
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodeClaims(ctx, env.Client)[0].Name).To(Equal(nodeClaims[0].Name))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)[0].Name).To(Equal(nodes[0].Name))
+			Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(localexp.ExpectNodeClaims(ctx, env.Client)[0].Name).To(Equal(nodeClaims[0].Name))
+			Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			Expect(localexp.ExpectNodes(ctx, env.Client)[0].Name).To(Equal(nodes[0].Name))
 
 			// Expect Unconsolidatable events to be fired for min values violation.
 			Expect(lo.Filter(recorder.Events(), func(e events.Event, _ int) bool {
