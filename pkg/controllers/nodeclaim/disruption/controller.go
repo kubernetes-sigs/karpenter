@@ -102,7 +102,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		errs = multierr.Append(errs, err)
 		results = append(results, res)
 	}
-	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+	if !equality.Semantic.DeepEqual(stored.Status, nodeClaim.Status) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
 		// Here, we are updating the status condition list
