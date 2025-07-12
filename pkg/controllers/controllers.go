@@ -47,6 +47,7 @@ import (
 	nodeclaimhydration "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/hydration"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/podevents"
+	nodeoverlayvalidation "sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay/validation"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
@@ -99,6 +100,7 @@ func NewControllers(
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
 		nodehydration.NewController(kubeClient, cloudProvider),
+		nodeoverlayvalidation.NewController(kubeClient),
 		status.NewController[*v1.NodeClaim](
 			kubeClient,
 			mgr.GetEventRecorderFor("karpenter"),
