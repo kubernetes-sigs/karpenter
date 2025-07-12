@@ -120,10 +120,16 @@ var _ = Describe("Provisioning", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(), pod)
 			prov.Trigger(pod.UID)
 
-			wg := sync.WaitGroup{}
-			ExpectToWait(fakeClock, &wg)
-			result := ExpectSingletonReconciled(ctx, prov)
-			Expect(result.RequeueAfter).ToNot(BeNil())
+			ExpectParallelized(
+				func() {
+					Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second*10).Should(BeTrue())
+					fakeClock.Step(time.Second * 11)
+				},
+				func() {
+					result := ExpectSingletonReconciled(ctx, prov)
+					Expect(result.RequeueAfter).ToNot(BeNil())
+				},
+			)
 		})
 		It("should not extend the timeout if we receive the same pod within the batch idle duration", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
