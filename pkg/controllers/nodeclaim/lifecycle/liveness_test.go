@@ -93,10 +93,10 @@ var _ = Describe("Liveness", func() {
 				ExpectExists(ctx, env.Client, nodeClaim)
 			}
 		},
-		Entry("should delete the nodeClaim when the Node hasn't registered past the registration ttl", true),
+		Entry("should delete the nodeClaim when the Node hasn't registered past the registration timeout", true),
 		Entry("should ignore NodeClaims not managed by this Karpenter instance", false),
 	)
-	It("shouldn't delete the nodeClaim when the node has registered past the registration ttl", func() {
+	It("shouldn't delete the nodeClaim when the node has registered past the registration timeout", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -126,7 +126,7 @@ var _ = Describe("Liveness", func() {
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
 	})
-	It("should delete the NodeClaim when the NodeClaim hasn't launched past the launch ttl", func() {
+	It("should delete the NodeClaim when the NodeClaim hasn't launched past the launch timeout", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -149,11 +149,40 @@ var _ = Describe("Liveness", func() {
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
-		fakeClock.Step(time.Minute * 10)
+		// If the node hasn't launched in the launch timeout timeframe, then we deprovision the nodeClaim
+		fakeClock.Step(time.Minute * 6)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
+	})
+	It("should not delete the NodeClaim when the NodeClaim hasn't launched before the launch timeout", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
+						fake.ResourceGPUVendorA: resource.MustParse("1"),
+					},
+				},
+			},
+		})
+		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		// try again a minute later but before the launch timeout
+		fakeClock.Step(time.Minute * 1)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		// expect that the nodeclaim was not deleted
+		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should not update NodeRegistrationHealthy status condition if it is already set to True", func() {
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
