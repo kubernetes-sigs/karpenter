@@ -184,6 +184,45 @@ var _ = Describe("Liveness", func() {
 		// expect that the nodeclaim was not deleted
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
+	It("should use the status condition transition times for timeouts, not the creation timestamp", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+			Spec: v1.NodeClaimSpec{
+				Resources: v1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:      resource.MustParse("2"),
+						corev1.ResourceMemory:   resource.MustParse("50Mi"),
+						corev1.ResourcePods:     resource.MustParse("5"),
+						fake.ResourceGPUVendorA: resource.MustParse("1"),
+					},
+				},
+			},
+		})
+		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		conditions := nodeClaim.Status.Conditions
+		newConditions := make([]status.Condition, len(conditions))
+		for i, condition := range conditions {
+			condition.LastTransitionTime = metav1.NewTime(fakeClock.Now().Add(10 * time.Minute))
+			newConditions[i] = condition
+		}
+		nodeClaim.Status.Conditions = newConditions
+		ExpectApplied(ctx, env.Client, nodeClaim)
+		// advance the clock to show that the timeout is not based on creation timestamp
+		fakeClock.Step(12 * time.Minute)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+
+		// expect that the nodeclaim was not deleted after the timeout
+		ExpectExists(ctx, env.Client, nodeClaim)
+	})
+
 	It("should not update NodeRegistrationHealthy status condition if it is already set to True", func() {
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
 		nodeClaim := test.NodeClaim(v1.NodeClaim{

@@ -18,7 +18,6 @@ package lifecycle
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -76,7 +75,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	if launched == nil {
 		return reconcile.Result{Requeue: true}, nil
 	}
-	if Timeout := launchTimeout - l.clock.Since(launched.LastTransitionTime.Time); Timeout <= 0 {
+	if timeUntilTimeout := launchTimeout - l.clock.Since(launched.LastTransitionTime.Time); timeUntilTimeout <= 0 {
 		if err := l.deleteNodeClaimForTimeout(ctx, LaunchTimeout, nodeClaim); err != nil {
 			return reconcile.Result{}, err
 		}
@@ -86,8 +85,8 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	}
 	// If the Registered statusCondition hasn't gone True during the Timeout since we first updated it, we should terminate the NodeClaim
 	// NOTE: Timeout has to be stored and checked in the same place since l.clock can advance after the check causing a race
-	if timeout := registrationTimeout - l.clock.Since(registered.LastTransitionTime.Time); timeout > 0 {
-		return reconcile.Result{RequeueAfter: timeout}, nil
+	if timeUntilTimeout := registrationTimeout - l.clock.Since(registered.LastTransitionTime.Time); timeUntilTimeout > 0 {
+		return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
 	}
 	if err := l.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
 		if errors.IsConflict(err) {
@@ -135,7 +134,7 @@ func (l *Liveness) deleteNodeClaimForTimeout(ctx context.Context, timeout NodeCl
 	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	log.FromContext(ctx).V(1).WithValues("timeout", timeout.duration).Info(fmt.Sprintf("terminating due to %s timeout", timeout.reason))
+	log.FromContext(ctx).V(1).WithValues("timeout", timeout.duration, "reason", timeout.reason).Info("terminating due to timeout")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 		metrics.ReasonLabel:       timeout.reason,
 		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
