@@ -43,6 +43,7 @@ type OptionsFields struct {
 	LogOutputPaths          *string
 	LogErrorOutputPaths     *string
 	PreferencePolicy        *options.PreferencePolicy
+	MinValuesPolicy         *options.MinValuesPolicy
 	BatchMaxDuration        *time.Duration
 	BatchIdleDuration       *time.Duration
 	FeatureGates            FeatureGates
@@ -78,9 +79,10 @@ func Options(overrides ...OptionsFields) *options.Options {
 		BatchMaxDuration:      lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
 		BatchIdleDuration:     lo.FromPtrOr(opts.BatchIdleDuration, time.Second),
 		PreferencePolicy:      lo.FromPtrOr(opts.PreferencePolicy, options.PreferencePolicyRespect),
+		MinValuesPolicy:       lo.FromPtrOr(opts.MinValuesPolicy, options.MinValuesPolicyStrict),
 		FeatureGates: options.FeatureGates{
 			NodeRepair:              lo.FromPtrOr(opts.FeatureGates.NodeRepair, false),
-			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, false),
+			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, true),
 			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
 		},
 	}

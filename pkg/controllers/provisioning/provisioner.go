@@ -315,7 +315,11 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	}
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
 
-	opts := []scheduler.Options{scheduler.DisableReservedCapacityFallback, scheduler.NumConcurrentReconciles(int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0)))}
+	opts := []scheduler.Options{
+		scheduler.DisableReservedCapacityFallback,
+		scheduler.NumConcurrentReconciles(int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))),
+		scheduler.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy),
+	}
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduler.IgnorePreferences)
 	}
@@ -345,7 +349,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return scheduler.Results{}, err
 	}
-	results = results.TruncateInstanceTypes(scheduler.MaxInstanceTypes)
+	results = results.TruncateInstanceTypes(ctx, scheduler.MaxInstanceTypes)
 	reservedOfferingErrors := results.ReservedOfferingErrors()
 	if len(reservedOfferingErrors) != 0 {
 		log.FromContext(ctx).V(1).WithValues(
@@ -404,11 +408,21 @@ func (p *Provisioner) Create(ctx context.Context, n *scheduler.NodeClaim, opts .
 
 	log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(nodeClaim), "requests", nodeClaim.Spec.Resources.Requests, "instance-types", instanceTypeList(instanceTypeRequirement.Values)).
 		Info("created nodeclaim")
-	metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
-		metrics.ReasonLabel:       options.Reason,
-		metrics.NodePoolLabel:     nodeClaim.Labels[v1.NodePoolLabelKey],
-		metrics.CapacityTypeLabel: nodeClaim.Labels[v1.CapacityTypeLabelKey],
-	})
+
+	if val, ok := nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey]; ok {
+		metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
+			metrics.ReasonLabel:           options.Reason,
+			metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.MinValuesRelaxedLabel: val,
+		})
+	} else {
+		// If annotation is missing for any reason, assume that min values wasn't relaxed.
+		metrics.NodeClaimsCreatedTotal.Inc(map[string]string{
+			metrics.ReasonLabel:           options.Reason,
+			metrics.NodePoolLabel:         nodeClaim.Labels[v1.NodePoolLabelKey],
+			metrics.MinValuesRelaxedLabel: "false",
+		})
+	}
 	// Update the nodeclaim manually in state to avoid eventual consistency delay races with our watcher.
 	// This is essential to avoiding races where disruption can create a replacement node, then immediately
 	// requeue. This can race with controller-runtime's internal cache as it watches events on the cluster

@@ -44,6 +44,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -86,6 +87,7 @@ const (
 type options struct {
 	reservedOfferingMode    ReservedOfferingMode
 	preferencePolicy        PreferencePolicy
+	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
 }
 
@@ -105,6 +107,12 @@ var NumConcurrentReconciles = func(numConcurrentReconciles int) func(*options) {
 	}
 }
 
+var MinValuesPolicy = func(policy karpopts.MinValuesPolicy) func(*options) {
+	return func(opts *options) {
+		opts.minValuesPolicy = policy
+	}
+}
+
 func NewScheduler(
 	ctx context.Context,
 	kubeClient client.Client,
@@ -118,6 +126,7 @@ func NewScheduler(
 	clock clock.Clock,
 	opts ...Options,
 ) *Scheduler {
+	minValuesPolicy := option.Resolve(opts...).minValuesPolicy
 
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
@@ -130,12 +139,19 @@ func NewScheduler(
 		}
 	}
 	// Pre-filter instance types eligible for NodePools to reduce work done during scheduling loops for pods
+	// if no templates remain, we still want to build the scheduler so that Karpenter can ack pods which can schedule to existing and in-flight capacity
 	templates := lo.FilterMap(nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
+		var err error
 		nct := NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions, _ = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{})
+		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
 		if len(nct.InstanceTypeOptions) == 0 {
-			recorder.Publish(NoCompatibleInstanceTypes(np))
-			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, nodepool requirements filtered out all instance types")
+			if instanceTypeFilterErr, ok := lo.ErrorsAs[InstanceTypeFilterError](err); ok && instanceTypeFilterErr.minValuesIncompatibleErr != nil {
+				recorder.Publish(NoCompatibleInstanceTypes(np, true))
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, nodepool requirements filtered out all instance types", "minValuesIncompatibleErr", instanceTypeFilterErr.minValuesIncompatibleErr)
+			} else {
+				recorder.Publish(NoCompatibleInstanceTypes(np, false))
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, nodepool requirements filtered out all instance types")
+			}
 			return nil, false
 		}
 		return nct, true
@@ -158,6 +174,7 @@ func NewScheduler(
 		reservationManager:      NewReservationManager(instanceTypes),
 		reservedOfferingMode:    option.Resolve(opts...).reservedOfferingMode,
 		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
+		minValuesPolicy:         minValuesPolicy,
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
@@ -188,6 +205,7 @@ type Scheduler struct {
 	reservationManager      *ReservationManager
 	reservedOfferingMode    ReservedOfferingMode
 	preferencePolicy        PreferencePolicy
+	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
 }
 
@@ -305,12 +323,12 @@ func (r Results) NonPendingPodSchedulingErrors() string {
 
 // TruncateInstanceTypes filters the result based on the maximum number of instanceTypes that needs
 // to be considered. This filters all instance types generated in NewNodeClaims in the Results
-func (r Results) TruncateInstanceTypes(maxInstanceTypes int) Results {
+func (r Results) TruncateInstanceTypes(ctx context.Context, maxInstanceTypes int) Results {
 	var validNewNodeClaims []*NodeClaim
 	for _, newNodeClaim := range r.NewNodeClaims {
 		// The InstanceTypeOptions are truncated due to limitations in sending the number of instances to launch API.
 		var err error
-		newNodeClaim.InstanceTypeOptions, err = newNodeClaim.InstanceTypeOptions.Truncate(newNodeClaim.Requirements, maxInstanceTypes)
+		newNodeClaim.InstanceTypeOptions, err = newNodeClaim.InstanceTypeOptions.Truncate(ctx, newNodeClaim.Requirements, maxInstanceTypes)
 		if err != nil {
 			// Check if the truncated InstanceTypeOptions in each NewNodeClaim from the results still satisfy the minimum requirements
 			// If number of InstanceTypes in the NodeClaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
@@ -442,6 +460,9 @@ func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	if err := s.addToInflightNode(ctx, pod); err == nil {
 		return nil
 	}
+	if len(s.nodeClaimTemplates) == 0 {
+		return fmt.Errorf("nodepool requirements filtered out all available instance types")
+	}
 	err := s.addToNewNodeClaim(ctx, pod)
 	if err == nil {
 		return nil
@@ -495,7 +516,7 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 	var updatedInstanceTypes []*cloudprovider.InstanceType
 	var offeringsToReserve []*cloudprovider.Offering
 	parallelizeUntil(s.numConcurrentReconciles, len(s.newNodeClaims), func(i int) bool {
-		r, its, ofr, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID])
+		r, its, ofr, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], false)
 		if err == nil {
 			mu.Lock()
 			defer mu.Unlock()
@@ -520,6 +541,7 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 	return fmt.Errorf("failed scheduling pod to inflight nodes")
 }
 
+//nolint:gocyclo
 func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) error {
 	idx := math.MaxInt
 	var mu sync.Mutex
@@ -549,7 +571,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 			}
 		}
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
-		r, its, ofs, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID])
+		r, its, ofs, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
 		if err != nil {
 			errs[i] = err
 
@@ -581,6 +603,18 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		if i >= idx {
 			return false
 		}
+
+		_, minValuesRelaxed := lo.Find(nodeClaim.Requirements.Keys().UnsortedList(), func(k string) bool {
+			updated := r.Get(k).MinValues
+			original := nodeClaim.Requirements.Get(k).MinValues
+			return original != nil && updated != nil && lo.FromPtr(updated) < lo.FromPtr(original)
+		})
+		if minValuesRelaxed {
+			nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey] = "true"
+		} else {
+			nodeClaim.Annotations[v1.NodeClaimMinValuesRelaxedAnnotationKey] = "false"
+		}
+
 		newNodeClaim = nodeClaim
 		updatedRequirements = r
 		updatedInstanceTypes = its

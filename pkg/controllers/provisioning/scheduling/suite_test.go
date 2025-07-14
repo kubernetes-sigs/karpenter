@@ -4298,6 +4298,200 @@ var _ = Context("Scheduling", func() {
 			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, targetInstanceTypeName))
 			Expect(node.Labels).To(HaveKeyWithValue(v1.NodePoolLabelKey, nodePool.Name))
 		})
+		It("should handle multiple pods on reserved nodes", func() {
+			nodePool.Name = "np-1"
+			ExpectApplied(ctx, env.Client, nodePool)
+			affLabels := map[string]string{"app": "test"}
+
+			pods := lo.Times(2, func(i int) *corev1.Pod {
+				return test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: affLabels,
+					},
+					NodeRequirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"small-instance-type"},
+						},
+						{
+							Key:      v1.NodePoolLabelKey,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"np-1"},
+						},
+						{
+							Key:      v1.CapacityTypeLabelKey,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{v1.CapacityTypeReserved},
+						},
+						{
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					PodRequirements: []corev1.PodAffinityTerm{
+						{
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: affLabels,
+							},
+							TopologyKey: corev1.LabelTopologyZone,
+						},
+					},
+				})
+			})
+
+			bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			Expect(len(bindings)).To(Equal(2))
+			node := lo.Values(bindings)[0].Node
+			for _, b := range lo.Values(bindings) {
+				Expect(b.Node.Name).To(Equal(node.Name))
+			}
+			Expect(node.Labels).To(HaveKeyWithValue(cloudprovider.ReservationIDLabel, "r-small-instance-type"))
+			Expect(node.Labels).To(HaveKeyWithValue(v1.CapacityTypeLabelKey, v1.CapacityTypeReserved))
+			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "small-instance-type"))
+		})
+	})
+	Describe("NodePool requirements instance filtering", func() {
+		It("should return appropriate pod error when no available instance types exist", func() {
+			// First, verify the nodepool is ready and can schedule pods normally
+			ExpectApplied(ctx, env.Client, nodePool)
+			normalPod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, normalPod)
+			ExpectScheduled(ctx, env.Client, normalPod)
+
+			// Update nodepool with a requirement for an instance type that does not exist
+			nodePool = test.ReplaceRequirements(nodePool,
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"non-existent-instance-type"},
+					},
+				},
+			)
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Create a pod that should fail to schedule due to being too large for the previously created node
+			// and no available instance types
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod-filtered",
+					Namespace: "default",
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("32"),
+						corev1.ResourceMemory: resource.MustParse("256Gi"),
+					},
+					Limits: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("32"),
+						corev1.ResourceMemory: resource.MustParse("256Gi"),
+					},
+				},
+			})
+
+			// Attempt to provision the pod - it should fail
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(results.PodErrors).To(HaveLen(1))
+			for _, err := range results.PodErrors {
+				fmt.Println(results.PodErrors[pod])
+				ExpectNotScheduled(ctx, env.Client, pod)
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
+			}
+		})
+		It("should handle multiple pods when requirements filter out all instance types", func() {
+			nodePool = test.ReplaceRequirements(nodePool,
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"non-existent-arch"},
+					},
+				},
+			)
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Create multiple pods that should all fail to schedule
+			pods := []*corev1.Pod{
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"},
+				}),
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"},
+				}),
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-3", Namespace: "default"},
+				}),
+			}
+
+			// ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			Expect(results.PodErrors).To(HaveLen(3))
+			for pod, err := range results.PodErrors {
+				ExpectNotScheduled(ctx, env.Client, pod)
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
+			}
+		})
+		It("should handle conflicting requirements that eliminate all instance types", func() {
+			// Create conflicting requirements that no instance type can satisfy
+			nodePool = test.ReplaceRequirements(nodePool,
+				// Require both amd64 and arm64 architecture (impossible)
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					},
+				},
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"arm64"},
+					},
+				},
+			)
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "conflicting-requirements-pod",
+					Namespace: "default",
+				},
+			})
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(results.PodErrors).To(HaveLen(1))
+			for _, err := range results.PodErrors {
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
+			}
+		})
+		It("should handle zone requirements that filter out all instance types", func() {
+			// Use a zone requirement that doesn't match any available instance types
+			nodePool = test.ReplaceRequirements(nodePool,
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"non-existent-zone-1", "non-existent-zone-2"},
+					},
+				},
+			)
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "zone-filtered-pod",
+					Namespace: "default",
+				},
+			})
+
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(results.PodErrors).To(HaveLen(1))
+			for _, err := range results.PodErrors {
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
+			}
+		})
 	})
 })
 
