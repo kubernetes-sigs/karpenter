@@ -98,7 +98,6 @@ var _ = BeforeSuite(func() {
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
 	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
 var _ = AfterSuite(func() {
@@ -112,7 +111,7 @@ var _ = BeforeEach(func() {
 	recorder.Reset() // Reset the events that we captured during the run
 
 	// Ensure that we reset the disruption controller's methods after each test run
-	disruptionController.Methods = NewMethodsWithNopValidator()
+	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithNopValidator()...))
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
 	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov))
@@ -632,7 +631,6 @@ var _ = Describe("Disruption Taints", func() {
 		// Process the item so that the nodes can be deleted.
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(1))
-		ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))

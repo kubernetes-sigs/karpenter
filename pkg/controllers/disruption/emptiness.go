@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/option"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -29,11 +30,12 @@ import (
 // Emptiness is a subreconciler that deletes empty candidates.
 type Emptiness struct {
 	consolidation
-	Validator
+	validator Validator
 }
 
-func NewEmptiness(c consolidation) *Emptiness {
-	return &Emptiness{consolidation: c, Validator: NewEmptinessValidator(c)}
+func NewEmptiness(c consolidation, opts ...option.Function[MethodOptions]) *Emptiness {
+	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewEmptinessValidator(c))}, opts...)...)
+	return &Emptiness{consolidation: c, validator: o.validator}
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
@@ -86,7 +88,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	cmd := Command{
 		Candidates: empty,
 	}
-	validCmd, err := e.Validate(ctx, cmd, consolidationTTL)
+	validCmd, err := e.validator.Validate(ctx, cmd, consolidationTTL)
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
