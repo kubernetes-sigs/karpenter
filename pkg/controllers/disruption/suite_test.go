@@ -25,10 +25,10 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/client-go/util/workqueue"
-	clockiface "k8s.io/utils/clock"
+	"k8s.io/apimachinery/pkg/types"
 
-	"sigs.k8s.io/karpenter/pkg/events"
+	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -49,7 +49,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
-	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
@@ -72,7 +71,7 @@ var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
 var fakeClock *clock.FakeClock
 var recorder *test.EventRecorder
-var queue *orchestration.Queue
+var queue *disruption.Queue
 var allKnownDisruptionReasons []v1.DisruptionReason
 
 var onDemandInstances []*cloudprovider.InstanceType
@@ -98,7 +97,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
-	queue = NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov)
+	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
 	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
 })
 
@@ -112,13 +111,11 @@ var _ = BeforeEach(func() {
 
 	recorder.Reset() // Reset the events that we captured during the run
 
-	// ensure any waiters on our clock are allowed to proceed before resetting our clock time
-	for fakeClock.HasWaiters() {
-		fakeClock.Step(1 * time.Minute)
-	}
+	// Ensure that we reset the disruption controller's methods after each test run
+	disruptionController.Methods = NewMethodsWithNopValidator()
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
-	*queue = lo.FromPtr(NewTestingQueue(env.Client, recorder, cluster, fakeClock, prov))
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov))
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -433,15 +430,14 @@ var _ = Describe("Simulate Scheduling", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		// disruption won't delete the old node until the new node is ready
-		var wg sync.WaitGroup
-		ExpectToWait(fakeClock, &wg)
-		ExpectMakeNewNodeClaimsReady(ctx, env.Client, &wg, cluster, cloudProvider, 1)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
+
+		// disruption won't delete the old node until the new node is ready
+		Expect(queue.GetCommands()).To(HaveLen(1))
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, queue.GetCommands()[0])
 
 		// Process the item so that the nodes can be deleted.
-		ExpectSingletonReconciled(ctx, queue)
+		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 		// Cascade any deletion of the nodeClaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -463,7 +459,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		defer hangCreateClient.Stop()
 
 		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
-		dc := disruption.NewController(fakeClock, env.Client, p, cloudProvider, recorder, cluster, queue)
+		q := disruption.NewQueue(hangCreateClient, recorder, cluster, fakeClock, p)
+		dc := disruption.NewController(fakeClock, hangCreateClient, p, cloudProvider, recorder, cluster, q)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
@@ -516,7 +513,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		go ExpectSingletonReconciled(ctx, dc)
 		Eventually(func(g Gomega) {
 			g.Expect(hangCreateClient.HasWaiter()).To(BeTrue())
-		}).Should(Succeed())
+		}, time.Second*5).Should(Succeed())
 
 		// If our code works correctly, the provisioner should not try to create a new NodeClaim since we shouldn't have marked
 		// our nodes for disruption until the new NodeClaims have been successfully launched
@@ -630,23 +627,12 @@ var _ = Describe("Disruption Taints", func() {
 		// inform cluster state about nodes and nodeClaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		// Trigger the reconcile loop to start but don't trigger the verify action
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ExpectToWait(fakeClock, &wg)
-			ExpectSingletonReconciled(ctx, disruptionController)
-		}()
+		ExpectSingletonReconciled(ctx, disruptionController)
 
-		// Iterate in a loop until we get to the validation action
-		// Then, apply the pods to the cluster and bind them to the nodes
-		for i := 0; i < 20; i++ {
-			time.Sleep(100 * time.Millisecond)
-			if len(ExpectNodeClaims(ctx, env.Client)) == 2 {
-				break
-			}
-		}
+		// Process the item so that the nodes can be deleted.
+		cmds := queue.GetCommands()
+		Expect(cmds).To(HaveLen(1))
+		ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmds[0])
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
@@ -663,12 +649,9 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectDeleted(ctx, env.Client, createdNodeClaim[0])
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, createdNodeClaim[0])
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
-		wg.Wait()
+		cluster.DeleteNodeClaim(createdNodeClaim[0].Name)
 
-		// Increment the clock so that the nodeclaim deletion isn't caught by the
-		// eventual consistency delay.
-		fakeClock.Step(6 * time.Second)
-		ExpectSingletonReconciled(ctx, queue)
+		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 		node = ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
@@ -1847,7 +1830,8 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
-		Expect(queue.Add(orchestration.NewCommand([]string{}, []*state.StateNode{cluster.Nodes()[0]}, "", "test-method", "fake-type"))).To(Succeed())
+		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.Nodes()[0]}}, Replacements: nil}
+		Expect(queue.StartCommand(ctx, cmd))
 
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
@@ -1901,13 +1885,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
-		fakeClock.Step(10 * time.Minute)
-		wg := sync.WaitGroup{}
-		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
-
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":          "delete",
 			metrics.ReasonLabel: "empty",
@@ -1931,8 +1909,6 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
-
-		fakeClock.Step(10 * time.Minute)
 		ExpectSingletonReconciled(ctx, disruptionController)
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
@@ -1956,8 +1932,6 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
-		fakeClock.Step(10 * time.Minute)
 		ExpectSingletonReconciled(ctx, disruptionController)
 
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
@@ -1970,14 +1944,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
-
-		fakeClock.Step(10 * time.Minute)
-
-		var wg sync.WaitGroup
-		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
-
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "delete",
 			metrics.ReasonLabel:  "empty",
@@ -2012,14 +1979,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
-
-		fakeClock.Step(10 * time.Minute)
-
-		var wg sync.WaitGroup
-		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
-
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "delete",
 			metrics.ReasonLabel:  "underutilized",
@@ -2074,14 +2034,7 @@ var _ = Describe("Metrics", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
-
-		fakeClock.Step(10 * time.Minute)
-
-		var wg sync.WaitGroup
-		ExpectToWait(fakeClock, &wg)
 		ExpectSingletonReconciled(ctx, disruptionController)
-		wg.Wait()
-
 		ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
 			"decision":           "replace",
 			metrics.ReasonLabel:  "underutilized",
@@ -2223,58 +2176,16 @@ func ExpectNewNodeClaimsDeleted(ctx context.Context, c client.Client, wg *sync.W
 	}()
 }
 
-func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, wg *sync.WaitGroup, cluster *state.Cluster,
-	cloudProvider cloudprovider.CloudProvider, numNewNodeClaims int) {
+func ExpectMakeNewNodeClaimsReady(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, cmd *disruption.Command) {
 	GinkgoHelper()
 
-	existingNodeClaims := ExpectNodeClaims(ctx, c)
-	existingNodeClaimNames := sets.NewString(lo.Map(existingNodeClaims, func(nc *v1.NodeClaim, _ int) string {
-		return nc.Name
-	})...)
-
-	wg.Add(1)
-	go func() {
-		nodeClaimsMadeReady := 0
-		ctx, cancel := context.WithTimeout(ctx, time.Second*10) // give up after 10s
-		defer GinkgoRecover()
-		defer wg.Done()
-		defer cancel()
-		for {
-			select {
-			case <-time.After(50 * time.Millisecond):
-				nodeClaimList := &v1.NodeClaimList{}
-				if err := c.List(ctx, nodeClaimList); err != nil {
-					continue
-				}
-				for i := range nodeClaimList.Items {
-					nc := &nodeClaimList.Items[i]
-					if existingNodeClaimNames.Has(nc.Name) {
-						continue
-					}
-					nc, n := ExpectNodeClaimDeployedAndStateUpdated(ctx, c, cluster, cloudProvider, nc)
-					ExpectMakeNodeClaimsInitialized(ctx, c, nc)
-					ExpectMakeNodesInitialized(ctx, c, n)
-
-					nodeClaimsMadeReady++
-					existingNodeClaimNames.Insert(nc.Name)
-					// did we make all the nodes ready that we expected?
-					if nodeClaimsMadeReady == numNewNodeClaims {
-						return
-					}
-				}
-			case <-ctx.Done():
-				Fail(fmt.Sprintf("waiting for nodeclaims to be ready, %s", ctx.Err()))
-			}
-		}
-	}()
-}
-
-func NewTestingQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clockiface.Clock,
-	provisioner *provisioning.Provisioner) *orchestration.Queue {
-
-	q := orchestration.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
-	q.TypedRateLimitingInterface = test.NewTypedRateLimitingInterface[*orchestration.Command](workqueue.TypedQueueConfig[*orchestration.Command]{Name: "disruption.workqueue"})
-	return q
+	for _, replacement := range cmd.Replacements {
+		nc := &v1.NodeClaim{}
+		Expect(c.Get(ctx, types.NamespacedName{Name: replacement.Name}, nc)).To(Succeed())
+		nc, n := ExpectNodeClaimDeployedAndStateUpdated(ctx, c, cluster, cloudProvider, nc)
+		ExpectMakeNodeClaimsInitialized(ctx, c, nc)
+		ExpectMakeNodesInitialized(ctx, c, n)
+	}
 }
 
 type hangCreateClient struct {

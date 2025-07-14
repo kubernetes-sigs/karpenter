@@ -26,8 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/utils/clock/testing"
-
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
@@ -136,24 +134,6 @@ func ExpectNotScheduled(ctx context.Context, c client.Client, pod *corev1.Pod) *
 	p := ExpectPodExists(ctx, c, pod.Name, pod.Namespace)
 	Eventually(p.Spec.NodeName).Should(BeEmpty(), fmt.Sprintf("expected %s/%s to not be scheduled", pod.Namespace, pod.Name))
 	return p
-}
-
-// ExpectToWait continually polls the wait group to see if there
-// is a timer waiting, incrementing the clock if not.
-func ExpectToWait(fakeClock *testing.FakeClock, wg *sync.WaitGroup) {
-	wg.Add(1)
-	Expect(fakeClock.HasWaiters()).To(BeFalse())
-	go func() {
-		defer GinkgoRecover()
-		defer wg.Done()
-		Eventually(func() bool { return fakeClock.HasWaiters() }).
-			// Caution: if another go routine takes longer than this timeout to
-			// wait on the clock, we will deadlock until the test suite timeout
-			WithTimeout(10 * time.Second).
-			WithPolling(10 * time.Millisecond).
-			Should(BeTrue())
-		fakeClock.Step(45 * time.Second)
-	}()
 }
 
 func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Object) {
@@ -358,6 +338,16 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 		}
 	}
 	return bindings
+}
+
+func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) scheduling.Results {
+	GinkgoHelper()
+	// Persist objects
+	for _, pod := range pods {
+		ExpectApplied(ctx, c, pod)
+	}
+	results, _ := provisioner.Schedule(ctx)
+	return results
 }
 
 func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, error) {
@@ -742,4 +732,17 @@ func ConsistentlyExpectNotTerminating(ctx context.Context, c client.Client, objs
 			g.Expect(obj.GetDeletionTimestamp().IsZero()).To(BeTrue())
 		}
 	}, time.Second).Should(Succeed())
+}
+
+func ExpectParallelized(fs ...func()) {
+	wg := sync.WaitGroup{}
+	wg.Add(len(fs))
+	for _, f := range fs {
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			f()
+		}()
+	}
+	wg.Wait()
 }

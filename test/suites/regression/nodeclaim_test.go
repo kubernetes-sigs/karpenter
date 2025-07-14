@@ -300,8 +300,8 @@ var _ = Describe("NodeClaim", func() {
 			nodeClaim = env.ExpectExists(nodeClaim).(*v1.NodeClaim)
 
 			By("Updated NodeClaim Status")
-			nodeClaim.Status.ProviderID = ""
-			nodeClaim.Status.NodeName = ""
+			nodeClaim.Status.ProviderID = "Provider:///AZ/i-01234567890123456"
+			nodeClaim.Status.NodeName = "test-node-name"
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)

@@ -51,7 +51,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
-	"sigs.k8s.io/karpenter/pkg/utils/termination"
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
@@ -131,23 +130,59 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("tainting node, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
 	}
 
+	var stored *v1.NodeClaim
+	if nodeClaim != nil {
+		stored = nodeClaim.DeepCopy()
+	}
+	var terminationErr error
+	var result reconcile.Result
 	for _, f := range []terminationFunc{
 		c.awaitDrain,
 		c.awaitVolumeDetachment,
 		c.awaitInstanceTermination,
 	} {
-		result, err := f(ctx, nodeClaim, node, nodeTerminationTime)
-		if result != nil || err != nil {
-			return *result, err
+		result, terminationErr = f(ctx, nodeClaim, node, nodeTerminationTime)
+		if !lo.IsEmpty(result) || terminationErr != nil {
+			break
 		}
 	}
-	if err := c.removeFinalizer(ctx, node); err != nil {
+	// If we don't have a NodeClaim, then there's nothing for us to patch here
+	if stored != nil && !equality.Semantic.DeepEqual(stored, nodeClaim) {
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the status condition list
+		if err = c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, fmt.Errorf("updating nodeclaim, %w", err)
+		}
+		// We only increment the drained metric after we have ensured that we have patched the status condition onto the NodeClaim
+		if !stored.StatusConditions().IsTrue(v1.ConditionTypeDrained) && nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeDrained) {
+			// We'll only increment this metric if there is a NodeClaim present for the node, but this prevents us from double
+			// counting over multiple reconciles.
+			NodesDrainedTotal.Inc(map[string]string{
+				metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey],
+			})
+		}
+		// We sleep here after a patch operation since we want to ensure that we are able to read our own writes
+		// so that we avoid duplicating metrics and log lines due to quick re-queues from our node watcher
+		// USE CAUTION when determining whether to increase this timeout or remove this line
+		time.After(time.Second)
+	}
+	if terminationErr != nil {
+		return reconcile.Result{}, terminationErr
+	}
+	if !lo.IsEmpty(result) {
+		return result, nil
+	}
+	if err = c.removeFinalizer(ctx, node); err != nil {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{}, nil
 }
 
-type terminationFunc func(context.Context, *v1.NodeClaim, *corev1.Node, *time.Time) (*reconcile.Result, error)
+type terminationFunc func(context.Context, *v1.NodeClaim, *corev1.Node, *time.Time) (reconcile.Result, error)
 
 // awaitDrain initiates the drain of the node and will continue to requeue until the node has been drained. If the
 // nodeClaim has a terminationGracePeriod set, pods will be deleted to ensure this function does not requeue past the
@@ -157,45 +192,21 @@ func (c *Controller) awaitDrain(
 	nodeClaim *v1.NodeClaim,
 	node *corev1.Node,
 	nodeTerminationTime *time.Time,
-) (*reconcile.Result, error) {
+) (reconcile.Result, error) {
 	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
-			return &reconcile.Result{}, fmt.Errorf("draining node, %w", err)
+			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
 		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
 		if nodeClaim != nil {
-			stored := nodeClaim.DeepCopy()
-			if modified := nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining"); modified {
-				if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
-					if errors.IsConflict(err) {
-						return &reconcile.Result{Requeue: true}, nil
-					}
-					return &reconcile.Result{}, err
-				}
-			}
+			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
 		}
-		return &reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
-	if nodeClaim != nil && !nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsTrue() {
-		stored := nodeClaim.DeepCopy()
-		// No need to check for modification since we've already verifyied it wasn't set to true
-		_ = nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrained)
-		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
-			if errors.IsConflict(err) {
-				return &reconcile.Result{Requeue: true}, nil
-			}
-			return &reconcile.Result{}, err
-		}
-		// We'll only increment this metric if there is a NodeClaim present for the node, but this prevents us from double
-		// counting over multiple reconciles.
-		NodesDrainedTotal.Inc(map[string]string{
-			metrics.NodePoolLabel: node.Labels[v1.NodePoolLabelKey],
-		})
-		// We requeue after a patch operation since we want to ensure we read our own writes before any subsequent
-		// operations on the NodeClaim.
-		return &reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+	if nodeClaim != nil {
+		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrained)
 	}
-	return nil, nil
+	return reconcile.Result{}, nil
 }
 
 // awaitVolumeDetachment will continue to requeue until all volume attachments associated with the node have been
@@ -208,32 +219,21 @@ func (c *Controller) awaitVolumeDetachment(
 	nodeClaim *v1.NodeClaim,
 	node *corev1.Node,
 	nodeTerminationTime *time.Time,
-) (*reconcile.Result, error) {
+) (reconcile.Result, error) {
 	// In order for Pods associated with PersistentVolumes to smoothly migrate from the terminating Node, we wait
 	// for VolumeAttachments of drain-able Pods to be cleaned up before terminating Node and removing its finalizer.
 	// However, if TerminationGracePeriod is configured for Node, and we are past that period, we will skip waiting.
 	pendingVolumeAttachments, err := c.pendingVolumeAttachments(ctx, node)
 	if err != nil {
-		return &reconcile.Result{}, fmt.Errorf("ensuring no volume attachments, %w", err)
+		return reconcile.Result{}, fmt.Errorf("ensuring no volume attachments, %w", err)
 	}
 	if len(pendingVolumeAttachments) == 0 {
 		// There are no remaining volume attachments blocking instance termination. If we've already updated the status
 		// condition, fall through. Otherwise, update the status condition and requeue.
 		if nodeClaim != nil {
-			stored := nodeClaim.DeepCopy()
-			if modified := nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeVolumesDetached); modified {
-				if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
-					if errors.IsConflict(err) {
-						return &reconcile.Result{Requeue: true}, nil
-					}
-					return &reconcile.Result{}, err
-				}
-				// We requeue after a patch operation since we want to ensure we read our own writes before any subsequent
-				// operations on the NodeClaim.
-				return &reconcile.Result{RequeueAfter: 1 * time.Second}, nil
-			}
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeVolumesDetached)
 		}
-		return nil, nil
+		return reconcile.Result{}, nil
 	}
 
 	if !c.hasTerminationGracePeriodElapsed(nodeTerminationTime) {
@@ -243,37 +243,18 @@ func (c *Controller) awaitVolumeDetachment(
 		// must have expired.
 		c.recorder.Publish(terminatorevents.NodeAwaitingVolumeDetachmentEvent(node, pendingVolumeAttachments...))
 		if nodeClaim != nil {
-			stored := nodeClaim.DeepCopy()
-			if modified := nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeVolumesDetached, "AwaitingVolumeDetachment", "AwaitingVolumeDetachment"); modified {
-				if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
-					if errors.IsConflict(err) {
-						return &reconcile.Result{Requeue: true}, nil
-					}
-					return &reconcile.Result{}, err
-				}
-			}
+			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeVolumesDetached, "AwaitingVolumeDetachment", "AwaitingVolumeDetachment")
 		}
-		return &reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
 	// There are volume attachments blocking instance termination remaining, but the nodeclaim's TGP has expired. In this
 	// case we should set the status condition to false (requeing if it wasn't already) and then fall through to instance
 	// termination.
 	if nodeClaim != nil {
-		stored := nodeClaim.DeepCopy()
-		if modified := nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeVolumesDetached, "TerminationGracePeriodElapsed", "TerminationGracePeriodElapsed"); modified {
-			if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
-				if errors.IsConflict(err) {
-					return &reconcile.Result{Requeue: true}, nil
-				}
-				return &reconcile.Result{}, err
-			}
-			// We requeue after a patch operation since we want to ensure we read our own writes before any subsequent
-			// operations on the NodeClaim.
-			return &reconcile.Result{RequeueAfter: 1 * time.Second}, nil
-		}
+		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeVolumesDetached, "TerminationGracePeriodElapsed", "TerminationGracePeriodElapsed")
 	}
-	return nil, nil
+	return reconcile.Result{}, nil
 }
 
 // awaitInstanceTermination will initiate instance termination and continue to requeue until the cloudprovider indicates
@@ -282,24 +263,21 @@ func (c *Controller) awaitVolumeDetachment(
 func (c *Controller) awaitInstanceTermination(
 	ctx context.Context,
 	nodeClaim *v1.NodeClaim,
-	node *corev1.Node,
+	_ *corev1.Node,
 	_ *time.Time,
-) (*reconcile.Result, error) {
+) (reconcile.Result, error) {
 	if nodeClaim == nil {
-		return nil, nil
+		return reconcile.Result{}, nil
 	}
-	isInstanceTerminated, err := termination.EnsureTerminated(ctx, c.kubeClient, nodeClaim, c.cloudProvider)
-	if client.IgnoreNotFound(err) != nil {
-		// 409 - The nodeClaim exists, but its status has already been modified
-		if errors.IsConflict(err) {
-			return &reconcile.Result{Requeue: true}, nil
-		}
-		return &reconcile.Result{}, fmt.Errorf("ensuring instance termination, %w", err)
+	deleteErr := c.cloudProvider.Delete(ctx, nodeClaim)
+	if cloudprovider.IgnoreNodeClaimNotFoundError(deleteErr) != nil {
+		return reconcile.Result{}, deleteErr
 	}
-	if !isInstanceTerminated {
-		return &reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
+	if !cloudprovider.IsNodeClaimNotFoundError(deleteErr) {
+		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 	}
-	return nil, nil
+	return reconcile.Result{}, nil
 }
 
 func (c *Controller) hasTerminationGracePeriodElapsed(nodeTerminationTime *time.Time) bool {
