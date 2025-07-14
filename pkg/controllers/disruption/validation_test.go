@@ -33,6 +33,32 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
+func NewMethodsWithRealValidator() []disruption.Method {
+	return disruption.NewMethods(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+}
+
+type NopValidator struct{}
+
+func (n NopValidator) Validate(_ context.Context, command disruption.Command, _ time.Duration) (disruption.Command, error) {
+	return command, nil
+}
+
+func NewMethodsWithNopValidator() []disruption.Method {
+	c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+	emptiness := disruption.NewEmptiness(c)
+	emptiness.Validator = NopValidator{}
+	multiNodeConsolidation := disruption.NewMultiNodeConsolidation(c)
+	multiNodeConsolidation.Validator = NopValidator{}
+	singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c)
+	singleNodeConsolidation.Validator = NopValidator{}
+	return []disruption.Method{
+		emptiness,
+		disruption.NewDrift(env.Client, cluster, prov, recorder),
+		multiNodeConsolidation,
+		singleNodeConsolidation,
+	}
+}
+
 type TestEmptinessValidator struct {
 	blocked    bool
 	churn      bool
