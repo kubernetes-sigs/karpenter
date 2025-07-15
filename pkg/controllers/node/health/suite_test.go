@@ -18,6 +18,7 @@ package health_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
