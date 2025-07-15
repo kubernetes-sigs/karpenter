@@ -75,7 +75,10 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	if launched == nil {
 		return reconcile.Result{Requeue: true}, nil
 	}
-	if timeUntilTimeout := launchTimeout - l.clock.Since(launched.LastTransitionTime.Time); timeUntilTimeout <= 0 {
+	if !launched.IsTrue() {
+		if timeUntilTimeout := launchTimeout - l.clock.Since(launched.LastTransitionTime.Time); timeUntilTimeout > 0 {
+			return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
+		}
 		if err := l.deleteNodeClaimForTimeout(ctx, LaunchTimeout, nodeClaim); err != nil {
 			return reconcile.Result{}, err
 		}
