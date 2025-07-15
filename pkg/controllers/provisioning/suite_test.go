@@ -121,7 +121,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool(), pod)
 			prov.Trigger(pod.UID)
 
-			ExpectParallelized(
+			localexp.ExpectParallelized(
 				func() {
 					Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second*10).Should(BeTrue())
 					fakeClock.Step(time.Second * 11)
