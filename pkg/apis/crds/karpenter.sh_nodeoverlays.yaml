@@ -142,7 +142,7 @@ spec:
                     ahead of other nodeoverlay with lower weights. A nodeoverlay with no weight
                     will be treated as if it is a nodeoverlay with a weight of 0. Two nodeoverlays that have the same weight,
                     we will merge them in alphabetical order.
-                  format: int64
+                  format: int32
                   maximum: 100
                   minimum: 1
                   type: integer

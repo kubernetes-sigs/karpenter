@@ -104,7 +104,7 @@ func (in *NodeOverlaySpec) DeepCopyInto(out *NodeOverlaySpec) {
 	}
 	if in.Weight != nil {
 		in, out := &in.Weight, &out.Weight
-		*out = new(int64)
+		*out = new(int32)
 		**out = **in
 	}
 }

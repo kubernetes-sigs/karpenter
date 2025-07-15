@@ -18,6 +18,8 @@ package v1alpha1
 
 import (
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -56,7 +58,7 @@ type NodeOverlaySpec struct {
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
-	Weight *int64 `json:"weight,omitempty"`
+	Weight *int32 `json:"weight,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -95,4 +97,23 @@ func (nol *NodeOverlayList) OrderByWeight() {
 		}
 		return weightA > weightB
 	})
+}
+
+func (in *NodeOverlay) AdjustedPrice(instanceTypePrice float64) float64 {
+	// Check if adjustment is a percentage
+	isPercentage := strings.HasSuffix(in.Spec.PriceAdjustment, "%")
+	adjustment := in.Spec.PriceAdjustment
+
+	// Remove the percentage sign if present
+	if isPercentage {
+		adjustment = strings.TrimSuffix(in.Spec.PriceAdjustment, "%")
+	}
+
+	// Parse the adjustment value
+	// Due to the CEL validation we can assume that
+	// there will always be a valid float provided into the spec
+	adjValue := lo.Must(strconv.ParseFloat(adjustment, 64))
+
+	// Apply the adjustment
+	return lo.Ternary(isPercentage, instanceTypePrice*(adjValue/100), instanceTypePrice+adjValue)
 }
