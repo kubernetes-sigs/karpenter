@@ -4491,8 +4491,8 @@ var _ = Context("Scheduling", func() {
 			// First, verify the nodepool is ready and can schedule pods normally
 			ExpectApplied(ctx, env.Client, nodePool)
 			normalPod := test.UnschedulablePod()
-			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, normalPod)
-			ExpectScheduled(ctx, env.Client, normalPod)
+			localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, normalPod)
+			localexp.ExpectScheduled(ctx, env.Client, normalPod)
 
 			// Update nodepool with a requirement for an instance type that does not exist
 			nodePool = test.ReplaceRequirements(nodePool,
@@ -4526,11 +4526,11 @@ var _ = Context("Scheduling", func() {
 			})
 
 			// Attempt to provision the pod - it should fail
-			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			results := localexp.ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(results.PodErrors).To(HaveLen(1))
 			for _, err := range results.PodErrors {
 				fmt.Println(results.PodErrors[pod])
-				ExpectNotScheduled(ctx, env.Client, pod)
+				localexp.ExpectNotScheduled(ctx, env.Client, pod)
 				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
 			}
 		})
@@ -4560,10 +4560,10 @@ var _ = Context("Scheduling", func() {
 			}
 
 			// ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
-			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			results := localexp.ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 			Expect(results.PodErrors).To(HaveLen(3))
 			for pod, err := range results.PodErrors {
-				ExpectNotScheduled(ctx, env.Client, pod)
+				localexp.ExpectNotScheduled(ctx, env.Client, pod)
 				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
 			}
 		})
@@ -4594,7 +4594,7 @@ var _ = Context("Scheduling", func() {
 					Namespace: "default",
 				},
 			})
-			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			results := localexp.ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(results.PodErrors).To(HaveLen(1))
 			for _, err := range results.PodErrors {
 				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
@@ -4620,7 +4620,7 @@ var _ = Context("Scheduling", func() {
 				},
 			})
 
-			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			results := localexp.ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(results.PodErrors).To(HaveLen(1))
 			for _, err := range results.PodErrors {
 				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))

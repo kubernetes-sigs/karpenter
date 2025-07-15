@@ -812,8 +812,8 @@ var _ = Describe("Termination", func() {
 			fakeClock.Step(90 * time.Second)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
 			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
-			ExpectNodeExists(ctx, env.Client, node.Name)
-			pod = ExpectExists(ctx, env.Client, pod)
+			localexp.ExpectNodeExists(ctx, env.Client, node.Name)
+			pod = localexp.ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.Time).To((BeTemporally("~", nodeTerminationTimestamp, 10*time.Second)))
 		})
 		Context("VolumeAttachments", func() {

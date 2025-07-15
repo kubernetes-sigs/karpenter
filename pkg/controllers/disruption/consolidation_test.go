@@ -107,7 +107,7 @@ var _ = Describe("Consolidation", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("0s")
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool)
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			Expect(recorder.Calls(events.Unconsolidatable)).To(Equal(0))
@@ -191,7 +191,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			localexp.ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
 				metrics.ReasonLabel: "underutilized",
@@ -200,7 +200,7 @@ var _ = Describe("Consolidation", func() {
 			// remove the do-not-disrupt annotation to make the node eligible for consolidation and update cluster state
 			pod.SetAnnotations(map[string]string{})
 			ExpectApplied(ctx, env.Client, pod)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			localexp.ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
@@ -371,7 +371,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := localexp.FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -394,7 +394,7 @@ var _ = Describe("Consolidation", func() {
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := localexp.FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -465,7 +465,7 @@ var _ = Describe("Consolidation", func() {
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Execute command, thus deleting 3 nodes
@@ -508,7 +508,7 @@ var _ = Describe("Consolidation", func() {
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			// Reconcile 5 times, enqueuing 3 commands total.
 			for i := 0; i < 5; i++ {
 				ExpectSingletonReconciled(ctx, disruptionController)
@@ -568,7 +568,7 @@ var _ = Describe("Consolidation", func() {
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
@@ -633,7 +633,7 @@ var _ = Describe("Consolidation", func() {
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
@@ -1003,7 +1003,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 				// inform cluster state about nodes and nodeClaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 				ExpectSingletonReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
@@ -1288,7 +1288,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -1407,7 +1407,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -1527,7 +1527,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pod, spotNode)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{spotNode}, []*v1.NodeClaim{spotNodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -1688,7 +1688,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 				ExpectSingletonReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
@@ -1759,7 +1759,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectManualBinding(ctx, env.Client, pods[2], node)
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 				ExpectSingletonReconciled(ctx, disruptionController)
 
 				// we didn't create a new nodeclaim or delete the old one
@@ -1832,7 +1832,7 @@ var _ = Describe("Consolidation", func() {
 				}
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 				ExpectSingletonReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
@@ -1901,7 +1901,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 				ExpectSingletonReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
@@ -1992,7 +1992,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectManualBinding(ctx, env.Client, pods[2], annotatedNode)
 
 				// inform cluster state about nodes and nodeClaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, annotatedNode}, []*v1.NodeClaim{nodeClaim, annotatedNodeClaim})
+				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, annotatedNode}, []*v1.NodeClaim{nodeClaim, annotatedNodeClaim})
 				ExpectSingletonReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
@@ -2080,7 +2080,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectManualBinding(ctx, env.Client, pods[2], node2)
 
 				// inform cluster state about nodes and nodeClaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 				ExpectSingletonReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
@@ -2173,7 +2173,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
@@ -2272,7 +2272,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
@@ -2331,7 +2331,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -2405,7 +2405,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -2455,7 +2455,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[0])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], unmanagedNode}, []*v1.NodeClaim{nodeClaims[0]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], unmanagedNode}, []*v1.NodeClaim{nodeClaims[0]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -2511,7 +2511,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -2557,7 +2557,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[0])
@@ -2599,7 +2599,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaims[0])
@@ -2647,7 +2647,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
@@ -2695,7 +2695,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
@@ -2737,7 +2737,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -2925,8 +2925,8 @@ var _ = Describe("Consolidation", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, consolidatableNodeClaim, consolidatableNode, consolidatablePod)
-			ExpectManualBinding(ctx, env.Client, consolidatablePod, consolidatableNode)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{consolidatableNode}, []*v1.NodeClaim{consolidatableNodeClaim})
+			localexp.ExpectManualBinding(ctx, env.Client, consolidatablePod, consolidatableNode)
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{consolidatableNode}, []*v1.NodeClaim{consolidatableNodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -2978,7 +2978,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -3032,7 +3032,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// No node can be deleted as it would cause one of the three pods to go pending
@@ -3083,7 +3083,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -3179,7 +3179,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 			finished := atomic.Bool{}
-			ExpectParallelized(
+			localexp.ExpectParallelized(
 				func() {
 					defer finished.Store(true)
 					ExpectSingletonReconciled(ctx, disruptionController)
@@ -3190,8 +3190,8 @@ var _ = Describe("Consolidation", func() {
 					// controller should be blocking during the timeout
 					Expect(finished.Load()).To(BeFalse())
 					// and the node should not be deleted yet
-					ExpectExists(ctx, env.Client, nodeClaims[0])
-					ExpectExists(ctx, env.Client, nodeClaims[1])
+					localexp.ExpectExists(ctx, env.Client, nodeClaims[0])
+					localexp.ExpectExists(ctx, env.Client, nodeClaims[1])
 
 					// advance the clock so that the timeout expires
 					fakeClock.Step(31 * time.Second)
@@ -3248,7 +3248,7 @@ var _ = Describe("Consolidation", func() {
 			var wg sync.WaitGroup
 			wg.Add(1)
 			finished := atomic.Bool{}
-			ExpectParallelized(
+			localexp.ExpectParallelized(
 				func() {
 					defer finished.Store(true)
 					ExpectSingletonReconciled(ctx, disruptionController)
@@ -3260,7 +3260,7 @@ var _ = Describe("Consolidation", func() {
 					Expect(finished.Load()).To(BeFalse())
 
 					// and the node should not be deleted yet
-					ExpectExists(ctx, env.Client, nodes[0])
+					localexp.ExpectExists(ctx, env.Client, nodes[0])
 
 					// add an additional pod to the node to change the consolidation decision
 					pod2 := test.Pod(test.PodOptions{
@@ -3283,8 +3283,8 @@ var _ = Describe("Consolidation", func() {
 						},
 					})
 					ExpectApplied(ctx, env.Client, pod2)
-					ExpectManualBinding(ctx, env.Client, pod2, nodes[0])
-					ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+					localexp.ExpectManualBinding(ctx, env.Client, pod2, nodes[0])
+					localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
 
 					// advance the clock so that the timeout expires
 					fakeClock.Step(31 * time.Second)
@@ -3310,7 +3310,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
 
 			finished := atomic.Bool{}
-			ExpectParallelized(
+			localexp.ExpectParallelized(
 				func() {
 					defer finished.Store(true)
 					ExpectSingletonReconciled(ctx, disruptionController)
@@ -3321,11 +3321,11 @@ var _ = Describe("Consolidation", func() {
 					// controller should be blocking during the timeout
 					Expect(finished.Load()).To(BeFalse())
 					// and the node should not be deleted yet
-					ExpectExists(ctx, env.Client, nodeClaims[0])
+					localexp.ExpectExists(ctx, env.Client, nodeClaims[0])
 
 					// make the node non-empty by binding it
-					ExpectManualBinding(ctx, env.Client, pod, nodes[0])
-					ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+					localexp.ExpectManualBinding(ctx, env.Client, pod, nodes[0])
+					localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
 
 					// advance the clock so that the timeout expires
 					fakeClock.Step(31 * time.Second)
@@ -3352,7 +3352,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeClaims
 			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectParallelized(
+			localexp.ExpectParallelized(
 				func() {
 					ExpectSingletonReconciled(ctx, disruptionController)
 				},
@@ -3366,12 +3366,12 @@ var _ = Describe("Consolidation", func() {
 						},
 					})
 					ExpectApplied(ctx, env.Client, doNotDisruptPod)
-					ExpectManualBinding(ctx, env.Client, doNotDisruptPod, node)
+					localexp.ExpectManualBinding(ctx, env.Client, doNotDisruptPod, node)
 
 					// we would normally be able to replace a node, but we are blocked by the do-not-disrupt pods during validation
-					Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-					Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-					ExpectExists(ctx, env.Client, node)
+					Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+					Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+					localexp.ExpectExists(ctx, env.Client, node)
 					// advance the clock so that the timeout expires
 					fakeClock.Step(31 * time.Second)
 				},
@@ -3387,7 +3387,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeClaims
 			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectParallelized(
+			localexp.ExpectParallelized(
 				func() {
 					ExpectSingletonReconciled(ctx, disruptionController)
 				},
@@ -3403,12 +3403,12 @@ var _ = Describe("Consolidation", func() {
 						MaxUnavailable: fromInt(0),
 					})
 					ExpectApplied(ctx, env.Client, blockingPDBPod, pdb)
-					ExpectManualBinding(ctx, env.Client, blockingPDBPod, node)
+					localexp.ExpectManualBinding(ctx, env.Client, blockingPDBPod, node)
 
 					// we would normally be able to replace a node, but we are blocked by the PDB during validation
-					Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-					Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-					ExpectExists(ctx, env.Client, node)
+					Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+					Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+					localexp.ExpectExists(ctx, env.Client, node)
 					// advance the clock so that the timeout expires
 					fakeClock.Step(31 * time.Second)
 				},
@@ -3425,7 +3425,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeClaims
 			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
-			ExpectParallelized(
+			localexp.ExpectParallelized(
 				func() {
 					ExpectSingletonReconciled(ctx, disruptionController)
 				},
@@ -3439,14 +3439,14 @@ var _ = Describe("Consolidation", func() {
 						},
 					})
 					ExpectApplied(ctx, env.Client, doNotDisruptPods[0], doNotDisruptPods[1])
-					ExpectManualBinding(ctx, env.Client, doNotDisruptPods[0], nodes[0])
-					ExpectManualBinding(ctx, env.Client, doNotDisruptPods[1], nodes[1])
+					localexp.ExpectManualBinding(ctx, env.Client, doNotDisruptPods[0], nodes[0])
+					localexp.ExpectManualBinding(ctx, env.Client, doNotDisruptPods[1], nodes[1])
 
 					// we would normally be able to consolidate down to a single node, but we are blocked by the do-not-disrupt pods during validation
-					Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
-					Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-					ExpectExists(ctx, env.Client, nodes[0])
-					ExpectExists(ctx, env.Client, nodes[1])
+					Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+					Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+					localexp.ExpectExists(ctx, env.Client, nodes[0])
+					localexp.ExpectExists(ctx, env.Client, nodes[1])
 					// advance the clock so that the timeout expires
 					fakeClock.Step(31 * time.Second)
 				},
@@ -3463,7 +3463,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeClaims
 			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
-			ExpectParallelized(
+			localexp.ExpectParallelized(
 				func() {
 					ExpectSingletonReconciled(ctx, disruptionController)
 				},
@@ -3479,14 +3479,14 @@ var _ = Describe("Consolidation", func() {
 						MaxUnavailable: fromInt(0),
 					})
 					ExpectApplied(ctx, env.Client, blockingPDBPods[0], blockingPDBPods[1], pdb)
-					ExpectManualBinding(ctx, env.Client, blockingPDBPods[0], nodes[0])
-					ExpectManualBinding(ctx, env.Client, blockingPDBPods[1], nodes[1])
+					localexp.ExpectManualBinding(ctx, env.Client, blockingPDBPods[0], nodes[0])
+					localexp.ExpectManualBinding(ctx, env.Client, blockingPDBPods[1], nodes[1])
 
 					// we would normally be able to consolidate down to a single node, but we are blocked by the PDB during validation
-					Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
-					Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
-					ExpectExists(ctx, env.Client, nodes[0])
-					ExpectExists(ctx, env.Client, nodes[1])
+					Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+					Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+					localexp.ExpectExists(ctx, env.Client, nodes[0])
+					localexp.ExpectExists(ctx, env.Client, nodes[1])
 					// advance the clock so that the timeout expires
 					fakeClock.Step(31 * time.Second)
 				},
@@ -3567,7 +3567,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -3627,7 +3627,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -3696,7 +3696,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 				// inform cluster state about nodes and nodeclaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 				ExpectSingletonReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
@@ -3755,7 +3755,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 
 				finished := atomic.Bool{}
-				ExpectParallelized(
+				localexp.ExpectParallelized(
 					func() {
 						defer finished.Store(true)
 						ExpectSingletonReconciled(ctx, disruptionController)
@@ -3766,8 +3766,8 @@ var _ = Describe("Consolidation", func() {
 						// controller should be blocking during the timeout
 						Expect(finished.Load()).To(BeFalse())
 						// and the node should not be deleted yet
-						ExpectExists(ctx, env.Client, nodeClaims[0])
-						ExpectExists(ctx, env.Client, nodeClaims[1])
+						localexp.ExpectExists(ctx, env.Client, nodeClaims[0])
+						localexp.ExpectExists(ctx, env.Client, nodeClaims[1])
 
 						// advance the clock so that the timeout expires
 						fakeClock.Step(31 * time.Second)
@@ -3820,7 +3820,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
 				finished := atomic.Bool{}
-				ExpectParallelized(
+				localexp.ExpectParallelized(
 					func() {
 						defer finished.Store(true)
 						ExpectSingletonReconciled(ctx, disruptionController)
@@ -3831,18 +3831,18 @@ var _ = Describe("Consolidation", func() {
 						// controller should be blocking during the timeout
 						Expect(finished.Load()).To(BeFalse())
 						// and the node should not be deleted yet
-						ExpectExists(ctx, env.Client, nodeClaims[0])
-						ExpectExists(ctx, env.Client, nodeClaims[1])
-						ExpectExists(ctx, env.Client, nodeClaims[2])
+						localexp.ExpectExists(ctx, env.Client, nodeClaims[0])
+						localexp.ExpectExists(ctx, env.Client, nodeClaims[1])
+						localexp.ExpectExists(ctx, env.Client, nodeClaims[2])
 
 						// bind pods to nodes
-						ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
-						ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
-						ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+						localexp.ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+						localexp.ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+						localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[1]))
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[2]))
+						localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+						localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[1]))
+						localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[2]))
 						// advance the clock so that the timeout expires for emptiness
 						Eventually(fakeClock.HasWaiters, time.Second*5).Should(BeTrue())
 						fakeClock.Step(31 * time.Second)
@@ -3907,7 +3907,7 @@ var _ = Describe("Consolidation", func() {
 				var wg sync.WaitGroup
 				wg.Add(1)
 				finished := atomic.Bool{}
-				ExpectParallelized(
+				localexp.ExpectParallelized(
 					func() {
 						defer finished.Store(true)
 						ExpectSingletonReconciled(ctx, disruptionController)
@@ -3919,9 +3919,9 @@ var _ = Describe("Consolidation", func() {
 						Expect(finished.Load()).To(BeFalse())
 
 						// and the node should not be deleted yet
-						ExpectExists(ctx, env.Client, nodeClaims[0])
-						ExpectExists(ctx, env.Client, nodeClaims[1])
-						ExpectExists(ctx, env.Client, nodeClaims[2])
+						localexp.ExpectExists(ctx, env.Client, nodeClaims[0])
+						localexp.ExpectExists(ctx, env.Client, nodeClaims[1])
+						localexp.ExpectExists(ctx, env.Client, nodeClaims[2])
 
 						var extraPods []*corev1.Pod
 						for i := 0; i < 2; i++ {
@@ -3935,11 +3935,11 @@ var _ = Describe("Consolidation", func() {
 						// bind the extra pods to node1 and node 2 to make the consolidation decision invalid
 						// we bind to 2 nodes so we can deterministically expect that node3 is consolidated in
 						// single nodeclaim consolidation
-						ExpectManualBinding(ctx, env.Client, extraPods[0], nodes[0])
-						ExpectManualBinding(ctx, env.Client, extraPods[1], nodes[1])
+						localexp.ExpectManualBinding(ctx, env.Client, extraPods[0], nodes[0])
+						localexp.ExpectManualBinding(ctx, env.Client, extraPods[1], nodes[1])
 
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
-						ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[1]))
+						localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[0]))
+						localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(nodes[1]))
 
 						// advance the clock so that the timeout expires for multi-nodeclaim consolidation
 						fakeClock.Step(31 * time.Second)
@@ -4031,7 +4031,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			fakeClock.SetTime(time.Now())
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -4137,7 +4137,7 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 
-			ExpectSkew(ctx, env.Client, "default", &tsc).To(ConsistOf(1, 1, 1))
+			localexp.ExpectSkew(ctx, env.Client, "default", &tsc).To(ConsistOf(1, 1, 1))
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -4219,7 +4219,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1], nodes[2]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1], nodeClaims[2]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// our nodes are already the cheapest available, so we can't replace them.  If we delete, it would
@@ -4430,7 +4430,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pod, reservedNode)
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{reservedNode}, []*v1.NodeClaim{reservedNodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{reservedNode}, []*v1.NodeClaim{reservedNodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -4490,7 +4490,7 @@ var _ = Describe("Consolidation", func() {
 				localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 				// inform cluster state about nodes and nodeClaims
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+				localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 				ExpectSingletonReconciled(ctx, disruptionController)
 
 				// Process the item so that the nodes can be deleted.
@@ -4571,7 +4571,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[2], nodes[1])
 
 			// inform cluster state about nodes and nodeclaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -4608,7 +4608,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeClaims
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Process the item so that the nodes can be deleted.
@@ -4707,13 +4707,7 @@ var _ = Describe("Consolidation", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
 
 			// inform cluster state about nodes and nodeclaims
-<<<<<<< HEAD
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
-=======
 			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
-
-			fakeClock.Step(10 * time.Minute)
->>>>>>> ec89cf5 (tests: moving expectations to use operatorpkg when it exists over there)
 			result, err := disruptionController.Reconcile(ctx)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
