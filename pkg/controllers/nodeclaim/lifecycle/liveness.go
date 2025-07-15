@@ -66,6 +66,7 @@ var (
 	}
 )
 
+//nolint:gocyclo
 func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	registered := nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered)
 	if registered.IsTrue() {
@@ -77,10 +78,14 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	}
 	if !launched.IsTrue() {
 		if timeUntilTimeout := launchTimeout - l.clock.Since(launched.LastTransitionTime.Time); timeUntilTimeout > 0 {
+			// This should never occur because if we failed to launch we requeue the object with error instead of this requeueAfter
 			return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
 		}
 		if err := l.deleteNodeClaimForTimeout(ctx, LaunchTimeout, nodeClaim); err != nil {
-			return reconcile.Result{}, err
+			if client.IgnoreNotFound(err) != nil {
+				return reconcile.Result{}, err
+			}
+			return reconcile.Result{}, nil
 		}
 	}
 	if registered == nil {
@@ -99,7 +104,10 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	}
 	// Delete the NodeClaim if we believe the NodeClaim won't register since we haven't seen the node
 	if err := l.deleteNodeClaimForTimeout(ctx, RegistrationTimeout, nodeClaim); err != nil {
-		return reconcile.Result{}, err
+		if client.IgnoreNotFound(err) != nil {
+			return reconcile.Result{}, err
+		}
+		return reconcile.Result{}, nil
 	}
 	return reconcile.Result{}, nil
 }
@@ -135,7 +143,7 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 
 func (l *Liveness) deleteNodeClaimForTimeout(ctx context.Context, timeout NodeClaimTimeout, nodeClaim *v1.NodeClaim) error {
 	if err := l.kubeClient.Delete(ctx, nodeClaim); err != nil {
-		return client.IgnoreNotFound(err)
+		return err
 	}
 	log.FromContext(ctx).V(1).WithValues("timeout", timeout.duration, "reason", timeout.reason).Info("terminating due to timeout")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
