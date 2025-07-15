@@ -55,7 +55,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -291,8 +290,4 @@ func setupIndexers(ctx context.Context, mgr manager.Manager) {
 	handleCRDIndexerError(mgr.GetFieldIndexer().IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(o client.Object) []string {
 		return []string{o.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
 	}), "failed to setup nodepool nodeclassref name indexer")
-
-	handleCRDIndexerError(mgr.GetFieldIndexer().IndexField(ctx, &v1alpha1.NodeOverlay{}, "spec.weight", func(o client.Object) []string {
-		return []string{fmt.Sprintf("%d", lo.FromPtr(o.(*v1alpha1.NodeOverlay).Spec.Weight))}
-	}), "failed to setup nodeoverlay weight name indexer")
 }

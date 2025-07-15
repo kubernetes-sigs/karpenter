@@ -18,7 +18,6 @@ package validation
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
@@ -34,15 +34,15 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-type conflict struct {
-	price     bool
-	capacity  bool
-	resources []string
-}
+const conflictMessage = "conflict with another overlay"
 
 // Controller for reconciling on node overlay resources
 type Controller struct {
 	kubeClient client.Client
+}
+
+func (c *Controller) Name() string {
+	return "nodeoverlay.validation"
 }
 
 // NewController constructs a controller for node overlay validation
@@ -53,113 +53,82 @@ func NewController(kubeClient client.Client) *Controller {
 }
 
 // Reconcile validates that all node overlays don't have conflicting requirements
-func (c *Controller) Reconcile(ctx context.Context, nodeOverlay *v1alpha1.NodeOverlay) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "nodeoverlay.validation")
-	stored := nodeOverlay.DeepCopy()
+func (c *Controller) Reconcile(ctx context.Context, _ *v1alpha1.NodeOverlay) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, c.Name())
 
-	overlays := &v1alpha1.NodeOverlayList{}
-	if err := c.kubeClient.List(ctx, overlays, client.MatchingFields{"spec.weight": fmt.Sprintf("%d", lo.FromPtr(nodeOverlay.Spec.Weight))}); err != nil {
-		if client.IgnoreNotFound(err) != nil {
-			return reconcile.Result{}, err
-		}
+	overlayList := &v1alpha1.NodeOverlayList{}
+	if err := c.kubeClient.List(ctx, overlayList); err != nil {
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	lo.Filter(overlays.Items, func(o v1alpha1.NodeOverlay, _ int) bool {
-		return o.Name != nodeOverlay.Name
-	})
 
-	conflictMessage := ""
-	conflictingOverlays := c.hasConflictingRequirements(nodeOverlay, lo.Filter(overlays.Items, func(o v1alpha1.NodeOverlay, _ int) bool { return o.Name != nodeOverlay.Name }))
-	for _, o := range conflictingOverlays {
-		conflict, err := c.areConflictingOverlay(ctx, nodeOverlay, o)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-		if conflict != nil {
-			if conflict.price {
-				conflictMessage = fmt.Sprintf("%s, conflict on the priceAdjustment with overlay: %s", conflictMessage, o.Name)
+	overlaysWithConflict := []string{}
+	for _, overlayOne := range overlayList.Items {
+		for _, overlayTwo := range overlayList.Items {
+			if overlayOne.Name == overlayTwo.Name || lo.FromPtr(overlayOne.Spec.Weight) != lo.FromPtr(overlayTwo.Spec.Weight) || !c.hasConflictingRequirements(overlayOne, overlayTwo) {
+				continue
 			}
-			if conflict.capacity {
-				conflictMessage = fmt.Sprintf("%s, conflict on the capacity with overlay: %s on resource: %s", conflictMessage, o.Name, conflict.resources)
+			// checks to see if there are any other conflicts against the node overlays
+			// Validate against pricing and capacity allocations.
+			if c.isConflictingOverlay(overlayOne, overlayTwo) {
+				overlaysWithConflict = append(overlaysWithConflict, overlayOne.Name, overlayTwo.Name)
 			}
 		}
 	}
 
-	if conflictMessage != "" {
-		nodeOverlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", conflictMessage)
-	} else {
-		nodeOverlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
-	}
-
-	if !equality.Semantic.DeepEqual(stored, nodeOverlay) {
-		if err := c.kubeClient.Status().Patch(ctx, nodeOverlay, client.MergeFrom(stored)); err != nil {
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
-	}
-
-	return reconcile.Result{}, nil
+	return reconcile.Result{}, c.updateOverlayStatuses(ctx, overlayList.Items, overlaysWithConflict)
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("nodeoverlay.validation").
+		Named(c.Name()).
 		For(&v1alpha1.NodeOverlay{}).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
-func (c *Controller) areConflictingOverlay(ctx context.Context, currentOverlay *v1alpha1.NodeOverlay, possibleOverlayToUpdate v1alpha1.NodeOverlay) (*conflict, error) {
-	stored := possibleOverlayToUpdate.DeepCopy()
-	conf := &conflict{
-		price:    false,
-		capacity: false,
-	}
-
-	if currentOverlay.Spec.PriceAdjustment != possibleOverlayToUpdate.Spec.PriceAdjustment {
-		possibleOverlayToUpdate.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", fmt.Sprintf("conflict on the priceAdjustment with overlay: %s", currentOverlay.Name))
-		conf.price = true
-	}
-	if resources := findConflictingResources(currentOverlay.Spec.Capacity, possibleOverlayToUpdate.Spec.Capacity); len(resources) != 0 {
-		possibleOverlayToUpdate.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", fmt.Sprintf("conflict on the capacity with overlay: %s on resource: %s", currentOverlay.Name, resources))
-		conf.capacity = true
-		conf.resources = resources
-	}
-
-	if !equality.Semantic.DeepEqual(stored, possibleOverlayToUpdate) {
-		if err := c.kubeClient.Status().Patch(ctx, &possibleOverlayToUpdate, client.MergeFrom(stored)); err != nil {
-			return nil, client.IgnoreNotFound(err)
-		}
-	}
-
-	return lo.Ternary(conf.price || conf.capacity, conf, nil), nil
-}
-
 // findConflictingRequirements checks if any node overlays with the same weight have conflicting requirements
 // and returns a map of overlay names to conflict messages
-func (c *Controller) hasConflictingRequirements(overlay *v1alpha1.NodeOverlay, possibleConflictingOverlies []v1alpha1.NodeOverlay) []v1alpha1.NodeOverlay {
-	conflictingOverlays := []v1alpha1.NodeOverlay{}
-	reqsA := scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...)
-
+func (c *Controller) hasConflictingRequirements(overlayOne v1alpha1.NodeOverlay, overlayTwo v1alpha1.NodeOverlay) bool {
+	reqsA := scheduling.NewNodeSelectorRequirements(overlayOne.Spec.Requirements...)
 	// For each pair of overlays, check if their requirements conflict
-	for x := range len(possibleConflictingOverlies) {
-		reqsB := scheduling.NewNodeSelectorRequirements(possibleConflictingOverlies[x].Spec.Requirements...)
-
-		// Check if the requirements are compatible
-		if err := reqsA.Intersects(reqsB); err == nil {
-			conflictingOverlays = append(conflictingOverlays, possibleConflictingOverlies[x])
-		}
+	reqsB := scheduling.NewNodeSelectorRequirements(overlayTwo.Spec.Requirements...)
+	// Check if the requirements are compatible
+	if err := reqsA.Intersects(reqsB); err == nil {
+		return true
 	}
 
-	return conflictingOverlays
+	return false
+}
+
+func (c *Controller) isConflictingOverlay(overlayOne v1alpha1.NodeOverlay, overlayTwo v1alpha1.NodeOverlay) bool {
+	conflictingResources := findConflictingResources(overlayOne.Spec.Capacity, overlayTwo.Spec.Capacity)
+	return overlayOne.Spec.PriceAdjustment != overlayTwo.Spec.PriceAdjustment || len(conflictingResources) != 0
+}
+
+func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1alpha1.NodeOverlay, overlaysWithConflict []string) error {
+	for _, overlay := range overlayList {
+		stored := overlay.DeepCopy()
+		overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+		if lo.Contains(overlaysWithConflict, overlay.Name) {
+			overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", conflictMessage)
+		}
+
+		if !equality.Semantic.DeepEqual(stored, overlay) {
+			if err := c.kubeClient.Status().Patch(ctx, &overlay, client.MergeFrom(stored)); err != nil {
+				return client.IgnoreNotFound(err)
+			}
+		}
+	}
+	return nil
 }
 
 func findConflictingResources(capacityOne corev1.ResourceList, capacityTwo corev1.ResourceList) []string {
 	result := []string{}
-
 	for key, quantity := range capacityOne {
 		if _, ok := capacityTwo[key]; ok && !quantity.Equal(capacityTwo[key]) {
 			result = append(result, string(key))
 		}
 	}
-
 	return result
 }

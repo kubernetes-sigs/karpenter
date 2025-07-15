@@ -18,7 +18,6 @@ package test
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"strings"
 
@@ -37,7 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
@@ -124,16 +122,6 @@ func NodePoolNodeClassRefFieldIndexer(ctx context.Context) func(cache.Cache) err
 		}))
 		err = multierr.Append(err, c.IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(obj client.Object) []string {
 			return []string{obj.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
-		}))
-		return err
-	}
-}
-
-func NodeOverlayRefFieldIndexer(ctx context.Context) func(cache.Cache) error {
-	return func(c cache.Cache) error {
-		var err error
-		err = multierr.Append(err, c.IndexField(ctx, &v1alpha1.NodeOverlay{}, "spec.weight", func(obj client.Object) []string {
-			return []string{fmt.Sprintf("%d", lo.FromPtr(obj.(*v1alpha1.NodeOverlay).Spec.Weight))}
 		}))
 		return err
 	}
