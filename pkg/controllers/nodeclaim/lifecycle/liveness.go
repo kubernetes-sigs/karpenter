@@ -91,7 +91,7 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	if registered == nil {
 		return reconcile.Result{Requeue: true}, nil
 	}
-	// If the Registered statusCondition hasn't gone True during the Timeout since we first updated it, we should terminate the NodeClaim
+	// If the Registered statusCondition hasn't gone True during the timeout since we first updated it, we should terminate the NodeClaim
 	// NOTE: Timeout has to be stored and checked in the same place since l.clock can advance after the check causing a race
 	if timeUntilTimeout := registrationTimeout - l.clock.Since(registered.LastTransitionTime.Time); timeUntilTimeout > 0 {
 		return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
@@ -123,7 +123,7 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 		}
 		if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown() {
 			stored := nodePool.DeepCopy()
-			// If the nodeClaim failed to register during the Timeout set NodeRegistrationHealthy status condition on
+			// If the nodeClaim failed to register during the timeout set NodeRegistrationHealthy status condition on
 			// NodePool to False. If the launch failed get the launch failure reason and message from nodeClaim.
 			if launchCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); launchCondition.IsTrue() {
 				nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "RegistrationFailed", "Failed to register node")
