@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/google/uuid"
@@ -56,7 +57,7 @@ type Controller struct {
 	recorder      events.Recorder
 	clock         clock.Clock
 	cloudProvider cloudprovider.CloudProvider
-	Methods       []Method
+	methods       []Method
 	mu            sync.Mutex
 	lastRun       map[string]time.Time
 }
@@ -64,8 +65,20 @@ type Controller struct {
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
 const pollingPeriod = 10 * time.Second
 
+type ControllerOptions struct {
+	methods []Method
+}
+
+func WithMethods(methods ...Method) option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.methods = methods
+	}
+}
+
 func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue) *Controller {
+	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue, opts ...option.Function[ControllerOptions]) *Controller {
+
+	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue)...)}, opts...)...)
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
@@ -75,7 +88,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
-		Methods:       NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue),
+		methods:       o.methods,
 	}
 }
 
@@ -139,7 +152,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
-	for _, m := range c.Methods {
+	for _, m := range c.methods {
 		c.recordRun(fmt.Sprintf("%T", m))
 		success, err := c.disrupt(ctx, m)
 		if err != nil {
@@ -224,7 +237,7 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	var buf bytes.Buffer
 	for _, np := range nps {
 		// Use a dummy value of 100 since we only care if this errors.
-		for _, method := range c.Methods {
+		for _, method := range c.methods {
 			if _, err := np.GetAllowedDisruptionsByReason(c.clock, 100, method.Reason()); err != nil {
 				fmt.Fprintf(&buf, "invalid disruption budgets in nodepool %s, %s", np.Name, err)
 				break // Prevent duplicate error message
