@@ -539,7 +539,11 @@ func validateAffinity(ctx context.Context, p *corev1.Pod) (errs error) {
 	if p.Spec.Affinity.NodeAffinity != nil {
 		if p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
 			for _, term := range p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-				errs = multierr.Append(errs, validateNodeSelectorTerm(ctx, term))
+				err := validateNodeSelectorTerm(ctx, term)
+				if err == nil {
+					return nil
+				}
+				errs = multierr.Append(errs, err)
 			}
 		}
 	}

@@ -410,6 +410,54 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		}
 	})
+	It("should provision nodes for pods with node affinities containing restricted and applicable label", func() {
+		nodePool := test.NodePool()
+		schedulable := []*corev1.Pod{
+			test.UnschedulablePod(test.PodOptions{NodeSelectorTerms: []corev1.NodeSelectorTerm{
+				{
+					MatchExpressions: []corev1.NodeSelectorRequirement{
+						// Ignored, restricted label
+						{
+							Key:      "node-role.kubernetes.io/my-node-role",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"true"},
+						},
+					},
+				},
+				{
+					MatchExpressions: []corev1.NodeSelectorRequirement{
+						// Constrained by architecture
+						{
+							Key:      corev1.LabelArchStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{v1.ArchitectureAmd64},
+						},
+					},
+				},
+			}}),
+		}
+		unschedulable := []*corev1.Pod{
+			test.UnschedulablePod(test.PodOptions{NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+				MatchExpressions: []corev1.NodeSelectorRequirement{
+					// Ignored, restricted label
+					{
+						Key:      "node-role.kubernetes.io/my-node-role",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"true"},
+					},
+				},
+			}}}),
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, schedulable...)
+		for _, pod := range schedulable {
+			ExpectScheduled(ctx, env.Client, pod)
+		}
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, unschedulable...)
+		for _, pod := range unschedulable {
+			ExpectNotScheduled(ctx, env.Client, pod)
+		}
+	})
 	It("should provision nodes for accelerators", func() {
 		ExpectApplied(ctx, env.Client, test.NodePool())
 		pods := []*corev1.Pod{
