@@ -287,6 +287,7 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 	for pod, binding := range bindings {
 		// Only bind the pods that are passed through
 		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
+			// We have to manually bind the pod to the node when using a fakeClient by setting the value for pod.Spec.NodeName
 			if strings.Contains(reflect.TypeOf(c).String(), "fake") {
 				pod.Spec.NodeName = binding.Node.Name
 				err := c.Update(ctx, pod)
