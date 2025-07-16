@@ -2051,7 +2051,7 @@ var _ = Context("Scheduling", func() {
 				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings
 				ExpectApplied(ctx, kubeClient, nodePool)
 				initialPod := test.UnschedulablePod()
-				bindings := ExpectProvisionedFakeClient(ctx, kubeClient, cluster, cloudProvider, provisioner, initialPod)
+				bindings := ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, initialPod)
 				// delete the pod so that the node is empty
 				ExpectDeleted(ctx, kubeClient, initialPod)
 				node1 := bindings.Get(initialPod).Node
@@ -2062,7 +2062,7 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, kubeClient, node1)
 				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
 				secondPod := test.UnschedulablePod()
-				bindings = ExpectProvisionedFakeClient(ctx, kubeClient, cluster, cloudProvider, provisioner, secondPod)
+				bindings = ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, secondPod)
 				Expect(bindings.Get(secondPod).Node.Name).To(BeEquivalentTo(node1.Name))
 				// delete the pod so that the node is empty
 				ExpectDeleted(ctx, kubeClient, secondPod)
@@ -2073,7 +2073,7 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, kubeClient, node1)
 				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
 				thirdPod := test.UnschedulablePod()
-				bindings = ExpectProvisionedFakeClient(ctx, kubeClient, cluster, cloudProvider, provisioner, thirdPod)
+				bindings = ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, thirdPod)
 				Expect(bindings.Get(thirdPod).Node.Name).ToNot(BeEquivalentTo(node1.Name))
 			})
 			It("should not assume pod will schedule to a tainted node", func() {
