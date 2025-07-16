@@ -19,6 +19,7 @@ package validation
 import (
 	"context"
 
+	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -83,7 +84,10 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Named(c.Name()).
 		For(&v1alpha1.NodeOverlay{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+			RateLimiter:             reasonable.RateLimiter(),
+		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 

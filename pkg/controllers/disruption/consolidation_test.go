@@ -212,14 +212,13 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			emptyConsolidation := disruption.NewEmptiness(c, disruption.WithValidator(NewTestEmptinessValidator(nodes, nodeClaims, nodePool, validatorOpt)))
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
-
-			emptyConsolidation.Validator = NewTestEmptinessValidator(nodes, nodeClaims, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), validatorOpt)
 
 			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).ToNot(HaveOccurred())
@@ -271,14 +270,13 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, node2)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
-			multiNodeConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			multiNodeConsolidation := disruption.NewMultiNodeConsolidation(c, disruption.WithValidator(NewTestMultiConsolidationValidator(nodePool, validatorOpt)))
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, multiNodeConsolidation.Reason())
 			Expect(err).To(Succeed())
 
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
-
-			multiNodeConsolidation.Validator = NewTestConsolidationValidator(cluster, nodePool, multiNodeConsolidation.Validator.(*disruption.ConsolidationValidator), validatorOpt)
 
 			cmd, err := multiNodeConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
@@ -315,14 +313,13 @@ var _ = Describe("Consolidation", func() {
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			singleNodeConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NewTestSingleConsolidationValidator(nodePool, validatorOpt)))
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, singleNodeConsolidation.Reason())
 			Expect(err).To(Succeed())
 
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
-
-			singleNodeConsolidation.Validator = NewTestConsolidationValidator(cluster, nodePool, singleNodeConsolidation.Validator.(*disruption.ConsolidationValidator), validatorOpt)
 
 			cmd, err := singleNodeConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
@@ -724,7 +721,8 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			emptyConsolidation := disruption.NewEmptiness(c)
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -786,7 +784,8 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			emptyConsolidation := disruption.NewEmptiness(c)
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -810,7 +809,8 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			multiConsolidation := disruption.NewMultiNodeConsolidation(c)
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, multiConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -872,7 +872,8 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			multiConsolidation := disruption.NewMultiNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			multiConsolidation := disruption.NewMultiNodeConsolidation(c)
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, multiConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -895,7 +896,8 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			singleConsolidation := disruption.NewSingleNodeConsolidation(c)
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, singleConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -957,7 +959,8 @@ var _ = Describe("Consolidation", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			singleConsolidation := disruption.NewSingleNodeConsolidation(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			singleConsolidation := disruption.NewSingleNodeConsolidation(c)
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, singleConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -2356,7 +2359,8 @@ var _ = Describe("Consolidation", func() {
 
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
-			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+			emptyConsolidation := disruption.NewEmptiness(c, disruption.WithValidator(NewTestEmptinessValidator(nodes, nodeClaims, nodePool, WithEmptinessChurn())))
 			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
 			Expect(err).To(Succeed())
 
@@ -2364,7 +2368,6 @@ var _ = Describe("Consolidation", func() {
 			Expect(err).To(Succeed())
 
 			// this test validator invalidates the command because it creates pod churn during validaiton
-			emptyConsolidation.Validator = NewTestEmptinessValidator(nodes, nodeClaims, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), WithEmptinessChurn())
 			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
 			Expect(cmd.Results).To(Equal(pscheduling.Results{}))
@@ -3102,7 +3105,7 @@ var _ = Describe("Consolidation", func() {
 		var nodes []*corev1.Node
 
 		BeforeEach(func() {
-			disruptionController.Methods = NewMethodsWithRealValidator()
+			disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
 			nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -3721,7 +3724,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should wait for the node TTL for non-empty nodes before consolidating (multi-node)",
 			func(spotToSpot bool) {
-				disruptionController.Methods = NewMethodsWithRealValidator()
+				disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -3793,7 +3796,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should continue to multi-nodeclaim consolidation when emptiness fails validation after the node ttl",
 			func(spotToSpot bool) {
-				disruptionController.Methods = NewMethodsWithRealValidator()
+				disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it
@@ -3871,7 +3874,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		DescribeTable("should continue to single nodeclaim consolidation when multi-nodeclaim consolidation fails validation after the node ttl",
 			func(spotToSpot bool) {
-				disruptionController.Methods = NewMethodsWithRealValidator()
+				disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
 				nodeClaims = lo.Ternary(spotToSpot, nodeClaims, spotNodeClaims)
 				nodes = lo.Ternary(spotToSpot, nodes, spotNodes)
 				// create our RS so we can link a pod to it

@@ -48,7 +48,7 @@ func TestValidation(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...), test.WithFieldIndexers(test.NodeOverlayRefFieldIndexer(ctx)))
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 	nodeOverlayValidationController = validation.NewController(env.Client)
 })
 
@@ -71,7 +71,7 @@ var _ = Describe("Validation", func() {
 						Values:   []string{"m5.large"},
 					},
 				},
-				Weight: lo.ToPtr(int64(10)),
+				Weight: lo.ToPtr(int32(10)),
 			},
 		})
 		ExpectApplied(ctx, env.Client, overlay)
@@ -92,7 +92,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
+					Weight:          lo.ToPtr(int32(10)),
 					PriceAdjustment: "54",
 				},
 			})
@@ -105,7 +105,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
+					Weight:          lo.ToPtr(int32(10)),
 					PriceAdjustment: "2",
 				},
 			})
@@ -134,7 +134,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
+					Weight:          lo.ToPtr(int32(10)),
 					PriceAdjustment: "100",
 				},
 			})
@@ -147,7 +147,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
+					Weight:          lo.ToPtr(int32(10)),
 					PriceAdjustment: "100",
 				},
 			})
@@ -174,7 +174,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
+					Weight:          lo.ToPtr(int32(10)),
 					PriceAdjustment: "54",
 				},
 			})
@@ -187,7 +187,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
+					Weight:          lo.ToPtr(int32(10)),
 					PriceAdjustment: "2",
 				},
 			})
@@ -215,7 +215,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
+					Weight:          lo.ToPtr(int32(10)),
 					PriceAdjustment: "54",
 				},
 			})
@@ -228,7 +228,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(20)),
+					Weight:          lo.ToPtr(int32(20)),
 					PriceAdjustment: "2",
 				},
 			})
@@ -258,7 +258,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
+					Weight: lo.ToPtr(int32(10)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
@@ -273,7 +273,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
+					Weight: lo.ToPtr(int32(10)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
@@ -304,7 +304,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
+					Weight: lo.ToPtr(int32(10)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
@@ -319,7 +319,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
+					Weight: lo.ToPtr(int32(10)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
@@ -348,7 +348,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
+					Weight: lo.ToPtr(int32(10)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
@@ -363,7 +363,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
+					Weight: lo.ToPtr(int32(10)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
 					},
@@ -393,7 +393,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
+					Weight: lo.ToPtr(int32(10)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("55"),
 					},
@@ -408,7 +408,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(20)),
+					Weight: lo.ToPtr(int32(20)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
 					},
@@ -438,7 +438,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
+					Weight: lo.ToPtr(int32(10)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("55"),
 					},
@@ -453,7 +453,7 @@ var _ = Describe("Validation", func() {
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(20)),
+					Weight: lo.ToPtr(int32(20)),
 					Capacity: v1.ResourceList{
 						v1.ResourceName("smarter-devices/buz"): resource.MustParse("5"),
 					},
