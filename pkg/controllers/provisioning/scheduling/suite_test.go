@@ -39,11 +39,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/csi-translation-lib/plugins"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -2037,31 +2039,42 @@ var _ = Context("Scheduling", func() {
 				Expect(node1.Name).To(Equal(node2.Name))
 			})
 			It("should assume pod will schedule to a node with ephemeral taint node.kubernetes.io/not-ready:NoExecute when the node is uninitialized", func() {
-				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings.
-				// The node will not be initialized but the initial pod will still be schedulable against the node
-				// because the node has node.kubernetes.io/not-ready:NoSchedule taint which is ephemeral.
-				nodePool.Spec.Template.Spec.Taints = []corev1.Taint{{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute}}
-				ExpectApplied(ctx, env.Client, nodePool)
+				kubeClient := fakeClient.NewClientBuilder().WithScheme(scheme.Scheme).WithStatusSubresource(&v1.NodeClaim{}, &v1.NodePool{}).WithIndex(
+					&corev1.Pod{},
+					"spec.nodeName",
+					func(o client.Object) []string {
+						return []string{o.(*corev1.Pod).Spec.NodeName}
+					},
+				).Build()
+				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+				controller := informer.NewNodeController(kubeClient, cluster)
+				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings
+				ExpectApplied(ctx, kubeClient, nodePool)
 				initialPod := test.UnschedulablePod()
-				bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, initialPod)
-				ExpectScheduled(ctx, env.Client, initialPod)
-
+				bindings := ExpectProvisionedFakeClient(ctx, kubeClient, cluster, cloudProvider, provisioner, initialPod)
 				// delete the pod so that the node is empty
-				ExpectDeleted(ctx, env.Client, initialPod)
+				ExpectDeleted(ctx, kubeClient, initialPod)
 				node1 := bindings.Get(initialPod).Node
 				node1.Spec.Taints = []corev1.Taint{{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute}}
+
+				// We try to schedule another pod that does not have any toleration. This should schedule to the existing node because we
+				// consider node.kubernetes.io/not-ready:NoExecute as ephemeral during provisioning if node is not initialized.
+				ExpectApplied(ctx, kubeClient, node1)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
+				secondPod := test.UnschedulablePod()
+				bindings = ExpectProvisionedFakeClient(ctx, kubeClient, cluster, cloudProvider, provisioner, secondPod)
+				Expect(bindings.Get(secondPod).Node.Name).To(BeEquivalentTo(node1.Name))
+				// delete the pod so that the node is empty
+				ExpectDeleted(ctx, kubeClient, secondPod)
+
+				// We try to schedule another pod that does not have any toleration. This should not schedule to the existing node because
+				// we do not consider node.kubernetes.io/not-ready:NoExecute as ephemeral during provisioning if node is initialized.
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1.NodeInitializedLabelKey: "true"})
-
-				ExpectApplied(ctx, env.Client, node1)
-				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
-
-				// We try to schedule another pod that only has one toleration. This should succeed because we consider node.kubernetes.io/not-ready:NoSchedule
-				// as ephemeral during provisioning as long as the node in uninitialized.
-				opts := test.PodOptions{Tolerations: []corev1.Toleration{{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule}}}
-				secondPod := test.UnschedulablePod(opts)
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
-				node2 := ExpectScheduled(ctx, env.Client, secondPod)
-				Expect(node1.Name).To(Equal(node2.Name))
+				ExpectApplied(ctx, kubeClient, node1)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
+				thirdPod := test.UnschedulablePod()
+				bindings = ExpectProvisionedFakeClient(ctx, kubeClient, cluster, cloudProvider, provisioner, thirdPod)
+				Expect(bindings.Get(thirdPod).Node.Name).ToNot(BeEquivalentTo(node1.Name))
 			})
 			It("should not assume pod will schedule to a tainted node", func() {
 				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{

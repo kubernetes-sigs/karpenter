@@ -293,6 +293,23 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 	return bindings
 }
 
+func ExpectProvisionedFakeClient(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
+	GinkgoHelper()
+	bindings := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
+	podKeys := sets.NewString(lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
+	for pod, binding := range bindings {
+		// Only bind the pods that are passed through
+		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
+			pod.Spec.NodeName = binding.Node.Name
+			err := c.Update(ctx, pod)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
+			ExpectExists(ctx, c, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: binding.Node.Name, Namespace: binding.Node.Namespace}})
+		}
+	}
+	return bindings
+}
+
 //nolint:gocyclo
 func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
 	GinkgoHelper()
