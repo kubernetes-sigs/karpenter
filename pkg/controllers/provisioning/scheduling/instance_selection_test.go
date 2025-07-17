@@ -19,6 +19,7 @@ package scheduling_test
 import (
 	"fmt"
 	"math/rand"
+
 	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"github.com/mitchellh/hashstructure/v2"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"

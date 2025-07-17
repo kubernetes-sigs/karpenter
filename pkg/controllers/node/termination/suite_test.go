@@ -32,9 +32,11 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 
 	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"

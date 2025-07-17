@@ -18,8 +18,9 @@ package scheduling_test
 
 import (
 	"fmt"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"time"
+
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"

@@ -20,17 +20,19 @@ package expectations
 import (
 	"context"
 	"fmt"
-	appsv1 "k8s.io/api/apps/v1"
-	nodev1 "k8s.io/api/node/v1"
-	storagev1 "k8s.io/api/storage/v1"
 	"log"
 	"reflect"
 	"regexp"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"strings"
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	"sync"
 	"time"
+
+	appsv1 "k8s.io/api/apps/v1"
+	nodev1 "k8s.io/api/node/v1"
+	storagev1 "k8s.io/api/storage/v1"
+
+	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/status"
@@ -51,7 +53,8 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
@@ -174,7 +177,7 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	GinkgoHelper()
 	// Persist objects
 	for _, pod := range pods {
-		ExpectApplied(ctx, c, pod)
+		operatorpkg.ExpectApplied(ctx, c, pod)
 	}
 	// TODO: Check the error on the provisioner scheduling round
 	results, err := provisioner.Schedule(ctx)
@@ -218,7 +221,7 @@ func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *sta
 	GinkgoHelper()
 	// Persist objects
 	for _, pod := range pods {
-		ExpectApplied(ctx, c, pod)
+		operatorpkg.ExpectApplied(ctx, c, pod)
 	}
 	results, _ := provisioner.Schedule(ctx)
 	return results
@@ -237,7 +240,7 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudPr
 	// Make the nodeclaim ready in the status conditions
 	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
 	nc.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
-	ExpectApplied(ctx, c, nc)
+	operatorpkg.ExpectApplied(ctx, c, nc)
 	return nc, nil
 }
 
@@ -254,7 +257,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 	node := test.NodeClaimLinkedNode(nc)
 	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1.NodeRegisteredLabelKey: "true"})
-	ExpectApplied(ctx, c, nc, node)
+	operatorpkg.ExpectApplied(ctx, c, nc, node)
 	return nc, node, nil
 }
 
@@ -295,7 +298,7 @@ func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeC
 		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeRegistered)
 		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeInitialized)
-		ExpectApplied(ctx, c, nodeClaims[i])
+		operatorpkg.ExpectApplied(ctx, c, nodeClaims[i])
 	}
 }
 
@@ -307,7 +310,7 @@ func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*
 		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
 		nodes[i].Labels[v1.NodeRegisteredLabelKey] = "true"
 		nodes[i].Labels[v1.NodeInitializedLabelKey] = "true"
-		ExpectApplied(ctx, c, nodes[i])
+		operatorpkg.ExpectApplied(ctx, c, nodes[i])
 	}
 }
 
@@ -327,7 +330,7 @@ func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*cor
 		if nodes[i].Labels == nil {
 			nodes[i].Labels = map[string]string{}
 		}
-		ExpectApplied(ctx, c, nodes[i])
+		operatorpkg.ExpectApplied(ctx, c, nodes[i])
 	}
 }
 
@@ -354,7 +357,7 @@ func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*corev1
 			})
 			return found
 		})
-		ExpectApplied(ctx, c, nodes[i])
+		operatorpkg.ExpectApplied(ctx, c, nodes[i])
 	}
 }
 

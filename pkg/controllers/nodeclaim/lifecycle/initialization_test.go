@@ -23,9 +23,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	cloudproviderapi "k8s.io/cloud-provider/api"
+
 	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"

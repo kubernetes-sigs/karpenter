@@ -17,8 +17,9 @@ limitations under the License.
 package lifecycle_test
 
 import (
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"time"
+
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"github.com/awslabs/operatorpkg/status"
 
@@ -29,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
