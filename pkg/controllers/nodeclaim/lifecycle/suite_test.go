@@ -30,6 +30,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"sigs.k8s.io/karpenter/pkg/operator/logging"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -41,6 +44,10 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
+
+func init() {
+	log.SetLogger(logging.NopLogger)
+}
 
 var ctx context.Context
 var nodeClaimController *nodeclaimlifecycle.Controller

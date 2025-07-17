@@ -118,7 +118,6 @@ var _ = Describe("Termination", func() {
 				_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 				Expect(cloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
 			} else {
-
 				ExpectExists(ctx, env.Client, node)
 				ExpectExists(ctx, env.Client, nodeClaim)
 			}
@@ -126,6 +125,50 @@ var _ = Describe("Termination", func() {
 		Entry("should delete the node and the CloudProvider NodeClaim when NodeClaim deletion is triggered", true),
 		Entry("should ignore NodeClaims which aren't managed by this Karpenter instance", false),
 	)
+	It("shouldn't mark the root condition of the NodeClaim as unknown when setting the Termination condition", func() {
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		node := test.NodeClaimLinkedNode(nodeClaim)
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+
+		// Initialize the NodeClaim
+		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		node = ExpectExists(ctx, env.Client, node)
+		node.Status.Capacity = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10"),
+			corev1.ResourceMemory: resource.MustParse("100Mi"),
+			corev1.ResourcePods:   resource.MustParse("110"),
+		}
+		node.Status.Allocatable = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("8"),
+			corev1.ResourceMemory: resource.MustParse("80Mi"),
+			corev1.ResourcePods:   resource.MustParse("110"),
+		}
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Root().IsTrue())
+
+		// Start deleting the NodeClaim and update the status condition
+		// We need to ensure that the root condition doesn't change to Unknown
+		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
+
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // Delete the Node
+		ExpectFinalizersRemoved(ctx, env.Client, node)
+		ExpectNotFound(ctx, env.Client, node)
+
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // Trigger CloudProvider Delete
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
+		Expect(nodeClaim.StatusConditions().Root().IsTrue())
+	})
 	It("should delete the NodeClaim when the spec resource.Quantity values will change during deserialization", func() {
 		nodeClaim.SetGroupVersionKind(object.GVK(nodeClaim)) // This is needed so that the GVK is set on the unstructured object
 		u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(nodeClaim)
@@ -165,6 +208,7 @@ var _ = Describe("Termination", func() {
 		// trigger nodeClaim Deletion that will make cloudProvider Delete and requeue reconciliation due to error
 		Expect(ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)).To(HaveOccurred())
 		result = ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will succeed
+		//nolint:staticcheck
 		Expect(result.Requeue).To(BeFalse())
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})

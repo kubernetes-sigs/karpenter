@@ -23,13 +23,13 @@ import (
 	"math"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -38,19 +38,20 @@ const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
 	consolidation
-	Validator
+	validator Validator
 }
 
-func NewMultiNodeConsolidation(c consolidation) *MultiNodeConsolidation {
+func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOptions]) *MultiNodeConsolidation {
+	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewMultiConsolidationValidator(c))}, opts...)...)
 	return &MultiNodeConsolidation{
 		consolidation: c,
-		Validator:     NewMultiConsolidationValidator(c),
+		validator:     o.validator,
 	}
 }
 
-func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
+func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
 	if m.IsConsolidated() {
-		return Command{}, scheduling.Results{}, nil
+		return Command{}, nil
 	}
 	candidates = m.sortCandidates(candidates)
 
@@ -85,9 +86,9 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 	// This could be further configurable in the future.
 	maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
 
-	cmd, results, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
+	cmd, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
 	if err != nil {
-		return Command{}, scheduling.Results{}, err
+		return Command{}, err
 	}
 
 	if cmd.Decision() == NoOpDecision {
@@ -97,26 +98,26 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		if !constrainedByBudgets {
 			m.markConsolidated()
 		}
-		return cmd, scheduling.Results{}, nil
+		return cmd, nil
 	}
 
-	if cmd, err = m.Validate(ctx, cmd, consolidationTTL); err != nil {
+	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, scheduling.Results{}, nil
+			return Command{}, nil
 		}
-		return Command{}, scheduling.Results{}, fmt.Errorf("validating consolidation, %w", err)
+		return Command{}, fmt.Errorf("validating consolidation, %w", err)
 	}
-	return cmd, results, nil
+	return cmd, nil
 }
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
 // NodeClaims are sorted by increasing disruption order which correlates to likelihood of being able to consolidate the node
 // nolint:gocyclo
-func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, scheduling.Results, error) {
+func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, candidates []*Candidate, max int) (Command, error) {
 	// we always operate on at least two NodeClaims at once, for single NodeClaims standard consolidation will find all solutions
 	if len(candidates) < 2 {
-		return Command{}, scheduling.Results{}, nil
+		return Command{}, nil
 	}
 	min := 1
 	if len(candidates) <= max {
@@ -124,7 +125,6 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	}
 
 	lastSavedCommand := Command{}
-	lastSavedResults := scheduling.Results{}
 	// Set a timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
@@ -133,41 +133,40 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 		candidatesToConsolidate := candidates[0 : mid+1]
 
 		// Pass the timeout context to ensure sub-operations can be canceled
-		cmd, results, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
+		cmd, err := m.computeConsolidation(timeoutCtx, candidatesToConsolidate...)
 		// context deadline exceeded will return to the top of the loop and either return nothing or the last saved command
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				ConsolidationTimeoutsTotal.Inc(map[string]string{ConsolidationTypeLabel: m.ConsolidationType()})
-				if lastSavedCommand.candidates == nil {
+				if lastSavedCommand.Candidates == nil {
 					log.FromContext(ctx).V(1).Info(fmt.Sprintf("failed to find a multi-node consolidation after timeout, last considered batch had %d", (min+max)/2))
-					return Command{}, scheduling.Results{}, nil
+					return Command{}, nil
 				}
 				log.FromContext(ctx).V(1).WithValues(lastSavedCommand.LogValues()...).Info("stopping multi-node consolidation after timeout, returning last valid command")
-				return lastSavedCommand, lastSavedResults, nil
+				return lastSavedCommand, nil
 
 			}
-			return Command{}, scheduling.Results{}, err
+			return Command{}, err
 		}
 
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
 		replacementHasValidInstanceTypes := false
 		if cmd.Decision() == ReplaceDecision {
-			cmd.replacements[0].InstanceTypeOptions, err = filterOutSameType(cmd.replacements[0], candidatesToConsolidate)
-			replacementHasValidInstanceTypes = len(cmd.replacements[0].InstanceTypeOptions) > 0 && err == nil
+			cmd.Replacements[0].InstanceTypeOptions, err = filterOutSameType(cmd.Replacements[0], candidatesToConsolidate)
+			replacementHasValidInstanceTypes = len(cmd.Replacements[0].InstanceTypeOptions) > 0 && err == nil
 		}
 
 		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
 		if replacementHasValidInstanceTypes || cmd.Decision() == DeleteDecision {
 			// We can consolidate NodeClaims [0,mid]
 			lastSavedCommand = cmd
-			lastSavedResults = results
 			min = mid + 1
 		} else {
 			max = mid - 1
 		}
 	}
-	return lastSavedCommand, lastSavedResults, nil
+	return lastSavedCommand, nil
 }
 
 // filterOutSameType filters out instance types that are more expensive than the cheapest instance type that is being
@@ -186,7 +185,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candidate) ([]*cloudprovider.InstanceType, error) {
+func filterOutSameType(replacement *Replacement, consolidate []*Candidate) ([]*cloudprovider.InstanceType, error) {
 	existingInstanceTypes := sets.New[string]()
 	pricesByInstanceType := map[string]float64{}
 
@@ -207,7 +206,7 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 	}
 
 	maxPrice := math.MaxFloat64
-	for _, it := range newNodeClaim.InstanceTypeOptions {
+	for _, it := range replacement.InstanceTypeOptions {
 		// we are considering replacing multiple NodeClaims with a single NodeClaim of one of the same types, so the replacement
 		// node must be cheaper than the price of the existing node, or we should just keep that one and do a
 		// deletion only to reduce cluster disruption (fewer pods will re-schedule).
@@ -218,11 +217,12 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 		}
 	}
 	// swallow the error since we don't allow min values to impact reschedulability in multi node claim
-	newNodeClaim, err := newNodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(newNodeClaim.Requirements, maxPrice)
+	var err error
+	replacement.NodeClaim, err = replacement.NodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(replacement.Requirements, maxPrice)
 	if err != nil {
 		return nil, err
 	}
-	return newNodeClaim.InstanceTypeOptions, nil
+	return replacement.InstanceTypeOptions, nil
 }
 
 func (m *MultiNodeConsolidation) Reason() v1.DisruptionReason {

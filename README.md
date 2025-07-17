@@ -20,9 +20,11 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [AWS](https://github.com/aws/karpenter-provider-aws)
 - [Azure](https://github.com/Azure/karpenter-provider-azure)
 - [AlibabaCloud](https://github.com/cloudpilot-ai/karpenter-provider-alibabacloud)
+- [Bizfly Cloud](https://github.com/bizflycloud/karpenter-provider-bizflycloud)
 - [Cluster API](https://github.com/kubernetes-sigs/karpenter-provider-cluster-api)
 - [GCP](https://github.com/cloudpilot-ai/karpenter-provider-gcp)
 - [Proxmox](https://github.com/sergelogvinov/karpenter-provider-proxmox)
+- [Oracle Cloud Infrastructure (OCI)](https://github.com/zoom/karpenter-oci)
 
 ## Community, discussion, contribution, and support
 

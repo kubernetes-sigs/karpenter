@@ -28,7 +28,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/disruption/orchestration"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -64,7 +63,7 @@ type validation struct {
 	cloudProvider cloudprovider.CloudProvider
 	provisioner   *provisioning.Provisioner
 	recorder      events.Recorder
-	queue         *orchestration.Queue
+	queue         *Queue
 	reason        v1.DisruptionReason
 }
 
@@ -92,12 +91,19 @@ func NewEmptinessValidator(c consolidation) *EmptinessValidator {
 	}
 }
 
-func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command, _ time.Duration) (Command, error) {
-	validatedCandidates, err := e.validateCandidates(ctx, cmd.candidates...)
+func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command, validationPeriod time.Duration) (Command, error) {
+	if validationPeriod > 0 {
+		select {
+		case <-ctx.Done():
+			return Command{}, errors.New("interrupted")
+		case <-e.clock.After(validationPeriod):
+		}
+	}
+	validatedCandidates, err := e.validateCandidates(ctx, cmd.Candidates...)
 	if err != nil {
 		return Command{}, err
 	}
-	cmd.candidates = validatedCandidates
+	cmd.Candidates = validatedCandidates
 	return cmd, nil
 }
 
@@ -151,8 +157,6 @@ func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, vali
 }
 
 func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
-	var err error
-	// TODO: see if this check can be removed, as written, consolidation tests begin hanging with its removal
 	if validationPeriod > 0 {
 		select {
 		case <-ctx.Done():
@@ -160,7 +164,7 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 		case <-c.clock.After(validationPeriod):
 		}
 	}
-	validatedCandidates, err := c.validateCandidates(ctx, cmd.candidates...)
+	validatedCandidates, err := c.validateCandidates(ctx, cmd.Candidates...)
 	if err != nil {
 		return err
 	}
@@ -270,7 +274,7 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 	//                    be deleted without producing more than one node
 	// len(NewNodeClaims) == 1, as long as the noe looks like what we were expecting, this is valid
 	if len(results.NewNodeClaims) == 0 {
-		if len(cmd.replacements) == 0 {
+		if len(cmd.Replacements) == 0 {
 			// scheduling produced zero new NodeClaims and we weren't expecting any, so this is valid.
 			return nil
 		}
@@ -285,7 +289,7 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 	}
 
 	// we now know that scheduling simulation wants to create one new node
-	if len(cmd.replacements) == 0 {
+	if len(cmd.Replacements) == 0 {
 		// but we weren't expecting any new NodeClaims, so this is invalid
 		return NewValidationError(fmt.Errorf("scheduling simulation produced new results"))
 	}
@@ -301,7 +305,7 @@ func (v *validation) validateCommand(ctx context.Context, cmd Command, candidate
 	// a 4xlarge and replace it with a 2xlarge. If things have changed and the scheduling simulation we just performed
 	// now says that we need to launch a 4xlarge. It's still launching the correct number of NodeClaims, but it's just
 	// as expensive or possibly more so we shouldn't validate.
-	if !instanceTypesAreSubset(cmd.replacements[0].InstanceTypeOptions, results.NewNodeClaims[0].InstanceTypeOptions) {
+	if !instanceTypesAreSubset(cmd.Replacements[0].InstanceTypeOptions, results.NewNodeClaims[0].InstanceTypeOptions) {
 		return NewValidationError(fmt.Errorf("scheduling simulation produced new results"))
 	}
 

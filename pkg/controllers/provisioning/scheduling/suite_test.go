@@ -39,11 +39,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/csi-translation-lib/plugins"
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	fakeClient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -2035,6 +2037,44 @@ var _ = Context("Scheduling", func() {
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, secondPod)
 				node2 := ExpectScheduled(ctx, env.Client, secondPod)
 				Expect(node1.Name).To(Equal(node2.Name))
+			})
+			It("should assume pod will schedule to a node with ephemeral taint node.kubernetes.io/not-ready:NoExecute when the node is uninitialized", func() {
+				kubeClient := fakeClient.NewClientBuilder().WithScheme(scheme.Scheme).WithStatusSubresource(&v1.NodeClaim{}, &v1.NodePool{}).WithIndex(
+					&corev1.Pod{},
+					"spec.nodeName",
+					func(o client.Object) []string {
+						return []string{o.(*corev1.Pod).Spec.NodeName}
+					},
+				).Build()
+				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+				controller := informer.NewNodeController(kubeClient, cluster)
+				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings
+				ExpectApplied(ctx, kubeClient, nodePool)
+				initialPod := test.UnschedulablePod()
+				bindings := ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, initialPod)
+				// delete the pod so that the node is empty
+				ExpectDeleted(ctx, kubeClient, initialPod)
+				node1 := bindings.Get(initialPod).Node
+				node1.Spec.Taints = []corev1.Taint{{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute}}
+
+				// We try to schedule another pod that does not have any toleration. This should schedule to the existing node because we
+				// consider node.kubernetes.io/not-ready:NoExecute as ephemeral during provisioning if node is not initialized.
+				ExpectApplied(ctx, kubeClient, node1)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
+				secondPod := test.UnschedulablePod()
+				bindings = ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, secondPod)
+				Expect(bindings.Get(secondPod).Node.Name).To(BeEquivalentTo(node1.Name))
+				// delete the pod so that the node is empty
+				ExpectDeleted(ctx, kubeClient, secondPod)
+
+				// We try to schedule another pod that does not have any toleration. This should not schedule to the existing node because
+				// we do not consider node.kubernetes.io/not-ready:NoExecute as ephemeral during provisioning if node is initialized.
+				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1.NodeInitializedLabelKey: "true"})
+				ExpectApplied(ctx, kubeClient, node1)
+				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
+				thirdPod := test.UnschedulablePod()
+				bindings = ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, thirdPod)
+				Expect(bindings.Get(thirdPod).Node.Name).ToNot(BeEquivalentTo(node1.Name))
 			})
 			It("should not assume pod will schedule to a tainted node", func() {
 				opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
@@ -4297,6 +4337,200 @@ var _ = Context("Scheduling", func() {
 			Expect(node.Labels).To(HaveKeyWithValue(v1.CapacityTypeLabelKey, Not(Equal(v1.CapacityTypeReserved))))
 			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, targetInstanceTypeName))
 			Expect(node.Labels).To(HaveKeyWithValue(v1.NodePoolLabelKey, nodePool.Name))
+		})
+		It("should handle multiple pods on reserved nodes", func() {
+			nodePool.Name = "np-1"
+			ExpectApplied(ctx, env.Client, nodePool)
+			affLabels := map[string]string{"app": "test"}
+
+			pods := lo.Times(2, func(i int) *corev1.Pod {
+				return test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: affLabels,
+					},
+					NodeRequirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"small-instance-type"},
+						},
+						{
+							Key:      v1.NodePoolLabelKey,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"np-1"},
+						},
+						{
+							Key:      v1.CapacityTypeLabelKey,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{v1.CapacityTypeReserved},
+						},
+						{
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					PodRequirements: []corev1.PodAffinityTerm{
+						{
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: affLabels,
+							},
+							TopologyKey: corev1.LabelTopologyZone,
+						},
+					},
+				})
+			})
+
+			bindings := ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			Expect(len(bindings)).To(Equal(2))
+			node := lo.Values(bindings)[0].Node
+			for _, b := range lo.Values(bindings) {
+				Expect(b.Node.Name).To(Equal(node.Name))
+			}
+			Expect(node.Labels).To(HaveKeyWithValue(cloudprovider.ReservationIDLabel, "r-small-instance-type"))
+			Expect(node.Labels).To(HaveKeyWithValue(v1.CapacityTypeLabelKey, v1.CapacityTypeReserved))
+			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelInstanceTypeStable, "small-instance-type"))
+		})
+	})
+	Describe("NodePool requirements instance filtering", func() {
+		It("should return appropriate pod error when no available instance types exist", func() {
+			// First, verify the nodepool is ready and can schedule pods normally
+			ExpectApplied(ctx, env.Client, nodePool)
+			normalPod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, normalPod)
+			ExpectScheduled(ctx, env.Client, normalPod)
+
+			// Update nodepool with a requirement for an instance type that does not exist
+			nodePool = test.ReplaceRequirements(nodePool,
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"non-existent-instance-type"},
+					},
+				},
+			)
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Create a pod that should fail to schedule due to being too large for the previously created node
+			// and no available instance types
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod-filtered",
+					Namespace: "default",
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("32"),
+						corev1.ResourceMemory: resource.MustParse("256Gi"),
+					},
+					Limits: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("32"),
+						corev1.ResourceMemory: resource.MustParse("256Gi"),
+					},
+				},
+			})
+
+			// Attempt to provision the pod - it should fail
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(results.PodErrors).To(HaveLen(1))
+			for _, err := range results.PodErrors {
+				fmt.Println(results.PodErrors[pod])
+				ExpectNotScheduled(ctx, env.Client, pod)
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
+			}
+		})
+		It("should handle multiple pods when requirements filter out all instance types", func() {
+			nodePool = test.ReplaceRequirements(nodePool,
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"non-existent-arch"},
+					},
+				},
+			)
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Create multiple pods that should all fail to schedule
+			pods := []*corev1.Pod{
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"},
+				}),
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"},
+				}),
+				test.UnschedulablePod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-3", Namespace: "default"},
+				}),
+			}
+
+			// ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			Expect(results.PodErrors).To(HaveLen(3))
+			for pod, err := range results.PodErrors {
+				ExpectNotScheduled(ctx, env.Client, pod)
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
+			}
+		})
+		It("should handle conflicting requirements that eliminate all instance types", func() {
+			// Create conflicting requirements that no instance type can satisfy
+			nodePool = test.ReplaceRequirements(nodePool,
+				// Require both amd64 and arm64 architecture (impossible)
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					},
+				},
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"arm64"},
+					},
+				},
+			)
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "conflicting-requirements-pod",
+					Namespace: "default",
+				},
+			})
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(results.PodErrors).To(HaveLen(1))
+			for _, err := range results.PodErrors {
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
+			}
+		})
+		It("should handle zone requirements that filter out all instance types", func() {
+			// Use a zone requirement that doesn't match any available instance types
+			nodePool = test.ReplaceRequirements(nodePool,
+				v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"non-existent-zone-1", "non-existent-zone-2"},
+					},
+				},
+			)
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			pod := test.UnschedulablePod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "zone-filtered-pod",
+					Namespace: "default",
+				},
+			})
+
+			results := ExpectProvisionedResults(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			Expect(results.PodErrors).To(HaveLen(1))
+			for _, err := range results.PodErrors {
+				Expect(err.Error()).To(ContainSubstring("nodepool requirements filtered out all available instance types"))
+			}
 		})
 	})
 })
