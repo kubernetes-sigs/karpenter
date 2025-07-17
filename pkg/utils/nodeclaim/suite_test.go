@@ -22,6 +22,7 @@ import (
 	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"testing"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -31,7 +32,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"

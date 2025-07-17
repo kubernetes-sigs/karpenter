@@ -102,7 +102,7 @@ var _ = Describe("Static Drift Hash", func() {
 			Name:  "default",
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		_, ok := nodePool.Annotations[v1.NodePoolHashAnnotationKey]
 		Expect(ok).To(BeFalse())
@@ -110,7 +110,7 @@ var _ = Describe("Static Drift Hash", func() {
 	// TODO we should split this out into a DescribeTable
 	It("should update the drift hash when NodePool static field is updated", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 
 		expectedHash := nodePool.Hash()
@@ -119,7 +119,7 @@ var _ = Describe("Static Drift Hash", func() {
 		nodePool.Spec.Template.Labels = map[string]string{"keyLabeltest": "valueLabeltest"}
 		nodePool.Spec.Template.Annotations = map[string]string{"keyAnnotation2": "valueAnnotation2", "keyAnnotation": "valueAnnotation"}
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 
 		expectedHashTwo := nodePool.Hash()
@@ -127,7 +127,7 @@ var _ = Describe("Static Drift Hash", func() {
 	})
 	It("should not update the drift hash when NodePool behavior field is updated", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 
 		expectedHash := nodePool.Hash()
@@ -143,7 +143,7 @@ var _ = Describe("Static Drift Hash", func() {
 		}
 		nodePool.Spec.Weight = lo.ToPtr(int32(80))
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 
 		Expect(nodePool.Annotations).To(HaveKeyWithValue(v1.NodePoolHashAnnotationKey, expectedHash))
@@ -155,7 +155,7 @@ var _ = Describe("Static Drift Hash", func() {
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
 
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 
 		expectedHash := nodePool.Hash()
@@ -188,7 +188,7 @@ var _ = Describe("Static Drift Hash", func() {
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaimOne, nodeClaimTwo)
 
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		nodeClaimOne = localexp.ExpectExists(ctx, env.Client, nodeClaimOne)
 		nodeClaimTwo = localexp.ExpectExists(ctx, env.Client, nodeClaimTwo)
@@ -215,7 +215,7 @@ var _ = Describe("Static Drift Hash", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -244,7 +244,7 @@ var _ = Describe("Static Drift Hash", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		// Expect NodeClaims hash to not have been updated
