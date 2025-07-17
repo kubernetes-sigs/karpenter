@@ -18,8 +18,9 @@ package lifecycle_test
 
 import (
 	"errors"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"time"
+
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
@@ -33,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"

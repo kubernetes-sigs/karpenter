@@ -19,12 +19,13 @@ package disruption_test
 import (
 	"fmt"
 	"math/rand"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -38,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -4021,7 +4023,7 @@ var _ = Describe("Consolidation", func() {
 
 			ExpectApplied(ctx, env.Client, rs, pods[0], pods[1], pods[2], nodePool)
 			ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0]) // ensure node1 is the oldest node
-			time.Sleep(2 * time.Second)                                      // this sleep is unfortunate, but necessary.  The creation time is from etcd, and we can't mock it, so we
+			time.Sleep(2 * time.Second)                             // this sleep is unfortunate, but necessary.  The creation time is from etcd, and we can't mock it, so we
 			// need to sleep to force the second node to be created a bit after the first node.
 			ExpectApplied(ctx, env.Client, nodeClaims[1], nodes[1])
 
