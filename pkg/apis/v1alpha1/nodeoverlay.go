@@ -49,7 +49,7 @@ type NodeOverlaySpec struct {
 	// Capacity that will add extended resources only, and not replace any existing resources on the nodes.
 	// These extended resources will be appended to the node's existing resource list.
 	// Note: This field does not modify or override standard resources like CPU, memory, ephemeral-storage, or pods.
-	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))"
+	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'pods']))"
 	// +optional
 	Capacity v1.ResourceList `json:"capacity,omitempty"`
 	// Weight is the priority given to the nodeoverlay while overriding node attributes. A higher
@@ -103,6 +103,15 @@ func (nol *NodeOverlayList) OrderByWeight() {
 }
 
 func (in *NodeOverlay) AdjustedPrice(instanceTypePrice float64) float64 {
+	// if price or price adjustment is not defined, then we will return the same price
+	if in.Spec.Price == nil && in.Spec.PriceAdjustment == nil {
+		return instanceTypePrice
+	}
+	// if price is defined, then we will return the value given in the overlay
+	if in.Spec.Price != nil {
+		return lo.Must(strconv.ParseFloat(lo.FromPtr(in.Spec.Price), 64))
+	}
+
 	// Check if adjustment is a percentage
 	isPercentage := strings.HasSuffix(lo.FromPtr(in.Spec.PriceAdjustment), "%")
 	adjustment := lo.FromPtr(in.Spec.PriceAdjustment)
@@ -116,7 +125,8 @@ func (in *NodeOverlay) AdjustedPrice(instanceTypePrice float64) float64 {
 	// Due to the CEL validation we can assume that
 	// there will always be a valid float provided into the spec
 	adjValue := lo.Must(strconv.ParseFloat(adjustment, 64))
+	adjustedPrice := lo.Ternary(isPercentage, instanceTypePrice*(1+(adjValue/100)), instanceTypePrice+adjValue)
 
 	// Apply the adjustment
-	return lo.Ternary(isPercentage, instanceTypePrice*(adjValue/100), instanceTypePrice+adjValue)
+	return lo.Ternary(adjustedPrice >= 0, adjustedPrice, 0)
 }

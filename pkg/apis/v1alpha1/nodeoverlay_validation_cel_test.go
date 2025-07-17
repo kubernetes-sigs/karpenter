@@ -311,13 +311,6 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
 		})
-		It("should not allow ephemeral-storage resources override", func() {
-			nodeOverlay.Spec.Capacity = corev1.ResourceList{
-				corev1.ResourceEphemeralStorage: resource.MustParse("34Gi"),
-			}
-			Expect(env.Client.Create(ctx, nodeOverlay)).ToNot(Succeed())
-			Expect(nodeOverlay.RuntimeValidate(ctx)).ToNot(Succeed())
-		})
 		It("should not allow pod resources override", func() {
 			nodeOverlay.Spec.Capacity = corev1.ResourceList{
 				corev1.ResourcePods: resource.MustParse("324"),

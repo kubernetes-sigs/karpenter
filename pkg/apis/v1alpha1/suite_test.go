@@ -114,22 +114,39 @@ var _ = Describe("NodeOverlay", func() {
 				Expect(adjustedPrice).To(BeNumerically("==", expectedPrice))
 			},
 			// Percentage adjustment
-			Entry("No change", "100%", 10.0, 10.0),
-			Entry("10% decrease", "90%", 10.0, 9.0),
-			Entry("10% increase", "110%", 10.0, 11.0),
-			Entry("50% decrease", "50%", 10.0, 5.0),
-			Entry("100% increase", "200%", 10.0, 20.0),
-			Entry("Zero price", "0%", 10.0, 0.0),
-			Entry("Fractional price", "75%", 1.5, 1.125),
+			Entry("No change", "0%", 10.0, 10.0),
+			Entry("10% decrease", "-10%", 10.0, 9.0),
+			Entry("10% increase", "+10%", 10.0, 11.0),
+			Entry("50% decrease", "-50%", 10.0, 5.0),
+			Entry("100% increase", "+100%", 10.0, 20.0),
+			Entry("Zero price", "-100%", 10.0, 0.0),
+			Entry("Zero price", "-200%", 10.0, 0.0),
+			Entry("Fractional price", "-25%", 1.5, 1.125),
 			// Raw adjustment
-			Entry("No change", "0", 10.0, 10.0),
-			Entry("Add 5", "5", 10.0, 15.0),
+			Entry("No change", "+0", 10.0, 10.0),
+			Entry("Add 5", "+5", 10.0, 15.0),
 			Entry("Subtract 2.5", "-2.5", 10.0, 7.5),
 			Entry("Subtract to zero", "-10", 10.0, 0.0),
-			Entry("Negative Result", "-15", 10.0, -5.0),
-			Entry("Fractional price", "0.75", 1.25, 2.0),
-			Entry("Large price adjustment", "100", 0.001, 100.001),
-			Entry("Small price adjustment", "0.0001", 0.0001, 0.0002),
+			Entry("Negative Result", "-15", 10.0, 0.0),
+			Entry("Fractional price", "+0.75", 1.25, 2.0),
+			Entry("Large price adjustment", "+100", 0.001, 100.001),
+			Entry("Small price adjustment", "+0.0001", 0.0001, 0.0002),
 		)
+		It("should override price", func() {
+			overlay := &v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Price: lo.ToPtr("80.0"),
+				},
+			}
+			adjustedPrice := overlay.AdjustedPrice(82781.0)
+			Expect(adjustedPrice).To(BeNumerically("==", 80))
+		})
+		It("should provide the same if price or priceAdjustment is not provided", func() {
+			overlay := &v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{},
+			}
+			adjustedPrice := overlay.AdjustedPrice(82781.0)
+			Expect(adjustedPrice).To(BeNumerically("==", 82781))
+		})
 	})
 })

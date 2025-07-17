@@ -64,7 +64,7 @@ spec:
                   type: object
                   x-kubernetes-validations:
                     - message: invalid resource restricted
-                      rule: self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))
+                      rule: self.all(x, !(x in ['cpu', 'memory', 'pods']))
                 price:
                   description: Price specifies amount for an instance types that match the specified labels. Users can override prices using a signed float representing the price override
                   pattern: ^\d+(\.\d+)?$
