@@ -3692,7 +3692,7 @@ var _ = Context("Scheduling", func() {
 			}
 		})
 		DescribeTable("should not reschedule pods from a deleting node when pods are blocked due to fully blocking PDBs",
-			func(pdb *policyv1.PodDisruptionBudget) {
+			func(pdbs ...*policyv1.PodDisruptionBudget) {
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
@@ -3705,7 +3705,7 @@ var _ = Context("Scheduling", func() {
 							},
 						}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-				ExpectApplied(ctx, env.Client, pdb)
+				lo.ForEach(pdbs, func(pdb *policyv1.PodDisruptionBudget, _ int) { ExpectApplied(ctx, env.Client, pdb) })
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels[corev1.LabelInstanceTypeStable]).To(Equal("small-instance-type"))
 
@@ -3731,6 +3731,18 @@ var _ = Context("Scheduling", func() {
 				Labels:       podLabels,
 				MinAvailable: lo.ToPtr(intstr.FromString("100%")),
 			})),
+			Entry("multiple PDBs on the same pod",
+				test.PodDisruptionBudget(test.PDBOptions{
+					ObjectMeta:   metav1.ObjectMeta{Name: "pdb-1"},
+					Labels:       podLabels,
+					MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+				}),
+				test.PodDisruptionBudget(test.PDBOptions{
+					ObjectMeta:   metav1.ObjectMeta{Name: "pdb-2"},
+					Labels:       podLabels,
+					MinAvailable: lo.ToPtr(intstr.FromString("100%")),
+				}),
+			),
 		)
 	})
 
