@@ -69,7 +69,7 @@ var _ = Describe("Initialization", func() {
 			}
 			nodeClaim := test.NodeClaim(nodeClaimOpts...)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 			node := test.Node(test.NodeOptions{
@@ -78,7 +78,7 @@ var _ = Describe("Initialization", func() {
 			})
 			ExpectApplied(ctx, env.Client, node)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 			localexp.ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 			// If we're testing that Karpenter correctly ignores unmanaged NodeClaims, we must set the registered
@@ -104,7 +104,7 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourcePods:   resource.MustParse("110"),
 			}
 			ExpectApplied(ctx, env.Client, node)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
@@ -116,7 +116,7 @@ var _ = Describe("Initialization", func() {
 	It("shouldn't consider the nodeClaim initialized when it has not registered", func() {
 		nodeClaim := test.NodeClaim()
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		node1 := test.Node(test.NodeOptions{
@@ -128,7 +128,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node1, node2)
 
 		// does not error but will not be registered because this reconcile returned multiple nodes
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectMakeNodesReady(ctx, env.Client, node1, node2) // Remove the not-ready taint
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
@@ -158,7 +158,7 @@ var _ = Describe("Initialization", func() {
 			corev1.ResourcePods:   resource.MustParse("110"),
 		}
 		ExpectApplied(ctx, env.Client, node1, node2)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
@@ -182,7 +182,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -200,9 +200,9 @@ var _ = Describe("Initialization", func() {
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		node = localexp.ExpectExists(ctx, env.Client, node)
 		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeInitializedLabelKey, "true"))
@@ -225,7 +225,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -243,9 +243,9 @@ var _ = Describe("Initialization", func() {
 			ReadyStatus: corev1.ConditionFalse,
 			Taints:      []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -270,7 +270,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		// Update the nodeClaim to add mock the instance type having an extended resource
@@ -294,9 +294,9 @@ var _ = Describe("Initialization", func() {
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -321,7 +321,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		// Update the nodeClaim to add mock the instance type having an extended resource
@@ -345,10 +345,10 @@ var _ = Describe("Initialization", func() {
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -361,7 +361,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Reconcile the nodeClaim and the nodeClaim/Node should now be initilized
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
@@ -396,7 +396,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -414,11 +414,11 @@ var _ = Describe("Initialization", func() {
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Should add the startup taints to the node
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = localexp.ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).To(ContainElements(
 			corev1.Taint{
@@ -434,7 +434,7 @@ var _ = Describe("Initialization", func() {
 		))
 
 		// Shouldn't consider the node ready since the startup taints still exist
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
@@ -469,7 +469,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -487,11 +487,11 @@ var _ = Describe("Initialization", func() {
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Shouldn't consider the node ready since the startup taints still exist
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
@@ -501,7 +501,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// nodeClaim should now be ready since all startup taints are removed
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
@@ -536,7 +536,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -571,7 +571,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Shouldn't consider the node ready since the ephemeral taints still exist
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
@@ -606,7 +606,7 @@ var _ = Describe("Initialization", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -641,7 +641,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Shouldn't consider the node ready since the ephemeral taints still exist
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
@@ -651,7 +651,7 @@ var _ = Describe("Initialization", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// nodeClaim should now be ready since all startup taints are removed
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))

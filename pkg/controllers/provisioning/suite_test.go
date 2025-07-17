@@ -1916,7 +1916,7 @@ var _ = Describe("Provisioning", func() {
 			localexp.ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			localexp.ExpectNotScheduled(ctx, env.Client, pod)
 		})
-		It("should not relax an added volume topology zone node-selector away", func() {
+		It("should not relax an added volume topology zone node-selector away", Focus, func() {
 			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
 			ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim, persistentVolume)

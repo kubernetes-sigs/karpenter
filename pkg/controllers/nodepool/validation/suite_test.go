@@ -78,7 +78,7 @@ var _ = Describe("Counter", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())
@@ -92,7 +92,7 @@ var _ = Describe("Counter", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
@@ -107,7 +107,7 @@ var _ = Describe("Counter", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
@@ -120,13 +120,13 @@ var _ = Describe("Counter", func() {
 			Name:  "default",
 		}
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsUnknown()).To(BeTrue())
 	})
 	It("should set the NodePoolValidationSucceeded status condition to true if nodePool healthy checks succeed", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
@@ -135,7 +135,7 @@ var _ = Describe("Counter", func() {
 	It("should set the NodePoolValidationSucceeded status condition to false if nodePool validation failed", func() {
 		nodePool.Spec.Template.Spec.Taints = []corev1.Taint{{Key: fmt.Sprintf("test.com.test.%s/test", strings.ToLower(randomdata.Alphanumeric(250))), Effect: corev1.TaintEffectNoSchedule}}
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, nodePoolValidationController, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolValidationController, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeValidationSucceeded).IsFalse()).To(BeTrue())

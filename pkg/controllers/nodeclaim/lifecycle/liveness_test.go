@@ -80,7 +80,7 @@ var _ = Describe("Liveness", func() {
 
 			// If the node hasn't registered in the registration timeframe, then we deprovision the NodeClaim
 			fakeClock.Step(time.Minute * 20)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 			localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 			if isManagedNodeClaim {
 				ExpectNotFound(ctx, env.Client, nodeClaim)
@@ -116,14 +116,14 @@ var _ = Describe("Liveness", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
 
 		// Node and nodeClaim should still exist
 		fakeClock.Step(time.Minute * 20)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		localexp.ExpectExists(ctx, env.Client, node)
 	})

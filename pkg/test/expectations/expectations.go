@@ -620,3 +620,43 @@ func ExpectParallelized(fs ...func()) {
 	}
 	wg.Wait()
 }
+
+func ExpectAllObjectsCleanedUp(ctx context.Context, c client.Client) {
+	GinkgoHelper()
+	wg := sync.WaitGroup{}
+	namespaces := &corev1.NamespaceList{}
+	Expect(c.List(ctx, namespaces)).To(Succeed())
+	ExpectFinalizersRemovedFromList(ctx, c, &corev1.NodeList{}, &v1.NodeClaimList{}, &corev1.PersistentVolumeClaimList{})
+	for _, object := range []client.Object{
+		&corev1.Pod{},
+		&corev1.Node{},
+		&appsv1.DaemonSet{},
+		&nodev1.RuntimeClass{},
+		&policyv1.PodDisruptionBudget{},
+		&corev1.PersistentVolumeClaim{},
+		&corev1.PersistentVolume{},
+		&storagev1.StorageClass{},
+		&v1.NodePool{},
+		&v1alpha1.TestNodeClass{},
+		&v1.NodeClaim{},
+	} {
+		for _, namespace := range namespaces.Items {
+			wg.Add(1)
+			go func(object client.Object, namespace string) {
+				GinkgoHelper()
+				defer wg.Done()
+				defer GinkgoRecover()
+				Expect(c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
+					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}})).ToNot(HaveOccurred())
+			}(object, namespace.Name)
+		}
+	}
+	wg.Wait()
+}
+
+func ExpectObjectReconciledWithResult[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) reconcile.Result {
+	GinkgoHelper()
+	result, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
+	Expect(err).ToNot(HaveOccurred())
+	return result
+}

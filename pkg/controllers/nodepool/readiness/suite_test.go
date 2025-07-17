@@ -82,19 +82,19 @@ var _ = Describe("Readiness", func() {
 			Name:  "default",
 		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		_ = localexp.ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsUnknown()).To(BeFalse())
 	})
 	It("should have status condition on nodePool as not ready when nodeClass does not exist", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 	})
 	It("should have status condition on nodePool as ready if nodeClass is ready", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		_ = localexp.ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
@@ -112,7 +112,7 @@ var _ = Describe("Readiness", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeFalse())
 	})
@@ -121,14 +121,14 @@ var _ = Describe("Readiness", func() {
 			Conditions: []status.Condition{},
 		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeFalse())
 	})
 	It("should mark NodeClassReady status condition on nodePool as NotReady if nodeClass is terminating", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
 		ExpectDeletionTimestampSet(ctx, env.Client, nodeClass)
-		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
 		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 	})

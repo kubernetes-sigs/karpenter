@@ -437,7 +437,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, queue.GetCommands()[0])
 
 		// Process the item so that the nodes can be deleted.
-		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
 		// Cascade any deletion of the nodeClaim to the node
 		localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
@@ -650,7 +650,7 @@ var _ = Describe("Disruption Taints", func() {
 		ExpectNotFound(ctx, env.Client, createdNodeClaim[0])
 		cluster.DeleteNodeClaim(createdNodeClaim[0].Name)
 
-		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
 
 		node = localexp.ExpectNodeExists(ctx, env.Client, node.Name)
 		Expect(node.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))

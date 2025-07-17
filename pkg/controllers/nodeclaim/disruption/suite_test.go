@@ -137,7 +137,7 @@ var _ = Describe("Disruption", func() {
 
 		// step forward to make the node empty
 		fakeClock.Step(60 * time.Second)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -151,7 +151,7 @@ var _ = Describe("Disruption", func() {
 
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		localexp.ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())

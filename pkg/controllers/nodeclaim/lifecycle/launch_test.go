@@ -59,7 +59,7 @@ var _ = Describe("Launch", func() {
 			}
 			nodeClaim := test.NodeClaim(nodeClaimOpts...)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -82,7 +82,7 @@ var _ = Describe("Launch", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeLaunched).Status).To(Equal(metav1.ConditionTrue))
@@ -91,7 +91,7 @@ var _ = Describe("Launch", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))
 		nodeClaim := test.NodeClaim()
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -99,7 +99,7 @@ var _ = Describe("Launch", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("nodeClass isn't ready"))
 		nodeClaim := test.NodeClaim()
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})

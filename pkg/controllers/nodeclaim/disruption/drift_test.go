@@ -71,7 +71,7 @@ var _ = Describe("Drift", func() {
 				}
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			if isNodeClaimManaged {
@@ -87,7 +87,7 @@ var _ = Describe("Drift", func() {
 		delete(nodeClaim.Labels, corev1.LabelInstanceTypeStable)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -96,7 +96,7 @@ var _ = Describe("Drift", func() {
 		cp.InstanceTypes = nil
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -108,7 +108,7 @@ var _ = Describe("Drift", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -126,7 +126,7 @@ var _ = Describe("Drift", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -142,7 +142,7 @@ var _ = Describe("Drift", func() {
 			v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -159,7 +159,7 @@ var _ = Describe("Drift", func() {
 			},
 		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -172,7 +172,7 @@ var _ = Describe("Drift", func() {
 		nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeLaunched)
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
@@ -184,7 +184,7 @@ var _ = Describe("Drift", func() {
 		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeLaunched, "LaunchFailed", "LaunchFailed")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
@@ -192,7 +192,7 @@ var _ = Describe("Drift", func() {
 	It("should not detect drift if the nodePool does not exist", func() {
 		cp.Drifted = "drifted"
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
@@ -201,7 +201,7 @@ var _ = Describe("Drift", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
@@ -213,13 +213,13 @@ var _ = Describe("Drift", func() {
 				nodeClaim.Labels = lo.Assign(nodeClaim.Labels, labels)
 
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-				ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+				localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 				nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 
 				nodePool.Spec.Template.Spec.Requirements = newNodePoolReq
 				ExpectApplied(ctx, env.Client, nodePool)
-				ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+				localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 				nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 				if drifted {
 					Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -385,8 +385,8 @@ var _ = Describe("Drift", func() {
 			nodeClaimTwo.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, nodeClaimTwo)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaimTwo)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaimTwo)
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			nodeClaimTwo = localexp.ExpectExists(ctx, env.Client, nodeClaimTwo)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
@@ -399,11 +399,11 @@ var _ = Describe("Drift", func() {
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaimTwo)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaimTwo)
 			nodeClaimTwo = localexp.ExpectExists(ctx, env.Client, nodeClaimTwo)
 			Expect(nodeClaimTwo.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 		})
@@ -459,8 +459,8 @@ var _ = Describe("Drift", func() {
 		DescribeTable("should detect drift on changes to the static fields",
 			func(changes v1.NodePool) {
 				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-				ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
-				ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+				localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+				localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 				nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 
@@ -468,8 +468,8 @@ var _ = Describe("Drift", func() {
 				Expect(mergo.Merge(nodePool, changes, mergo.WithOverride)).To(Succeed())
 				ExpectApplied(ctx, env.Client, nodePool)
 
-				ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
-				ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+				localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+				localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 				nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
 			},
@@ -484,7 +484,7 @@ var _ = Describe("Drift", func() {
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodePool", func() {
 			nodePool.ObjectMeta.Annotations = map[string]string{}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
@@ -493,7 +493,7 @@ var _ = Describe("Drift", func() {
 				v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
@@ -507,7 +507,7 @@ var _ = Describe("Drift", func() {
 				v1.NodePoolHashVersionAnnotationKey: "test-version-2",
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
@@ -516,7 +516,7 @@ var _ = Describe("Drift", func() {
 				v1.NodePoolHashAnnotationKey: "test-hash-111111111",
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
