@@ -177,13 +177,13 @@ var _ = Describe("Liveness", func() {
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		// try again a minute later but before the launch timeout
 		fakeClock.Step(time.Minute * 1)
-		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		// expect that the nodeclaim was not deleted
-		ExpectExists(ctx, env.Client, nodeClaim)
+		localexp.ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should use the status condition transition time for launch timeout, not the creation timestamp", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -207,7 +207,7 @@ var _ = Describe("Liveness", func() {
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		conditions := nodeClaim.Status.Conditions
 		newConditions := make([]status.Condition, len(conditions))
@@ -222,7 +222,7 @@ var _ = Describe("Liveness", func() {
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		// expect that the nodeclaim was not deleted after the timeout
-		ExpectExists(ctx, env.Client, nodeClaim)
+		localexp.ExpectExists(ctx, env.Client, nodeClaim)
 	})
 
 	It("should use the status condition transition time for registration timeout, not the creation timestamp", func() {
@@ -245,7 +245,7 @@ var _ = Describe("Liveness", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		conditions := nodeClaim.Status.Conditions
 		newConditions := make([]status.Condition, len(conditions))
@@ -258,11 +258,11 @@ var _ = Describe("Liveness", func() {
 		// advance the clock to show that the timeout is not based on creation timestamp when considering registration timeout
 		fakeClock.Step(16 * time.Minute)
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		Expect(result.RequeueAfter).To(Not(Equal(0 * time.Second)))
-		Expect(result.RequeueAfter > 0*time.Second && result.RequeueAfter < 15*time.Minute).To(BeTrue())
+		result.To(HaveField("RequeueAfter", Not(Equal(0*time.Second))))
+		result.To(HaveField("RequeueAfter", And(BeNumerically(">", 0*time.Second), BeNumerically("<", 15*time.Minute))))
 
 		// expect that the nodeclaim was not deleted after the timeout
-		ExpectExists(ctx, env.Client, nodeClaim)
+		localexp.ExpectExists(ctx, env.Client, nodeClaim)
 	})
 
 	It("should not update NodeRegistrationHealthy status condition if it is already set to True", func() {
