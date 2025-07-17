@@ -62,8 +62,17 @@ func (c *Controller) Reconcile(ctx context.Context, _ *v1alpha1.NodeOverlay) (re
 	}
 
 	overlaysWithConflict := []string{}
+	overlayWithRuntimeValidationFailure := map[string]error{}
 	for _, overlayOne := range overlayList.Items {
+		if err := overlayOne.RuntimeValidate(ctx); err != nil {
+			overlayWithRuntimeValidationFailure[overlayOne.Name] = err
+			continue
+		}
 		for _, overlayTwo := range overlayList.Items {
+			if err := overlayTwo.RuntimeValidate(ctx); err != nil {
+				overlayWithRuntimeValidationFailure[overlayTwo.Name] = err
+				continue
+			}
 			if overlayOne.Name == overlayTwo.Name || lo.FromPtr(overlayOne.Spec.Weight) != lo.FromPtr(overlayTwo.Spec.Weight) || !c.hasConflictingRequirements(overlayOne, overlayTwo) {
 				continue
 			}
@@ -75,7 +84,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ *v1alpha1.NodeOverlay) (re
 		}
 	}
 
-	return reconcile.Result{}, c.updateOverlayStatuses(ctx, overlayList.Items, overlaysWithConflict)
+	return reconcile.Result{}, c.updateOverlayStatuses(ctx, overlayList.Items, overlaysWithConflict, overlayWithRuntimeValidationFailure)
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
@@ -103,14 +112,18 @@ func (c *Controller) hasConflictingRequirements(overlayOne v1alpha1.NodeOverlay,
 
 func (c *Controller) isConflictingOverlay(overlayOne v1alpha1.NodeOverlay, overlayTwo v1alpha1.NodeOverlay) bool {
 	conflictingResources := findConflictingResources(overlayOne.Spec.Capacity, overlayTwo.Spec.Capacity)
-	return overlayOne.Spec.PriceAdjustment != overlayTwo.Spec.PriceAdjustment || len(conflictingResources) != 0
+	return lo.FromPtr(overlayOne.Spec.PriceAdjustment) != lo.FromPtr(overlayTwo.Spec.PriceAdjustment) ||
+		lo.FromPtr(overlayOne.Spec.Price) != lo.FromPtr(overlayTwo.Spec.Price) ||
+		len(conflictingResources) != 0
 }
 
-func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1alpha1.NodeOverlay, overlaysWithConflict []string) error {
+func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1alpha1.NodeOverlay, overlaysWithConflict []string, overlayWithRuntimeValidationFailure map[string]error) error {
 	for _, overlay := range overlayList {
 		stored := overlay.DeepCopy()
 		overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
-		if lo.Contains(overlaysWithConflict, overlay.Name) {
+		if err, ok := overlayWithRuntimeValidationFailure[overlay.Name]; ok {
+			overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "RuntimeValidation", err.Error())
+		} else if lo.Contains(overlaysWithConflict, overlay.Name) {
 			overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", conflictMessage)
 		}
 

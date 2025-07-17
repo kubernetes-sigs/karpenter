@@ -18,15 +18,19 @@ package validation_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay/validation"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -64,10 +68,10 @@ var _ = Describe("Validation", func() {
 	It("should pass with a single overlay", func() {
 		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []v1.NodeSelectorRequirement{
+				Requirements: []corev1.NodeSelectorRequirement{
 					{
 						Key:      "instance-type",
-						Operator: v1.NodeSelectorOpIn,
+						Operator: corev1.NodeSelectorOpIn,
 						Values:   []string{"m5.large"},
 					},
 				},
@@ -81,32 +85,245 @@ var _ = Describe("Validation", func() {
 		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
 		Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 	})
-	Context("Pricing adjustment", func() {
-		It("should fail with conflicting pricing overlays with overlapping requirements", func() {
-			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+	Context("Runtime Validation", func() {
+		It("should fail validation for invalid requirements values", func() {
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      fmt.Sprintf("test.com.test/test-%s", strings.ToLower(randomdata.Alphanumeric(250))),
+							Operator: corev1.NodeSelectorOpExists,
+						},
+					},
+					Weight: lo.ToPtr(int32(10)),
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, overlay)
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+
+			updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+			Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("RuntimeValidation"))
+		})
+		It("should fail validation for invalid capacity values", func() {
+			v1.WellKnownResources.Insert(corev1.ResourceName("testResource"))
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"m5.large"},
+						},
+					},
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("testResource"): resource.MustParse("5"),
+					},
+					Weight: lo.ToPtr(int32(10)),
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, overlay)
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+
+			updatedOverlay := ExpectExists(ctx, env.Client, overlay)
+			Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("RuntimeValidation"))
+		})
+	})
+	Context("Price", func() {
+		It("should fail with conflicting price overlays with overlapping requirements", func() {
+			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "instance-type",
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
-					PriceAdjustment: "54",
+					Weight: lo.ToPtr(int32(10)),
+					Price:  lo.ToPtr("1.03"),
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
-					PriceAdjustment: "2",
+					Weight: lo.ToPtr(int32(10)),
+					Price:  lo.ToPtr("23"),
+				},
+			})
+			ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+			// Reconcile both overlays
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+			// Check that the conditions were set correctly
+			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+
+			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+		})
+		It("should pass with price are the same overlays with overlapping requirements", func() {
+			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "instance-type",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"m5.large", "m5.xlarge"},
+						},
+					},
+					Weight: lo.ToPtr(int32(10)),
+					Price:  lo.ToPtr("100"),
+				},
+			})
+			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "instance-type",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"m5.large", "m5.2xlarge"},
+						},
+					},
+					Weight: lo.ToPtr(int32(10)),
+					Price:  lo.ToPtr("100"),
+				},
+			})
+			ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+			// Reconcile both overlays
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+			// Check that the conditions were set correctly
+			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+		})
+		It("should pass with conflicting price overlays with mutually exclusive requirements", func() {
+			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "instance-type",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"m5.large"},
+						},
+					},
+					Weight: lo.ToPtr(int32(10)),
+					Price:  lo.ToPtr("54"),
+				},
+			})
+			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "instance-type",
+							Operator: corev1.NodeSelectorOpNotIn,
+							Values:   []string{"m5.large"},
+						},
+					},
+					Weight: lo.ToPtr(int32(10)),
+					Price:  lo.ToPtr("23"),
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+			// Reconcile both overlays
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+			// Check that the conditions were set correctly
+			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+		})
+		It("should pass with conflicting price overlays with mutually exclusive weights", func() {
+			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "instance-type",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"m5.large"},
+						},
+					},
+					Weight: lo.ToPtr(int32(10)),
+					Price:  lo.ToPtr("34"),
+				},
+			})
+			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "instance-type",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"m5.large", "m5.2xlarge"},
+						},
+					},
+					Weight: lo.ToPtr(int32(20)),
+					Price:  lo.ToPtr("2"),
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+			// Reconcile both overlays
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+			// Check that the conditions were set correctly
+			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+		})
+	})
+	Context("Pricing adjustment", func() {
+		It("should fail with conflicting price adjustment overlays with overlapping requirements", func() {
+			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "instance-type",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"m5.large", "m5.xlarge"},
+						},
+					},
+					Weight:          lo.ToPtr(int32(10)),
+					PriceAdjustment: lo.ToPtr("+54"),
+				},
+			})
+			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "instance-type",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"m5.large", "m5.2xlarge"},
+						},
+					},
+					Weight:          lo.ToPtr(int32(10)),
+					PriceAdjustment: lo.ToPtr("-2"),
 				},
 			})
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
@@ -127,28 +344,28 @@ var _ = Describe("Validation", func() {
 		It("should pass with pricing adjustment are the same overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
-					PriceAdjustment: "100",
+					Weight:          lo.ToPtr(int32(10)),
+					PriceAdjustment: lo.ToPtr("+100"),
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
-					PriceAdjustment: "100",
+					Weight:          lo.ToPtr(int32(10)),
+					PriceAdjustment: lo.ToPtr("+100"),
 				},
 			})
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
@@ -164,31 +381,31 @@ var _ = Describe("Validation", func() {
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
-		It("should pass with conflicting pricing overlays with mutually exclusive requirements", func() {
+		It("should pass with conflicting price adjustments overlays with mutually exclusive requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
-					PriceAdjustment: "54",
+					Weight:          lo.ToPtr(int32(10)),
+					PriceAdjustment: lo.ToPtr("+54%"),
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpNotIn,
+							Operator: corev1.NodeSelectorOpNotIn,
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
-					PriceAdjustment: "2",
+					Weight:          lo.ToPtr(int32(10)),
+					PriceAdjustment: lo.ToPtr("-2%"),
 				},
 			})
 
@@ -205,31 +422,31 @@ var _ = Describe("Validation", func() {
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
-		It("should pass with conflicting pricing overlays with mutually exclusive weights", func() {
+		It("should pass with conflicting price adjustment overlays with mutually exclusive weights", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(10)),
-					PriceAdjustment: "54",
+					Weight:          lo.ToPtr(int32(10)),
+					PriceAdjustment: lo.ToPtr("-4%"),
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight:          lo.ToPtr(int64(20)),
-					PriceAdjustment: "2",
+					Weight:          lo.ToPtr(int32(20)),
+					PriceAdjustment: lo.ToPtr("-2%"),
 				},
 			})
 
@@ -251,31 +468,31 @@ var _ = Describe("Validation", func() {
 		It("should fail with conflicting capacity overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
+					Weight: lo.ToPtr(int32(10)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
 					},
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
+					Weight: lo.ToPtr(int32(10)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
 				},
 			})
@@ -297,31 +514,31 @@ var _ = Describe("Validation", func() {
 		It("should pass with capacity adjustment are the same overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
+					Weight: lo.ToPtr(int32(10)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
+					Weight: lo.ToPtr(int32(10)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
 				},
 			})
@@ -341,31 +558,31 @@ var _ = Describe("Validation", func() {
 		It("should pass with conflicting capacity overlays with mutually exclusive requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
+					Weight: lo.ToPtr(int32(10)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("54"),
 					},
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpNotIn,
+							Operator: corev1.NodeSelectorOpNotIn,
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
+					Weight: lo.ToPtr(int32(10)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
 					},
 				},
 			})
@@ -386,31 +603,31 @@ var _ = Describe("Validation", func() {
 		It("should pass with conflicting capacity overlays with mutually exclusive weights", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("55"),
+					Weight: lo.ToPtr(int32(10)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("55"),
 					},
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(20)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
+					Weight: lo.ToPtr(int32(20)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("5"),
 					},
 				},
 			})
@@ -431,31 +648,31 @@ var _ = Describe("Validation", func() {
 		It("should pass with non conflicting capacity overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large"},
 						},
 					},
-					Weight: lo.ToPtr(int64(10)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/fuse"): resource.MustParse("55"),
+					Weight: lo.ToPtr(int32(10)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("55"),
 					},
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
-					Requirements: []v1.NodeSelectorRequirement{
+					Requirements: []corev1.NodeSelectorRequirement{
 						{
 							Key:      "instance-type",
-							Operator: v1.NodeSelectorOpIn,
+							Operator: corev1.NodeSelectorOpIn,
 							Values:   []string{"m5.large", "m5.2xlarge"},
 						},
 					},
-					Weight: lo.ToPtr(int64(20)),
-					Capacity: v1.ResourceList{
-						v1.ResourceName("smarter-devices/buz"): resource.MustParse("5"),
+					Weight: lo.ToPtr(int32(20)),
+					Capacity: corev1.ResourceList{
+						corev1.ResourceName("smarter-devices/buz"): resource.MustParse("5"),
 					},
 				},
 			})
