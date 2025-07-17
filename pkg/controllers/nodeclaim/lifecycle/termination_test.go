@@ -18,7 +18,6 @@ package lifecycle_test
 
 import (
 	"errors"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"time"
 
@@ -80,7 +79,7 @@ var _ = Describe("Termination", func() {
 				}
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 			if isNodeClaimManaged {
 				nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
@@ -90,7 +89,7 @@ var _ = Describe("Termination", func() {
 
 			node := test.NodeClaimLinkedNode(nodeClaim)
 			ExpectApplied(ctx, env.Client, node)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(Equal(isNodeClaimManaged))
 
@@ -101,16 +100,16 @@ var _ = Describe("Termination", func() {
 
 			// Expect the node and the nodeClaim to both be gone
 			Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 			localexp.ExpectFinalizersRemoved(ctx, env.Client, node)
 			if isNodeClaimManaged {
 				ExpectNotFound(ctx, env.Client, node)
-				result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now all the nodes are gone so nodeClaim deletion continues
-				result.To(BeEquivalentTo(reconcile.Result{RequeueAfter: 5 * time.Second}))
+				result := localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // now all the nodes are gone so nodeClaim deletion continues
+				Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
 				nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
-				ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+				localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
 				localexp.ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_instance_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
 				localexp.ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
@@ -129,19 +128,19 @@ var _ = Describe("Termination", func() {
 	)
 	It("shouldn't mark the root condition of the NodeClaim as unknown when setting the Termination condition", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		// Initialize the NodeClaim
 		localexp.ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = localexp.ExpectExists(ctx, env.Client, node)
 		node.Status.Capacity = corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse("10"),
@@ -162,11 +161,11 @@ var _ = Describe("Termination", func() {
 		// We need to ensure that the root condition doesn't change to Unknown
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // Delete the Node
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // Delete the Node
 		localexp.ExpectFinalizersRemoved(ctx, env.Client, node)
 		ExpectNotFound(ctx, env.Client, node)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // Trigger CloudProvider Delete
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // Trigger CloudProvider Delete
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Root().IsTrue())
@@ -183,57 +182,57 @@ var _ = Describe("Termination", func() {
 
 		ExpectApplied(ctx, env.Client, nodePool, obj)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		// Expect the node and the nodeClaim to both be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the nodeclaim deletion
+		result := localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the nodeclaim deletion
 
-		result.To(BeEquivalentTo(reconcile.Result{RequeueAfter: 5 * time.Second}))
+		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should requeue reconciliation if cloudProvider Delete returns an error other than NodeClaimNotFoundError", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will set the nodeClaim status as terminating
-		result.To(BeEquivalentTo(reconcile.Result{RequeueAfter: 5 * time.Second}))
+		result := localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will set the nodeClaim status as terminating
+		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
 		cloudProvider.NextDeleteErr = errors.New("fake error")
 		// trigger nodeClaim Deletion that will make cloudProvider Delete and requeue reconciliation due to error
 		ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim).To(HaveOccurred())
-		result = ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will succeed
+		result = localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will succeed
 		//nolint:staticcheck
-		result.To(HaveField("Requeue", false))
+		Expect(result.Requeue).To(BeFalse())
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should not remove the finalizer and terminate the NodeClaim if the cloudProvider instance is still around", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		// The delete call that happened first will remove the cloudProvider instance from cloudProvider.CreatedNodeClaims[].
 		// To model the behavior of having cloudProvider instance not terminated, we add it back here.
 		cloudProvider.CreatedNodeClaims[nodeClaim.Status.ProviderID] = nodeClaim
-		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will ensure that we call cloudProvider Get to check if the instance is still around
-		result.To(BeEquivalentTo(reconcile.Result{RequeueAfter: 5 * time.Second}))
+		result := localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will ensure that we call cloudProvider Get to check if the instance is still around
+		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 	})
 	It("should delete multiple Nodes if multiple Nodes map to the NodeClaim", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -242,7 +241,7 @@ var _ = Describe("Termination", func() {
 		// First register a single Node to ensure the NodeClaim can successfully register, then apply the remaining nodes.
 		node1 := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node1)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
@@ -252,13 +251,13 @@ var _ = Describe("Termination", func() {
 
 		// Expect the node and the nodeClaim to both be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 		localexp.ExpectFinalizersRemoved(ctx, env.Client, node1, node2, node3)
 		ExpectNotFound(ctx, env.Client, node1, node2, node3)
 
-		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now all nodes are gone so nodeClaim deletion continues
-		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+		result := localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // now all nodes are gone so nodeClaim deletion continues
+		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
 		localexp.ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_instance_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
 		localexp.ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
@@ -270,7 +269,7 @@ var _ = Describe("Termination", func() {
 	})
 	It("should not delete the NodeClaim until all the Nodes are removed", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -278,20 +277,20 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
-		localexp.ExpectExists(ctx, env.Client, nodeClaim)                       // the node still hasn't been deleted, so the nodeClaim should remain
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		localexp.ExpectExists(ctx, env.Client, nodeClaim)                                          // the node still hasn't been deleted, so the nodeClaim should remain
 		localexp.ExpectExists(ctx, env.Client, node)
 		localexp.ExpectFinalizersRemoved(ctx, env.Client, node)
 		ExpectNotFound(ctx, env.Client, node)
 
-		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now the nodeClaim should be gone
-		result.To(BeEquivalentTo(reconcile.Result{RequeueAfter: 5 * time.Second}))
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+		result := localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // now the nodeClaim should be gone
+		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -301,7 +300,7 @@ var _ = Describe("Termination", func() {
 
 		// Expect the nodeClaim to be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		Expect(cloudProvider.DeleteCalls).To(HaveLen(0))
 		ExpectNotFound(ctx, env.Client, nodeClaim)
@@ -318,7 +317,7 @@ var _ = Describe("Termination", func() {
 
 		// Expect the nodeClaim to be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		localexp.ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_instance_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
 		localexp.ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
@@ -329,7 +328,7 @@ var _ = Describe("Termination", func() {
 	})
 	It("should not annotate the node if the NodeClaim has no terminationGracePeriod", func() {
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -337,12 +336,12 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 		localexp.ExpectExists(ctx, env.Client, node)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -351,7 +350,7 @@ var _ = Describe("Termination", func() {
 	It("should annotate the node if the NodeClaim has a terminationGracePeriod", func() {
 		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -359,12 +358,12 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 		localexp.ExpectExists(ctx, env.Client, node)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -377,7 +376,7 @@ var _ = Describe("Termination", func() {
 			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
 		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -385,12 +384,12 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, node, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 		localexp.ExpectExists(ctx, env.Client, node)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -401,15 +400,15 @@ var _ = Describe("Termination", func() {
 	It("should not delete Nodes if the NodeClaim is not registered", func() {
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 		localexp.ExpectExists(ctx, env.Client, node)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})

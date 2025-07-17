@@ -73,13 +73,13 @@ var _ = Describe("Underutilized", func() {
 		// set the lastPodEvent as now, so it's first marked as not consolidatable
 		unmanagedNodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
 		ExpectApplied(ctx, env.Client, unmanagedNodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
 		unmanagedNodeClaim = localexp.ExpectExists(ctx, env.Client, unmanagedNodeClaim)
 		Expect(unmanagedNodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsUnknown()).To(BeTrue())
 
 		fakeClock.Step(1 * time.Minute)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
 		unmanagedNodeClaim = localexp.ExpectExists(ctx, env.Client, unmanagedNodeClaim)
 		Expect(unmanagedNodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsUnknown()).To(BeTrue())
 	})
@@ -87,13 +87,13 @@ var _ = Describe("Underutilized", func() {
 		// set the lastPodEvent as now, so it's first marked as not consolidatable
 		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
 		ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeFalse())
 
 		fakeClock.Step(1 * time.Minute)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
@@ -104,13 +104,13 @@ var _ = Describe("Underutilized", func() {
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		fakeClock.SetTime(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).LastTransitionTime.Time)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeFalse())
 
 		fakeClock.Step(1 * time.Minute)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
@@ -119,7 +119,7 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
@@ -128,7 +128,7 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
@@ -137,7 +137,7 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeInitialized)
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
@@ -146,7 +146,7 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "NotInitialized", "NotInitialized")
 		ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})

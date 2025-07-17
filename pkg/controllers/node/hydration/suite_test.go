@@ -84,7 +84,7 @@ var _ = Describe("Hydration", func() {
 			})
 			delete(node.Labels, v1.NodeClassLabelKey(nodeClassRef.GroupKind()))
 			ExpectApplied(ctx, env.Client, nodeClaim, node)
-			ExpectObjectReconciled(ctx, env.Client, hydrationController, node)
+			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, hydrationController, node)
 
 			// The missing NodeClass label should have been propagated to the Node
 			node = localexp.ExpectExists(ctx, env.Client, node)
