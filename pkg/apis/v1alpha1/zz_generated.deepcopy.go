@@ -95,6 +95,16 @@ func (in *NodeOverlaySpec) DeepCopyInto(out *NodeOverlaySpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.PriceAdjustment != nil {
+		in, out := &in.PriceAdjustment, &out.PriceAdjustment
+		*out = new(string)
+		**out = **in
+	}
+	if in.Price != nil {
+		in, out := &in.Price, &out.Price
+		*out = new(string)
+		**out = **in
+	}
 	if in.Capacity != nil {
 		in, out := &in.Capacity, &out.Capacity
 		*out = make(v1.ResourceList, len(*in))

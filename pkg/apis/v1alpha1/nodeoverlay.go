@@ -38,12 +38,14 @@ type NodeOverlaySpec struct {
 	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
 	// PriceAdjustment specifies a price changes for matching instance types. Accepts either:
 	// - A fixed price modifier (e.g., -0.5, 1.2)
-	// - A percentage modifier (e.g., 90% to decrease by 10%, 115% to increase by 15%)
-	// Note: Percentage values must be positive. The adjustment is applied to whatever price unit is in use.
-	// +kubebuilder:validation:Pattern=`^(-?\d*\.?\d+$|\d*\.?\d+%)$`
-	// +kubebuilder:default:="100%"
+	// - A percentage modifier (e.g., +10% for increase, -15% for decrees)
+	// +kubebuilder:validation:Pattern=`^[+-](?:\d+(?:\.\d*)?|\.\d+)(?:%)?$`
 	// +optional
-	PriceAdjustment string `json:"priceAdjustment,omitempty"`
+	PriceAdjustment *string `json:"priceAdjustment,omitempty"`
+	// Price specifies amount for an instance types that match the specified labels. Users can override prices using a signed float representing the price override
+	// +kubebuilder:validation:Pattern=`^\d+(\.\d+)?$`
+	// +optional
+	Price *string `json:"price,omitempty"`
 	// Capacity that will add extended resources only, and not replace any existing resources on the nodes.
 	// These extended resources will be appended to the node's existing resource list.
 	// Note: This field does not modify or override standard resources like CPU, memory, ephemeral-storage, or pods.
@@ -72,6 +74,7 @@ type NodeOverlay struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// +kubebuilder:validation:XValidation:message="cannot set both 'price' and 'priceAdjustment'",rule="!has(self.price) || !has(self.priceAdjustment)"
 	Spec   NodeOverlaySpec   `json:"spec"`
 	Status NodeOverlayStatus `json:"status,omitempty"`
 }
@@ -101,12 +104,12 @@ func (nol *NodeOverlayList) OrderByWeight() {
 
 func (in *NodeOverlay) AdjustedPrice(instanceTypePrice float64) float64 {
 	// Check if adjustment is a percentage
-	isPercentage := strings.HasSuffix(in.Spec.PriceAdjustment, "%")
-	adjustment := in.Spec.PriceAdjustment
+	isPercentage := strings.HasSuffix(lo.FromPtr(in.Spec.PriceAdjustment), "%")
+	adjustment := lo.FromPtr(in.Spec.PriceAdjustment)
 
 	// Remove the percentage sign if present
 	if isPercentage {
-		adjustment = strings.TrimSuffix(in.Spec.PriceAdjustment, "%")
+		adjustment = strings.TrimSuffix(lo.FromPtr(in.Spec.PriceAdjustment), "%")
 	}
 
 	// Parse the adjustment value

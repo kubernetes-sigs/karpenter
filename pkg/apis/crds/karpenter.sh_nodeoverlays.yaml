@@ -65,14 +65,16 @@ spec:
                   x-kubernetes-validations:
                     - message: invalid resource restricted
                       rule: self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))
+                price:
+                  description: Price specifies amount for an instance types that match the specified labels. Users can override prices using a signed float representing the price override
+                  pattern: ^\d+(\.\d+)?$
+                  type: string
                 priceAdjustment:
-                  default: 100%
                   description: |-
                     PriceAdjustment specifies a price changes for matching instance types. Accepts either:
                     - A fixed price modifier (e.g., -0.5, 1.2)
-                    - A percentage modifier (e.g., 90% to decrease by 10%, 115% to increase by 15%)
-                    Note: Percentage values must be positive. The adjustment is applied to whatever price unit is in use.
-                  pattern: ^(-?\d*\.?\d+$|\d*\.?\d+%)$
+                    - A percentage modifier (e.g., +10% for increase, -15% for decrees)
+                  pattern: ^[+-](?:\d+(?:\.\d*)?|\.\d+)(?:%)?$
                   type: string
                 requirements:
                   description: |-
@@ -147,6 +149,9 @@ spec:
                   minimum: 1
                   type: integer
               type: object
+              x-kubernetes-validations:
+                - message: cannot set both 'price' and 'priceAdjustment'
+                  rule: '!has(self.price) || !has(self.priceAdjustment)'
             status:
               description: NodeOverlayStatus defines the observed state of NodeOverlay
               properties:

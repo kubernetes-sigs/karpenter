@@ -40,7 +40,7 @@ var env *test.Environment
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "v1")
+	RunSpecs(t, "v1alpha1")
 }
 
 var _ = BeforeSuite(func() {
@@ -107,7 +107,7 @@ var _ = Describe("NodeOverlay", func() {
 			func(priceAdjustment string, basePrice float64, expectedPrice float64) {
 				overlay := &v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
-						PriceAdjustment: priceAdjustment,
+						PriceAdjustment: lo.ToPtr(priceAdjustment),
 					},
 				}
 				adjustedPrice := overlay.AdjustedPrice(basePrice)
