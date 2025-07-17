@@ -18,14 +18,16 @@ package node_test
 
 import (
 	"context"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"testing"
+
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 
 	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"

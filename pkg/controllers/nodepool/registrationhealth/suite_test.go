@@ -18,9 +18,10 @@ package registrationhealth_test
 
 import (
 	"context"
+	"testing"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"testing"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/registrationhealth"
 

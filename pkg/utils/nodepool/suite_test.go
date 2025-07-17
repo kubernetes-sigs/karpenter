@@ -19,8 +19,9 @@ package nodepool_test
 import (
 	"context"
 	"math/rand/v2"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"testing"
+
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

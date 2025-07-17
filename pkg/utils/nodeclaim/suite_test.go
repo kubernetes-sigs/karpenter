@@ -19,8 +19,9 @@ package nodeclaim_test
 import (
 	"context"
 	"fmt"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"testing"
+
+	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
