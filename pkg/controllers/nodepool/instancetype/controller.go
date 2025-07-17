@@ -22,13 +22,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/api/equality"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -66,23 +68,26 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	if err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	nodeOverlayList.OrderByWeight()
+	nodeOverlayList.OrderByWeight() // Test
 
+	// Test
 	its, err := c.cloudProvider.GetInstanceTypes(ctx, nodePool)
 	if err != nil {
+		c.cluster.UpdateInstanceTypes(nodePool.Name, []*cloudprovider.InstanceType{}) // Test
 		if errors.Is(err, context.DeadlineExceeded) {
 			return reconcile.Result{}, fmt.Errorf("getting instance types, %w", err)
 		}
 		return reconcile.Result{}, fmt.Errorf("skipping, unable to resolve instance types, %w", err)
 	}
+	// Test
 	if len(its) == 0 {
-		log.FromContext(ctx).WithValues("NodePool", nodePool.Name).Info("skipping, no resolved instance types found")
+		c.cluster.UpdateInstanceTypes(nodePool.Name, []*cloudprovider.InstanceType{}) // Test
 		return reconcile.Result{}, nil
 	}
-	adjInstanceTypes := c.overlayInstanceTypes(nodeOverlayList.Items, its)
-	c.cluster.UpdateInstanceTypes(nodePool.Name, adjInstanceTypes)
+	c.overlayInstanceTypes(nodeOverlayList.Items, its)
+	c.cluster.UpdateInstanceTypes(nodePool.Name, its) // Test
 
-	return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
+	return reconcile.Result{RequeueAfter: time.Hour}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
@@ -90,69 +95,59 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Named(c.Name()).
 		For(&v1.NodePool{}).
 		Watches(&v1alpha1.NodeOverlay{}, nodepoolutils.NodeOverlayEventHandler(c.kubeClient)).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{
+			RateLimiter:             reasonable.RateLimiter(),
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
-func (c *Controller) overlayInstanceTypes(overlays []v1alpha1.NodeOverlay, instanceTypesSet []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
-	remainingInstanceTypes := instanceTypesSet
-	overriddenInstanceTypes := []*cloudprovider.InstanceType{}
+// Explain weights. That will be hard to understand
+func (c *Controller) overlayInstanceTypes(overlays []v1alpha1.NodeOverlay, instanceTypes []*cloudprovider.InstanceType) {
+	// Only apply overlays that have passed runtime validation
+	validOverlays := lo.Filter(overlays, func(o v1alpha1.NodeOverlay, _ int) bool {
+		return o.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).IsTrue()
+	})
 
-	for _, overlay := range overlays {
-		// Only apply overlays that have passed runtime validation
-		if !overlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).IsTrue() {
-			continue
-		}
-
-		reqs := scheduling.NewRequirements()
-		reqs.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
-
-		updatedITs := lo.FilterMap(remainingInstanceTypes, func(it *cloudprovider.InstanceType, _ int) (*cloudprovider.InstanceType, bool) {
-			// skip instance types that do not match the overlay selector
-			if it.Requirements.Intersects(reqs) != nil {
-				return nil, false
-			}
-
-			// The offering prices that match the overlay selectors need will be updated by the price
-			updatedOfferings := updatePricePerOfferings(it.Offerings, reqs, overlay)
-
-			return &cloudprovider.InstanceType{
-				Name:         it.Name,
-				Offerings:    updatedOfferings,
-				Capacity:     it.Capacity,
-				Overhead:     it.Overhead,
-				Requirements: it.Requirements,
-			}, true
-		})
-
-		// We want to only apply the overlay based on the weight, once an instance type has been updated
-		// by an overlay, avoid updating the instance type again
-		remainingInstanceTypes = lo.Filter(remainingInstanceTypes, func(it *cloudprovider.InstanceType, _ int) bool {
-			return !lo.ContainsBy(updatedITs, func(upIt *cloudprovider.InstanceType) bool {
-				return upIt.Name == it.Name
-			})
-		})
-
-		// update the list of overridden instance types
-		overriddenInstanceTypes = append(overriddenInstanceTypes, updatedITs...)
-	}
-
-	return append(overriddenInstanceTypes, remainingInstanceTypes...)
+	overlayCapacityOnInstanceTypes(validOverlays, instanceTypes)
+	overlayPriceOnInstanceTypes(validOverlays, instanceTypes)
 }
 
-func updatePricePerOfferings(offerings cloudprovider.Offerings, overlaySelector scheduling.Requirements, overlay v1alpha1.NodeOverlay) cloudprovider.Offerings {
-	results := cloudprovider.Offerings{}
+// Test with different offerings
+func overlayCapacityOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
+	for _, overlay := range overlays {
+		overlaySelector := scheduling.NewRequirements()
+		overlaySelector.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
 
-	for _, of := range offerings {
-		if of.Available && overlaySelector.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) {
-			results = append(results, &cloudprovider.Offering{
-				Requirements:        of.Requirements,
-				Available:           of.Available,
-				ReservationCapacity: of.ReservationCapacity,
-				Price:               overlay.AdjustedPrice(of.Price),
-			})
+		for _, it := range its {
+			it.Capacity = lo.Ternary(it.Requirements.Intersects(overlaySelector) == nil, lo.Assign(overlay.Spec.Capacity, it.Capacity), it.Capacity)
 		}
 	}
+}
 
-	return results
+// Test with different offerings
+func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
+	overriddenInstanceType := map[string][]scheduling.Requirements{}
+
+	for _, overlay := range overlays {
+		overlaySelector := scheduling.NewRequirements()
+		overlaySelector.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
+
+		for _, it := range its {
+			if err := it.Requirements.Intersects(overlaySelector); err != nil {
+				continue
+			}
+
+			overriddenInstanceType[it.Name] = []scheduling.Requirements{}
+			for _, of := range it.Offerings {
+				alreadyOverridden := lo.ContainsBy(overriddenInstanceType[it.Name], func(tempOf scheduling.Requirements) bool {
+					return equality.Semantic.DeepEqual(tempOf, of.Requirements)
+				})
+				if overlaySelector.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && !alreadyOverridden {
+					overriddenInstanceType[it.Name] = append(overriddenInstanceType[it.Name], of.Requirements)
+					of.Price = overlay.AdjustedPrice(of.Price)
+				}
+			}
+		}
+	}
 }

@@ -103,6 +103,7 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		podsSchedulingAttempted:         sync.Map{},
 		podHealthyNodePoolScheduledTime: sync.Map{},
 		podToNodeClaim:                  sync.Map{},
+		instanceTypes:                   map[string][]*cloudprovider.InstanceType{},
 	}
 }
 
