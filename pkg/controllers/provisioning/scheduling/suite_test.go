@@ -1149,13 +1149,13 @@ var _ = Context("Scheduling", func() {
 				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
 					{
 						Weight: 1, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
-							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}},
-						}},
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}},
+					}},
 					},
 					{
 						Weight: 1, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
-							{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}},
-						}},
+						{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"invalid"}},
+					}},
 					},
 				}}}
 				// Success
@@ -1170,18 +1170,18 @@ var _ = Context("Scheduling", func() {
 				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
 					{
 						Weight: 100, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
-							{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
-						}},
+						{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-3"}},
+					}},
 					},
 					{
 						Weight: 50, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
-							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}},
-						}},
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-2"}},
+					}},
 					},
 					{
 						Weight: 1, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{ // OR operator, never get to this one
-							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
-						}},
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1"}},
+					}},
 					},
 				}}}
 				// Success
@@ -1195,8 +1195,8 @@ var _ = Context("Scheduling", func() {
 				pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
 					{
 						Weight: 1, Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{
-							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-3"}},
-						}},
+						{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"test-zone-3"}},
+					}},
 					},
 				},
 					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{
@@ -2052,7 +2052,7 @@ var _ = Context("Scheduling", func() {
 				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings
 				ExpectApplied(ctx, kubeClient, nodePool)
 				initialPod := test.UnschedulablePod()
-				bindings := ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, initialPod)
+				bindings := localexp.ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, initialPod)
 				// delete the pod so that the node is empty
 				ExpectDeleted(ctx, kubeClient, initialPod)
 				node1 := bindings.Get(initialPod).Node
@@ -2061,9 +2061,9 @@ var _ = Context("Scheduling", func() {
 				// We try to schedule another pod that does not have any toleration. This should schedule to the existing node because we
 				// consider node.kubernetes.io/not-ready:NoExecute as ephemeral during provisioning if node is not initialized.
 				ExpectApplied(ctx, kubeClient, node1)
-				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
+				localexp.ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
 				secondPod := test.UnschedulablePod()
-				bindings = ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, secondPod)
+				bindings = localexp.ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, secondPod)
 				Expect(bindings.Get(secondPod).Node.Name).To(BeEquivalentTo(node1.Name))
 				// delete the pod so that the node is empty
 				ExpectDeleted(ctx, kubeClient, secondPod)
@@ -2072,9 +2072,9 @@ var _ = Context("Scheduling", func() {
 				// we do not consider node.kubernetes.io/not-ready:NoExecute as ephemeral during provisioning if node is initialized.
 				node1.Labels = lo.Assign(node1.Labels, map[string]string{v1.NodeInitializedLabelKey: "true"})
 				ExpectApplied(ctx, kubeClient, node1)
-				ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
+				localexp.ExpectReconcileSucceeded(ctx, controller, client.ObjectKeyFromObject(node1))
 				thirdPod := test.UnschedulablePod()
-				bindings = ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, thirdPod)
+				bindings = localexp.ExpectProvisioned(ctx, kubeClient, cluster, cloudProvider, provisioner, thirdPod)
 				Expect(bindings.Get(thirdPod).Node.Name).ToNot(BeEquivalentTo(node1.Name))
 			})
 			It("should not assume pod will schedule to a tainted node", func() {
