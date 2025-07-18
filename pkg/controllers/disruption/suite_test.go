@@ -1329,9 +1329,9 @@ var _ = Describe("Candidate Filtering", func() {
 			MaxUnavailable: fromInt(0),
 		})
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod, budget1, budget2)
-		ExpectManualBinding(ctx, env.Client, pod, node)
+		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 
-		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
