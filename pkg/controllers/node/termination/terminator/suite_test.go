@@ -140,7 +140,7 @@ var _ = Describe("Eviction/Queue", func() {
 			localexp.ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
 			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			result.To(HaveField("RequeueAfter",BeNumerically(">", 0)))
+			result.To(HaveField("RequeueAfter", BeNumerically(">", 0)))
 			localexp.ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "429"})
 			e := recorder.Events()
 			Expect(e).To(HaveLen(1))
