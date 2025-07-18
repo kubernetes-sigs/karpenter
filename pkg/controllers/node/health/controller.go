@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -32,8 +33,11 @@ import (
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -68,7 +72,35 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.health").
-		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
+		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				if len(e.ObjectOld.(*corev1.Node).Status.Conditions) != len(e.ObjectNew.(*corev1.Node).Status.Conditions) {
+					return true
+				}
+
+				for _, oldCond := range e.ObjectOld.(*corev1.Node).Status.Conditions {
+					newCond := nodeutils.GetCondition(e.ObjectNew.(*corev1.Node), oldCond.Type)
+					// Return true if any of these conditions are met:
+					// 1. Condition type no longer exists in new node
+					// 2. Transition time has changed
+					// 3. Status has changed
+					// 4. Reason has changed
+					// 5. Message has changed
+					if newCond.Type == "" ||
+						oldCond.LastTransitionTime != newCond.LastTransitionTime ||
+						oldCond.Status != newCond.Status ||
+						oldCond.Reason != newCond.Reason ||
+						oldCond.Message != newCond.Message {
+						return true
+					}
+				}
+				return false
+			},
+		})).
+		WithOptions(controller.Options{
+			RateLimiter:             reasonable.RateLimiter(),
+			MaxConcurrentReconciles: 100,
+		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
@@ -104,7 +136,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 		if !nodePoolHealthy {
-			return reconcile.Result{}, c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName)
+			return reconcile.Result{RequeueAfter: 5 * time.Minute}, c.publishNodePoolHealthEvent(ctx, node, nodeClaim, nodePoolName)
 		}
 	} else {
 		clusterHealthy, err := c.isClusterHealthy(ctx)
@@ -113,7 +145,7 @@ func (c *Controller) Reconcile(ctx context.Context, node *corev1.Node) (reconcil
 		}
 		if !clusterHealthy {
 			c.recorder.Publish(NodeRepairBlockedUnmanagedNodeClaim(node, nodeClaim, fmt.Sprintf("more then %s nodes are unhealthy in the cluster", allowedUnhealthyPercent.String()))...)
-			return reconcile.Result{}, nil
+			return reconcile.Result{RequeueAfter: 5 * time.Minute}, nil
 		}
 	}
 	// For unhealthy past the tolerationDisruption window we can forcefully terminate the node
@@ -132,7 +164,7 @@ func (c *Controller) deleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClai
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	// The deletion timestamp has successfully been set for the Node, update relevant metrics.
-	log.FromContext(ctx).V(1).Info("deleting unhealthy node")
+	log.FromContext(ctx).Info("deleting unhealthy node")
 	metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 		metrics.ReasonLabel:       metrics.UnhealthyReason,
 		metrics.NodePoolLabel:     node.Labels[v1.NodePoolLabelKey],
