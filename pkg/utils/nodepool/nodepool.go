@@ -23,6 +23,7 @@ import (
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -30,7 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 func IsManaged(nodePool *v1.NodePool, cp cloudprovider.CloudProvider) bool {
@@ -110,6 +113,29 @@ func NodeClassEventHandler(c client.Client) handler.EventHandler {
 			return reconcile.Request{
 				NamespacedName: client.ObjectKeyFromObject(&np),
 			}
+		})
+	})
+}
+
+// NodeOverlayEventHandler is a watcher on v1.NodePool that maps NodeOverlay to NodePools based
+// on the NodeOverlay requirements and enqueues reconcile.Requests for the NodePool
+func NodeOverlayEventHandler(c client.Client) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) (requests []reconcile.Request) {
+		overlay := o.(*v1alpha1.NodeOverlay)
+		nps := &v1.NodePoolList{}
+		if err := c.List(ctx, nps); err != nil {
+			return nil
+		}
+
+		return lo.FilterMap(nps.Items, func(np v1.NodePool, _ int) (reconcile.Request, bool) {
+			overlayReqs := scheduling.NewRequirements()
+			overlayReqs.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
+			nodePoolReq := scheduling.NewRequirement(v1.NodePoolLabelKey, corev1.NodeSelectorOpIn, np.Name)
+			applyToNodePool := overlayReqs.Intersects(scheduling.NewRequirements(nodePoolReq)) == nil
+
+			return reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(&np),
+			}, applyToNodePool
 		})
 	})
 }

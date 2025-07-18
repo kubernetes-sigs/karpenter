@@ -82,6 +82,8 @@ type Cluster struct {
 	unsyncedStartTime   time.Time
 	lastUnsyncedLogTime time.Time
 	antiAffinityPods    sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
+
+	instanceTypes map[string][]*cloudprovider.InstanceType
 }
 
 func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
@@ -101,6 +103,7 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		podsSchedulingAttempted:         sync.Map{},
 		podHealthyNodePoolScheduledTime: sync.Map{},
 		podToNodeClaim:                  sync.Map{},
+		instanceTypes:                   map[string][]*cloudprovider.InstanceType{},
 	}
 }
 
@@ -872,4 +875,22 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
+}
+
+func (c *Cluster) GetInstanceTypes(npName string) ([]*cloudprovider.InstanceType, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if _, ok := c.instanceTypes[npName]; !ok {
+		return []*cloudprovider.InstanceType{}, fmt.Errorf("no instance types found")
+	}
+
+	return c.instanceTypes[npName], nil
+}
+
+func (c *Cluster) UpdateInstanceTypes(npName string, its []*cloudprovider.InstanceType) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	c.instanceTypes[npName] = its
 }
