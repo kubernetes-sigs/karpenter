@@ -17,6 +17,9 @@ spec:
   scope: Cluster
   versions:
     - additionalPrinterColumns:
+        - jsonPath: .status.replicas
+          name: Replicas
+          type: string
         - jsonPath: .spec.template.spec.nodeClassRef.name
           name: NodeClass
           type: string
@@ -167,6 +170,19 @@ spec:
                     x-kubernetes-int-or-string: true
                   description: Limits define a set of bounds for provisioning capacity.
                   type: object
+                replicas:
+                  description: |-
+                    Replicas is the desired number of nodes for the NodePool. When specified, the NodePool will
+                    maintain this fixed number of replicas rather than scaling based on pod demand.
+                    When replicas is set, the following fields cannot be specified:
+                    - disruption.consolidationPolicy
+                    - disruption.consolidateAfter
+                    - limits
+                    - weight
+                    Note that the Disruption struct itself is allowed, but the specific fields above are restricted.
+                  format: int64
+                  minimum: 0
+                  type: integer
                 template:
                   description: |-
                     Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
@@ -437,6 +453,15 @@ spec:
               required:
                 - template
               type: object
+              x-kubernetes-validations:
+                - message: When replicas is set, consolidationPolicy must not be explicitly set
+                  rule: '!(has(self.replicas)) || self.disruption.consolidationPolicy == "WhenEmptyOrUnderutilized"'
+                - message: When replicas is set, consolidateAfter must not be explicitly set
+                  rule: '!(has(self.replicas)) || self.disruption.consolidateAfter == "Never"'
+                - message: When replicas is set, limits (limits.cpu and limits.memory) must not be set
+                  rule: '!(has(self.replicas)) || (!has(self.limits) || (!has(self.limits.cpu) && !has(self.limits.memory)))'
+                - message: When replicas is set, weight must not be set
+                  rule: '!(has(self.replicas)) || (!has(self.weight))'
             status:
               description: NodePoolStatus defines the observed state of NodePool
               properties:
@@ -502,6 +527,11 @@ spec:
                     the actual NodeClass Generation, NodeRegistrationHealthy status condition on the NodePool will be reset
                   format: int64
                   type: integer
+                replicas:
+                  default: 0
+                  description: Replicas is the count of desired static nodes associated with this NodePool
+                  format: int32
+                  type: integer
                 resources:
                   additionalProperties:
                     anyOf:
@@ -518,4 +548,7 @@ spec:
       served: true
       storage: true
       subresources:
+        scale:
+          specReplicasPath: .spec.replicas
+          statusReplicasPath: .status.replicas
         status: {}
