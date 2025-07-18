@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
+	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/api/equality"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -127,7 +127,7 @@ func overlayCapacityOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*clou
 
 // Test with different offerings
 func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
-	overriddenInstanceType := map[string][]scheduling.Requirements{}
+	overriddenInstanceType := map[string][]string{}
 
 	for _, overlay := range overlays {
 		overlaySelector := scheduling.NewRequirements()
@@ -138,13 +138,15 @@ func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudpr
 				continue
 			}
 
-			overriddenInstanceType[it.Name] = []scheduling.Requirements{}
+			overriddenInstanceType[it.Name] = []string{}
 			for _, of := range it.Offerings {
-				alreadyOverridden := lo.ContainsBy(overriddenInstanceType[it.Name], func(tempOf scheduling.Requirements) bool {
-					return equality.Semantic.DeepEqual(tempOf, of.Requirements)
-				})
-				if overlaySelector.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && !alreadyOverridden {
-					overriddenInstanceType[it.Name] = append(overriddenInstanceType[it.Name], of.Requirements)
+				offeringRequirementsHash := fmt.Sprint(lo.Must(hashstructure.Hash(of.Requirements, hashstructure.FormatV2, &hashstructure.HashOptions{
+					SlicesAsSets:    true,
+					IgnoreZeroValue: true,
+					ZeroNil:         true,
+				})))
+				if overlaySelector.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && !lo.Contains(overriddenInstanceType[it.Name], offeringRequirementsHash) {
+					overriddenInstanceType[it.Name] = append(overriddenInstanceType[it.Name], offeringRequirementsHash)
 					of.Price = overlay.AdjustedPrice(of.Price)
 				}
 			}

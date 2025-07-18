@@ -96,116 +96,421 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Instance Type Controller", func() {
-	It("should not apply adjustments for invalid overlays", func() {
-		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
-			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
-					{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"default-instance-type"},
+	Context("Price Adjustment", func() {
+		It("should not apply adjustments for invalid overlays", func() {
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"default-instance-type"},
+						},
 					},
+					PriceAdjustment: lo.ToPtr("+1000.0"),
+					Weight:          lo.ToPtr(int32(10)),
 				},
-				PriceAdjustment: lo.ToPtr("+1000.0"),
-				Weight:          lo.ToPtr(int32(10)),
-			},
+			})
+			overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "testing")
+
+			ExpectApplied(ctx, env.Client, nodePool, overlay)
+			ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
+
+			instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
+			Expect(err).To(BeNil())
+			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
 		})
-		overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "testing")
+		It("should apply pricing adjustments for instances types", func() {
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"default-instance-type"},
+						},
+					},
+					PriceAdjustment: lo.ToPtr("+1000.0"),
+					Weight:          lo.ToPtr(int32(10)),
+				},
+			})
+			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 
-		ExpectApplied(ctx, env.Client, nodePool, overlay)
-		ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool, overlay)
+			ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
 
-		instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
-		Expect(err).To(BeNil())
-		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-		Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
+			instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
+			Expect(err).To(BeNil())
+			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1001.020))
+		})
+		It("should apply pricing adjustments for instances types for capacity type", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "default-instance-type",
+					Offerings: []*cloudprovider.Offering{
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "spot",
+								corev1.LabelTopologyZone: "test-zone-1",
+							}),
+							Price: 1.020,
+						},
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "on-demand",
+								corev1.LabelTopologyZone: "test-zone-1",
+							}),
+							Price: 5.020,
+						},
+					},
+				}),
+			}
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      v1.CapacityTypeLabelKey,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"on-demand"},
+						},
+					},
+					PriceAdjustment: lo.ToPtr("+1000.0"),
+					Weight:          lo.ToPtr(int32(10)),
+				},
+			})
+			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+
+			ExpectApplied(ctx, env.Client, nodePool, overlay)
+			ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
+
+			instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
+			Expect(err).To(BeNil())
+			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
+			odReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"on-demand"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(odReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(odReq)[0].Price).To(BeNumerically("==", 1005.020))
+			spotReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"spot"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(spotReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(spotReq)[0].Price).To(BeNumerically("==", 1.020))
+		})
+		It("should apply pricing adjustments for instances types for availability zone", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "default-instance-type",
+					Offerings: []*cloudprovider.Offering{
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "spot",
+								corev1.LabelTopologyZone: "test-zone-1",
+							}),
+							Price: 1.020,
+						},
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "spot",
+								corev1.LabelTopologyZone: "test-zone-2",
+							}),
+							Price: 5.020,
+						},
+					},
+				}),
+			}
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					PriceAdjustment: lo.ToPtr("+1000.0"),
+					Weight:          lo.ToPtr(int32(10)),
+				},
+			})
+			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+
+			ExpectApplied(ctx, env.Client, nodePool, overlay)
+			ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
+
+			instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
+			Expect(err).To(BeNil())
+			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
+			zoneOneReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-1"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(zoneOneReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(zoneOneReq)[0].Price).To(BeNumerically("==", 1001.020))
+			zoneTwoReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-2"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(zoneTwoReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(zoneTwoReq)[0].Price).To(BeNumerically("==", 5.020))
+		})
 	})
-	It("should apply pricing adjustments for instances types", func() {
-		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
-			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
-					{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"default-instance-type"},
+	Context("Price", func() {
+		It("should override instance type price", func() {
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelInstanceTypeStable,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"default-instance-type"},
+						},
 					},
+					Price:  lo.ToPtr("13234.223"),
+					Weight: lo.ToPtr(int32(10)),
 				},
-				PriceAdjustment: lo.ToPtr("+1000.0"),
-				Weight:          lo.ToPtr(int32(10)),
-			},
+			})
+			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+
+			ExpectApplied(ctx, env.Client, nodePool, overlay)
+			ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
+
+			instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
+			Expect(err).To(BeNil())
+			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 13234.223))
 		})
-		overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+		It("should override instance type price by capacity type", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "default-instance-type",
+					Offerings: []*cloudprovider.Offering{
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "spot",
+								corev1.LabelTopologyZone: "test-zone-1",
+							}),
+							Price: 1.020,
+						},
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "on-demand",
+								corev1.LabelTopologyZone: "test-zone-1",
+							}),
+							Price: 5.020,
+						},
+					},
+				}),
+			}
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      v1.CapacityTypeLabelKey,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"on-demand"},
+						},
+					},
+					Price:  lo.ToPtr("12321.32"),
+					Weight: lo.ToPtr(int32(10)),
+				},
+			})
+			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 
-		ExpectApplied(ctx, env.Client, nodePool, overlay)
-		ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool, overlay)
+			ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
 
-		instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
-		Expect(err).To(BeNil())
-		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-		Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-		Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1001.020))
+			instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
+			Expect(err).To(BeNil())
+			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
+			odReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"on-demand"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(odReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(odReq)[0].Price).To(BeNumerically("==", 12321.32))
+			spotReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      v1.CapacityTypeLabelKey,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"spot"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(spotReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(spotReq)[0].Price).To(BeNumerically("==", 1.020))
+		})
+		It("should override instance type price by availability zone", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "default-instance-type",
+					Offerings: []*cloudprovider.Offering{
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "spot",
+								corev1.LabelTopologyZone: "test-zone-1",
+							}),
+							Price: 1.020,
+						},
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "spot",
+								corev1.LabelTopologyZone: "test-zone-2",
+							}),
+							Price: 5.020,
+						},
+					},
+				}),
+			}
+			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1"},
+						},
+					},
+					Price:  lo.ToPtr("121.421"),
+					Weight: lo.ToPtr(int32(10)),
+				},
+			})
+			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+
+			ExpectApplied(ctx, env.Client, nodePool, overlay)
+			ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
+
+			instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
+			Expect(err).To(BeNil())
+			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
+			zoneOneReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-1"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(zoneOneReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(zoneOneReq)[0].Price).To(BeNumerically("==", 121.421))
+			zoneTwoReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-2"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(zoneTwoReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(zoneTwoReq)[0].Price).To(BeNumerically("==", 5.020))
+		})
+		It("should update price offerings instance types from multiple overlays", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "default-instance-type",
+					Offerings: []*cloudprovider.Offering{
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "spot",
+								corev1.LabelTopologyZone: "test-zone-1",
+							}),
+							Price: 1.020,
+						},
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "on-demand",
+								corev1.LabelTopologyZone: "test-zone-2",
+							}),
+							Price: 2.020,
+						},
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "spot",
+								corev1.LabelTopologyZone: "test-zone-3",
+							}),
+							Price: 3.020,
+						},
+						{
+							Available: true,
+							Requirements: scheduling.NewLabelRequirements(map[string]string{
+								v1.CapacityTypeLabelKey:  "reserved",
+								corev1.LabelTopologyZone: "test-zone-4",
+							}),
+							Price: 4.020,
+						},
+					},
+				}),
+			}
+			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      corev1.LabelTopologyZone,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"test-zone-1", "test-zone-4"},
+						},
+					},
+					Price:  lo.ToPtr("121.421"),
+					Weight: lo.ToPtr(int32(10)),
+				},
+			})
+			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				Spec: v1alpha1.NodeOverlaySpec{
+					Requirements: []corev1.NodeSelectorRequirement{
+						{
+							Key:      v1.CapacityTypeLabelKey,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"spot"},
+						},
+					},
+					Price:  lo.ToPtr("165.421"),
+					Weight: lo.ToPtr(int32(10)),
+				},
+			})
+			// should not be valid
+			overlayA.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+			overlayB.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
+
+			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
+			ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
+
+			instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
+			Expect(err).To(BeNil())
+			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
+			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
+			zoneOneReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-1"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(zoneOneReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(zoneOneReq)[0].Price).To(BeNumerically("==", 121.421))
+			zoneTwoReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-2"},
+			})
+			Expect(len(instanceTypeList[0].Offerings.Compatible(zoneTwoReq))).To(BeNumerically("==", 1))
+			Expect(instanceTypeList[0].Offerings.Compatible(zoneTwoReq)[0].Price).To(BeNumerically("==", 5.020))
+		})
 	})
-	It("should apply pricing adjustments for instances types for a subset of offerings", func() {
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-			fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "default-instance-type",
-				Offerings: []*cloudprovider.Offering{
-					{
-						Available: true,
-						Requirements: scheduling.NewLabelRequirements(map[string]string{
-							v1.CapacityTypeLabelKey:  "spot",
-							corev1.LabelTopologyZone: "test-zone-1",
-						}),
-						Price: 1.020,
-					},
-					{
-						Available: true,
-						Requirements: scheduling.NewLabelRequirements(map[string]string{
-							v1.CapacityTypeLabelKey:  "on-demand",
-							corev1.LabelTopologyZone: "test-zone-1",
-						}),
-						Price: 5.020,
-					},
-				},
-			}),
-		}
-		overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
-			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
-					{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"default-instance-type"},
-					},
-					{
-						Key:      v1.CapacityTypeLabelKey,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"on-demand"},
-					},
-				},
-				PriceAdjustment: lo.ToPtr("+1000.0"),
-				Weight:          lo.ToPtr(int32(10)),
-			},
-		})
-		overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
-
-		ExpectApplied(ctx, env.Client, nodePool, overlay)
-		ExpectObjectReconciled(ctx, env.Client, instanceTypeController, nodePool)
-
-		instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
-		Expect(err).To(BeNil())
-		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-		Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
-		odReq := scheduling.NewNodeSelectorRequirements(corev1.NodeSelectorRequirement{
-			Key:      v1.CapacityTypeLabelKey,
-			Operator: corev1.NodeSelectorOpIn,
-			Values:   []string{"on-demand"},
-		})
-		Expect(len(instanceTypeList[0].Offerings.Compatible(odReq))).To(BeNumerically("==", 1))
-		Expect(instanceTypeList[0].Offerings.Compatible(odReq)[0].Price).To(BeNumerically("==", 1005.020))
-	})
-
 	Context("Capacity", func() {
 		It("should apply capacity adjustments for instances types", func() {
 			overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -330,10 +635,14 @@ var _ = Describe("Instance Type Controller", func() {
 		overlayPrice.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
-		ExpectObjectReconcileFailed(ctx, env.Client, instanceTypeController, nodePool)
+		err := ExpectObjectReconcileFailed(ctx, env.Client, instanceTypeController, nodePool)
+		Expect(err).ToNot(BeNil())
 
 		instanceTypeList, err := cluster.GetInstanceTypes(nodePool.Name)
 		Expect(err).To(BeNil())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 0))
+	})
+	It("should update price offerings instance types from multiple overlays", func() {
+
 	})
 })
