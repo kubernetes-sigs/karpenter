@@ -67,6 +67,7 @@ func NewControllers(
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
+	instanceTypeStore nodeoverlayvalidation.InstanceTypeOverlayStore,
 ) []controller.Controller {
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
@@ -127,6 +128,10 @@ func NewControllers(
 	// The cloud provider must define status conditions for the node repair controller to use to detect unhealthy nodes
 	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
 		controllers = append(controllers, health.NewController(kubeClient, cloudProvider, clock, recorder))
+	}
+
+	if options.FromContext(ctx).FeatureGates.NodeOverlay {
+		controllers = append(controllers, nodeoverlayvalidation.NewController(kubeClient, cloudProvider, instanceTypeStore))
 	}
 
 	return controllers
