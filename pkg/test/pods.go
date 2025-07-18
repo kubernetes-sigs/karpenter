@@ -39,6 +39,7 @@ type PodOptions struct {
 	InitContainers                []v1.Container
 	ResourceRequirements          v1.ResourceRequirements
 	NodeSelector                  map[string]string
+	NodeSelectorTerms             []v1.NodeSelectorTerm
 	NodeRequirements              []v1.NodeSelectorRequirement
 	NodePreferences               []v1.NodeSelectorRequirement
 	PodRequirements               []v1.PodAffinityTerm
@@ -262,7 +263,7 @@ func PodDisruptionBudget(overrides ...PDBOptions) *policyv1.PodDisruptionBudget 
 
 func buildAffinity(options PodOptions) *v1.Affinity {
 	affinity := &v1.Affinity{}
-	if nodeAffinity := buildNodeAffinity(options.NodeRequirements, options.NodePreferences); nodeAffinity != nil {
+	if nodeAffinity := buildNodeAffinity(options.NodeRequirements, options.NodePreferences, options.NodeSelectorTerms); nodeAffinity != nil {
 		affinity.NodeAffinity = nodeAffinity
 	}
 	if podAffinity := buildPodAffinity(options.PodRequirements, options.PodPreferences); podAffinity != nil {
@@ -309,14 +310,18 @@ func buildPodAntiAffinity(podAntiRequirements []v1.PodAffinityTerm, podAntiPrefe
 	return podAntiAffinity
 }
 
-func buildNodeAffinity(nodeRequirements []v1.NodeSelectorRequirement, nodePreferences []v1.NodeSelectorRequirement) *v1.NodeAffinity {
+func buildNodeAffinity(nodeRequirements []v1.NodeSelectorRequirement, nodePreferences []v1.NodeSelectorRequirement, nodeSelectorTerms []v1.NodeSelectorTerm) *v1.NodeAffinity {
 	var nodeAffinity *v1.NodeAffinity
-	if nodeRequirements == nil && nodePreferences == nil {
+	if nodeRequirements == nil && nodePreferences == nil && nodeSelectorTerms == nil {
 		return nodeAffinity
 	}
 	nodeAffinity = &v1.NodeAffinity{}
 
-	if nodeRequirements != nil {
+	if nodeSelectorTerms != nil {
+		nodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &v1.NodeSelector{
+			NodeSelectorTerms: nodeSelectorTerms,
+		}
+	} else if nodeRequirements != nil {
 		nodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &v1.NodeSelector{
 			NodeSelectorTerms: []v1.NodeSelectorTerm{{MatchExpressions: nodeRequirements}},
 		}
