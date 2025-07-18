@@ -18,6 +18,7 @@ package validation
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
@@ -30,7 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
@@ -39,7 +42,8 @@ const conflictMessage = "conflict with another overlay"
 
 // Controller for reconciling on node overlay resources
 type Controller struct {
-	kubeClient client.Client
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
 }
 
 func (c *Controller) Name() string {
@@ -47,9 +51,10 @@ func (c *Controller) Name() string {
 }
 
 // NewController constructs a controller for node overlay validation
-func NewController(kubeClient client.Client) *Controller {
+func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider) *Controller {
 	return &Controller{
-		kubeClient: kubeClient,
+		kubeClient:    kubeClient,
+		cloudProvider: cp,
 	}
 }
 
@@ -62,19 +67,26 @@ func (c *Controller) Reconcile(ctx context.Context, _ *v1alpha1.NodeOverlay) (re
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	overlaysWithConflict := []string{}
 	overlayWithRuntimeValidationFailure := map[string]error{}
+	overlaysWithConflict := []string{}
 	for _, overlayOne := range overlayList.Items {
 		if err := overlayOne.RuntimeValidate(ctx); err != nil {
 			overlayWithRuntimeValidationFailure[overlayOne.Name] = err
 			continue
 		}
 		for _, overlayTwo := range overlayList.Items {
-			if err := overlayTwo.RuntimeValidate(ctx); err != nil {
+			if err := overlayOne.RuntimeValidate(ctx); err != nil {
 				overlayWithRuntimeValidationFailure[overlayTwo.Name] = err
 				continue
 			}
-			if overlayOne.Name == overlayTwo.Name || lo.FromPtr(overlayOne.Spec.Weight) != lo.FromPtr(overlayTwo.Spec.Weight) || !c.hasConflictingRequirements(overlayOne, overlayTwo) {
+			if overlayOne.Name == overlayTwo.Name || lo.FromPtr(overlayOne.Spec.Weight) != lo.FromPtr(overlayTwo.Spec.Weight) {
+				continue
+			}
+			requirementsConflict, err := c.hasConflictingRequirements(ctx, overlayOne, overlayTwo)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+			if !requirementsConflict {
 				continue
 			}
 			// checks to see if there are any other conflicts against the node overlays
@@ -102,15 +114,50 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 // findConflictingRequirements checks if any node overlays with the same weight have conflicting requirements
 // and returns a map of overlay names to conflict messages
-func (c *Controller) hasConflictingRequirements(overlayOne v1alpha1.NodeOverlay, overlayTwo v1alpha1.NodeOverlay) bool {
-	reqsA := scheduling.NewNodeSelectorRequirements(overlayOne.Spec.Requirements...)
+func (c *Controller) hasConflictingRequirements(ctx context.Context, overlayOne v1alpha1.NodeOverlay, overlayTwo v1alpha1.NodeOverlay) (bool, error) {
+	overlayRequirementsA := scheduling.NewNodeSelectorRequirements(overlayOne.Spec.Requirements...)
 	// For each pair of overlays, check if their requirements conflict
-	reqsB := scheduling.NewNodeSelectorRequirements(overlayTwo.Spec.Requirements...)
-	// Check if the requirements are compatible
-	if err := reqsA.Intersects(reqsB); err == nil {
-		return true
+	overlayRequirementsB := scheduling.NewNodeSelectorRequirements(overlayTwo.Spec.Requirements...)
+	// // Check if the requirements are compatible for each instance type
+	nodePoolList := &v1.NodePoolList{}
+	err := c.kubeClient.List(ctx, nodePoolList)
+	if err != nil {
+		return false, fmt.Errorf("listing nodepool, %w", err)
+	}
+	for _, np := range nodePoolList.Items {
+		nodePoolRequirements := scheduling.NewNodeSelectorRequirementsWithMinValues(np.Spec.Template.Spec.Requirements...)
+		its, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
+		if err != nil {
+			return false, fmt.Errorf("listing instance types from nodepool, %w", err)
+		}
+		for _, it := range its {
+			if compatibleInstanceType(it, overlayRequirementsA, overlayRequirementsB, nodePoolRequirements) {
+				return true, nil
+			}
+		}
 	}
 
+	return false, nil
+}
+
+func compatibleInstanceType(it *cloudprovider.InstanceType, overlayReqA scheduling.Requirements, overlayReqB scheduling.Requirements, nodePoolReq scheduling.Requirements) bool {
+	if it.Requirements.Compatible(nodePoolReq) != nil {
+		return false
+	}
+	if it.Requirements.Compatible(overlayReqA) == nil && it.Requirements.Compatible(overlayReqB) == nil {
+		if overlayReqA.Keys().HasAny(v1.WellKnownLabelsForOfferings.UnsortedList()...) && overlayReqB.Keys().HasAny(v1.WellKnownLabelsForOfferings.UnsortedList()...) {
+			for _, of := range it.Offerings {
+				if of.Requirements.Compatible(nodePoolReq) != nil {
+					return false
+				}
+				if of.Requirements.Compatible(overlayReqA) == nil && of.Requirements.Compatible(overlayReqB) == nil {
+					return true
+				}
+			}
+		} else {
+			return true
+		}
+	}
 	return false
 }
 

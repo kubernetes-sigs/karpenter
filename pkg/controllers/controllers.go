@@ -100,7 +100,7 @@ func NewControllers(
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
 		nodehydration.NewController(kubeClient, cloudProvider),
-		nodeoverlayvalidation.NewController(kubeClient),
+		nodeoverlayvalidation.NewController(kubeClient, cloudProvider),
 		status.NewController[*v1.NodeClaim](
 			kubeClient,
 			mgr.GetEventRecorderFor("karpenter"),

@@ -28,11 +28,15 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay/validation"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -42,6 +46,8 @@ import (
 var (
 	ctx                             context.Context
 	env                             *test.Environment
+	cloudProvider                   *fake.CloudProvider
+	nodePool                        *v1.NodePool
 	nodeOverlayValidationController *validation.Controller
 )
 
@@ -53,7 +59,14 @@ func TestValidation(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
-	nodeOverlayValidationController = validation.NewController(env.Client)
+	cloudProvider = fake.NewCloudProvider()
+	nodeOverlayValidationController = validation.NewController(env.Client, cloudProvider)
+})
+
+var _ = BeforeEach(func() {
+	nodePool = test.NodePool()
+	cloudProvider.Reset()
+	ExpectApplied(ctx, env.Client, nodePool)
 })
 
 var _ = AfterEach(func() {
@@ -70,9 +83,9 @@ var _ = Describe("Validation", func() {
 			Spec: v1alpha1.NodeOverlaySpec{
 				Requirements: []corev1.NodeSelectorRequirement{
 					{
-						Key:      "instance-type",
+						Key:      corev1.LabelInstanceTypeStable,
 						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"m5.large"},
+						Values:   []string{"default-instance-type"},
 					},
 				},
 				Weight: lo.ToPtr(int32(10)),
@@ -112,9 +125,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Capacity: corev1.ResourceList{
@@ -132,15 +145,345 @@ var _ = Describe("Validation", func() {
 			Expect(updatedOverlay.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("RuntimeValidation"))
 		})
 	})
+	Context("Requirements Validations", func() {
+		Describe("Instance types Requirements", func() {
+			It("should pass if an instance type conflicts but is not defined in a nodepool", func() {
+				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      corev1.LabelArchStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"arm64"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("1.03"),
+					},
+				})
+				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{},
+						Weight:       lo.ToPtr(int32(10)),
+						Price:        lo.ToPtr("23"),
+					},
+				})
+				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelArchStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
+
+				// Reconcile both overlays
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+				// Check that the conditions were set correctly
+				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+				Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			})
+			It("should fail with requirements overlays overlap", func() {
+				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      corev1.LabelArchStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"arm64"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("1.03"),
+					},
+				})
+				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{},
+						Weight:       lo.ToPtr(int32(10)),
+						Price:        lo.ToPtr("23"),
+					},
+				})
+				ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+				// Reconcile both overlays
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+				// Check that the conditions were set correctly
+				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+				Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+				Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+
+				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+				Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+			})
+			It("should succeed with requirements overlays don't overlap", func() {
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					fake.NewInstanceType(fake.InstanceTypeOptions{
+						Name:             "arm-instance-type",
+						Architecture:     "arm64",
+						OperatingSystems: sets.New(string(corev1.Linux), string(corev1.Windows), "darwin"),
+					}),
+					fake.NewInstanceType(fake.InstanceTypeOptions{
+						Name:             "amd-instance-type",
+						Architecture:     "amd64",
+						OperatingSystems: sets.New("ios"),
+					}),
+				}
+				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      corev1.LabelArchStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"arm64"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("1.03"),
+					},
+				})
+				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      corev1.LabelOSStable,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"ios"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("23"),
+					},
+				})
+				ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+				// Reconcile both overlays
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+				// Check that the conditions were set correctly
+				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+				Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			})
+		})
+		Describe("Offering Requirements", func() {
+			BeforeEach(func() {
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					fake.NewInstanceType(fake.InstanceTypeOptions{
+						Name: "default-instance-type",
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  "spot",
+									corev1.LabelTopologyZone: "test-zone-1",
+								}),
+								Price: 1.020,
+							},
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  "on-demand",
+									corev1.LabelTopologyZone: "test-zone-2",
+								}),
+								Price: 2.020,
+							},
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  "spot",
+									corev1.LabelTopologyZone: "test-zone-3",
+								}),
+								Price: 3.020,
+							},
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  "reserved",
+									corev1.LabelTopologyZone: "test-zone-4",
+								}),
+								Price: 4.020,
+							},
+						},
+					}),
+				}
+			})
+			It("should fail with requirements overlays overlap on zone", func() {
+				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"test-zone-1", "test-zone-4"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("1.03"),
+					},
+				})
+				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{},
+						Weight:       lo.ToPtr(int32(10)),
+						Price:        lo.ToPtr("23"),
+					},
+				})
+				ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+				// Reconcile both overlays
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+				// Check that the conditions were set correctly
+				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+				Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+				Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+
+				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+				Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+			})
+			It("should fail with requirements overlays overlap on capacity", func() {
+				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{},
+						Weight:       lo.ToPtr(int32(10)),
+						Price:        lo.ToPtr("1.03"),
+					},
+				})
+				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      v1.CapacityTypeLabelKey,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"spot"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("23"),
+					},
+				})
+				ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+				// Reconcile both overlays
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+				// Check that the conditions were set correctly
+				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+				Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+				Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+
+				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+				Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+			})
+			It("should succeed with requirements overlays don't overlap", func() {
+				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"test-zone-6", "test-zone-4"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("1.03"),
+					},
+				})
+				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      v1.CapacityTypeLabelKey,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"spot"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("23"),
+					},
+				})
+				ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+				// Reconcile both overlays
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+				// Check that the conditions were set correctly
+				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+				Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
+				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			})
+			It("should fail with requirements overlays overlap", func() {
+				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      corev1.LabelTopologyZone,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"test-zone-1", "test-zone-4"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("1.03"),
+					},
+				})
+				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					Spec: v1alpha1.NodeOverlaySpec{
+						Requirements: []corev1.NodeSelectorRequirement{
+							{
+								Key:      v1.CapacityTypeLabelKey,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"spot"},
+							},
+						},
+						Weight: lo.ToPtr(int32(10)),
+						Price:  lo.ToPtr("23"),
+					},
+				})
+				ExpectApplied(ctx, env.Client, overlayA, overlayB)
+
+				// Reconcile both overlays
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
+				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+
+				// Check that the conditions were set correctly
+				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
+				Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+				Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+
+				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+				Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+			})
+		})
+	})
 	Context("Price", func() {
 		It("should fail with conflicting price overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.xlarge"},
+							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -151,9 +494,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -180,9 +523,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.xlarge"},
+							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -193,9 +536,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -220,9 +563,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -233,9 +576,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpNotIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -261,9 +604,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -274,9 +617,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(20)),
@@ -304,9 +647,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.xlarge"},
+							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
 					Weight:          lo.ToPtr(int32(10)),
@@ -317,9 +660,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight:          lo.ToPtr(int32(10)),
@@ -346,9 +689,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.xlarge"},
+							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
 					Weight:          lo.ToPtr(int32(10)),
@@ -359,9 +702,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight:          lo.ToPtr(int32(10)),
@@ -386,9 +729,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight:          lo.ToPtr(int32(10)),
@@ -399,9 +742,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpNotIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight:          lo.ToPtr(int32(10)),
@@ -427,9 +770,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight:          lo.ToPtr(int32(10)),
@@ -440,9 +783,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight:          lo.ToPtr(int32(20)),
@@ -470,9 +813,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.xlarge"},
+							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -485,9 +828,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -516,9 +859,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.xlarge"},
+							Values:   []string{"default-instance-type", "small-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -531,9 +874,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -560,9 +903,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -575,9 +918,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpNotIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -605,9 +948,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -620,9 +963,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(20)),
@@ -650,9 +993,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large"},
+							Values:   []string{"default-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(10)),
@@ -665,9 +1008,9 @@ var _ = Describe("Validation", func() {
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
-							Key:      "instance-type",
+							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"m5.large", "m5.2xlarge"},
+							Values:   []string{"default-instance-type", "gpu-vendor-instance-type"},
 						},
 					},
 					Weight: lo.ToPtr(int32(20)),
