@@ -185,6 +185,7 @@ type PodData struct {
 	Requests           corev1.ResourceList
 	Requirements       scheduling.Requirements
 	StrictRequirements scheduling.Requirements
+	IsDRAEnabled       bool
 }
 
 type Scheduler struct {
@@ -445,10 +446,17 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 		Requests:           resources.RequestsForPods(p),
 		Requirements:       requirements,
 		StrictRequirements: strictRequirements,
+		IsDRAEnabled:       pod.HasDRARequirements(p),
 	}
 }
 
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
+	// Check if pod has DRA requirements - if so, return immediately as DRA is not yet supported
+	if s.cachedPodData[pod.UID].IsDRAEnabled {
+		log.FromContext(ctx).V(1).WithValues("Pod", klog.KObj(pod)).Info("skipping pod scheduling, Dynamic Resource Allocation (DRA) is not yet supported by Karpenter")
+		return nil
+	}
+
 	// first try to schedule against an in-flight real node
 	if err := s.addToExistingNode(ctx, pod); err == nil {
 		return nil
