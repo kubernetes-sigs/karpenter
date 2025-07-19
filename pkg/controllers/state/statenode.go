@@ -243,8 +243,11 @@ func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient cli
 			return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf(`pod has "karpenter.sh/do-not-disrupt" annotation`), "Pod", klog.KObj(po)))
 		}
 	}
-	if pdbKey, ok := pdbs.CanEvictPods(pods); !ok {
-		return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf("pdb prevents pod evictions"), "PodDisruptionBudget", klog.KRef(pdbKey.Namespace, pdbKey.Name)))
+	if pdbKeys, ok := pdbs.CanEvictPods(pods); !ok {
+		if len(pdbKeys) > 1 {
+			return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf("eviction does not support multiple PDBs"), "PodDisruptionBudget(s)", pdbKeys))
+		}
+		return pods, NewPodBlockEvictionError(serrors.Wrap(fmt.Errorf("pdb prevents pod evictions"), "PodDisruptionBudget", pdbKeys))
 	}
 
 	return pods, nil
