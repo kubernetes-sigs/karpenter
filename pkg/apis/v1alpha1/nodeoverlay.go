@@ -36,7 +36,7 @@ type NodeOverlaySpec struct {
 	// +kubebuilder:validation:MaxItems:=100
 	// +optional
 	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
-	// PriceAdjustment specifies a price changes for matching instance types. Accepts either:
+	// PriceAdjustment specifies the price change for matching instance types. Accepts either:
 	// - A fixed price modifier (e.g., -0.5, 1.2)
 	// - A percentage modifier (e.g., +10% for increase, -15% for decrees)
 	// +kubebuilder:validation:Pattern=`^[+-](?:\d+(?:\.\d*)?|\.\d+)(?:%)?$`
@@ -89,13 +89,13 @@ type NodeOverlayList struct {
 // OrderByWeight orders the NodeOverlays in the provided slice by their priority weight in-place. This priority evaluates
 // the following things in precedence order:
 //  1. NodeOverlays that have a larger weight are ordered first
-//  2. If two NodeOverlays have the same weight, then the NodePool with the name later in the alphabet will come first
+//  2. If two NodeOverlays have the same weight, then the NodeOverlay with the name later in the alphabet will come first
 func (nol *NodeOverlayList) OrderByWeight() {
 	sort.Slice(nol.Items, func(a, b int) bool {
 		weightA := lo.FromPtr(nol.Items[a].Spec.Weight)
 		weightB := lo.FromPtr(nol.Items[b].Spec.Weight)
 		if weightA == weightB {
-			// Order NodePools by name for a consistent ordering when sorting equal weight
+			// Order Node Overlay by name for a consistent ordering when sorting equal weight
 			return nol.Items[a].Name > nol.Items[b].Name
 		}
 		return weightA > weightB

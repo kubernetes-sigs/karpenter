@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 )
 
-// NodePool creates a test NodePool with defaults that can be overridden by overrides.
+// NodeOverlay creates a test NodeOverlay with defaults that can be overridden by overrides.
 // Overrides are applied in order, with a last write wins semantic.
 func NodeOverlay(overrides ...v1alpha1.NodeOverlay) *v1alpha1.NodeOverlay {
 	override := v1alpha1.NodeOverlay{}

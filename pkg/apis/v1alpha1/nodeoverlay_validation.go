@@ -25,7 +25,6 @@ import (
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
@@ -35,9 +34,9 @@ func (in *NodeOverlay) RuntimeValidate(ctx context.Context) error {
 	return multierr.Combine(in.Spec.validateRequirements(ctx), in.Spec.validateCapacity())
 }
 
-// This function is used by the NodeClaim validation webhook to verify the nodepool requirements.
-// When this function is called, the nodepool's requirements do not include the requirements from labels.
-// NodeClaim requirements only support well known labels.
+// This function is used by the NodeOverlay validation webhook to verify the nodeoverlay requirements.
+// When this function is called, the nodeoverlay's requirements do not include the requirements from labels.
+// NodeOverlay requirements only support well known labels.
 func (in *NodeOverlaySpec) validateRequirements(ctx context.Context) (errs error) {
 	for _, requirement := range in.Requirements {
 		if err := ValidateRequirement(ctx, requirement); err != nil {
@@ -56,7 +55,8 @@ func (in *NodeOverlaySpec) validateCapacity() (errs error) {
 	return errs
 }
 
-func ValidateRequirement(ctx context.Context, requirement corev1.NodeSelectorRequirement) error { //nolint:gocyclo
+//nolint:gocyclo
+func ValidateRequirement(ctx context.Context, requirement corev1.NodeSelectorRequirement) error {
 	var errs error
 	if normalized, ok := v1.NormalizedLabels[requirement.Key]; ok {
 		requirement.Key = normalized
@@ -125,7 +125,7 @@ func validateWellKnownValues(ctx context.Context, requirement corev1.NodeSelecto
 
 	// If there are valid and invalid values, log the invalid values and proceed with valid values
 	if len(invalidValues) > 0 {
-		log.FromContext(ctx).Error(fmt.Errorf("invalid values found for key"), "please correct found invalid values, proceeding with valid values", "key", requirement.Key, "valid-values", values, "invalid-values", invalidValues)
+		return fmt.Errorf("invalid values found for key in %s please correct found invalid values in %s, proceeding with valid values %s", requirement.Key, invalidValues, values)
 	}
 
 	return nil
