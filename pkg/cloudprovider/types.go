@@ -119,6 +119,10 @@ func (i *InstanceType) precompute() {
 	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
 }
 
+func (i *InstanceType) ResetAllocatable() {
+	i.once = sync.Once{}
+}
+
 func (i *InstanceType) Allocatable() corev1.ResourceList {
 	i.once.Do(i.precompute)
 	return i.allocatable

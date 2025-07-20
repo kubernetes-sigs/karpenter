@@ -25,6 +25,7 @@ import (
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
+	lop "github.com/samber/lo/parallel"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -109,8 +110,13 @@ func (c *Controller) overlayInstanceTypes(overlays []v1alpha1.NodeOverlay, insta
 		return o.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).IsTrue()
 	})
 
-	overlayCapacityOnInstanceTypes(validOverlays, instanceTypes)
-	overlayPriceOnInstanceTypes(validOverlays, instanceTypes)
+	work := []func(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType){
+		overlayCapacityOnInstanceTypes,
+		overlayPriceOnInstanceTypes,
+	}
+	lop.ForEach(work, func(f func(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType), i int) {
+		f(validOverlays, instanceTypes)
+	})
 }
 
 // Test with different offerings
@@ -120,7 +126,10 @@ func overlayCapacityOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*clou
 		overlaySelector.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
 
 		for _, it := range its {
-			it.Capacity = lo.Ternary(it.Requirements.Intersects(overlaySelector) == nil, lo.Assign(overlay.Spec.Capacity, it.Capacity), it.Capacity)
+			if it.Requirements.Intersects(overlaySelector) == nil {
+				it.Capacity = lo.Assign(it.Capacity, overlay.Spec.Capacity)
+				it.ResetAllocatable()
+			}
 		}
 	}
 }
@@ -128,8 +137,11 @@ func overlayCapacityOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*clou
 // Test with different offerings
 func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
 	overriddenInstanceType := map[string][]string{}
-
 	for _, overlay := range overlays {
+		// if price or price adjustment is not defined, then we should skip the overlay
+		if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil {
+			continue
+		}
 		overlaySelector := scheduling.NewRequirements()
 		overlaySelector.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
 
@@ -137,14 +149,12 @@ func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudpr
 			if err := it.Requirements.Intersects(overlaySelector); err != nil {
 				continue
 			}
+			if _, ok := overriddenInstanceType[it.Name]; !ok {
+				overriddenInstanceType[it.Name] = []string{}
+			}
 
-			overriddenInstanceType[it.Name] = []string{}
 			for _, of := range it.Offerings {
-				offeringRequirementsHash := fmt.Sprint(lo.Must(hashstructure.Hash(of.Requirements, hashstructure.FormatV2, &hashstructure.HashOptions{
-					SlicesAsSets:    true,
-					IgnoreZeroValue: true,
-					ZeroNil:         true,
-				})))
+				offeringRequirementsHash := fmt.Sprint(lo.Must(hashstructure.Hash(of.Requirements.String(), hashstructure.FormatV2, &hashstructure.HashOptions{})))
 				if overlaySelector.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && !lo.Contains(overriddenInstanceType[it.Name], offeringRequirementsHash) {
 					overriddenInstanceType[it.Name] = append(overriddenInstanceType[it.Name], offeringRequirementsHash)
 					of.Price = overlay.AdjustedPrice(of.Price)
