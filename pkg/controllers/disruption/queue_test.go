@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -47,6 +48,8 @@ var node1, node2 *corev1.Node
 var _ = Describe("Queue", func() {
 	BeforeEach(func() {
 		nodePool = test.NodePool()
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		nodeClaim1, node1 = test.NodeClaimAndNode(
 			v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{

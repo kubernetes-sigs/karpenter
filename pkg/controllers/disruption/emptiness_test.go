@@ -60,6 +60,8 @@ var _ = Describe("Emptiness", func() {
 				},
 			},
 		})
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		nodeClaims, nodes = test.NodeClaimsAndNodes(2, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{

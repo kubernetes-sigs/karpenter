@@ -223,6 +223,8 @@ func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.
 			},
 		},
 	})
+	its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+	cluster.UpdateInstanceTypes(nodePool.Name, its)
 
 	// Apply limits to both of the NodePools
 	cloudProvider = fake.NewCloudProvider()

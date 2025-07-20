@@ -75,6 +75,12 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				},
 			},
 		})
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool1))
+		cluster.UpdateInstanceTypes(nodePool1.Name, its)
+		its = lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool2))
+		cluster.UpdateInstanceTypes(nodePool2.Name, its)
+		its = lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool3))
+		cluster.UpdateInstanceTypes(nodePool3.Name, its)
 		ExpectApplied(ctx, env.Client, nodePool1, nodePool2, nodePool3)
 
 		// Set up NodePool maps for candidate creation

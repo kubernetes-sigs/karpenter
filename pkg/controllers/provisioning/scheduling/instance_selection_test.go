@@ -78,6 +78,8 @@ var _ = Describe("Instance Type Selection", func() {
 		rand.Shuffle(len(cloudProvider.InstanceTypes), func(i, j int) {
 			cloudProvider.InstanceTypes[i], cloudProvider.InstanceTypes[j] = cloudProvider.InstanceTypes[j], cloudProvider.InstanceTypes[i]
 		})
+		its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 	})
 
 	// This set of tests ensure that we schedule on the cheapest valid instance type while also ensuring that all of the
@@ -467,6 +469,8 @@ var _ = Describe("Instance Type Selection", func() {
 		})
 
 		Expect(len(cloudProvider.InstanceTypes)).To(BeNumerically(">", 0))
+		its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
@@ -491,6 +495,8 @@ var _ = Describe("Instance Type Selection", func() {
 			return true
 		})
 		Expect(len(cloudProvider.InstanceTypes)).To(BeNumerically(">", 0))
+		its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
@@ -530,6 +536,8 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		Expect(len(cloudProvider.InstanceTypes)).To(BeNumerically(">", 0))
+		its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
@@ -561,6 +569,8 @@ var _ = Describe("Instance Type Selection", func() {
 		for _, cpu := range []float64{0.1, 1.0, 2, 2.5, 4, 8, 16} {
 			for _, mem := range []float64{0.1, 1.0, 2, 4, 8, 16, 32} {
 				cluster.Reset()
+				its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+				cluster.UpdateInstanceTypes(nodePool.Name, its)
 				cloudProvider.CreateCalls = nil
 				opts := test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{Requests: map[corev1.ResourceName]resource.Quantity{
@@ -651,7 +661,8 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-
+		its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -709,6 +720,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
@@ -805,6 +818,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
@@ -882,6 +897,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
@@ -989,6 +1006,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
@@ -1067,6 +1086,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// Both of these should schedule on a instance-type-1 without the minValues requirement being specified.
@@ -1161,6 +1182,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
@@ -1280,6 +1303,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// Both of these should schedule on a instance-type-3 without the minValues requirement being specified.
@@ -1327,6 +1352,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(11),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 
@@ -1388,6 +1415,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
@@ -1467,6 +1496,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
@@ -1551,6 +1582,8 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(1),
 				},
 			}
+			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.

@@ -174,6 +174,8 @@ var _ = Describe("Simulate Scheduling", func() {
 				},
 			},
 		})
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 	})
 	It("should allow pods on deleting nodes to reschedule to uninitialized nodes", func() {
 		numNodes := 10
@@ -582,6 +584,8 @@ var _ = Describe("Disruption Taints", func() {
 		}
 		nodePool.Spec.Disruption.ConsolidateAfter.Duration = lo.ToPtr(time.Duration(0))
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		ExpectApplied(ctx, env.Client, nodeClaim, nodePool)
 	})
 	It("should remove taints from NodeClaims that were left tainted from a previous disruption action", func() {
@@ -689,6 +693,8 @@ var _ = Describe("BuildDisruptionBudgetMapping", func() {
 				},
 			},
 		})
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		ExpectApplied(ctx, env.Client, nodePool)
 
 		for i := 0; i < numNodes; i++ {
@@ -915,6 +921,8 @@ var _ = Describe("Candidate Filtering", func() {
 		var err error
 		pdbLimits, err = pdb.NewLimits(ctx, env.Client)
 		Expect(err).ToNot(HaveOccurred())
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 	})
 	It("should not consider candidates that have do-not-disrupt pods scheduled and no terminationGracePeriod", func() {
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -1859,6 +1867,8 @@ var _ = Describe("Metrics", func() {
 				},
 			},
 		})
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{

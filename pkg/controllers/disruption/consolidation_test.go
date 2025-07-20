@@ -70,6 +70,8 @@ var _ = Describe("Consolidation", func() {
 				},
 			},
 		})
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -1079,6 +1081,8 @@ var _ = Describe("Consolidation", func() {
 							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					}}})
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
 
 			// bind pods to node
@@ -1194,6 +1198,8 @@ var _ = Describe("Consolidation", func() {
 							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					}}})
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
 
 			// bind pods to node
@@ -1278,6 +1284,8 @@ var _ = Describe("Consolidation", func() {
 							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					}}})
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
 
 			// bind pods to node
@@ -1397,6 +1405,8 @@ var _ = Describe("Consolidation", func() {
 							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					}}})
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
 
 			// bind pods to node
@@ -1517,6 +1527,8 @@ var _ = Describe("Consolidation", func() {
 							BlockOwnerDeletion: lo.ToPtr(true),
 						},
 					}}})
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
 
 			// bind pods to node
@@ -1634,6 +1646,8 @@ var _ = Describe("Consolidation", func() {
 								BlockOwnerDeletion: lo.ToPtr(true),
 							},
 						}}})
+				its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+				cluster.UpdateInstanceTypes(nodePool.Name, its)
 				ExpectApplied(ctx, env.Client, rs, pod, spotNode, spotNodeClaim, nodePool)
 
 				// bind pods to node
@@ -1678,6 +1692,8 @@ var _ = Describe("Consolidation", func() {
 
 				nodePool2 := test.NodePool()
 				cloudProvider.InstanceTypesForNodePool[nodePool2.Name] = nil
+				its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool2))
+				cluster.UpdateInstanceTypes(nodePool2.Name, its)
 				ExpectApplied(ctx, env.Client, rs, pod, node, nodeClaim, nodePool, nodePool2)
 
 				// bind pods to node
@@ -2162,7 +2178,8 @@ var _ = Describe("Consolidation", func() {
 					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 				},
 			})
-
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
 
 			// bind pods to node
@@ -2261,7 +2278,8 @@ var _ = Describe("Consolidation", func() {
 					Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
 				},
 			})
-
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
 
 			// bind pods to node
@@ -2843,6 +2861,8 @@ var _ = Describe("Consolidation", func() {
 					},
 				},
 			})
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, rs, nodePool)
 
 			// Setup 100 nodeclaims/nodes with a single nodeclaim/node that is initialized
@@ -4667,6 +4687,8 @@ var _ = Describe("Consolidation", func() {
 
 			// Update instance types to ensure that min values won't be satisfied.
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{leastExpensiveInstance, mostExpensiveInstance}
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePoolWithMinValues))
+			cluster.UpdateInstanceTypes(nodePoolWithMinValues.Name, its)
 		})
 
 		AfterEach(func() {

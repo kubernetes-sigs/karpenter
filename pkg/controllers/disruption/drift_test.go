@@ -57,6 +57,8 @@ var _ = Describe("Drift", func() {
 				},
 			},
 		})
+		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+		cluster.UpdateInstanceTypes(nodePool.Name, its)
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -801,7 +803,8 @@ var _ = Describe("Drift", func() {
 				currentInstance,
 				replacementInstance,
 			}
-
+			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
+			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			labels := map[string]string{
 				"app": "test",
 			}
