@@ -34,7 +34,7 @@ type NodeOverlaySpec struct {
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt' or 'Lt' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
 	// +kubebuilder:validation:MaxItems:=100
-	// +optional
+	// +required
 	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
 	// PriceAdjustment specifies the price change for matching instance types. Accepts either:
 	// - A fixed price modifier (e.g., -0.5, 1.2)
@@ -46,17 +46,16 @@ type NodeOverlaySpec struct {
 	// +kubebuilder:validation:Pattern=`^\d+(\.\d+)?$`
 	// +optional
 	Price *string `json:"price,omitempty"`
-	// Capacity that will add extended resources only, and not replace any existing resources on the nodes.
-	// These extended resources will be appended to the node's existing resource list.
+	// Capacity adds extended resources only, and not replace any existing resources.
+	// These extended resources are appended to the node's existing resource list.
 	// Note: This field does not modify or override standard resources like CPU, memory, ephemeral-storage, or pods.
-	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'pods']))"
+	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))"
 	// +optional
 	Capacity v1.ResourceList `json:"capacity,omitempty"`
-	// Weight is the priority given to the nodeoverlay while overriding node attributes. A higher
-	// numerical weight indicates that this nodeoverlay will be ordered
-	// ahead of other nodeoverlay with lower weights. A nodeoverlay with no weight
-	// will be treated as if it is a nodeoverlay with a weight of 0. Two nodeoverlays that have the same weight,
-	// we will merge them in alphabetical order.
+	// Weight defines the priority of this NodeOverlay when overriding node attributes.
+	// NodeOverlays with higher numerical weights take precedence over those with lower weights.
+	//  If no weight is specified, the NodeOverlay is treated as having a weight of 0.
+	// When multiple NodeOverlays have identical weights, they are merged in alphabetical order.
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional

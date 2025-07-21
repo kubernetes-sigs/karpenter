@@ -96,6 +96,7 @@ var (
 	WellKnownResources = sets.New[v1.ResourceName](
 		v1.ResourceCPU,
 		v1.ResourceMemory,
+		v1.ResourceEphemeralStorage,
 		v1.ResourcePods,
 	)
 

@@ -58,13 +58,13 @@ spec:
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
                   description: |-
-                    Capacity that will add extended resources only, and not replace any existing resources on the nodes.
-                    These extended resources will be appended to the node's existing resource list.
+                    Capacity adds extended resources only, and not replace any existing resources.
+                    These extended resources are appended to the node's existing resource list.
                     Note: This field does not modify or override standard resources like CPU, memory, ephemeral-storage, or pods.
                   type: object
                   x-kubernetes-validations:
                     - message: invalid resource restricted
-                      rule: self.all(x, !(x in ['cpu', 'memory', 'pods']))
+                      rule: self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))
                 price:
                   description: Price specifies amount for an instance types that match the specified labels. Users can override prices using a signed float representing the price override
                   pattern: ^\d+(\.\d+)?$
@@ -139,15 +139,16 @@ spec:
                       rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt'') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
                 weight:
                   description: |-
-                    Weight is the priority given to the nodeoverlay while overriding node attributes. A higher
-                    numerical weight indicates that this nodeoverlay will be ordered
-                    ahead of other nodeoverlay with lower weights. A nodeoverlay with no weight
-                    will be treated as if it is a nodeoverlay with a weight of 0. Two nodeoverlays that have the same weight,
-                    we will merge them in alphabetical order.
+                    Weight defines the priority of this NodeOverlay when overriding node attributes.
+                    NodeOverlays with higher numerical weights take precedence over those with lower weights.
+                     If no weight is specified, the NodeOverlay is treated as having a weight of 0.
+                    When multiple NodeOverlays have identical weights, they are merged in alphabetical order.
                   format: int32
                   maximum: 100
                   minimum: 1
                   type: integer
+              required:
+                - requirements
               type: object
               x-kubernetes-validations:
                 - message: cannot set both 'price' and 'priceAdjustment'

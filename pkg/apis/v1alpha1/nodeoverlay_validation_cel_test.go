@@ -173,7 +173,12 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})
 		It("should allow empty requirements", func() {
-			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{}
+			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+				{
+					Key:      "test",
+					Operator: corev1.NodeSelectorOpExists,
+				},
+			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
 		})

@@ -20,8 +20,6 @@ import (
 	"github.com/awslabs/operatorpkg/status"
 )
 
-// Note(Remove after decision point): Only set this up for runtime validation I will need to assess if this is necessary, but I get the feeling it will be
-
 const (
 	// ConditionTypeValidationSucceeded = "ValidationSucceeded" condition indicates that the
 	// runtime-based configuration is valid and conflict for this NodeOverlay

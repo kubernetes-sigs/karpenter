@@ -22,6 +22,7 @@ import (
 	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,14 +36,21 @@ var _ = Describe("CEL/Default", func() {
 	BeforeEach(func() {
 		nodeOverlay = &NodeOverlay{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
-			Spec:       NodeOverlaySpec{},
+			Spec: NodeOverlaySpec{
+				Requirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      "test",
+						Operator: corev1.NodeSelectorOpExists,
+					},
+				},
+			},
 		}
 	})
 	Context("Defaults/TopLevel", func() {
 		It("should default the priceAdjustment field when undefined", func() {
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodeOverlay), nodeOverlay)).To(Succeed())
-			Expect(nodeOverlay.Spec.Requirements).To(BeNil())
+			Expect(nodeOverlay.Spec.Requirements).ToNot(BeNil())
 			Expect(nodeOverlay.Spec.PriceAdjustment).To(BeNil())
 			Expect(nodeOverlay.Spec.Price).To(BeNil())
 			Expect(nodeOverlay.Spec.Capacity).To(BeNil())
