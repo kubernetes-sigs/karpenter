@@ -216,7 +216,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		ExpectApplied(ctx, env.Client, pod)
 		ExpectManualBinding(ctx, env.Client, pod, nodes[0])
 
-		nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, env.Client, cloudProvider)
+		nodePoolMap, nodePoolToInstanceTypesMap, err := disruption.BuildNodePoolMap(ctx, env.Client, cloudProvider, cluster)
 		Expect(err).To(Succeed())
 
 		// Mark all nodeclaims as marked for deletion

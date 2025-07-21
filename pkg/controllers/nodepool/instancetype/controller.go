@@ -69,24 +69,23 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	if err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	nodeOverlayList.OrderByWeight() // Test
+	nodeOverlayList.OrderByWeight()
 
-	// Test
-	its, err := c.cloudProvider.GetInstanceTypes(ctx, nodePool)
+	its, err := c.getInstanceTypes(ctx, nodePool)
 	if err != nil {
-		c.cluster.UpdateInstanceTypes(nodePool.Name, []*cloudprovider.InstanceType{}) // Test
+		c.cluster.UpdateInstanceTypes(nodePool.Name, []*cloudprovider.InstanceType{})
 		if errors.Is(err, context.DeadlineExceeded) {
 			return reconcile.Result{}, fmt.Errorf("getting instance types, %w", err)
 		}
 		return reconcile.Result{}, fmt.Errorf("skipping, unable to resolve instance types, %w", err)
 	}
-	// Test
 	if len(its) == 0 {
-		c.cluster.UpdateInstanceTypes(nodePool.Name, []*cloudprovider.InstanceType{}) // Test
+		c.cluster.UpdateInstanceTypes(nodePool.Name, []*cloudprovider.InstanceType{})
 		return reconcile.Result{}, nil
 	}
+
 	c.overlayInstanceTypes(nodeOverlayList.Items, its)
-	c.cluster.UpdateInstanceTypes(nodePool.Name, its) // Test
+	c.cluster.UpdateInstanceTypes(nodePool.Name, its)
 
 	return reconcile.Result{RequeueAfter: time.Hour}, nil
 }
@@ -162,4 +161,36 @@ func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudpr
 			}
 		}
 	}
+}
+
+func (c *Controller) getInstanceTypes(ctx context.Context, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	its, err := c.cloudProvider.GetInstanceTypes(ctx, nodePool)
+	if err != nil {
+		return []*cloudprovider.InstanceType{}, err
+	}
+
+	return lo.Map(its, func(it *cloudprovider.InstanceType, _ int) *cloudprovider.InstanceType {
+		return &cloudprovider.InstanceType{
+			Name:         it.Name,
+			Requirements: it.Requirements,
+			Offerings:    copyOfferings(it.Offerings),
+			Capacity:     it.Capacity.DeepCopy(),
+			Overhead: &cloudprovider.InstanceTypeOverhead{
+				KubeReserved:      it.Overhead.KubeReserved.DeepCopy(),
+				SystemReserved:    it.Overhead.SystemReserved.DeepCopy(),
+				EvictionThreshold: it.Overhead.EvictionThreshold.DeepCopy(),
+			},
+		}
+	}), nil
+}
+
+func copyOfferings(offerings cloudprovider.Offerings) []*cloudprovider.Offering {
+	return lo.Map(offerings, func(of *cloudprovider.Offering, _ int) *cloudprovider.Offering {
+		return &cloudprovider.Offering{
+			Requirements:        of.Requirements,
+			Price:               of.Price,
+			Available:           of.Available,
+			ReservationCapacity: of.ReservationCapacity,
+		}
+	})
 }

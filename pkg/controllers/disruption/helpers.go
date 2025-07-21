@@ -172,7 +172,7 @@ func instanceTypesAreSubset(lhs []*cloudprovider.InstanceType, rhs []*cloudprovi
 func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient client.Client, recorder events.Recorder, clk clock.Clock,
 	cloudProvider cloudprovider.CloudProvider, shouldDisrupt CandidateFilter, disruptionClass string, queue *Queue,
 ) ([]*Candidate, error) {
-	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
+	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
-func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
+func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) (map[string]*v1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
 	nodePoolMap := map[string]*v1.NodePool{}
 	nodePools, err := nodepoolutils.ListManaged(ctx, kubeClient, cloudProvider)
 	if err != nil {
@@ -200,7 +200,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 	for _, np := range nodePools {
 		nodePoolMap[np.Name] = np
 
-		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
+		nodePoolInstanceTypes, err := cluster.GetInstanceTypes(np.Name)
 		if err != nil {
 			// don't error out on building the node pool, we just won't be able to handle any nodes that
 			// were created by it

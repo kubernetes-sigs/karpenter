@@ -255,6 +255,8 @@ var _ = Describe("Emptiness", func() {
 			nodes = make([]*corev1.Node, 0, 30)
 			// Create 3 nodes for each nodePool
 			for _, np := range nps {
+				its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, np))
+				cluster.UpdateInstanceTypes(np.Name, its)
 				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -320,6 +322,8 @@ var _ = Describe("Emptiness", func() {
 			nodes = make([]*corev1.Node, 0, 30)
 			// Create 3 nodes for each nodePool
 			for _, np := range nps {
+				its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, np))
+				cluster.UpdateInstanceTypes(np.Name, its)
 				ncs, ns := test.NodeClaimsAndNodes(3, v1.NodeClaim{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
