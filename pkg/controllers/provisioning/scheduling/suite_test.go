@@ -142,8 +142,6 @@ var _ = Context("Scheduling", func() {
 				},
 			},
 		})
-		its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-		cluster.UpdateInstanceTypes(nodePool.Name, its)
 	})
 
 	Describe("Custom Constraints", func() {
@@ -1414,8 +1412,6 @@ var _ = Context("Scheduling", func() {
 			cloudProvider.InstanceTypes[1].Capacity[fakeGPU2] = resource.MustParse("25")
 
 			nodeNames := sets.NewString()
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
@@ -1444,8 +1440,6 @@ var _ = Context("Scheduling", func() {
 			cloudProvider.InstanceTypes[0].Capacity[fakeGPU1] = resource.MustParse("25")
 			cloudProvider.InstanceTypes[1].Capacity[fakeGPU2] = resource.MustParse("25")
 
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: corev1.ResourceRequirements{
@@ -1460,8 +1454,6 @@ var _ = Context("Scheduling", func() {
 		Context("Provider Specific Labels", func() {
 			It("should filter instance types that match labels", func() {
 				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
-				its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-				cluster.UpdateInstanceTypes(nodePool.Name, its)
 				ExpectApplied(ctx, env.Client, nodePool)
 				pods := []*corev1.Pod{
 					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{fake.LabelInstanceSize: "large"}}),
@@ -1475,8 +1467,6 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should not schedule with incompatible labels", func() {
 				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
-				its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-				cluster.UpdateInstanceTypes(nodePool.Name, its)
 				ExpectApplied(ctx, env.Client, nodePool)
 				pods := []*corev1.Pod{
 					test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{
@@ -1494,8 +1484,6 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should schedule optional labels", func() {
 				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
-				its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-				cluster.UpdateInstanceTypes(nodePool.Name, its)
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 					// Only some instance types have this key
@@ -1508,10 +1496,7 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should schedule without optional labels if disallowed", func() {
 				cloudProvider.InstanceTypes = fake.InstanceTypes(5)
-				np := test.NodePool()
-				its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, np))
-				cluster.UpdateInstanceTypes(np.Name, its)
-				ExpectApplied(ctx, env.Client, np)
+				ExpectApplied(ctx, env.Client, test.NodePool())
 				pod := test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 					// Only some instance types have this key
 					{Key: fake.ExoticInstanceLabelKey, Operator: corev1.NodeSelectorOpDoesNotExist},
@@ -1650,8 +1635,6 @@ var _ = Context("Scheduling", func() {
 		It("should pack nodes tightly", func() {
 			cloudProvider.InstanceTypes = fake.InstanceTypes(5)
 			var nodes []*corev1.Node
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 			pods := []*corev1.Pod{
 				test.UnschedulablePod(test.PodOptions{
@@ -1823,8 +1806,6 @@ var _ = Context("Scheduling", func() {
 					},
 				}),
 			}
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
 				test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
@@ -2364,8 +2345,7 @@ var _ = Context("Scheduling", func() {
 					corev1.ResourceCPU: resource.MustParse("1"),
 				},
 			}}
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
+
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			// scheduling in multiple batches random sets of pods
@@ -2751,8 +2731,6 @@ var _ = Context("Scheduling", func() {
 						},
 					}),
 			}
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			nodePool.Spec.Limits = nil
 		})
 		It("should launch multiple nodes if required due to volume limits", func() {
@@ -3892,8 +3870,6 @@ var _ = Context("Scheduling", func() {
 				})
 			}
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{FeatureGates: test.FeatureGates{ReservedCapacity: lo.ToPtr(true)}}))
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
 		})
 		It("shouldn't fallback to on-demand or spot when compatible reserved offerings are available", func() {
 			// With the pessimistic nature of scheduling reservations, we'll only be able to provision one instance per loop if a
@@ -3950,10 +3926,6 @@ var _ = Context("Scheduling", func() {
 		It("should correctly track reservations shared across nodepools", func() {
 			nodePool.Name = "np-1"
 			nodePool2 := test.NodePool(*nodePool, v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "np-2"}})
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
-			its = lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool2))
-			cluster.UpdateInstanceTypes(nodePool2.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool, nodePool2)
 
 			pods := lo.Times(2, func(i int) *corev1.Pod {
@@ -4037,10 +4009,6 @@ var _ = Context("Scheduling", func() {
 			distinctInstanceType.Requirements.Get(v1.CapacityTypeLabelKey).Insert(v1.CapacityTypeReserved)
 			cloudProvider.InstanceTypesForNodePool[nodePool2.Name] = []*cloudprovider.InstanceType{distinctInstanceType}
 
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
-			its = lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool2))
-			cluster.UpdateInstanceTypes(nodePool2.Name, its)
 			pods := lo.Times(2, func(i int) *corev1.Pod {
 				return test.UnschedulablePod(test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
@@ -4096,8 +4064,7 @@ var _ = Context("Scheduling", func() {
 				}),
 				Price: fake.PriceFromResources(targetInstanceType.Capacity) / 100_000.0,
 			})
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
+
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			pods := lo.Times(4, func(_ int) *corev1.Pod {
@@ -4198,10 +4165,6 @@ var _ = Context("Scheduling", func() {
 				Price: fake.PriceFromResources(targetInstanceType.Capacity) / 100_000.0,
 			})
 			cloudProvider.InstanceTypesForNodePool[nodePoolFallback.Name] = []*cloudprovider.InstanceType{targetInstanceType}
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
-			its = lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePoolFallback))
-			cluster.UpdateInstanceTypes(nodePoolFallback.Name, its)
 
 			pods := lo.Times(2, func(_ int) *corev1.Pod {
 				return test.UnschedulablePod(test.PodOptions{
@@ -4281,10 +4244,6 @@ var _ = Context("Scheduling", func() {
 				}),
 				Price: fake.PriceFromResources(distinctInstanceType.Capacity) / 100_000.0,
 			})
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
-			its = lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool2))
-			cluster.UpdateInstanceTypes(nodePool2.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool, nodePool2)
 
 			pods := lo.Times(2, func(_ int) *corev1.Pod {
@@ -4343,8 +4302,6 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should handle multiple pods on reserved nodes", func() {
 			nodePool.Name = "np-1"
-			its := lo.Must1(cloudProvider.GetInstanceTypes(ctx, nodePool))
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool)
 			affLabels := map[string]string{"app": "test"}
 

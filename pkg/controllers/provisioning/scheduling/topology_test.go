@@ -55,8 +55,6 @@ var _ = Describe("Topology", func() {
 				},
 			},
 		})
-		its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
-		cluster.UpdateInstanceTypes(nodePool.Name, its)
 	})
 
 	It("should ignore unknown topology keys", func() {
@@ -205,10 +203,6 @@ var _ = Describe("Topology", func() {
 					},
 				},
 			})
-			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
-			its, _ = cloudProvider.GetInstanceTypes(ctx, nodePool2)
-			cluster.UpdateInstanceTypes(nodePool2.Name, its)
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       corev1.LabelTopologyZone,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
@@ -996,8 +990,6 @@ var _ = Describe("Topology", func() {
 					},
 				},
 			})
-			its, _ := cloudProvider.GetInstanceTypes(ctx, spotNodePool)
-			cluster.UpdateInstanceTypes(spotNodePool.Name, its)
 			onDemandNodePool := test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Template: v1.NodeClaimTemplate{
@@ -1022,8 +1014,6 @@ var _ = Describe("Topology", func() {
 					},
 				},
 			})
-			its, _ = cloudProvider.GetInstanceTypes(ctx, onDemandNodePool)
-			cluster.UpdateInstanceTypes(onDemandNodePool.Name, its)
 
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       "capacity.spread.4-1",
@@ -1083,10 +1073,6 @@ var _ = Describe("Topology", func() {
 					Limits: v1.Limits(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("0")}),
 				},
 			})
-			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
-			its, _ = cloudProvider.GetInstanceTypes(ctx, nodePoolB)
-			cluster.UpdateInstanceTypes(nodePoolB.Name, its)
 			ExpectApplied(ctx, env.Client, nodePool, nodePoolB)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov,
 				test.UnschedulablePods(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: labels}, TopologySpreadConstraints: topology}, 10)...,
@@ -1384,10 +1370,6 @@ var _ = Describe("Topology", func() {
 					},
 				},
 			})
-			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
-			its, _ = cloudProvider.GetInstanceTypes(ctx, taintedNodePool)
-			cluster.UpdateInstanceTypes(taintedNodePool.Name, its)
 
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       spreadLabel,
@@ -1450,8 +1432,6 @@ var _ = Describe("Topology", func() {
 					},
 				},
 			})
-			its, _ := cloudProvider.GetInstanceTypes(ctx, taintedNodePool)
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
 
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       spreadLabel,
@@ -1533,10 +1513,6 @@ var _ = Describe("Topology", func() {
 					}},
 				}, (i+1)*2)
 			}))
-			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePools[0])
-			cluster.UpdateInstanceTypes(nodePools[0].Name, its)
-			its, _ = cloudProvider.GetInstanceTypes(ctx, nodePools[1])
-			cluster.UpdateInstanceTypes(nodePools[1].Name, its)
 
 			ExpectApplied(ctx, env.Client, nodePools[0], nodePools[1])
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -1739,8 +1715,6 @@ var _ = Describe("Topology", func() {
 		It("should spread pods while respecting all constraints", func() {
 			// ensure we've got an instance type for every zone/capacity-type pair
 			cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
-			its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
-			cluster.UpdateInstanceTypes(nodePool.Name, its)
 			topology := []corev1.TopologySpreadConstraint{{
 				TopologyKey:       v1.CapacityTypeLabelKey,
 				WhenUnsatisfiable: corev1.DoNotSchedule,
@@ -2831,8 +2805,6 @@ var _ = Describe("Topology", func() {
 			cacheLabels := map[string]string{"type": "cache", "spread": "spread"}
 			uiLabels := map[string]string{"type": "ui", "spread": "spread"}
 			for i := 0; i < 50; i++ {
-				its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
-				cluster.UpdateInstanceTypes(nodePool.Name, its)
 				ExpectApplied(ctx, env.Client, nodePool.DeepCopy())
 				// we have to schedule DB -> Web -> Cache -> UI in that order or else there are pod affinity violations
 				pods := []*corev1.Pod{
@@ -3020,8 +2992,6 @@ var _ = Describe("Taints", func() {
 				},
 			},
 		})
-		its, _ := cloudProvider.GetInstanceTypes(ctx, nodePool)
-		cluster.UpdateInstanceTypes(nodePool.Name, its)
 	})
 	It("should taint nodes with NodePool taints", func() {
 		nodePool.Spec.Template.Spec.Taints = []corev1.Taint{{Key: "test", Value: "bar", Effect: corev1.TaintEffectNoSchedule}}

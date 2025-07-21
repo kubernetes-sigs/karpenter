@@ -300,6 +300,13 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	for _, pod := range pods {
 		ExpectApplied(ctx, c, pod)
 	}
+	npl := &v1.NodePoolList{}
+	err := c.List(ctx, npl)
+	Expect(err).To(BeNil())
+	for _, np := range npl.Items {
+		its, _ := cloudProvider.GetInstanceTypes(ctx, &np)
+		cluster.UpdateInstanceTypes(np.Name, its)
+	}
 	// TODO: Check the error on the provisioner scheduling round
 	results, err := provisioner.Schedule(ctx)
 	bindings := Bindings{}
