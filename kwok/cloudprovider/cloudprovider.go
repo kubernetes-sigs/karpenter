@@ -225,8 +225,8 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		},
 		Status: corev1.NodeStatus{
-			Capacity:    instanceType.Capacity,
-			Allocatable: instanceType.Allocatable(),
+			Capacity:    nodeClaim.Spec.Resources.Requests,
+			Allocatable: lo.Assign(nodeClaim.Spec.Resources.Requests, instanceType.Allocatable()),
 			Phase:       corev1.NodePending,
 		},
 	}, nil
