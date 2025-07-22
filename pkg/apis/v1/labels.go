@@ -91,8 +91,8 @@ var (
 		v1.LabelWindowsBuild,
 	)
 
-	// WellKnownResources are resources that are known expected from the instance types
-	// provided by the cloud providers.
+	// WellKnownResources are resources that are expected from the instance types
+	// provided by cloud providers.
 	WellKnownResources = sets.New[v1.ResourceName](
 		v1.ResourceCPU,
 		v1.ResourceMemory,

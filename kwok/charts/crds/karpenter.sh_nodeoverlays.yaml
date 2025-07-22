@@ -13,6 +13,8 @@ spec:
     kind: NodeOverlay
     listKind: NodeOverlayList
     plural: nodeoverlays
+    shortNames:
+      - overlays
     singular: nodeoverlay
   scope: Cluster
   versions:
@@ -58,9 +60,9 @@ spec:
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
                   description: |-
-                    Capacity adds extended resources only, and not replace any existing resources.
+                    Capacity adds extended resources only, and does not replace any existing resources.
                     These extended resources are appended to the node's existing resource list.
-                    Note: This field does not modify or override standard resources like CPU, memory, ephemeral-storage, or pods.
+                    Note: This field does not modify or override standard resources like cpu, memory, ephemeral-storage, or pods.
                   type: object
                   x-kubernetes-validations:
                     - message: invalid resource restricted
@@ -74,11 +76,11 @@ spec:
                     PriceAdjustment specifies the price change for matching instance types. Accepts either:
                     - A fixed price modifier (e.g., -0.5, 1.2)
                     - A percentage modifier (e.g., +10% for increase, -15% for decrees)
-                  pattern: ^[+-](?:\d+(?:\.\d*)?|\.\d+)(?:%)?$
+                  pattern: ^(([+-]{1}(\d*\.?\d+))|(\+{1}\d*\.?\d+%)|(^(-\d{1,2}(\.\d+)?%)$)|(-100%))$
                   type: string
                 requirements:
                   description: |-
-                    Requirements constrain when this NodeOverlay is applied during scheduling simulation.
+                    Requirements constrain when this NodeOverlay is applied during scheduling simulations.
                     These requirements can match:
                     - Well-known labels (e.g., node.kubernetes.io/instance-type, karpenter.sh/nodepool)
                     - Custom labels from NodePool's spec.template.labels
@@ -133,6 +135,8 @@ spec:
                   maxItems: 100
                   type: array
                   x-kubernetes-validations:
+                    - message: requirements with operator 'NotIn' must have a value defined
+                      rule: 'self.all(x, x.operator == ''NotIn'' ? x.values.size() != 0 : true)'
                     - message: requirements with operator 'In' must have a value defined
                       rule: 'self.all(x, x.operator == ''In'' ? x.values.size() != 0 : true)'
                     - message: requirements operator 'Gt' or 'Lt' must have a single positive integer value
@@ -141,10 +145,10 @@ spec:
                   description: |-
                     Weight defines the priority of this NodeOverlay when overriding node attributes.
                     NodeOverlays with higher numerical weights take precedence over those with lower weights.
-                     If no weight is specified, the NodeOverlay is treated as having a weight of 0.
+                    If no weight is specified, the NodeOverlay is treated as having a weight of 0.
                     When multiple NodeOverlays have identical weights, they are merged in alphabetical order.
                   format: int32
-                  maximum: 100
+                  maximum: 10000
                   minimum: 1
                   type: integer
               required:

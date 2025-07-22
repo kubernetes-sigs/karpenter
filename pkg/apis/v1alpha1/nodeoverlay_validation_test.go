@@ -37,9 +37,6 @@ var _ = Describe("CEL/Validation", func() {
 	var nodeOverlay *NodeOverlay
 
 	BeforeEach(func() {
-		if env.Version.Minor() < 25 {
-			Skip("CEL Validation is for 1.25>")
-		}
 		nodeOverlay = &NodeOverlay{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
 			Spec: NodeOverlaySpec{
@@ -53,6 +50,27 @@ var _ = Describe("CEL/Validation", func() {
 		}
 	})
 	Context("Requirements", func() {
+		It("should fail for no values for In operator", func() {
+			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+				{Key: "Test", Operator: corev1.NodeSelectorOpIn},
+			}
+			Expect(env.Client.Create(ctx, nodeOverlay)).NotTo(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).NotTo(Succeed())
+		})
+		It("should fail for no values for NotIn operator", func() {
+			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+				{Key: "Test", Operator: corev1.NodeSelectorOpNotIn},
+			}
+			Expect(env.Client.Create(ctx, nodeOverlay)).NotTo(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).NotTo(Succeed())
+		})
+		It("should succeed for valid requirement keys", func() {
+			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
+				{Key: "Test", Operator: corev1.NodeSelectorOpExists},
+			}
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+			Expect(nodeOverlay.RuntimeValidate(ctx)).To(Succeed())
+		})
 		It("should succeed for valid requirement keys", func() {
 			nodeOverlay.Spec.Requirements = []corev1.NodeSelectorRequirement{
 				{Key: "Test", Operator: corev1.NodeSelectorOpExists},
@@ -103,7 +121,7 @@ var _ = Describe("CEL/Validation", func() {
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}},
-				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn},
+				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1"}},
 				{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpExists},
 			}
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
@@ -224,7 +242,9 @@ var _ = Describe("CEL/Validation", func() {
 			Entry("Multiple decimal points", "42.0.0"),
 			Entry("Just a sign", "-"),
 			Entry("Just a decimal point", "."),
-			Entry("No leading digit after sign", "-.42"),
+			Entry("No leading digit after sign", "-100.0%"),
+			Entry("less -100% float ", "-101.1%"),
+			Entry("less -100% integer ", "-129"),
 		)
 		It("should not allow an unsigned priceAdjustment percentage", func() {
 			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("1%")
@@ -244,6 +264,18 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should allow negative percentage less then 0%", func() {
 			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("-1%")
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+		})
+		It("should allow negative percentage -100%", func() {
+			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("-100%")
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+		})
+		It("should allow positive percentage greater then 100%", func() {
+			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+100.102%")
+			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
+		})
+		It("should allow positive percentage greater then 100% with an integer", func() {
+			nodeOverlay.Spec.PriceAdjustment = lo.ToPtr("+298%")
 			Expect(env.Client.Create(ctx, nodeOverlay)).To(Succeed())
 		})
 		It("should allow positive integer value", func() {
