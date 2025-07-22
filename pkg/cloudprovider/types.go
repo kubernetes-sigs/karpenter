@@ -105,8 +105,7 @@ type InstanceType struct {
 	Capacity corev1.ResourceList
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
-	Overhead *InstanceTypeOverhead
-
+	Overhead    *InstanceTypeOverhead
 	once        sync.Once
 	allocatable corev1.ResourceList
 }
@@ -117,6 +116,17 @@ type InstanceTypes []*InstanceType
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {
 	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
+}
+
+func (i *InstanceType) IsPricingOverlayApplied() bool {
+	_, found := lo.Find(i.Offerings, func(of *Offering) bool {
+		return of.IsAnOverlayApplied()
+	})
+	return found
+}
+
+func (i *InstanceType) ResetAllocatable() {
+	i.once = sync.Once{}
 }
 
 func (i *InstanceType) Allocatable() corev1.ResourceList {
@@ -261,6 +271,16 @@ type Offering struct {
 	Price               float64
 	Available           bool
 	ReservationCapacity int
+
+	overlayApplied bool
+}
+
+func (o *Offering) ApplyOverlay() {
+	o.overlayApplied = true
+}
+
+func (o *Offering) IsAnOverlayApplied() bool {
+	return o.overlayApplied
 }
 
 func (o *Offering) CapacityType() string {

@@ -53,6 +53,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/nodeoverlay"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
@@ -245,7 +246,7 @@ func (p *Provisioner) NewScheduler(
 
 	instanceTypes := map[string][]*cloudprovider.InstanceType{}
 	for _, np := range nodePools {
-		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
+		its, err := nodeoverlay.GetInstanceTypes(ctx, p.kubeClient, p.cloudProvider, np)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, fmt.Errorf("getting instance types, %w", err)
