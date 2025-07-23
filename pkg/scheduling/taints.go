@@ -35,6 +35,7 @@ import (
 // since we expect these taints to eventually be removed
 var KnownEphemeralTaints = []corev1.Taint{
 	{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule},
+	{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoExecute},
 	{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 	{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 	v1.UnregisteredNoExecuteTaint,

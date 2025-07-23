@@ -583,7 +583,6 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail for restricted label domains", func() {
 			for label := range RestrictedLabelDomains {
-				fmt.Println(label)
 				nodePool.Spec.Template.Labels = map[string]string{label + "/unknown": randomdata.SillyName()}
 				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
@@ -600,7 +599,6 @@ var _ = Describe("CEL/Validation", func() {
 		It("should allow labels in restricted domains exceptions list", func() {
 			oldNodePool := nodePool.DeepCopy()
 			for label := range LabelDomainExceptions {
-				fmt.Println(label)
 				nodePool.Spec.Template.Labels = map[string]string{
 					label: "test-value",
 				}

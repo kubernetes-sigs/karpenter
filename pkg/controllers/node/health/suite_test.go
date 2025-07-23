@@ -18,7 +18,6 @@ package health_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -233,7 +232,6 @@ var _ = Describe("Node Health", func() {
 			fakeClock.Step(27 * time.Minute)
 
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
-			fmt.Println(result.RequeueAfter.String())
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
 		})
 		It("should return the requeue interval for the time between now and when the nodeClaim termination time", func() {

@@ -46,6 +46,10 @@ func (l *Launch) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconc
 	if cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); !cond.IsUnknown() {
 		// Ensure that we always set the status condition to the latest generation
 		nodeClaim.StatusConditions().Set(*cond)
+		if cond.IsTrue() {
+			// Once the NodeClaim has successfully marked as launched, we no longer need to store it
+			l.cache.Delete(string(nodeClaim.UID))
+		}
 		return reconcile.Result{}, nil
 	}
 
