@@ -29,7 +29,7 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -114,10 +114,10 @@ var _ = Describe("Counter", func() {
 			},
 		})
 		expected = counter.BaseResources.DeepCopy()
-		ExpectApplied(ctx, env.Client, nodePool)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolInformerController, nodePool)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolInformerController, nodePool)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 	})
 	It("should ignore NodePools which aren't managed by this instance of Karpenter", func() {
 		nodePool = test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{
@@ -143,28 +143,28 @@ var _ = Describe("Counter", func() {
 				NodeClassRef: nodePool.Spec.Template.Spec.NodeClassRef,
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolInformerController, nodePool)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolInformerController, nodePool)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.Status.Resources).To(BeNil())
 	})
 	It("should set well-known resource to zero when no nodes exist in the cluster", func() {
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should set the counter from the nodeClaim and then to the node when it initializes", func() {
-		ExpectApplied(ctx, env.Client, node, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, node, nodeClaim)
 		// Don't initialize the node yet
-		localexp.ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 		// Inform cluster state about node and nodeClaim readiness
-		localexp.ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		localexp.ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
 		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
@@ -176,15 +176,15 @@ var _ = Describe("Counter", func() {
 			corev1.ResourcePods:   resource.MustParse("512"),
 			corev1.ResourceMemory: resource.MustParse("2Gi"),
 		}
-		ExpectApplied(ctx, env.Client, node, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, node, nodeClaim)
 		// Don't initialize the node yet
-		localexp.ExpectMakeNodesInitialized(ctx, env.Client, node)
+		ExpectMakeNodesInitialized(ctx, env.Client, node)
 		// Inform cluster state about node and nodeClaim readiness
-		localexp.ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		localexp.ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		expected = counter.BaseResources.DeepCopy()
 		expected = resources.MergeInto(expected, node.Status.Capacity)
@@ -192,11 +192,11 @@ var _ = Describe("Counter", func() {
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should increase the counter when new nodes are created", func() {
-		ExpectApplied(ctx, env.Client, node, nodeClaim)
-		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		operatorpkg.ExpectApplied(ctx, env.Client, node, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
@@ -208,11 +208,11 @@ var _ = Describe("Counter", func() {
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should decrease the counter when an existing node is deleted", func() {
-		ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
-		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+		operatorpkg.ExpectApplied(ctx, env.Client, node, nodeClaim, node2, nodeClaim2)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal the sums of the nodeClaims and nodes
 		res := corev1.ResourceList{
@@ -224,11 +224,11 @@ var _ = Describe("Counter", func() {
 		expected = resources.MergeInto(expected, res)
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 
-		ExpectDeleted(ctx, env.Client, node, nodeClaim)
-		localexp.ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		localexp.ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		operatorpkg.ExpectDeleted(ctx, env.Client, node, nodeClaim)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
 		expected = counter.BaseResources.DeepCopy()
@@ -241,11 +241,11 @@ var _ = Describe("Counter", func() {
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
 	It("should zero out the counter when all nodes are deleted", func() {
-		ExpectApplied(ctx, env.Client, node, nodeClaim)
-		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		operatorpkg.ExpectApplied(ctx, env.Client, node, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 
 		// Should equal both the nodeClaim and node capacity
 		expected = resources.MergeInto(expected, nodeClaim.Status.Capacity)
@@ -256,12 +256,12 @@ var _ = Describe("Counter", func() {
 		expected[corev1.ResourceName("nodes")] = resource.MustParse("1")
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 
-		ExpectDeleted(ctx, env.Client, node, nodeClaim)
+		operatorpkg.ExpectDeleted(ctx, env.Client, node, nodeClaim)
 
-		localexp.ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		localexp.ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
-		nodePool = localexp.ExpectExists(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		expected = counter.BaseResources.DeepCopy()
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})

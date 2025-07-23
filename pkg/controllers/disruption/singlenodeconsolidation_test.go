@@ -27,13 +27,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
 
@@ -77,7 +77,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool1, nodePool2, nodePool3)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool1, nodePool2, nodePool3)
 
 		// Set up NodePool maps for candidate creation
 		nodePoolMap = map[string]*v1.NodePool{
@@ -99,7 +99,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 	AfterEach(func() {
 		disruption.SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 		fakeClock.SetTime(time.Now())
-		localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+		ExpectAllObjectsCleanedUp(ctx, env.Client)
 	})
 
 	Context("Candidate Shuffling", func() {
@@ -257,15 +257,15 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 				},
 			})
 			pod := test.Pod()
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-			localexp.ExpectManualBinding(ctx, env.Client, pod, node)
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-			ExpectApplied(ctx, env.Client, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
 			// Ensure the state is updated after all changes
-			localexp.ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
-			localexp.ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
+			ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(nodeClaim))
 
 			nodeClaims = append(nodeClaims, nodeClaim)
 		}
@@ -277,7 +277,7 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 	}
 
 	return lo.Map(nodeClaims, func(nodeClaim *v1.NodeClaim, _ int) *disruption.Candidate {
-		stateNode := localexp.ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
+		stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
 		candidate, err := disruption.NewCandidate(
 			ctx,
 			env.Client,

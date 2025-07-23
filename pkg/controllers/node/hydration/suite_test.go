@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/hydration"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -61,7 +61,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectAllObjectsCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
 })
 
@@ -84,11 +84,11 @@ var _ = Describe("Hydration", func() {
 				},
 			})
 			delete(node.Labels, v1.NodeClassLabelKey(nodeClassRef.GroupKind()))
-			ExpectApplied(ctx, env.Client, nodeClaim, node)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, hydrationController, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, hydrationController, node)
 
 			// The missing NodeClass label should have been propagated to the Node
-			node = localexp.ExpectExists(ctx, env.Client, node)
+			node = ExpectExists(ctx, env.Client, node)
 			value, ok := node.Labels[v1.NodeClassLabelKey(nodeClassRef.GroupKind())]
 			Expect(ok).To(Equal(isNodeClaimManaged))
 			if isNodeClaimManaged {

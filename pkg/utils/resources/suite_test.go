@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -54,11 +54,11 @@ var _ = Describe("Resources", func() {
 				},
 			})
 			podResources := resources.Ceiling(pod)
-			localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+			ExpectResources(podResources.Requests, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("3"),
 				v1.ResourceMemory: resource.MustParse("3Gi"),
 			})
-			localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+			ExpectResources(podResources.Limits, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("3"),
 				v1.ResourceMemory: resource.MustParse("3Gi"),
 			})
@@ -90,11 +90,11 @@ var _ = Describe("Resources", func() {
 				},
 			})
 			podResources := resources.Ceiling(pod)
-			localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+			ExpectResources(podResources.Requests, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("5Gi"),
 			})
-			localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+			ExpectResources(podResources.Limits, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("10"),
 				v1.ResourceMemory: resource.MustParse("5Gi"),
 			})
@@ -122,11 +122,11 @@ var _ = Describe("Resources", func() {
 				},
 			})
 			podResources := resources.Ceiling(pod)
-			localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+			ExpectResources(podResources.Requests, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("14"),
 				v1.ResourceMemory: resource.MustParse("4Gi"),
 			})
-			localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+			ExpectResources(podResources.Limits, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("14"),
 				v1.ResourceMemory: resource.MustParse("4Gi"),
 			})
@@ -155,11 +155,11 @@ var _ = Describe("Resources", func() {
 				},
 			})
 			podResources := resources.Ceiling(pod)
-			localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+			ExpectResources(podResources.Requests, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("6"),
 				v1.ResourceMemory: resource.MustParse("4Gi"),
 			})
-			localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+			ExpectResources(podResources.Limits, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("6"),
 				v1.ResourceMemory: resource.MustParse("4Gi"),
 			})
@@ -209,11 +209,11 @@ var _ = Describe("Resources", func() {
 					},
 				})
 				podResources := resources.Ceiling(pod)
-				localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+				ExpectResources(podResources.Requests, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("31"),
 					v1.ResourceMemory: resource.MustParse("31Gi"),
 				})
-				localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+				ExpectResources(podResources.Limits, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("31"),
 					v1.ResourceMemory: resource.MustParse("31Gi"),
 				})
@@ -262,11 +262,11 @@ var _ = Describe("Resources", func() {
 					},
 				})
 				podResources := resources.Ceiling(pod)
-				localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+				ExpectResources(podResources.Requests, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("14"),
 					v1.ResourceMemory: resource.MustParse("14Gi"),
 				})
-				localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+				ExpectResources(podResources.Limits, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("14"),
 					v1.ResourceMemory: resource.MustParse("14Gi"),
 				})
@@ -332,11 +332,11 @@ var _ = Describe("Resources", func() {
 					},
 				})
 				podResources := resources.Ceiling(pod)
-				localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+				ExpectResources(podResources.Requests, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("25"),
 					v1.ResourceMemory: resource.MustParse("25Gi"),
 				})
-				localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+				ExpectResources(podResources.Limits, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("25"),
 					v1.ResourceMemory: resource.MustParse("25Gi"),
 				})
@@ -410,11 +410,11 @@ var _ = Describe("Resources", func() {
 					},
 				})
 				podResources := resources.Ceiling(pod)
-				localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+				ExpectResources(podResources.Requests, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("10"),
 					v1.ResourceMemory: resource.MustParse("10Gi"),
 				})
-				localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+				ExpectResources(podResources.Limits, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("10"),
 					v1.ResourceMemory: resource.MustParse("10Gi"),
 				})
@@ -452,11 +452,11 @@ var _ = Describe("Resources", func() {
 					},
 				})
 				podResources := resources.Ceiling(pod)
-				localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+				ExpectResources(podResources.Requests, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("25"),
 					v1.ResourceMemory: resource.MustParse("9Gi"),
 				})
-				localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+				ExpectResources(podResources.Limits, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("25"),
 					v1.ResourceMemory: resource.MustParse("9Gi"),
 				})
@@ -491,11 +491,11 @@ var _ = Describe("Resources", func() {
 					},
 				})
 				podResources := resources.Ceiling(pod)
-				localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+				ExpectResources(podResources.Requests, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("9"),
 					v1.ResourceMemory: resource.MustParse("25Gi"),
 				})
-				localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+				ExpectResources(podResources.Limits, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("9"),
 					v1.ResourceMemory: resource.MustParse("25Gi"),
 				})
@@ -523,11 +523,11 @@ var _ = Describe("Resources", func() {
 					},
 				})
 				podResources := resources.Ceiling(pod)
-				localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+				ExpectResources(podResources.Requests, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("14"),
 					v1.ResourceMemory: resource.MustParse("6Gi"),
 				})
-				localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+				ExpectResources(podResources.Limits, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("14"),
 					v1.ResourceMemory: resource.MustParse("6Gi"),
 				})
@@ -555,11 +555,11 @@ var _ = Describe("Resources", func() {
 					},
 				})
 				podResources := resources.Ceiling(pod)
-				localexp.ExpectResources(podResources.Requests, v1.ResourceList{
+				ExpectResources(podResources.Requests, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("14"),
 					v1.ResourceMemory: resource.MustParse("6Gi"),
 				})
-				localexp.ExpectResources(podResources.Limits, v1.ResourceList{
+				ExpectResources(podResources.Limits, v1.ResourceList{
 					v1.ResourceCPU:    resource.MustParse("14"),
 					v1.ResourceMemory: resource.MustParse("6Gi"),
 				})
@@ -577,7 +577,7 @@ var _ = Describe("Resources", func() {
 				},
 			}
 			requests := resources.MergeResourceLimitsIntoRequests(container)
-			localexp.ExpectResources(requests, v1.ResourceList{
+			ExpectResources(requests, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("2"),
 				v1.ResourceMemory: resource.MustParse("1Gi"),
 			})
@@ -593,7 +593,7 @@ var _ = Describe("Resources", func() {
 				},
 			}
 			requests := resources.MergeResourceLimitsIntoRequests(container)
-			localexp.ExpectResources(requests, v1.ResourceList{
+			ExpectResources(requests, v1.ResourceList{
 				v1.ResourceCPU:    resource.MustParse("2"),
 				v1.ResourceMemory: resource.MustParse("1Gi"),
 			})

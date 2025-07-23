@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,7 +29,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
@@ -65,7 +65,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("CanEvictPods", func() {
@@ -83,7 +83,7 @@ var _ = Describe("CanEvictPods", func() {
 				Labels: podLabels,
 			},
 			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionFalse}}})
-		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
 
 		limits, err := pdb.NewLimits(ctx, env.Client)
 		Expect(err).NotTo(HaveOccurred())
@@ -102,7 +102,7 @@ var _ = Describe("CanEvictPods", func() {
 				Labels: podLabels,
 			},
 			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionFalse}}})
-		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
 
 		limits, err := pdb.NewLimits(ctx, env.Client)
 		Expect(err).NotTo(HaveOccurred())
@@ -120,7 +120,7 @@ var _ = Describe("CanEvictPods", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: podLabels,
 			}})
-		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
 
 		limits, err := pdb.NewLimits(ctx, env.Client)
 		Expect(err).NotTo(HaveOccurred())
@@ -141,8 +141,8 @@ var _ = Describe("CanEvictPods", func() {
 					Labels: podLabels,
 				},
 			})
-			lo.ForEach(podDisruptionBudgets, func(pdb *policyv1.PodDisruptionBudget, _ int) { ExpectApplied(ctx, env.Client, pdb) })
-			ExpectApplied(ctx, env.Client, pod1, pod2)
+			lo.ForEach(podDisruptionBudgets, func(pdb *policyv1.PodDisruptionBudget, _ int) { operatorpkg.ExpectApplied(ctx, env.Client, pdb) })
+			operatorpkg.ExpectApplied(ctx, env.Client, pod1, pod2)
 
 			limits, err := pdb.NewLimits(ctx, env.Client)
 			Expect(err).NotTo(HaveOccurred())
@@ -187,8 +187,8 @@ var _ = Describe("CanEvictPods", func() {
 				},
 			})
 			pod2 := test.Pod(test.PodOptions{})
-			lo.ForEach(podDisruptionBudgets, func(pdb *policyv1.PodDisruptionBudget, _ int) { ExpectApplied(ctx, env.Client, pdb) })
-			ExpectApplied(ctx, env.Client, pod1, pod2)
+			lo.ForEach(podDisruptionBudgets, func(pdb *policyv1.PodDisruptionBudget, _ int) { operatorpkg.ExpectApplied(ctx, env.Client, pdb) })
+			operatorpkg.ExpectApplied(ctx, env.Client, pod1, pod2)
 
 			limits, err := pdb.NewLimits(ctx, env.Client)
 			Expect(err).NotTo(HaveOccurred())
@@ -242,7 +242,7 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 				Labels: podLabels,
 			},
 			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionFalse}}})
-		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
 
 		limits, err := pdb.NewLimits(ctx, env.Client)
 		Expect(err).NotTo(HaveOccurred())
@@ -259,7 +259,7 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 				Labels: podLabels,
 			},
 			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionFalse}}})
-		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
 
 		limits, err := pdb.NewLimits(ctx, env.Client)
 		Expect(err).NotTo(HaveOccurred())
@@ -274,7 +274,7 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: podLabels,
 			}})
-		ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, podDisruptionBudget, pod)
 
 		limits, err := pdb.NewLimits(ctx, env.Client)
 		Expect(err).NotTo(HaveOccurred())
@@ -288,8 +288,8 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 					Labels: podLabels,
 				},
 			})
-			lo.ForEach(podDisruptionBudgets, func(pdb *policyv1.PodDisruptionBudget, _ int) { ExpectApplied(ctx, env.Client, pdb) })
-			ExpectApplied(ctx, env.Client, pod)
+			lo.ForEach(podDisruptionBudgets, func(pdb *policyv1.PodDisruptionBudget, _ int) { operatorpkg.ExpectApplied(ctx, env.Client, pdb) })
+			operatorpkg.ExpectApplied(ctx, env.Client, pod)
 
 			limits, err := pdb.NewLimits(ctx, env.Client)
 			Expect(err).NotTo(HaveOccurred())
@@ -328,7 +328,7 @@ var _ = Describe("IsCurrentlyReschedulable", func() {
 				Labels:      podLabels,
 			},
 		})
-		ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
 
 		limits, err := pdb.NewLimits(ctx, env.Client)
 		Expect(err).NotTo(HaveOccurred())

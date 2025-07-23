@@ -34,7 +34,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -42,7 +42,7 @@ import (
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -92,7 +92,7 @@ var _ = AfterSuite(func() {
 
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
-	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectAllObjectsCleanedUp(ctx, env.Client)
 	cloudProvider.Reset()
 })
 
@@ -112,10 +112,10 @@ var _ = Describe("Finalizer", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			_, ok := lo.Find(nodeClaim.Finalizers, func(f string) bool {
 				return f == v1.TerminationFinalizer
 			})
@@ -136,10 +136,10 @@ var _ = Describe("Finalizer", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			_, ok := lo.Find(nodeClaim.Finalizers, func(f string) bool {
 				return f == v1.TerminationFinalizer
 			})
@@ -153,14 +153,14 @@ var _ = Describe("Finalizer", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			localexp.ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			// add a finalizer so we can make assertions about all status conditions
-			ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			operatorpkg.ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue()).To(BeTrue())
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).ObservedGeneration).To(Equal(nodeClaim.Generation))
@@ -171,12 +171,12 @@ var _ = Describe("Finalizer", func() {
 			Expect(nodeClaim.StatusConditions().Get(status.ConditionReady).IsTrue()).To(BeTrue())
 			Expect(nodeClaim.StatusConditions().Get(status.ConditionReady).ObservedGeneration).To(Equal(nodeClaim.Generation))
 
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).ObservedGeneration).To(Equal(nodeClaim.Generation))
-			localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-			ExpectDeleted(ctx, env.Client, nodeClaim)
+			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+			operatorpkg.ExpectDeleted(ctx, env.Client, nodeClaim)
 		})
 	})
 	It("should update observedGeneration if generation increases after all conditions are marked True", func() {
@@ -196,24 +196,24 @@ var _ = Describe("Finalizer", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
 			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
-		localexp.ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsUnknown()).To(BeTrue())
 
-		node = localexp.ExpectExists(ctx, env.Client, node)
+		node = ExpectExists(ctx, env.Client, node)
 		node.Status.Capacity = corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse("10"),
 			corev1.ResourceMemory: resource.MustParse("100Mi"),
@@ -224,20 +224,20 @@ var _ = Describe("Finalizer", func() {
 			corev1.ResourceMemory: resource.MustParse("80Mi"),
 			corev1.ResourcePods:   resource.MustParse("110"),
 		}
-		ExpectApplied(ctx, env.Client, node)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).IsTrue()).To(BeTrue())
 
 		// Change a field to increase the generation
 		nodeClaim.Spec.Taints = append(nodeClaim.Spec.Taints, corev1.Taint{Key: "test", Value: "value", Effect: corev1.TaintEffectNoSchedule})
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// Expect that when the object re-reconciles, all of the observedGenerations across all status condition match
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).ObservedGeneration).To(Equal(nodeClaim.Generation))

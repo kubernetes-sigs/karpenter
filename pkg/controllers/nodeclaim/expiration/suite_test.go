@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -71,7 +71,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("Expiration", func() {
@@ -92,29 +92,29 @@ var _ = Describe("Expiration", func() {
 	})
 	Context("Metrics", func() {
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
 
-			ExpectNotFound(ctx, env.Client, nodeClaim)
+			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 
-			localexp.ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 				metrics.ReasonLabel: metrics.ExpiredReason,
 				"nodepool":          nodePool.Name,
 			})
 		})
 		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
 			nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeSpot
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
 
-			ExpectNotFound(ctx, env.Client, nodeClaim)
-			localexp.ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 				metrics.ReasonLabel: metrics.ExpiredReason,
 				"nodepool":          nodePool.Name,
 			})
@@ -131,17 +131,17 @@ var _ = Describe("Expiration", func() {
 					Name:  "default",
 				}
 			}
-			ExpectApplied(ctx, env.Client, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
 			if isNodeClaimManaged {
 				// with forceful termination, when we see a nodeclaim meets the conditions for expiration
 				// we should remove it
-				ExpectNotFound(ctx, env.Client, nodeClaim)
+				operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 			} else {
-				localexp.ExpectExists(ctx, env.Client, nodeClaim)
+				ExpectExists(ctx, env.Client, nodeClaim)
 			}
 		},
 		Entry("should remove nodeclaims that are expired", true),
@@ -150,50 +150,50 @@ var _ = Describe("Expiration", func() {
 
 	It("should not remove the NodeClaims when expiration is disabled", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
-		ExpectApplied(ctx, env.Client, nodeClaim)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should not remove non-expired NodeClaims", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
-		ExpectApplied(ctx, env.Client, nodeClaim)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should delete NodeClaims if the nodeClaim is expired but the node isn't", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("30s")
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
-		ExpectApplied(ctx, env.Client, node) // node shouldn't be expired, but nodeClaim will be
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, node) // node shouldn't be expired, but nodeClaim will be
+		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
 
-		ExpectNotFound(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should return the requeue interval for the time between now and when the nodeClaim expires", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
-		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
 
 		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))
 
-		result := localexp.ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		result := ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
 		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
 	})
 	It("shouldn't expire the same NodeClaim multiple times", func() {
 		nodeClaim.ObjectMeta.Finalizers = append(nodeClaim.ObjectMeta.Finalizers, "test-finalizer")
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
-		localexp.ExpectExists(ctx, env.Client, nodeClaim)
-		localexp.ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 			metrics.ReasonLabel: metrics.ExpiredReason,
 			"nodepool":          nodePool.Name,
 		})
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
-		localexp.ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 			metrics.ReasonLabel: metrics.ExpiredReason,
 			"nodepool":          nodePool.Name,
 		})

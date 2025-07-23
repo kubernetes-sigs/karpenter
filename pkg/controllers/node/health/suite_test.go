@@ -28,7 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -93,7 +93,7 @@ var _ = Describe("Node Health", func() {
 	})
 
 	AfterEach(func() {
-		localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+		ExpectAllObjectsCleanedUp(ctx, env.Client)
 
 		// Reset the metrics collectors
 		metrics.NodeClaimsDisruptedTotal.Reset()
@@ -107,11 +107,11 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
 		It("should not delete node when unhealthy type does not match cloud provider passed in value", func() {
@@ -121,11 +121,11 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
 		})
 		It("should not delete node when health status does not match cloud provider passed in value", func() {
@@ -135,11 +135,11 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
 		})
 		It("should not delete node when health duration is not reached", func() {
@@ -150,11 +150,11 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(20 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
 		})
 		It("should set annotation termination grace period when force termination is started", func() {
@@ -165,11 +165,11 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: time.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, fakeClock.Now().Format(time.RFC3339)))
 		})
 		It("should not respect termination grace period if set on the nodepool", func() {
@@ -181,11 +181,11 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: time.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, fakeClock.Now().Format(time.RFC3339)))
 		})
 		It("should not update termination grace period if set before the current time", func() {
@@ -198,11 +198,11 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: time.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime))
 		})
 		It("should return the requeue interval for the condition closest to its terminationDuration", func() {
@@ -229,11 +229,11 @@ var _ = Describe("Node Health", func() {
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
 				LastTransitionTime: metav1.Time{Time: time.Now()},
 			})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			fakeClock.Step(27 * time.Minute)
 
-			result := localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			result := ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
 		})
 		It("should return the requeue interval for the time between now and when the nodeClaim termination time", func() {
@@ -243,11 +243,11 @@ var _ = Describe("Node Health", func() {
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
 				LastTransitionTime: metav1.Time{Time: time.Now()},
 			})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			fakeClock.Step(27 * time.Minute)
 
-			result := localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			result := ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
 		})
 	})
@@ -268,11 +268,11 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
 		It("should ignore do-not-disrupt on a node", func() {
@@ -283,15 +283,15 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
 		It("should ignore unhealthy nodes if more then 20% of the nodes are unhealthy", func() {
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			nodeClaims := []*v1.NodeClaim{}
 			nodes := []*corev1.Node{}
 			for i := range 10 {
@@ -307,15 +307,15 @@ var _ = Describe("Node Health", func() {
 				nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
 				nodeClaims = append(nodeClaims, nodeClaim)
 				nodes = append(nodes, node)
-				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			}
 
 			fakeClock.Step(60 * time.Minute)
 
 			// Determine to delete unhealthy nodes
 			for i := range 4 {
-				localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, nodes[i])
-				nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaims[i])
+				ExpectObjectReconciledWithResult(ctx, env.Client, healthController, nodes[i])
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[i])
 				Expect(nodeClaim.DeletionTimestamp).To(BeNil())
 			}
 		})
@@ -335,13 +335,13 @@ var _ = Describe("Node Health", func() {
 				nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
 				nodeClaims = append(nodeClaims, nodeClaim)
 				nodes = append(nodes, node)
-				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			}
 
 			fakeClock.Step(60 * time.Minute)
 			// Determine to delete unhealthy nodes
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, nodes[0])
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaims[0])
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, nodes[0])
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[0])
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
 	})
@@ -353,17 +353,17 @@ var _ = Describe("Node Health", func() {
 				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, healthController, node)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 
-			localexp.ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 				metrics.ReasonLabel:   metrics.UnhealthyReason,
 				metrics.NodePoolLabel: nodePool.Name,
 			})
-			localexp.ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+			ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
 				health.Condition:      pretty.ToSnakeCase(string(cloudProvider.RepairPolicies()[0].ConditionType)),
 				metrics.NodePoolLabel: nodePool.Name,
 			})

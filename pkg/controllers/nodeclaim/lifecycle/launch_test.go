@@ -19,14 +19,14 @@ package lifecycle_test
 import (
 	"fmt"
 
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -60,10 +60,10 @@ var _ = Describe("Launch", func() {
 				})
 			}
 			nodeClaim := test.NodeClaim(nodeClaimOpts...)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 			Expect(cloudProvider.CreateCalls).To(HaveLen(lo.Ternary(isNodeClaimManaged, 1, 0)))
 			Expect(cloudProvider.CreatedNodeClaims).To(HaveLen(lo.Ternary(isNodeClaimManaged, 1, 0)))
@@ -83,37 +83,37 @@ var _ = Describe("Launch", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
 
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
-		Expect(localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeLaunched).Status).To(Equal(metav1.ConditionTrue))
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeLaunched).Status).To(Equal(metav1.ConditionTrue))
 	})
 	It("should delete the nodeclaim if InsufficientCapacity is returned from the cloudprovider", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all instance types were unavailable"))
 		nodeClaim := test.NodeClaim()
-		ExpectApplied(ctx, env.Client, nodeClaim)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
-		localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should delete the nodeclaim if NodeClassNotReady is returned from the cloudprovider", func() {
 		cloudProvider.NextCreateErr = cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("nodeClass isn't ready"))
 		nodeClaim := test.NodeClaim()
-		ExpectApplied(ctx, env.Client, nodeClaim)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
-		localexp.ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should set nodeClaim status condition from the condition message received if error returned is CreateError", func() {
 		conditionReason := "CustomReason"
 		conditionMessage := "instance creation failed"
 		cloudProvider.NextCreateErr = cloudprovider.NewCreateError(fmt.Errorf("error launching instance"), conditionReason, conditionMessage)
 		nodeClaim := test.NodeClaim()
-		ExpectApplied(ctx, env.Client, nodeClaim)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
-		condition := localexp.ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeLaunched)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		condition := ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeLaunched)
 		Expect(condition.Status).To(Equal(metav1.ConditionUnknown))
 		Expect(condition.Reason).To(Equal(conditionReason))
 		Expect(condition.Message).To(Equal(conditionMessage))

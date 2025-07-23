@@ -28,7 +28,7 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -69,7 +69,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectAllObjectsCleanedUp(ctx, env.Client)
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 
@@ -86,12 +86,12 @@ var _ = Describe("Node Metrics", func() {
 		node = test.Node(test.NodeOptions{Allocatable: resources})
 	})
 	It("should update the allocatable metric", func() {
-		ExpectApplied(ctx, env.Client, node)
-		localexp.ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectSingletonReconciled(ctx, metricsStateController)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		operatorpkg.ExpectSingletonReconciled(ctx, metricsStateController)
 
 		for k, v := range resources {
-			metric, found := localexp.FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 				"node_name":     node.GetName(),
 				"resource_type": k.String(),
 			})
@@ -101,18 +101,18 @@ var _ = Describe("Node Metrics", func() {
 	})
 	It("should update the node lifetime and cluster utilization metrics", func() {
 
-		ExpectApplied(ctx, env.Client, node)
-		localexp.ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectSingletonReconciled(ctx, metricsStateController)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		operatorpkg.ExpectSingletonReconciled(ctx, metricsStateController)
 
-		metric, found := localexp.FindMetricWithLabelValues("karpenter_nodes_current_lifetime_seconds", map[string]string{
+		metric, found := FindMetricWithLabelValues("karpenter_nodes_current_lifetime_seconds", map[string]string{
 			"node_name": node.GetName(),
 		})
 		Expect(found).To(BeTrue())
 		Expect(metric.GetGauge().GetValue()).To(BeNumerically(">=", 0))
 
 		for resourceName := range resources {
-			metric, found := localexp.FindMetricWithLabelValues("karpenter_cluster_utilization_percent", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_cluster_utilization_percent", map[string]string{
 				"resource_type": resourceName.String(),
 			})
 			Expect(found).To(BeTrue())
@@ -120,20 +120,20 @@ var _ = Describe("Node Metrics", func() {
 		}
 	})
 	It("should remove the node metric gauge when the node is deleted", func() {
-		ExpectApplied(ctx, env.Client, node)
-		localexp.ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectSingletonReconciled(ctx, metricsStateController)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		operatorpkg.ExpectSingletonReconciled(ctx, metricsStateController)
 
-		_, found := localexp.FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
+		_, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 			"node_name": node.GetName(),
 		})
 		Expect(found).To(BeTrue())
 
-		ExpectDeleted(ctx, env.Client, node)
-		localexp.ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectSingletonReconciled(ctx, metricsStateController)
+		operatorpkg.ExpectDeleted(ctx, env.Client, node)
+		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		operatorpkg.ExpectSingletonReconciled(ctx, metricsStateController)
 
-		_, found = localexp.FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
+		_, found = FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 			"node_name": node.GetName(),
 		})
 		Expect(found).To(BeFalse())
