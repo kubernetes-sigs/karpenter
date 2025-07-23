@@ -28,7 +28,7 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var testGauge1, testGauge2 opmetrics.GaugeMetric
@@ -74,11 +74,11 @@ var _ = Describe("Store", func() {
 			ms.Update(key.String(), storeMetrics)
 
 			// Expect to find the metrics with the correct values
-			m, ok := localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			m, ok := FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", storeMetrics[0].Value))
 
-			m, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			m, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", storeMetrics[1].Value))
 
@@ -125,16 +125,16 @@ var _ = Describe("Store", func() {
 			ms.Update(key.String(), newStoreMetrics)
 
 			// Expect to not find the old metrics
-			_, ok := localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok := FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeFalse())
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeFalse())
 
 			// Expect to find the new metrics with the correct values
-			m, ok := localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test_2", "label_2": "test_2"})
+			m, ok := FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test_2", "label_2": "test_2"})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", newStoreMetrics[0].Value))
-			m, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test_2", "label_2": "test_2"})
+			m, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test_2", "label_2": "test_2"})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", newStoreMetrics[1].Value))
 		})
@@ -160,11 +160,11 @@ var _ = Describe("Store", func() {
 			ms.Update(key.String(), storeMetrics)
 
 			// Expect to find the metrics with the correct values
-			m, ok := localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			m, ok := FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", storeMetrics[0].Value))
 
-			m, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			m, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", storeMetrics[1].Value))
 
@@ -190,11 +190,11 @@ var _ = Describe("Store", func() {
 			ms.Update(key.String(), newStoreMetrics)
 
 			// Expect to find the metrics with the new values
-			m, ok = localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			m, ok = FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", newStoreMetrics[0].Value))
 
-			m, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			m, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
 			Expect(lo.FromPtr(m.Gauge.Value)).To(BeNumerically("==", newStoreMetrics[1].Value))
 		})
@@ -222,17 +222,17 @@ var _ = Describe("Store", func() {
 			ms.Update(key.String(), storeMetrics)
 
 			// Expect to find the metrics
-			_, ok := localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok := FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
 
 			ms.Delete(key.String())
 
 			// Expect the metrics to be gone
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeFalse())
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeFalse())
 		})
 		It("should delete the metrics if key didn't previously exist", func() {
@@ -262,9 +262,9 @@ var _ = Describe("Store", func() {
 			ms.Update(key.String(), storeMetrics)
 
 			// Expect to find the metrics
-			_, ok := localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok := FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
 
 			key2 := client.ObjectKey{Namespace: "default", Name: "test2"}
@@ -311,21 +311,21 @@ var _ = Describe("Store", func() {
 			ms.ReplaceAll(newStore)
 
 			// Expect to not find the old metrics
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeFalse())
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeFalse())
 
 			// Expect to find the new metrics for test2
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test2", "label_2": "test2"})
+			_, ok = FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test2", "label_2": "test2"})
 			Expect(ok).To(BeTrue())
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test2", "label_2": "test2"})
+			_, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test2", "label_2": "test2"})
 			Expect(ok).To(BeTrue())
 
 			// Expect to find the new metrics for test3
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test3", "label_2": "test3"})
+			_, ok = FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test3", "label_2": "test3"})
 			Expect(ok).To(BeTrue())
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test3", "label_2": "test3"})
+			_, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test3", "label_2": "test3"})
 			Expect(ok).To(BeTrue())
 		})
 		It("should replace with an empty store", func() {
@@ -350,17 +350,17 @@ var _ = Describe("Store", func() {
 			ms.Update(key.String(), storeMetrics)
 
 			// Expect to find the metrics
-			_, ok := localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok := FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeTrue())
 
 			ms.ReplaceAll(nil)
 
 			// Expect to not find the metrics now
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_1", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeFalse())
-			_, ok = localexp.FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
+			_, ok = FindMetricWithLabelValues("test_gauge_2", map[string]string{"label_1": "test", "label_2": "test"})
 			Expect(ok).To(BeFalse())
 		})
 	})

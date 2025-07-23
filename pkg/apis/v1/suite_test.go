@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -45,7 +45,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {

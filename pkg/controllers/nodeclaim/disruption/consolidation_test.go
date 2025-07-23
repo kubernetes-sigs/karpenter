@@ -24,11 +24,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Underutilized", func() {
@@ -49,7 +49,7 @@ var _ = Describe("Underutilized", func() {
 		// set the lastPodEvent to 5 minutes in the past
 		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
-		ExpectApplied(ctx, env.Client, nodeClaim, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, nodePool)
 	})
 	It("should ignore NodeClaims not managed by this instance of Karpenter", func() {
 		unmanagedNodeClaim, _ := test.NodeClaimAndNode(v1.NodeClaim{
@@ -69,86 +69,86 @@ var _ = Describe("Underutilized", func() {
 		})
 		unmanagedNodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
 		unmanagedNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInitialized)
-		ExpectApplied(ctx, env.Client, unmanagedNodeClaim, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, unmanagedNodeClaim, nodePool)
 
 		// set the lastPodEvent as now, so it's first marked as not consolidatable
 		unmanagedNodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
-		ExpectApplied(ctx, env.Client, unmanagedNodeClaim)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
-		unmanagedNodeClaim = localexp.ExpectExists(ctx, env.Client, unmanagedNodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, unmanagedNodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
+		unmanagedNodeClaim = ExpectExists(ctx, env.Client, unmanagedNodeClaim)
 		Expect(unmanagedNodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsUnknown()).To(BeTrue())
 
 		fakeClock.Step(1 * time.Minute)
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
-		unmanagedNodeClaim = localexp.ExpectExists(ctx, env.Client, unmanagedNodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
+		unmanagedNodeClaim = ExpectExists(ctx, env.Client, unmanagedNodeClaim)
 		Expect(unmanagedNodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsUnknown()).To(BeTrue())
 	})
 	It("should mark NodeClaims as consolidatable", func() {
 		// set the lastPodEvent as now, so it's first marked as not consolidatable
 		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
-		ExpectApplied(ctx, env.Client, nodeClaim)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeFalse())
 
 		fakeClock.Step(1 * time.Minute)
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
 	It("should mark NodeClaims as consolidatable based on the nodeclaim initialized time", func() {
 		// set the lastPodEvent as zero, so it's like no pods have scheduled
 		nodeClaim.Status.LastPodEventTime.Time = time.Time{}
 
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 		fakeClock.SetTime(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).LastTransitionTime.Time)
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeFalse())
 
 		fakeClock.Step(1 * time.Minute)
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
 	It("should remove the status condition from the nodeClaim when lastPodEvent is too recent", func() {
 		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when consolidateAfter is never", func() {
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when the nodeClaim initialization condition is unknown", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeInitialized)
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim when the nodeClaim is not initialized", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "NotInitialized", "NotInitialized")
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
-		nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
 })

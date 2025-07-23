@@ -30,14 +30,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Emptiness", func() {
@@ -87,21 +87,21 @@ var _ = Describe("Emptiness", func() {
 	Context("Metrics", func() {
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod()
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
-			localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
-			localexp.ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
 
-			ExpectDeleted(ctx, env.Client, pod)
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectDeleted(ctx, env.Client, pod)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
-			localexp.ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
 		})
@@ -127,17 +127,17 @@ var _ = Describe("Emptiness", func() {
 			})
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := localexp.FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -146,9 +146,9 @@ var _ = Describe("Emptiness", func() {
 			// Execute command, thus deleting 10 nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
-			Expect(len(localexp.ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 		It("should allow no empty nodes to be disrupted", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
@@ -169,17 +169,17 @@ var _ = Describe("Emptiness", func() {
 			})
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := localexp.FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -189,7 +189,7 @@ var _ = Describe("Emptiness", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
 
-			Expect(len(localexp.ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
 		})
 		It("should only allow 3 empty nodes to be disrupted", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
@@ -210,17 +210,17 @@ var _ = Describe("Emptiness", func() {
 			})
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
-			metric, found := localexp.FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
 			})
 			Expect(found).To(BeTrue())
@@ -229,9 +229,9 @@ var _ = Describe("Emptiness", func() {
 			// Execute command, thus deleting 3 nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
-			Expect(len(localexp.ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
 		It("should allow 2 nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
@@ -247,9 +247,9 @@ var _ = Describe("Emptiness", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nps); i++ {
-				ExpectApplied(ctx, env.Client, nps[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
 			nodes = make([]*corev1.Node, 0, 30)
@@ -274,18 +274,18 @@ var _ = Describe("Emptiness", func() {
 				nodeClaims = append(nodeClaims, ncs...)
 				nodes = append(nodes, ns...)
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
-				metric, found := localexp.FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
@@ -295,9 +295,9 @@ var _ = Describe("Emptiness", func() {
 			// Execute the command in the queue, only deleting 20 nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
-			Expect(len(localexp.ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
 		})
 		It("should allow all nodes from each nodePool to be deleted", func() {
 			// Create 10 nodepools
@@ -312,9 +312,9 @@ var _ = Describe("Emptiness", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nps); i++ {
-				ExpectApplied(ctx, env.Client, nps[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
 			nodes = make([]*corev1.Node, 0, 30)
@@ -339,18 +339,18 @@ var _ = Describe("Emptiness", func() {
 				nodeClaims = append(nodeClaims, ncs...)
 				nodes = append(nodes, ns...)
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
-				metric, found := localexp.FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
+				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 					"nodepool": np.Name,
 				})
 				Expect(found).To(BeTrue())
@@ -360,141 +360,141 @@ var _ = Describe("Emptiness", func() {
 			// Execute the command in the queue, deleting all nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
-			Expect(len(localexp.ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 	})
 	Context("Emptiness", func() {
 		It("can delete empty nodes", func() {
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
-			localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the empty node
-			Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-			Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("can delete empty and drifted nodes", func() {
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
-			localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the empty node
-			Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-			Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
-			localexp.ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
 		})
 		It("should ignore nodes without the consolidatable status condition", func() {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
-			Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
 		})
 		It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation", func() {
 			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
-			Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
 		})
 		It("should delete nodes with the karpenter.sh/do-not-disrupt annotation set to false", func() {
 			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "false"})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
-			localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 			// we should delete the empty node
-			Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-			Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("should ignore nodes that have pods", func() {
 			pod := test.Pod()
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
-			localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
-			Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
 		})
 		It("should ignore nodes with the consolidatable status condition set to false", func() {
 			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeConsolidatable, "NotEmpty", "NotEmpty")
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
-			localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
-			Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
 		})
 	})
 	It("can delete multiple empty nodes", func() {
-		ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2, nodePool)
 
 		// inform cluster state about nodes and nodeclaims
-		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
-		ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(1))
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
-		localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
 
 		// we should delete the empty nodes
-		Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-		Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, nodeClaim2)
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim2)
 	})
 	It("considers pending pods when consolidating", func() {
 		largeTypes := lo.Filter(cloudProvider.InstanceTypes, func(item *cloudprovider.InstanceType, index int) bool {
@@ -538,21 +538,21 @@ var _ = Describe("Emptiness", func() {
 			},
 		})
 
-		ExpectApplied(ctx, env.Client, nodeClaim, node, pod, unsched, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, pod, unsched, nodePool)
 
 		// bind one of the pods to the node
-		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeclaims
-		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		ExpectSingletonReconciled(ctx, disruptionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
 		// node to schedule, which prevents the large expensive node from being replaced
-		Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-		Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		localexp.ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("will consider a node with a DaemonSet pod as empty", func() {
 		// assign the nodeclaims to the least expensive offering so we don't get a replacement
@@ -568,7 +568,7 @@ var _ = Describe("Emptiness", func() {
 		})
 
 		ds := test.DaemonSet()
-		ExpectApplied(ctx, env.Client, ds, nodeClaim, node, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, ds, nodeClaim, node, nodePool)
 
 		// Pods owned by a Deployment
 		pod := test.Pod(test.PodOptions{
@@ -586,22 +586,22 @@ var _ = Describe("Emptiness", func() {
 			},
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		})
-		ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
 
-		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeclaims
-		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectSingletonReconciled(ctx, disruptionController)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
-		localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 		// we should delete the empty node
-		Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-		Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
 	})
 	It("will consider a node with terminating Deployment pods as empty", func() {
 		// assign the nodeclaims to the least expensive offering so we don't get a replacement
@@ -617,7 +617,7 @@ var _ = Describe("Emptiness", func() {
 		})
 
 		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs, nodeClaim, node, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, rs, nodeClaim, node, nodePool)
 
 		// Pod owned by a Deployment
 		pods := test.Pods(3, test.PodOptions{
@@ -635,31 +635,31 @@ var _ = Describe("Emptiness", func() {
 			},
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		})
-		ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
+		operatorpkg.ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
 
 		for _, p := range pods {
-			localexp.ExpectManualBinding(ctx, env.Client, p, node)
+			ExpectManualBinding(ctx, env.Client, p, node)
 		}
 
 		// Evict the pods off of the node
 		for _, p := range pods {
 			// Trigger an eviction to set the deletion timestamp but not delete the pod
-			localexp.ExpectEvicted(ctx, env.Client, p)
-			localexp.ExpectExists(ctx, env.Client, p)
+			ExpectEvicted(ctx, env.Client, p)
+			ExpectExists(ctx, env.Client, p)
 		}
 
 		// inform cluster state about nodes and nodeclaims
-		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectSingletonReconciled(ctx, disruptionController)
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+		ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
-		localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 		// we should delete the empty node
-		Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-		Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
 	})
 	It("will not consider a node with a terminating StatefulSet pod as empty", func() {
 		// assign the nodeclaims to the least expensive offering so we don't get a replacement
@@ -675,7 +675,7 @@ var _ = Describe("Emptiness", func() {
 		})
 
 		ss := test.StatefulSet()
-		ExpectApplied(ctx, env.Client, ss, nodeClaim, node, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, ss, nodeClaim, node, nodePool)
 
 		// Pod owned by a StatefulSet
 		pod := test.Pod(test.PodOptions{
@@ -693,42 +693,42 @@ var _ = Describe("Emptiness", func() {
 			},
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		})
-		ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
 
-		localexp.ExpectManualBinding(ctx, env.Client, pod, node)
+		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// Trigger an eviction to set the deletion timestamp but not delete the pod
-		localexp.ExpectEvicted(ctx, env.Client, pod)
-		localexp.ExpectExists(ctx, env.Client, pod)
+		ExpectEvicted(ctx, env.Client, pod)
+		ExpectExists(ctx, env.Client, pod)
 
 		// inform cluster state about nodes and nodeclaims
-		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		ExpectSingletonReconciled(ctx, disruptionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(0))
 
 		// Cascade any deletion of the nodeclaim to the node
-		localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
 
 		// we shouldn't delete the node due to emptiness with a statefulset terminating pod
-		Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-		Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-		localexp.ExpectExists(ctx, env.Client, nodeClaim)
-		localexp.ExpectExists(ctx, env.Client, node)
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+		ExpectExists(ctx, env.Client, nodeClaim)
+		ExpectExists(ctx, env.Client, node)
 	})
 	It("should wait for the node TTL for empty nodes before consolidating", func() {
 		disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
-		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
 
 		// inform cluster state about nodes and nodeclaims
-		localexp.ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
 
 		finished := atomic.Bool{}
-		localexp.ExpectParallelized(
+		ExpectParallelized(
 			func() {
 				defer finished.Store(true)
-				ExpectSingletonReconciled(ctx, disruptionController)
+				operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 			},
 			func() {
 				// wait for the controller to block on the validation timeout
@@ -736,7 +736,7 @@ var _ = Describe("Emptiness", func() {
 				// controller should be blocking during the timeout
 				Expect(finished.Load()).To(BeFalse())
 				// and the node should not be deleted yet
-				localexp.ExpectExists(ctx, env.Client, nodeClaims[0])
+				ExpectExists(ctx, env.Client, nodeClaims[0])
 				// advance the clock so that the timeout expires
 				fakeClock.Step(31 * time.Second)
 				// controller should finish
@@ -744,14 +744,14 @@ var _ = Describe("Emptiness", func() {
 			},
 		)
 		// Process the item so that the nodes can be deleted
-		localexp.ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
+		ExpectObjectReconciledWithResult(ctx, env.Client, queue, nodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
-		localexp.ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
+		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
 
 		// nodeclaim should be deleted after the TTL due to emptiness
-		Expect(localexp.ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
-		Expect(localexp.ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
+		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
 	})
 })

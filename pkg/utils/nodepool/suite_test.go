@@ -21,7 +21,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -56,7 +56,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("NodePoolUtils", func() {

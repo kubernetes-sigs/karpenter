@@ -28,7 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -78,7 +78,7 @@ var _ = BeforeEach(func() {
 
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
-	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("NodeClaimController", func() {
@@ -130,10 +130,10 @@ var _ = Describe("NodeClaimController", func() {
 				}
 				nodeClaim, node := test.NodeClaimAndNode(nodeClaimOpts...)
 				nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeConsistentStateFound)
-				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-				localexp.ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-				localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
-				nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+				operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+				ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				if isNodeClaimManaged {
 					Expect(nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeConsistentStateFound)).To(BeTrue())
 				} else {
@@ -175,11 +175,11 @@ var _ = Describe("NodeClaimController", func() {
 				corev1.ResourceMemory: resource.MustParse("64Gi"),
 				corev1.ResourcePods:   resource.MustParse("10"),
 			}
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-			localexp.ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-			localexp.ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
-			nodeClaim = localexp.ExpectExists(ctx, env.Client, nodeClaim)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsistentStateFound).IsFalse()).To(BeTrue())
 		})
 	})

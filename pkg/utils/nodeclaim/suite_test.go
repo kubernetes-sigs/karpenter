@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"testing"
 
-	localexp "sigs.k8s.io/karpenter/pkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -65,7 +65,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	localexp.ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectAllObjectsCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("NodeClaimUtils", func() {
@@ -151,7 +151,7 @@ var _ = Describe("NodeClaimUtils", func() {
 					},
 				})
 			})
-			ExpectApplied(ctx, env.Client, ncs[0], ncs[1])
+			operatorpkg.ExpectApplied(ctx, env.Client, ncs[0], ncs[1])
 			res, err := nodeclaimutils.ListManaged(ctx, env.Client, cloudProvider, nodeclaimutils.ForProviderID(ncs[0].Status.ProviderID))
 			Expect(err).To(BeNil())
 			Expect(len(res)).To(Equal(1))
@@ -174,7 +174,7 @@ var _ = Describe("NodeClaimUtils", func() {
 					},
 				})
 			})
-			ExpectApplied(ctx, env.Client, ncs[0], ncs[1])
+			operatorpkg.ExpectApplied(ctx, env.Client, ncs[0], ncs[1])
 			res, err := nodeclaimutils.ListManaged(ctx, env.Client, cloudProvider, nodeclaimutils.ForNodePool(ncs[0].Labels[v1.NodePoolLabelKey]))
 			Expect(err).To(BeNil())
 			Expect(len(res)).To(Equal(1))
@@ -217,7 +217,7 @@ var _ = Describe("NodeClaimUtils", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, managed, unmanagedByGroup, unmanagedByKind, unmanaged)
+			operatorpkg.ExpectApplied(ctx, env.Client, managed, unmanagedByGroup, unmanagedByKind, unmanaged)
 			res, err := nodeclaimutils.ListManaged(ctx, env.Client, cloudProvider)
 			Expect(err).To(BeNil())
 			Expect(len(res)).To(Equal(1))
