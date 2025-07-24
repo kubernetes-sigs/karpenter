@@ -53,9 +53,8 @@ import (
 )
 
 const (
-	evictionQueueBaseDelay                 = 100 * time.Millisecond
-	evictionQueueUserMisconfigurationDelay = 1 * time.Second
-	evictionQueueMaxDelay                  = 10 * time.Second
+	evictionQueueBaseDelay = 100 * time.Millisecond
+	evictionQueueMaxDelay  = 10 * time.Second
 
 	multiplePodDisruptionBudgetsError = "This pod has more than one PodDisruptionBudget, which the eviction subresource does not support."
 )
@@ -198,9 +197,8 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 				return reconcile.Result{}, err2
 			}
 			errorMessage := lo.Ternary(message == multiplePodDisruptionBudgetsError, "eviction does not support multiple PDBs", "evicting pod violates a PDB")
-			requeueDuration := lo.Ternary(message == multiplePodDisruptionBudgetsError, evictionQueueUserMisconfigurationDelay, evictionQueueBaseDelay)
 			q.recorder.Publish(terminatorevents.NodeFailedToDrain(node, serrors.Wrap(errors.New(errorMessage), "Pod", klog.KRef(pod.Namespace, pod.Name))))
-			return reconcile.Result{RequeueAfter: requeueDuration}, nil
+			return reconcile.Result{Requeue: true}, nil
 		}
 		// Its not a PDB, we should requeue
 		return reconcile.Result{}, err
