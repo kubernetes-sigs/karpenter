@@ -32,6 +32,8 @@ import (
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
+var DeniedStorageClassProvisioners = make(map[string]struct{})
+
 func NewVolumeTopology(kubeClient client.Client) *VolumeTopology {
 	return &VolumeTopology{kubeClient: kubeClient}
 }
@@ -195,6 +197,9 @@ func (v *VolumeTopology) validateStorageClass(ctx context.Context, storageClassN
 	storageClass := &storagev1.StorageClass{}
 	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
 		return err
+	}
+	if _, exists := DeniedStorageClassProvisioners[storageClass.Provisioner]; exists {
+		return fmt.Errorf("storageClass provisioner %s is not supported", storageClass.Provisioner)
 	}
 	return nil
 }
