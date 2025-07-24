@@ -103,7 +103,7 @@ var _ = Describe("Termination", func() {
 	})
 
 	AfterEach(func() {
-		ExpectAllObjectsCleanedUp(ctx, env.Client)
+		ExpectCleanedUp(ctx, env.Client)
 
 		// Reset the metrics collectors
 		metrics.NodesTerminatedTotal.Reset()

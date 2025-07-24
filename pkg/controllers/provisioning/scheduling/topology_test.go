@@ -2833,7 +2833,7 @@ var _ = Describe("Topology", func() {
 				for i := range pods {
 					ExpectScheduled(ctx, env.Client, pods[i])
 				}
-				ExpectAllObjectsCleanedUp(ctx, env.Client)
+				ExpectCleanedUp(ctx, env.Client)
 				cluster.Reset()
 			}
 		})

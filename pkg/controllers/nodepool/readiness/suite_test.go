@@ -60,7 +60,7 @@ var _ = BeforeSuite(func() {
 	controller = readiness.NewController(env.Client, cloudProvider)
 })
 var _ = AfterEach(func() {
-	ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectCleanedUp(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {

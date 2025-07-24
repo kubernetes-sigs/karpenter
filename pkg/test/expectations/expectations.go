@@ -624,7 +624,7 @@ func ExpectParallelized(fs ...func()) {
 	wg.Wait()
 }
 
-func ExpectAllObjectsCleanedUp(ctx context.Context, c client.Client) {
+func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	GinkgoHelper()
 	wg := sync.WaitGroup{}
 	namespaces := &corev1.NamespaceList{}

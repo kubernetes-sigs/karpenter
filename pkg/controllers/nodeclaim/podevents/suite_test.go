@@ -75,7 +75,7 @@ var _ = BeforeEach(func() {
 
 var _ = AfterEach(func() {
 	cp.Reset()
-	ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectCleanedUp(ctx, env.Client)
 })
 var _ = Describe("PodEvents", func() {
 	var nodePool *v1.NodePool

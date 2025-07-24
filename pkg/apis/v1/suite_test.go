@@ -45,7 +45,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectCleanedUp(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {

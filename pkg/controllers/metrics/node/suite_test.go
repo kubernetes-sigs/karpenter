@@ -69,7 +69,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectCleanedUp(ctx, env.Client)
 	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
 })
 

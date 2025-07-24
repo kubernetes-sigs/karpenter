@@ -99,7 +99,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 	AfterEach(func() {
 		disruption.SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 		fakeClock.SetTime(time.Now())
-		ExpectAllObjectsCleanedUp(ctx, env.Client)
+		ExpectCleanedUp(ctx, env.Client)
 	})
 
 	Context("Candidate Shuffling", func() {
