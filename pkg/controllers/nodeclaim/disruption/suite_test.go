@@ -106,7 +106,7 @@ var _ = BeforeEach(func() {
 var _ = AfterEach(func() {
 	cp.Reset()
 	nodeClaimDisruptionController.Reset()
-	ExpectAllObjectsCleanedUp(ctx, env.Client)
+	ExpectCleanedUp(ctx, env.Client)
 })
 
 var _ = Describe("Disruption", func() {
