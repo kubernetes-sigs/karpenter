@@ -19,6 +19,7 @@ package nodeoverlay
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
@@ -45,13 +46,19 @@ func GetInstanceTypes(ctx context.Context, kubeClient client.Client, cloudProvid
 	return OverlayInstanceTypes(overlay.Items, its), nil
 }
 
-// Explain weights. That will be hard to understand
 func OverlayInstanceTypes(overlays []v1alpha1.NodeOverlay, instanceTypes []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
-	// Only apply overlays that have passed runtime validation
+	// Only apply overlays that have passed runtime validation and know there have not been
+	// any updates to the spec of the overlay field
 	validOverlays := lo.Filter(overlays, func(o v1alpha1.NodeOverlay, _ int) bool {
-		return o.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).IsTrue()
+		condition := o.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded)
+		return condition.IsTrue() && condition.ObservedGeneration == o.Generation
 	})
 
+	// We order the overlays from largest to smallest, as we have already done validation
+	// we can be sure that we will not be blocked due to invalid or conflicting overlays
+	sort.Slice(validOverlays, func(x int, y int) bool {
+		return lo.FromPtr(validOverlays[x].Spec.Weight) > lo.FromPtr(validOverlays[y].Spec.Weight)
+	})
 	work := []func(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType){
 		overlayCapacityOnInstanceTypes,
 		overlayPriceOnInstanceTypes,
@@ -63,7 +70,6 @@ func OverlayInstanceTypes(overlays []v1alpha1.NodeOverlay, instanceTypes []*clou
 	return instanceTypes
 }
 
-// Test with different offerings
 func overlayCapacityOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
 	for _, overlay := range overlays {
 		overlaySelector := scheduling.NewRequirements()
@@ -72,13 +78,11 @@ func overlayCapacityOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*clou
 		for _, it := range its {
 			if it.Requirements.Intersects(overlaySelector) == nil {
 				it.Capacity = lo.Assign(it.Capacity, overlay.Spec.Capacity)
-				// it.ResetAllocatable()
 			}
 		}
 	}
 }
 
-// Test with different offerings
 func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
 	overriddenInstanceType := map[string][]string{}
 	for _, overlay := range overlays {
@@ -109,6 +113,9 @@ func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudpr
 	}
 }
 
+// As the instance types values are returned are pointers, we need to make sure that we are not
+// updating the instances returned by the cloud provider. We need to get a fresh copy of the instances types
+// Such that we only overlay currently defined set of overrides
 func pullInstanceTypes(ctx context.Context, cp cloudprovider.CloudProvider, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	its, err := cp.GetInstanceTypes(ctx, nodePool)
 	if err != nil {
