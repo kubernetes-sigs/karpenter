@@ -17,12 +17,38 @@ limitations under the License.
 package test
 
 import (
+	"fmt"
+
+	"github.com/imdario/mergo"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 )
+
+// NodeOverlay creates a test NodeOverlay with defaults that can be overridden by overrides.
+// Overrides are applied in order, with a last write wins semantic.
+func NodeOverlay(overrides ...v1alpha1.NodeOverlay) *v1alpha1.NodeOverlay {
+	override := v1alpha1.NodeOverlay{}
+	for _, opts := range overrides {
+		if err := mergo.Merge(&override, opts, mergo.WithOverride); err != nil {
+			panic(fmt.Sprintf("failed to merge: %v", err))
+		}
+	}
+	if override.Name == "" {
+		override.Name = RandomName()
+	}
+	if override.Spec.Requirements == nil {
+		override.Spec.Requirements = []corev1.NodeSelectorRequirement{}
+	}
+	no := &v1alpha1.NodeOverlay{
+		ObjectMeta: ObjectMeta(override.ObjectMeta),
+		Spec:       override.Spec,
+		Status:     override.Status,
+	}
+	return no
+}
 
 // ReplaceOverlayRequirements any current requirements on the passed through NodeOverlay with the passed in requirements
 // If any of the keys match between the existing requirements and the new requirements, the new requirement with the same

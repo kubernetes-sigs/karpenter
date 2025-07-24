@@ -23,6 +23,7 @@ import (
 	"log"
 	"reflect"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +54,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -62,7 +64,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 const (
@@ -238,8 +240,9 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&corev1.PersistentVolume{},
 		&storagev1.StorageClass{},
 		&v1.NodePool{},
-		&v1alpha1.TestNodeClass{},
+		&testv1alpha1.TestNodeClass{},
 		&v1.NodeClaim{},
+		&v1alpha1.NodeOverlay{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
@@ -286,7 +289,15 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 	for pod, binding := range bindings {
 		// Only bind the pods that are passed through
 		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
-			ExpectManualBinding(ctx, c, pod, binding.Node)
+			// We have to manually bind the pod to the node when using a fakeClient by setting the value for pod.Spec.NodeName
+			if strings.Contains(reflect.TypeOf(c).String(), "fake") {
+				pod.Spec.NodeName = binding.Node.Name
+				err := c.Update(ctx, pod)
+				Expect(err).ToNot(HaveOccurred())
+				ExpectExists(ctx, c, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: binding.Node.Name, Namespace: binding.Node.Namespace}})
+			} else {
+				ExpectManualBinding(ctx, c, pod, binding.Node)
+			}
 			Expect(cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
 		}
 	}

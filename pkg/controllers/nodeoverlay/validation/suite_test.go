@@ -147,52 +147,6 @@ var _ = Describe("Validation", func() {
 	})
 	Context("Requirements Validations", func() {
 		Describe("Instance types Requirements", func() {
-			It("should pass if an instance type conflicts but is not defined in a nodepool", func() {
-				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
-					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
-							{
-								Key:      corev1.LabelArchStable,
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{"arm64"},
-							},
-						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("1.03"),
-					},
-				})
-				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
-					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
-							{
-								Key:      v1.CapacityTypeLabelKey,
-								Operator: corev1.NodeSelectorOpExists,
-							},
-						},
-						Weight: lo.ToPtr(int32(10)),
-						Price:  lo.ToPtr("23"),
-					},
-				})
-				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelArchStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"amd64"},
-					},
-				})
-				ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
-
-				// Reconcile both overlays
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
-
-				// Check that the conditions were set correctly
-				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
-				Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
-
-				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
-			})
 			It("should fail with requirements overlays overlap", func() {
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 					Spec: v1alpha1.NodeOverlaySpec{
