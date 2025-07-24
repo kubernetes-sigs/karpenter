@@ -80,12 +80,14 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 	i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
 		return i.Name
 	})...))
-	_, found := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
-		return it.IsPricingOverlayApplied()
-	})
-	if found {
+	if _, pricingOverlay := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); pricingOverlay {
 		i.Annotations = lo.Assign(i.Annotations, map[string]string{
 			v1alpha1.PriceOverlayAppliedAnnotationKey: "true",
+		})
+	}
+	if _, capacityOverlay := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }); capacityOverlay {
+		i.Annotations = lo.Assign(i.Annotations, map[string]string{
+			v1alpha1.CapacityOverlayAppliedAnnotationKey: "true",
 		})
 	}
 

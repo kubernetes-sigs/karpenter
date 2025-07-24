@@ -24,6 +24,7 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
 	lop "github.com/samber/lo/parallel"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -37,19 +38,28 @@ func GetInstanceTypes(ctx context.Context, kubeClient client.Client, cloudProvid
 	if err != nil {
 		return []*cloudprovider.InstanceType{}, err
 	}
-	overlay := &v1alpha1.NodeOverlayList{}
-	err = kubeClient.List(ctx, overlay)
+	// The additional requirements will be added to the instance type during scheduling simulation
+	// Since getting instance types is done on a NodePool level, these requirnements were always assumed
+	// to be allowed with these instance types.
+	addNodePoolRequirements(np, its)
+	its, err = OverlayInstanceTypes(ctx, kubeClient, its)
+	if err != nil {
+		return []*cloudprovider.InstanceType{}, err
+	}
+	removeNodePoolRequirements(np, its)
+	return its, nil
+}
+
+func OverlayInstanceTypes(ctx context.Context, kubeClient client.Client, instanceTypes []*cloudprovider.InstanceType) ([]*cloudprovider.InstanceType, error) {
+	overlays := &v1alpha1.NodeOverlayList{}
+	err := kubeClient.List(ctx, overlays)
 	if err != nil {
 		return []*cloudprovider.InstanceType{}, err
 	}
 
-	return OverlayInstanceTypes(overlay.Items, its), nil
-}
-
-func OverlayInstanceTypes(overlays []v1alpha1.NodeOverlay, instanceTypes []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
 	// Only apply overlays that have passed runtime validation and know there have not been
 	// any updates to the spec of the overlay field
-	validOverlays := lo.Filter(overlays, func(o v1alpha1.NodeOverlay, _ int) bool {
+	validOverlays := lo.Filter(overlays.Items, func(o v1alpha1.NodeOverlay, _ int) bool {
 		condition := o.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded)
 		return condition.IsTrue() && condition.ObservedGeneration == o.Generation
 	})
@@ -67,7 +77,7 @@ func OverlayInstanceTypes(overlays []v1alpha1.NodeOverlay, instanceTypes []*clou
 		f(validOverlays, instanceTypes)
 	})
 
-	return instanceTypes
+	return instanceTypes, nil
 }
 
 func overlayCapacityOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
@@ -76,14 +86,16 @@ func overlayCapacityOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*clou
 		overlaySelector.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
 
 		for _, it := range its {
-			if it.Requirements.Intersects(overlaySelector) == nil {
+			if it.Requirements.IsCompatible(overlaySelector) {
 				it.Capacity = lo.Assign(it.Capacity, overlay.Spec.Capacity)
+				it.ApplyResourceOverlay()
 			}
 		}
 	}
 }
 
 func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
+	// we will only update instance types once
 	overriddenInstanceType := map[string][]string{}
 	for _, overlay := range overlays {
 		// if price or price adjustment is not defined, then we should skip the overlay
@@ -94,7 +106,7 @@ func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudpr
 		overlaySelector.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
 
 		for _, it := range its {
-			if err := it.Requirements.Intersects(overlaySelector); err != nil {
+			if !it.Requirements.IsCompatible(overlaySelector) {
 				continue
 			}
 			if _, ok := overriddenInstanceType[it.Name]; !ok {
@@ -125,9 +137,12 @@ func pullInstanceTypes(ctx context.Context, cp cloudprovider.CloudProvider, node
 	// Since we are altering the instance type data we need to copy the instance types into a new struct
 	// The main things that have been copied are the offerings, capacity and overhead
 	return lo.Map(its, func(it *cloudprovider.InstanceType, _ int) *cloudprovider.InstanceType {
+		// The additional requirements will be added to the instance type during scheduling simulation
+		// Since getting instance types is done on a NodePool level, these requirnements were always assumed
+		// to be allowed with these instance types.
 		return &cloudprovider.InstanceType{
 			Name:         it.Name,
-			Requirements: it.Requirements,
+			Requirements: scheduling.NewRequirements(it.Requirements.Values()...),
 			Offerings:    copyOfferings(it.Offerings),
 			Capacity:     it.Capacity.DeepCopy(),
 			Overhead: &cloudprovider.InstanceTypeOverhead{
@@ -148,4 +163,21 @@ func copyOfferings(offerings cloudprovider.Offerings) []*cloudprovider.Offering 
 			ReservationCapacity: of.ReservationCapacity,
 		}
 	})
+}
+
+func addNodePoolRequirements(nodePool *v1.NodePool, its []*cloudprovider.InstanceType) {
+	for _, it := range its {
+		nodePoolReq := scheduling.NewRequirement(v1.NodePoolLabelKey, corev1.NodeSelectorOpIn, nodePool.Name)
+		nodeClassReq := scheduling.NewRequirement(v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind()), corev1.NodeSelectorOpIn, nodePool.Spec.Template.Spec.NodeClassRef.Name)
+		it.Requirements.Add(scheduling.NewLabelRequirements(nodePool.Spec.Template.ObjectMeta.Labels).Values()...)
+		it.Requirements.Add(nodePoolReq, nodeClassReq)
+	}
+}
+
+func removeNodePoolRequirements(nodePool *v1.NodePool, its []*cloudprovider.InstanceType) {
+	for _, it := range its {
+		removeReq := []string{v1.NodePoolLabelKey, v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind())}
+		removeReq = append(removeReq, lo.Keys(nodePool.Spec.Template.ObjectMeta.Labels)...)
+		it.Requirements = lo.OmitByKeys(it.Requirements, removeReq)
+	}
 }

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,9 +106,10 @@ type InstanceType struct {
 	Capacity corev1.ResourceList
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
-	Overhead    *InstanceTypeOverhead
-	once        sync.Once
-	allocatable corev1.ResourceList
+	Overhead               *InstanceTypeOverhead
+	once                   sync.Once
+	allocatable            corev1.ResourceList
+	capacityOverlayApplied bool
 }
 
 type InstanceTypes []*InstanceType
@@ -116,6 +118,24 @@ type InstanceTypes []*InstanceType
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {
 	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
+
+	// subtract the amount of memory that will be allocatable for
+	// application based on hugepage reservations
+	for name, quantity := range i.Capacity {
+		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
+			i.allocatable.Memory().Sub(quantity)
+			current := i.allocatable.Memory()
+			current.Sub(quantity)
+			i.allocatable[corev1.ResourceMemory] = lo.FromPtr(current)
+		}
+	}
+	// If there there are hugepages resource that consume all the memory on an instance
+	// we will cap the memory used to being zero as negative memory does not make sense.
+	if i.allocatable.Memory().Sign() == -1 {
+		current := i.allocatable.Memory()
+		current.Set(0)
+		i.allocatable[corev1.ResourceMemory] = lo.FromPtr(current)
+	}
 }
 
 func (i *InstanceType) IsPricingOverlayApplied() bool {
@@ -125,8 +145,12 @@ func (i *InstanceType) IsPricingOverlayApplied() bool {
 	return found
 }
 
-func (i *InstanceType) ResetAllocatable() {
-	i.once = sync.Once{}
+func (i *InstanceType) ApplyResourceOverlay() {
+	i.capacityOverlayApplied = true
+}
+
+func (i *InstanceType) IsCapacityOverlayApplied() bool {
+	return i.capacityOverlayApplied
 }
 
 func (i *InstanceType) Allocatable() corev1.ResourceList {

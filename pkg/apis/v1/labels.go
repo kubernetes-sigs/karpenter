@@ -91,6 +91,15 @@ var (
 		v1.LabelWindowsBuild,
 	)
 
+	// WellKnownResources are resources that are expected from the instance types
+	// provided by cloud providers.
+	WellKnownResources = sets.New[v1.ResourceName](
+		v1.ResourceCPU,
+		v1.ResourceMemory,
+		v1.ResourceEphemeralStorage,
+		v1.ResourcePods,
+	)
+
 	// WellKnownValuesForRequirements are for requirements where a known set of values
 	// is expected to be used for that requirement. For example, in the AWS provider,
 	// only on-demand, spot, and reserved make sense as values for the capacity type requirement

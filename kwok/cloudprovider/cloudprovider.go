@@ -225,6 +225,9 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		},
 		Status: corev1.NodeStatus{
+			// To support custom resource provisioning for node overlay
+			// We will use the resource request defined on the NodeClaims
+			// for KWOK node creation
 			Capacity:    nodeClaim.Spec.Resources.Requests,
 			Allocatable: lo.Assign(nodeClaim.Spec.Resources.Requests, instanceType.Allocatable()),
 			Phase:       corev1.NodePending,
