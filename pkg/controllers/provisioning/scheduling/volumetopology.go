@@ -25,6 +25,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -34,7 +35,7 @@ import (
 
 // UnsupportedProvisioners is a map of volume plugins that are not supported. When a pod requests storage using a PersistentVolumeClaim (PVC)
 // that uses a StorageClass with any of these unsupported provisioners, Karpenter will skip scheduling that pod.
-var UnsupportedProvisioners = make(map[string]struct{})
+var UnsupportedProvisioners = sets.New[string]()
 
 func NewVolumeTopology(kubeClient client.Client) *VolumeTopology {
 	return &VolumeTopology{kubeClient: kubeClient}
@@ -200,7 +201,7 @@ func (v *VolumeTopology) validateStorageClass(ctx context.Context, storageClassN
 	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
 		return err
 	}
-	if _, ok := UnsupportedProvisioners[storageClass.Provisioner]; ok {
+	if UnsupportedProvisioners.Has(storageClass.Provisioner) {
 		return serrors.Wrap(fmt.Errorf("storageClass provisioner is not supported"), "StorageClass", klog.KRef("", storageClass.Provisioner))
 	}
 	return nil

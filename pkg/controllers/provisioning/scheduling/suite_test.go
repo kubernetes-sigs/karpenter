@@ -3242,7 +3242,7 @@ var _ = Context("Scheduling", func() {
 			Expect(node.Name).ToNot(Equal(node2.Name))
 		})
 		It("should not launch nodes for pod with storageClass that uses an unsupported provisioner", func() {
-			scheduling.UnsupportedProvisioners = lo.Assign(scheduling.UnsupportedProvisioners, map[string]struct{}{"other-provider": {}})
+			scheduling.UnsupportedProvisioners = lo.Assign(scheduling.UnsupportedProvisioners, sets.New("other-provider"))
 			// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
