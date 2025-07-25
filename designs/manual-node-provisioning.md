@@ -59,6 +59,15 @@ spec:
     # A percentage of the total number of nodes managed by the targetNodePool.
     # For example, a value of 10 would maintain a 10% buffer.
     percentage: null
+
+  # defines overrides for schedueld time
+  scheduledOverrides:
+    - schedule: "0 9 * * mon-fri"
+      duration: 8h
+      # Only one of count or percentage can be specified.
+      sizing:
+        count: 2
+        percentage: null
 ```
 ### Controller Behavior
 A new overprovisioner controller will be introduced into Karpenter. This controller will:
@@ -101,6 +110,80 @@ The controller will use `ceil()` to round up, ensuring at least one spare node i
 ## Alternatives Considered
 
 One of the alternatives suggested was to extend the NodePool API directly[1]. This was rejected because it conflates two distinct responsibilities: defining the properties of a pool of capacity (NodePool) and defining the proactive management strategy for that capacity (Overprovisioner). A separate CRD provides a cleaner separation of concerns, a more intuitive user experience, and avoids creating an overly complex, monolithic API object. The common "pause pod" workaround was also considered and rejected as it is an operationally burdensome hack and not cost effective solve for larger spike.
+
+### Possible implementation using CRDs
+
+Here is the CRD mentioned which includes the overprovisioning in the existing definition. In this case, if there is a same overprovisioning config required for all the nodepools, the same config needs to be copied and managed as its part of the same CRD. This makes it a bit complex to manage them as well as it would be more error prone if the overprovisioning gets more complex with diff type of node state, stratagy, sizing and schedules. However, there is some upside in terms of some shared core functionality could be used, however, future enhancement could be hampered if this adds any other requirements.  
+```apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: arm-nodepool
+spec:
+  disruption:
+    budgets:
+    - nodes: 5%
+      reasons:
+      - Underutilized
+    - nodes: 25%
+      reasons:
+      - Empty
+    - nodes: 1%
+      reasons:
+      - Drifted
+    consolidateAfter: 2m0s
+    consolidationPolicy: WhenEmptyOrUnderutilized
+  limits:
+    cpu: 15000
+    memory: 30000Gi
+
+  # Overprovisioning definition in the same CRD. the fields represents same usage as mentioend fpr separate CRD.
+  overprovision:
+  - state: Running
+    stratagy: KeepMinimum
+    sizing:
+      count: 10
+    scheduledOverrides:
+    - schedule: "0 9 * * mon-fri"
+      duration: 8h
+      sizing:
+        count: "0"
+  - state: Stopped
+    stratagy: KeepEmpty
+    sizing:
+      percentage: 20
+  template:
+    metadata:
+      labels:
+        availability-zone-id: az1
+        nodegroup: graviton-nodes-common-workloads
+        role: graviton-nodes-common-workloads
+    spec:
+      expireAfter: Never
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: graviton-workloads
+      requirements:
+      - key: node.kubernetes.io/instance-type
+        operator: In
+        values:
+        - c7g.8xlarge
+        - c7g.12xlarge
+        - c7g.16xlarge
+      - key: topology.kubernetes.io/zone
+        operator: In
+        values:
+        - ap-south-1a
+      - key: karpenter.sh/capacity-type
+        operator: In
+        values:
+        - on-demand
+      taints:
+      - effect: NoSchedule
+        key: nodegroup
+        value: arm-nodes-common-workloads
+  weight: 100
+```
 
 ## Refs: 
 1. Autoscaler Buffers Proposal - https://docs.google.com/document/d/1bcct-luMPP51YAeUhVuFV7MIXud5wqHsVBDah9WuKeo/edit?tab=t.0 
