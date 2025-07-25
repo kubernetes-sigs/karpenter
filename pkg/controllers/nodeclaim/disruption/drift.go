@@ -47,7 +47,6 @@ type Drift struct {
 	instanceTypeNotFoundCheckCache *cache.Cache
 }
 
-// This function should only modify the nodeclaim's Status section
 func (d *Drift) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	hasDriftedCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted) != nil
 
