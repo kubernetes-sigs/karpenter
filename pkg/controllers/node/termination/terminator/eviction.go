@@ -190,7 +190,7 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 				return reconcile.Result{}, err2
 			}
 			q.recorder.Publish(terminatorevents.NodeFailedToDrain(node, serrors.Wrap(fmt.Errorf("evicting pod violates a PDB"), "Pod", klog.KRef(pod.Namespace, pod.Name))))
-			return reconcile.Result{RequeueAfter: evictionQueueBaseDelay}, nil
+			return reconcile.Result{Requeue: true}, nil
 		}
 		// Its not a PDB, we should requeue
 		return reconcile.Result{}, err
