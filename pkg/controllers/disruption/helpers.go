@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
+	"sigs.k8s.io/karpenter/pkg/utils/nodeoverlay"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 )
@@ -200,7 +201,7 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 	for _, np := range nodePools {
 		nodePoolMap[np.Name] = np
 
-		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
+		nodePoolInstanceTypes, err := nodeoverlay.GetInstanceTypes(ctx, kubeClient, cloudProvider, np)
 		if err != nil {
 			// don't error out on building the node pool, we just won't be able to handle any nodes that
 			// were created by it
