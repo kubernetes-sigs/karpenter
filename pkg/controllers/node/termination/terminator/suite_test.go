@@ -238,7 +238,7 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectExists(ctx, env.Client, pod)
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(0))
 		})
-		It("should delete a pod with less than terminationGracePeriodSeconds remaining before nodeTerminationTime", Focus, func() {
+		It("should delete a pod with less than terminationGracePeriodSeconds remaining before nodeTerminationTime", func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
 			operatorpkg.ExpectApplied(ctx, env.Client, pod)
 
