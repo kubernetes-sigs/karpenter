@@ -121,7 +121,7 @@ var _ = Describe("Eviction/Queue", func() {
 		It("should succeed with an evicted event when there are no PDBs", func() {
 			operatorpkg.ExpectApplied(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
@@ -136,12 +136,11 @@ var _ = Describe("Eviction/Queue", func() {
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
-			ExpectApplied(ctx, env.Client, pdb, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pdb, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			//nolint:staticcheck
-			Expect(result.Requeue).To(BeTrue())
+			result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			result.To(HaveField("Requeue", BeTrue()))
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "429"})
 			e := recorder.Events()
 			Expect(e).To(HaveLen(1))
@@ -153,12 +152,11 @@ var _ = Describe("Eviction/Queue", func() {
 				Labels:         testLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
 			})
-			ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			//nolint:staticcheck
-			Expect(result.Requeue).To(BeTrue())
+			result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			result.To(HaveField("Requeue", BeTrue()))
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "500"})
 			e := recorder.Events()
 			Expect(e).To(HaveLen(1))
@@ -190,7 +188,7 @@ var _ = Describe("Eviction/Queue", func() {
 		It("should increment PodsDrainedTotal metric when a pod is evicted", func() {
 			operatorpkg.ExpectApplied(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
@@ -212,7 +210,7 @@ var _ = Describe("Eviction/Queue", func() {
 				Message: "Node is being interrupted",
 			})
 
-			ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
 			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
