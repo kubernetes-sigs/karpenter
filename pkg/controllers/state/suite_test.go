@@ -1723,7 +1723,7 @@ var _ = Describe("Consolidated State", func() {
 		fakeClock.Step(time.Minute)
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		state := cluster.ConsolidationState()
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodePoolController, nodePool)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })

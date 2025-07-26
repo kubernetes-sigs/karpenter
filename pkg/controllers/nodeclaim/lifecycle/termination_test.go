@@ -81,7 +81,7 @@ var _ = Describe("Termination", func() {
 				}
 			}
 			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 			if isNodeClaimManaged {
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -91,7 +91,7 @@ var _ = Describe("Termination", func() {
 
 			node := test.NodeClaimLinkedNode(nodeClaim)
 			operatorpkg.ExpectApplied(ctx, env.Client, node)
-			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(Equal(isNodeClaimManaged))
 
@@ -102,16 +102,16 @@ var _ = Describe("Termination", func() {
 
 			// Expect the node and the nodeClaim to both be gone
 			Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 			ExpectFinalizersRemoved(ctx, env.Client, node)
 			if isNodeClaimManaged {
 				operatorpkg.ExpectNotFound(ctx, env.Client, node)
-				result := ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // now all the nodes are gone so nodeClaim deletion continues
-				Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+				result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now all the nodes are gone so nodeClaim deletion continues
+				result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
-				ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+				operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
 				ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_instance_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
 				ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
@@ -130,19 +130,19 @@ var _ = Describe("Termination", func() {
 	)
 	It("shouldn't mark the root condition of the NodeClaim as unknown when setting the Termination condition", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		// Initialize the NodeClaim
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
 		node.Status.Capacity = corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse("10"),
@@ -163,11 +163,11 @@ var _ = Describe("Termination", func() {
 		// We need to ensure that the root condition doesn't change to Unknown
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // Delete the Node
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // Delete the Node
 		ExpectFinalizersRemoved(ctx, env.Client, node)
 		operatorpkg.ExpectNotFound(ctx, env.Client, node)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // Trigger CloudProvider Delete
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // Trigger CloudProvider Delete
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.StatusConditions().Root().IsTrue())
@@ -184,57 +184,56 @@ var _ = Describe("Termination", func() {
 
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, obj)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		// Expect the node and the nodeClaim to both be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		result := ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the nodeclaim deletion
-
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the nodeclaim deletion
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should requeue reconciliation if cloudProvider Delete returns an error other than NodeClaimNotFoundError", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		result := ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will set the nodeClaim status as terminating
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will set the nodeClaim status as terminating
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 		cloudProvider.NextDeleteErr = errors.New("fake error")
 		// trigger nodeClaim Deletion that will make cloudProvider Delete and requeue reconciliation due to error
 		operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim).To(HaveOccurred())
-		result = ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will succeed
+		result = operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will succeed
 		//nolint:staticcheck
-		Expect(result.Requeue).To(BeFalse())
+		result.To(HaveField("Requeue", BeFalse()))
 		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should not remove the finalizer and terminate the NodeClaim if the cloudProvider instance is still around", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		// The delete call that happened first will remove the cloudProvider instance from cloudProvider.CreatedNodeClaims[].
 		// To model the behavior of having cloudProvider instance not terminated, we add it back here.
 		cloudProvider.CreatedNodeClaims[nodeClaim.Status.ProviderID] = nodeClaim
-		result := ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will ensure that we call cloudProvider Get to check if the instance is still around
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will ensure that we call cloudProvider Get to check if the instance is still around
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 	})
 	It("should delete multiple Nodes if multiple Nodes map to the NodeClaim", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -243,7 +242,7 @@ var _ = Describe("Termination", func() {
 		// First register a single Node to ensure the NodeClaim can successfully register, then apply the remaining nodes.
 		node1 := test.NodeClaimLinkedNode(nodeClaim)
 		operatorpkg.ExpectApplied(ctx, env.Client, node1)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
@@ -253,13 +252,13 @@ var _ = Describe("Termination", func() {
 
 		// Expect the node and the nodeClaim to both be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 		ExpectFinalizersRemoved(ctx, env.Client, node1, node2, node3)
 		operatorpkg.ExpectNotFound(ctx, env.Client, node1, node2, node3)
 
-		result := ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // now all nodes are gone so nodeClaim deletion continues
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+		result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now all nodes are gone so nodeClaim deletion continues
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
 		ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_instance_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
 		ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
@@ -271,7 +270,7 @@ var _ = Describe("Termination", func() {
 	})
 	It("should not delete the NodeClaim until all the Nodes are removed", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -279,20 +278,20 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
-		ExpectExists(ctx, env.Client, nodeClaim)                                          // the node still hasn't been deleted, so the nodeClaim should remain
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		ExpectExists(ctx, env.Client, nodeClaim)                                            // the node still hasn't been deleted, so the nodeClaim should remain
 		ExpectExists(ctx, env.Client, node)
 		ExpectFinalizersRemoved(ctx, env.Client, node)
 		operatorpkg.ExpectNotFound(ctx, env.Client, node)
 
-		result := ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // now the nodeClaim should be gone
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
+		result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now the nodeClaim should be gone
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
 		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -302,7 +301,7 @@ var _ = Describe("Termination", func() {
 
 		// Expect the nodeClaim to be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		Expect(cloudProvider.DeleteCalls).To(HaveLen(0))
 		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
@@ -319,7 +318,7 @@ var _ = Describe("Termination", func() {
 
 		// Expect the nodeClaim to be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_instance_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
 		ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
@@ -330,7 +329,7 @@ var _ = Describe("Termination", func() {
 	})
 	It("should not annotate the node if the NodeClaim has no terminationGracePeriod", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -338,12 +337,12 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 		ExpectExists(ctx, env.Client, node)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -352,7 +351,7 @@ var _ = Describe("Termination", func() {
 	It("should annotate the node if the NodeClaim has a terminationGracePeriod", func() {
 		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -360,12 +359,12 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 		ExpectExists(ctx, env.Client, node)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -378,7 +377,7 @@ var _ = Describe("Termination", func() {
 			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
 		}
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
@@ -386,12 +385,12 @@ var _ = Describe("Termination", func() {
 
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		operatorpkg.ExpectApplied(ctx, env.Client, node, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the node deletion
 		ExpectExists(ctx, env.Client, node)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -402,15 +401,15 @@ var _ = Describe("Termination", func() {
 	It("should not delete Nodes if the NodeClaim is not registered", func() {
 		node := test.NodeClaimLinkedNode(nodeClaim)
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		_, err := cloudProvider.Get(ctx, nodeClaim.Status.ProviderID)
 		Expect(err).ToNot(HaveOccurred())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
 		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})

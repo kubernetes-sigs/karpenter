@@ -85,7 +85,7 @@ var _ = Describe("Hydration", func() {
 			})
 			delete(nodeClaim.Labels, v1.NodeClassLabelKey(nodeClassRef.GroupKind()))
 			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectObjectReconciledWithResult(ctx, env.Client, hydrationController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, hydrationController, nodeClaim)
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			value, ok := nodeClaim.Labels[v1.NodeClassLabelKey(nodeClassRef.GroupKind())]

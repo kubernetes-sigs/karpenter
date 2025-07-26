@@ -74,13 +74,13 @@ var _ = Describe("Underutilized", func() {
 		// set the lastPodEvent as now, so it's first marked as not consolidatable
 		unmanagedNodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
 		operatorpkg.ExpectApplied(ctx, env.Client, unmanagedNodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
 		unmanagedNodeClaim = ExpectExists(ctx, env.Client, unmanagedNodeClaim)
 		Expect(unmanagedNodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsUnknown()).To(BeTrue())
 
 		fakeClock.Step(1 * time.Minute)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, unmanagedNodeClaim)
 		unmanagedNodeClaim = ExpectExists(ctx, env.Client, unmanagedNodeClaim)
 		Expect(unmanagedNodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsUnknown()).To(BeTrue())
 	})
@@ -88,13 +88,13 @@ var _ = Describe("Underutilized", func() {
 		// set the lastPodEvent as now, so it's first marked as not consolidatable
 		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now()
 		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeFalse())
 
 		fakeClock.Step(1 * time.Minute)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
@@ -105,13 +105,13 @@ var _ = Describe("Underutilized", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 		fakeClock.SetTime(nodeClaim.StatusConditions().Get(v1.ConditionTypeInitialized).LastTransitionTime.Time)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeFalse())
 
 		fakeClock.Step(1 * time.Minute)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable).IsTrue()).To(BeTrue())
 	})
@@ -120,7 +120,7 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
@@ -129,7 +129,7 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
@@ -138,7 +138,7 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeInitialized)
 		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})
@@ -147,7 +147,7 @@ var _ = Describe("Underutilized", func() {
 		nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeInitialized, "NotInitialized", "NotInitialized")
 		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable)).To(BeNil())
 	})

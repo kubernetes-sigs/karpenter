@@ -103,27 +103,27 @@ var _ = Describe("PodEvents", func() {
 	It("should set the nodeclaim lastPodEvent", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 		timeToCheck := fakeClock.Now().Truncate(time.Second)
-		ExpectObjectReconciledWithResult(ctx, env.Client, podEventsController, pod)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(timeToCheck))
 	})
 	It("should not set the nodeclaim lastPodEvent when the node does not exist", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, pod)
-		ExpectObjectReconciledWithResult(ctx, env.Client, podEventsController, pod)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeZero())
 	})
 	It("should succeed when the nodeclaim lastPodEvent when the nodeclaim does not exist", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, node, pod)
-		ExpectObjectReconciledWithResult(ctx, env.Client, podEventsController, pod)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 	})
 	It("should set the nodeclaim lastPodEvent when it's been set before", func() {
 		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
 		timeToCheck := fakeClock.Now().Truncate(time.Second)
-		ExpectObjectReconciledWithResult(ctx, env.Client, podEventsController, pod)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(timeToCheck))
@@ -131,7 +131,7 @@ var _ = Describe("PodEvents", func() {
 	It("should only set the nodeclaim lastPodEvent once within the dedupe timeframe", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, node, nodeClaim, pod)
 		timeToCheck := fakeClock.Now().Truncate(time.Second)
-		ExpectObjectReconciledWithResult(ctx, env.Client, podEventsController, pod)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		// Expect that the lastPodEventTime is set
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -139,14 +139,14 @@ var _ = Describe("PodEvents", func() {
 
 		// step through half of the dedupe timeout, and re-reconcile, expecting the status to not change
 		fakeClock.Step(5 * time.Second)
-		ExpectObjectReconciledWithResult(ctx, env.Client, podEventsController, pod)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Status.LastPodEventTime.Time).To(BeEquivalentTo(timeToCheck))
 
 		// step through rest of the dedupe timeout, and re-reconcile, expecting the status to change
 		fakeClock.Step(5 * time.Second)
-		ExpectObjectReconciledWithResult(ctx, env.Client, podEventsController, pod)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, podEventsController, pod)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.Status.LastPodEventTime.Time).ToNot(BeEquivalentTo(timeToCheck))

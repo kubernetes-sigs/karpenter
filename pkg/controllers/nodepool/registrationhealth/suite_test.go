@@ -85,13 +85,13 @@ var _ = Describe("RegistrationHealth", func() {
 			Name:  "default",
 		}
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		_ = ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
+		_ = operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy)).To(BeNil())
 	})
 	It("should not set NodeRegistrationHealthy status condition on nodePool when nodeClass does not exist", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy)).To(BeNil())
 	})
@@ -102,7 +102,7 @@ var _ = Describe("RegistrationHealth", func() {
 
 		nodeClass.Spec.Tags = map[string]string{"keyTag-1": "valueTag-1"}
 		operatorpkg.ExpectApplied(ctx, env.Client, nodeClass)
-		_ = ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
+		_ = operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeTrue())
 		Expect(nodePool.Status.NodeClassObservedGeneration).To(Equal(int64(2)))
@@ -114,7 +114,7 @@ var _ = Describe("RegistrationHealth", func() {
 
 		nodePool.Spec.Limits = map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("14")}
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		_ = ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
+		_ = operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeTrue())
 	})
@@ -122,7 +122,7 @@ var _ = Describe("RegistrationHealth", func() {
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
 		nodePool.Status.NodeClassObservedGeneration = int64(1)
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		_ = ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
+		_ = operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeFalse())
 	})
@@ -130,7 +130,7 @@ var _ = Describe("RegistrationHealth", func() {
 		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "unhealthy", "unhealthy")
 		nodePool.Status.NodeClassObservedGeneration = int64(1)
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		_ = ExpectObjectReconciledWithResult(ctx, env.Client, controller, nodePool)
+		_ = operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown()).To(BeFalse())
 	})

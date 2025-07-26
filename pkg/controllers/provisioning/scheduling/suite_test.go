@@ -3920,7 +3920,7 @@ var _ = Context("Scheduling", func() {
 				operatorpkg.ExpectApplied(ctx, env.Client, p)
 				_, ok := FindMetricWithLabelValues("karpenter_pods_scheduling_decision_duration_seconds", nil)
 				Expect(ok).To(BeFalse())
-				ExpectObjectReconciledWithResult(ctx, env.Client, podController, p)
+				operatorpkg.ExpectObjectReconciled(ctx, env.Client, podController, p)
 			}
 
 			// step the clock so the metric isn't 0

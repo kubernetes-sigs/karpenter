@@ -96,7 +96,7 @@ var _ = Describe("Expiration", func() {
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)
-			ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 
@@ -111,7 +111,7 @@ var _ = Describe("Expiration", func() {
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)
-			ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
@@ -135,7 +135,7 @@ var _ = Describe("Expiration", func() {
 
 			// step forward to make the node expired
 			fakeClock.Step(60 * time.Second)
-			ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 			if isNodeClaimManaged {
 				// with forceful termination, when we see a nodeclaim meets the conditions for expiration
 				// we should remove it
@@ -151,13 +151,13 @@ var _ = Describe("Expiration", func() {
 	It("should not remove the NodeClaims when expiration is disabled", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("Never")
 		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should not remove non-expired NodeClaims", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
 		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 	})
 	It("should delete NodeClaims if the nodeClaim is expired but the node isn't", func() {
@@ -167,7 +167,7 @@ var _ = Describe("Expiration", func() {
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
 		operatorpkg.ExpectApplied(ctx, env.Client, node) // node shouldn't be expired, but nodeClaim will be
-		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
@@ -177,8 +177,8 @@ var _ = Describe("Expiration", func() {
 
 		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))
 
-		result := ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
-		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
+		result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
+		result.To(HaveField("RequeueAfter", BeNumerically("~", time.Second*100, time.Second)))
 	})
 	It("shouldn't expire the same NodeClaim multiple times", func() {
 		nodeClaim.ObjectMeta.Finalizers = append(nodeClaim.ObjectMeta.Finalizers, "test-finalizer")
@@ -186,13 +186,13 @@ var _ = Describe("Expiration", func() {
 
 		// step forward to make the node expired
 		fakeClock.Step(60 * time.Second)
-		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 			metrics.ReasonLabel: metrics.ExpiredReason,
 			"nodepool":          nodePool.Name,
 		})
-		ExpectObjectReconciledWithResult(ctx, env.Client, expirationController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
 			metrics.ReasonLabel: metrics.ExpiredReason,
 			"nodepool":          nodePool.Name,
