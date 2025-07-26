@@ -108,7 +108,7 @@ var _ = Describe("Emptiness", func() {
 	})
 	Context("Budgets", func() {
 		var numNodes = 10
-		It("should allow all empty nodes to be disrupted", Focus, func() {
+		It("should allow all empty nodes to be disrupted", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
