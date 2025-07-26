@@ -19,19 +19,21 @@ package lifecycle_test
 import (
 	"time"
 
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	"github.com/awslabs/operatorpkg/status"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Liveness", func() {
@@ -72,18 +74,18 @@ var _ = Describe("Liveness", func() {
 				})
 			}
 			nodeClaim := test.NodeClaim(nodeClaimOpts...)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 			// If the node hasn't registered in the registration timeframe, then we deprovision the NodeClaim
 			fakeClock.Step(time.Minute * 20)
-			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 			if isManagedNodeClaim {
-				ExpectNotFound(ctx, env.Client, nodeClaim)
+				operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 				operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
 					Type:    v1.ConditionTypeNodeRegistrationHealthy,
 					Status:  metav1.ConditionFalse,
@@ -115,15 +117,15 @@ var _ = Describe("Liveness", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		node := test.NodeClaimLinkedNode(nodeClaim)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 		// Node and nodeClaim should still exist
 		fakeClock.Step(time.Minute * 20)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
 	})
@@ -146,15 +148,15 @@ var _ = Describe("Liveness", func() {
 			},
 		})
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't launched in the launch timeout timeframe, then we deprovision the nodeClaim
 		fakeClock.Step(time.Minute * 6)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should not delete the NodeClaim when the NodeClaim hasn't launched before the launch timeout", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -175,8 +177,8 @@ var _ = Describe("Liveness", func() {
 			},
 		})
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// try again a minute later but before the launch timeout
@@ -205,8 +207,8 @@ var _ = Describe("Liveness", func() {
 		})
 		// the result cannot be tested with launch because if the launch fails the error is returned instead of requeue after
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		conditions := nodeClaim.Status.Conditions
@@ -216,10 +218,10 @@ var _ = Describe("Liveness", func() {
 			newConditions[i] = condition
 		}
 		nodeClaim.Status.Conditions = newConditions
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 		// advance the clock to show that the timeout is not based on creation timestamp when considering launch timeout
 		fakeClock.Step(12 * time.Minute)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		// expect that the nodeclaim was not deleted after the timeout
 		ExpectExists(ctx, env.Client, nodeClaim)
@@ -243,8 +245,8 @@ var _ = Describe("Liveness", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		conditions := nodeClaim.Status.Conditions
@@ -254,12 +256,12 @@ var _ = Describe("Liveness", func() {
 			newConditions[i] = condition
 		}
 		nodeClaim.Status.Conditions = newConditions
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 		// advance the clock to show that the timeout is not based on creation timestamp when considering registration timeout
 		fakeClock.Step(16 * time.Minute)
-		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		Expect(result.RequeueAfter).To(Not(Equal(0 * time.Second)))
-		Expect(result.RequeueAfter > 0*time.Second && result.RequeueAfter < 15*time.Minute).To(BeTrue())
+		result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		result.To(HaveField("RequeueAfter", Not(Equal(0*time.Second))))
+		result.To(HaveField("RequeueAfter", And(BeNumerically(">", 0*time.Second), BeNumerically("<", 15*time.Minute))))
 
 		// expect that the nodeclaim was not deleted after the timeout
 		ExpectExists(ctx, env.Client, nodeClaim)
@@ -285,30 +287,30 @@ var _ = Describe("Liveness", func() {
 			},
 		})
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
 		fakeClock.Step(time.Minute * 20)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		// NodeClaim registration failed, but we should not update the NodeRegistrationHealthy status condition if it is already True
 		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{Type: v1.ConditionTypeNodeRegistrationHealthy, Status: metav1.ConditionTrue})
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should not block on updating NodeRegistrationHealthy status condition if nodeClaim is not owned by a nodePool", func() {
 		nodeClaim := test.NodeClaim()
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
-		ExpectApplied(ctx, env.Client, nodeClaim)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
 		fakeClock.Step(time.Minute * 20)
-		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 })

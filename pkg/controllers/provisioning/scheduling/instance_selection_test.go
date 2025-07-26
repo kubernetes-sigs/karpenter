@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math/rand"
 
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	"github.com/mitchellh/hashstructure/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -28,13 +30,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -85,14 +88,14 @@ var _ = Describe("Instance Type Selection", func() {
 	// ways they repeat some other tests, but the testing regarding checking against all possible instance types
 	// passed to the cloud provider is unique.
 	It("should schedule on one of the cheapest instances", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
 		Expect(nodePrice(node)).To(Equal(minPrice))
 	})
 	It("should schedule on one of the cheapest instances (pod arch = amd64)", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{
 				Key:      corev1.LabelArchStable,
@@ -106,7 +109,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), corev1.LabelArchStable, v1.ArchitectureAmd64)
 	})
 	It("should schedule on one of the cheapest instances (pod arch = arm64)", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{
 				Key:      corev1.LabelArchStable,
@@ -128,7 +131,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -145,7 +148,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -162,7 +165,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -170,7 +173,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), corev1.LabelOSStable, string(corev1.Windows))
 	})
 	It("should schedule on one of the cheapest instances (pod os = windows)", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{
 				Key:      corev1.LabelOSStable,
@@ -192,7 +195,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -200,7 +203,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), corev1.LabelOSStable, string(corev1.Windows))
 	})
 	It("should schedule on one of the cheapest instances (pod os = linux)", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{
 				Key:      corev1.LabelOSStable,
@@ -213,7 +216,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), corev1.LabelOSStable, string(corev1.Linux))
 	})
 	It("should schedule on one of the cheapest instances (pod os = linux)", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{
 				Key:      corev1.LabelOSStable,
@@ -235,7 +238,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -243,7 +246,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), corev1.LabelTopologyZone, "test-zone-2")
 	})
 	It("should schedule on one of the cheapest instances (pod zone = test-zone-2)", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{
 				Key:      corev1.LabelTopologyZone,
@@ -265,7 +268,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -273,7 +276,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1.CapacityTypeLabelKey, v1.CapacityTypeSpot)
 	})
 	It("should schedule on one of the cheapest instances (pod ct = spot)", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{
 				Key:      v1.CapacityTypeLabelKey,
@@ -302,7 +305,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -310,7 +313,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithOffering(supportedInstanceTypes(cloudProvider.CreateCalls[0]), v1.CapacityTypeOnDemand, "test-zone-1")
 	})
 	It("should schedule on one of the cheapest instances (pod ct = spot, pod zone = test-zone-1)", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{
 				Key:      v1.CapacityTypeLabelKey,
@@ -338,7 +341,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{
 				Key:      corev1.LabelTopologyZone,
@@ -381,7 +384,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -407,7 +410,7 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 				{
@@ -429,7 +432,7 @@ var _ = Describe("Instance Type Selection", func() {
 		ExpectInstancesWithLabel(supportedInstanceTypes(cloudProvider.CreateCalls[0]), corev1.LabelArchStable, "amd64")
 	})
 	It("should schedule on one of the cheapest instances (pod ct = spot/test-zone-2/amd64/linux)", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 				{
@@ -467,7 +470,7 @@ var _ = Describe("Instance Type Selection", func() {
 		})
 
 		Expect(len(cloudProvider.InstanceTypes)).To(BeNumerically(">", 0))
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 				{
@@ -491,7 +494,7 @@ var _ = Describe("Instance Type Selection", func() {
 			return true
 		})
 		Expect(len(cloudProvider.InstanceTypes)).To(BeNumerically(">", 0))
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 				{
@@ -530,7 +533,7 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 		Expect(len(cloudProvider.InstanceTypes)).To(BeNumerically(">", 0))
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod(
 			test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 				{
@@ -556,7 +559,7 @@ var _ = Describe("Instance Type Selection", func() {
 			overheadHashes[it.Name], err = hashstructure.Hash(it.Overhead.Total(), hashstructure.FormatV2, nil)
 			Expect(err).To(BeNil())
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		// these values are constructed so that three of these pods can always fit on at least one of our instance types
 		for _, cpu := range []float64{0.1, 1.0, 2, 2.5, 4, 8, 16} {
 			for _, mem := range []float64{0.1, 1.0, 2, 4, 8, 16, 32} {
@@ -652,7 +655,7 @@ var _ = Describe("Instance Type Selection", func() {
 			},
 		}
 
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		node := ExpectScheduled(ctx, env.Client, pod)
@@ -709,7 +712,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
 			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
@@ -805,7 +808,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
 			// Both of these should schedule on a instance-type-3 without the minValues requirement being specified.
@@ -882,7 +885,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
 			pod1 := test.UnschedulablePod(test.PodOptions{
@@ -912,8 +915,8 @@ var _ = Describe("Instance Type Selection", func() {
 				},
 			})
 
-			ExpectApplied(ctx, env.Client, pod1)
-			ExpectApplied(ctx, env.Client, pod2)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod1)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod2)
 			results, _ := prov.Schedule(ctx)
 			for _, v := range results.PodErrors {
 				Expect(v.Error()).To(ContainSubstring(`minValues requirement is not met for label(s) (label(s)=[karpenter/numerical-value])`))
@@ -989,7 +992,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
 			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
@@ -1067,7 +1070,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// Both of these should schedule on a instance-type-1 without the minValues requirement being specified.
 			pod1 := test.UnschedulablePod(test.PodOptions{
@@ -1161,7 +1164,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
 			pod1 := test.UnschedulablePod(test.PodOptions{
@@ -1280,7 +1283,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// Both of these should schedule on a instance-type-3 without the minValues requirement being specified.
 			pod1 := test.UnschedulablePod(test.PodOptions{
@@ -1327,7 +1330,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(11),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 
 			// Pods are not scheduled since the requirements are not met
@@ -1388,7 +1391,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
 			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
@@ -1467,7 +1470,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(2),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
 			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.
@@ -1551,7 +1554,7 @@ var _ = Describe("Instance Type Selection", func() {
 					MinValues: lo.ToPtr(1),
 				},
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 
 			// 2 pods are created with resources such that both fit together only in one of the 2 InstanceTypes created above.
 			// Both of these should schedule on a instance-type-2 without the minValues requirement being specified.

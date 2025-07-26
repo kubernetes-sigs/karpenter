@@ -30,6 +30,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -85,19 +87,19 @@ var _ = Describe("Emptiness", func() {
 	Context("Metrics", func() {
 		It("should correctly report eligible nodes", func() {
 			pod := test.Pod()
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 0, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
 
-			ExpectDeleted(ctx, env.Client, pod)
+			operatorpkg.ExpectDeleted(ctx, env.Client, pod)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
 				metrics.ReasonLabel: "empty",
@@ -125,15 +127,15 @@ var _ = Describe("Emptiness", func() {
 			})
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
@@ -144,7 +146,7 @@ var _ = Describe("Emptiness", func() {
 			// Execute command, thus deleting 10 nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
@@ -167,15 +169,15 @@ var _ = Describe("Emptiness", func() {
 			})
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "0%"}}
 
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
@@ -208,15 +210,15 @@ var _ = Describe("Emptiness", func() {
 			})
 			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "30%"}}
 
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
 				"nodepool": nodePool.Name,
@@ -227,7 +229,7 @@ var _ = Describe("Emptiness", func() {
 			// Execute command, thus deleting 3 nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(7))
 		})
@@ -245,9 +247,9 @@ var _ = Describe("Emptiness", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nps); i++ {
-				ExpectApplied(ctx, env.Client, nps[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
 			nodes = make([]*corev1.Node, 0, 30)
@@ -272,15 +274,15 @@ var _ = Describe("Emptiness", func() {
 				nodeClaims = append(nodeClaims, ncs...)
 				nodes = append(nodes, ns...)
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -293,7 +295,7 @@ var _ = Describe("Emptiness", func() {
 			// Execute the command in the queue, only deleting 20 nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(10))
 		})
@@ -310,9 +312,9 @@ var _ = Describe("Emptiness", func() {
 					},
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nps); i++ {
-				ExpectApplied(ctx, env.Client, nps[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nps[i])
 			}
 			nodeClaims = make([]*v1.NodeClaim, 0, 30)
 			nodes = make([]*corev1.Node, 0, 30)
@@ -337,15 +339,15 @@ var _ = Describe("Emptiness", func() {
 				nodeClaims = append(nodeClaims, ncs...)
 				nodes = append(nodes, ns...)
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < len(nodeClaims); i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			for _, np := range nps {
 				metric, found := FindMetricWithLabelValues("karpenter_nodepools_allowed_disruptions", map[string]string{
@@ -358,19 +360,19 @@ var _ = Describe("Emptiness", func() {
 			// Execute the command in the queue, deleting all nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
-			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(0))
 		})
 	})
 	Context("Emptiness", func() {
 		It("can delete empty nodes", func() {
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
-			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -378,16 +380,16 @@ var _ = Describe("Emptiness", func() {
 			// we should delete the empty node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("can delete empty and drifted nodes", func() {
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
-			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -395,19 +397,19 @@ var _ = Describe("Emptiness", func() {
 			// we should delete the empty node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
 			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
 				metrics.ReasonLabel: "empty",
 			})
 		})
 		It("should ignore nodes without the consolidatable status condition", func() {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -416,12 +418,12 @@ var _ = Describe("Emptiness", func() {
 		})
 		It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation", func() {
 			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "true"})
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -430,12 +432,12 @@ var _ = Describe("Emptiness", func() {
 		})
 		It("should delete nodes with the karpenter.sh/do-not-disrupt annotation set to false", func() {
 			node.Annotations = lo.Assign(node.Annotations, map[string]string{v1.DoNotDisruptAnnotationKey: "false"})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-			ExpectSingletonReconciled(ctx, disruptionController)
-			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 			// Cascade any deletion of the nodeClaim to the node
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -443,17 +445,17 @@ var _ = Describe("Emptiness", func() {
 			// we should delete the empty node
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
 		})
 		It("should ignore nodes that have pods", func() {
 			pod := test.Pod()
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -462,12 +464,12 @@ var _ = Describe("Emptiness", func() {
 		})
 		It("should ignore nodes with the consolidatable status condition set to false", func() {
 			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeConsolidatable, "NotEmpty", "NotEmpty")
-			ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodePool)
 
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-			ExpectSingletonReconciled(ctx, disruptionController)
+			operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Expect to not create or delete more nodeclaims
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
@@ -475,15 +477,15 @@ var _ = Describe("Emptiness", func() {
 		})
 	})
 	It("can delete multiple empty nodes", func() {
-		ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, nodeClaim2, node2, nodePool)
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
-		ExpectSingletonReconciled(ctx, disruptionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(1))
-		ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim, nodeClaim2)
@@ -491,8 +493,8 @@ var _ = Describe("Emptiness", func() {
 		// we should delete the empty nodes
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, nodeClaim2)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim2)
 	})
 	It("considers pending pods when consolidating", func() {
 		largeTypes := lo.Filter(cloudProvider.InstanceTypes, func(item *cloudprovider.InstanceType, index int) bool {
@@ -536,7 +538,7 @@ var _ = Describe("Emptiness", func() {
 			},
 		})
 
-		ExpectApplied(ctx, env.Client, nodeClaim, node, pod, unsched, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, pod, unsched, nodePool)
 
 		// bind one of the pods to the node
 		ExpectManualBinding(ctx, env.Client, pod, node)
@@ -544,7 +546,7 @@ var _ = Describe("Emptiness", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		ExpectSingletonReconciled(ctx, disruptionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 
 		// we don't need any new nodes and consolidation should notice the huge pending pod that needs the large
 		// node to schedule, which prevents the large expensive node from being replaced
@@ -566,7 +568,7 @@ var _ = Describe("Emptiness", func() {
 		})
 
 		ds := test.DaemonSet()
-		ExpectApplied(ctx, env.Client, ds, nodeClaim, node, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, ds, nodeClaim, node, nodePool)
 
 		// Pods owned by a Deployment
 		pod := test.Pod(test.PodOptions{
@@ -584,14 +586,14 @@ var _ = Describe("Emptiness", func() {
 			},
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		})
-		ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
 
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectSingletonReconciled(ctx, disruptionController)
-		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -599,7 +601,7 @@ var _ = Describe("Emptiness", func() {
 		// we should delete the empty node
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
 	})
 	It("will consider a node with terminating Deployment pods as empty", func() {
 		// assign the nodeclaims to the least expensive offering so we don't get a replacement
@@ -615,7 +617,7 @@ var _ = Describe("Emptiness", func() {
 		})
 
 		rs := test.ReplicaSet()
-		ExpectApplied(ctx, env.Client, rs, nodeClaim, node, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, rs, nodeClaim, node, nodePool)
 
 		// Pod owned by a Deployment
 		pods := test.Pods(3, test.PodOptions{
@@ -633,7 +635,7 @@ var _ = Describe("Emptiness", func() {
 			},
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		})
-		ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
+		operatorpkg.ExpectApplied(ctx, env.Client, lo.Map(pods, func(p *corev1.Pod, _ int) client.Object { return p })...)
 
 		for _, p := range pods {
 			ExpectManualBinding(ctx, env.Client, p, node)
@@ -648,8 +650,8 @@ var _ = Describe("Emptiness", func() {
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-		ExpectSingletonReconciled(ctx, disruptionController)
-		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
@@ -657,7 +659,7 @@ var _ = Describe("Emptiness", func() {
 		// we should delete the empty node
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim, node)
 	})
 	It("will not consider a node with a terminating StatefulSet pod as empty", func() {
 		// assign the nodeclaims to the least expensive offering so we don't get a replacement
@@ -673,7 +675,7 @@ var _ = Describe("Emptiness", func() {
 		})
 
 		ss := test.StatefulSet()
-		ExpectApplied(ctx, env.Client, ss, nodeClaim, node, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, ss, nodeClaim, node, nodePool)
 
 		// Pod owned by a StatefulSet
 		pod := test.Pod(test.PodOptions{
@@ -691,7 +693,7 @@ var _ = Describe("Emptiness", func() {
 			},
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		})
-		ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
 
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
@@ -702,7 +704,7 @@ var _ = Describe("Emptiness", func() {
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
-		ExpectSingletonReconciled(ctx, disruptionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 		cmds := queue.GetCommands()
 		Expect(cmds).To(HaveLen(0))
 
@@ -717,7 +719,7 @@ var _ = Describe("Emptiness", func() {
 	})
 	It("should wait for the node TTL for empty nodes before consolidating", func() {
 		disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue, disruption.WithMethods(NewMethodsWithRealValidator()...))
-		ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[0], nodes[0], nodePool)
 
 		// inform cluster state about nodes and nodeclaims
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0]}, []*v1.NodeClaim{nodeClaims[0]})
@@ -726,7 +728,7 @@ var _ = Describe("Emptiness", func() {
 		ExpectParallelized(
 			func() {
 				defer finished.Store(true)
-				ExpectSingletonReconciled(ctx, disruptionController)
+				operatorpkg.ExpectSingletonReconciled(ctx, disruptionController)
 			},
 			func() {
 				// wait for the controller to block on the validation timeout
@@ -742,7 +744,7 @@ var _ = Describe("Emptiness", func() {
 			},
 		)
 		// Process the item so that the nodes can be deleted
-		ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
 
 		// Cascade any deletion of the nodeclaim to the node
 		ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
@@ -750,6 +752,6 @@ var _ = Describe("Emptiness", func() {
 		// nodeclaim should be deleted after the TTL due to emptiness
 		Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
-		ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaims[0], nodes[0])
 	})
 })

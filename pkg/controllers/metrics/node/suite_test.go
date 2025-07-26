@@ -28,6 +28,8 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
@@ -84,9 +86,9 @@ var _ = Describe("Node Metrics", func() {
 		node = test.Node(test.NodeOptions{Allocatable: resources})
 	})
 	It("should update the allocatable metric", func() {
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectSingletonReconciled(ctx, metricsStateController)
+		operatorpkg.ExpectSingletonReconciled(ctx, metricsStateController)
 
 		for k, v := range resources {
 			metric, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
@@ -99,9 +101,9 @@ var _ = Describe("Node Metrics", func() {
 	})
 	It("should update the node lifetime and cluster utilization metrics", func() {
 
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectSingletonReconciled(ctx, metricsStateController)
+		operatorpkg.ExpectSingletonReconciled(ctx, metricsStateController)
 
 		metric, found := FindMetricWithLabelValues("karpenter_nodes_current_lifetime_seconds", map[string]string{
 			"node_name": node.GetName(),
@@ -118,18 +120,18 @@ var _ = Describe("Node Metrics", func() {
 		}
 	})
 	It("should remove the node metric gauge when the node is deleted", func() {
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectSingletonReconciled(ctx, metricsStateController)
+		operatorpkg.ExpectSingletonReconciled(ctx, metricsStateController)
 
 		_, found := FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 			"node_name": node.GetName(),
 		})
 		Expect(found).To(BeTrue())
 
-		ExpectDeleted(ctx, env.Client, node)
+		operatorpkg.ExpectDeleted(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		ExpectSingletonReconciled(ctx, metricsStateController)
+		operatorpkg.ExpectSingletonReconciled(ctx, metricsStateController)
 
 		_, found = FindMetricWithLabelValues("karpenter_nodes_allocatable", map[string]string{
 			"node_name": node.GetName(),

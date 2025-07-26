@@ -27,6 +27,8 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -80,20 +82,20 @@ var _ = Describe("Readiness", func() {
 			Kind:  "UnmanagedNodeClass",
 			Name:  "default",
 		}
-		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClass)
+		_ = operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsUnknown()).To(BeFalse())
 	})
 	It("should have status condition on nodePool as not ready when nodeClass does not exist", func() {
-		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 	})
 	It("should have status condition on nodePool as ready if nodeClass is ready", func() {
-		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClass)
+		_ = operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeTrue())
@@ -110,8 +112,8 @@ var _ = Describe("Readiness", func() {
 				},
 			},
 		}
-		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClass)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeFalse())
 	})
@@ -119,15 +121,15 @@ var _ = Describe("Readiness", func() {
 		nodeClass.Status = v1alpha1.TestNodeClassStatus{
 			Conditions: []status.Condition{},
 		}
-		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClass)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().IsTrue(status.ConditionReady)).To(BeFalse())
 	})
 	It("should mark NodeClassReady status condition on nodePool as NotReady if nodeClass is terminating", func() {
-		ExpectApplied(ctx, env.Client, nodePool, nodeClass)
-		ExpectDeletionTimestampSet(ctx, env.Client, nodeClass)
-		ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClass)
+		operatorpkg.ExpectDeletionTimestampSet(ctx, env.Client, nodeClass)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 		nodePool = ExpectExists(ctx, env.Client, nodePool)
 		Expect(nodePool.StatusConditions().Get(status.ConditionReady).IsFalse()).To(BeTrue())
 	})

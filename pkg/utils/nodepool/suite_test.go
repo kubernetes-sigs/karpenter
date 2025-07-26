@@ -21,6 +21,8 @@ import (
 	"math/rand/v2"
 	"testing"
 
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -29,7 +31,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"

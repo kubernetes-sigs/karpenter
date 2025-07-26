@@ -31,6 +31,8 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -90,7 +92,7 @@ var _ = Describe("GarbageCollection", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		nodeClaim, node, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
@@ -105,9 +107,9 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
 
 		// Expect the NodeClaim to not be removed since there is a Node that exists that has a Ready "true" condition
-		ExpectSingletonReconciled(ctx, garbageCollectionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, garbageCollectionController)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
-		ExpectNotFound(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("shouldn't delete the NodeClaim when the Node is there in a Ready state and the instance is gone", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -117,7 +119,7 @@ var _ = Describe("GarbageCollection", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		nodeClaim, _, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
@@ -129,7 +131,7 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
 
 		// Expect the NodeClaim to not be removed since there is a Node that exists that has a Ready "true" condition
-		ExpectSingletonReconciled(ctx, garbageCollectionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, garbageCollectionController)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
@@ -144,10 +146,10 @@ var _ = Describe("GarbageCollection", func() {
 				},
 			}))
 		}
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
 			defer GinkgoRecover()
-			ExpectApplied(ctx, env.Client, nodeClaims[i])
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaims[i])
 			var node *corev1.Node
 			var err error
 			nodeClaims[i], node, err = ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaims[i])
@@ -167,13 +169,13 @@ var _ = Describe("GarbageCollection", func() {
 		})
 
 		// Expect the NodeClaims to be removed now that the Instance is gone
-		ExpectSingletonReconciled(ctx, garbageCollectionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, garbageCollectionController)
 
 		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
 			defer GinkgoRecover()
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaims[i])
 		})
-		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(n *v1.NodeClaim, _ int) client.Object { return n })...)
+		operatorpkg.ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(n *v1.NodeClaim, _ int) client.Object { return n })...)
 	})
 	It("shouldn't delete the NodeClaim when the Node isn't there and the instance is gone", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
@@ -183,7 +185,7 @@ var _ = Describe("GarbageCollection", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		nodeClaim, err := ExpectNodeClaimDeployedNoNode(ctx, env.Client, cloudProvider, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 
@@ -194,7 +196,7 @@ var _ = Describe("GarbageCollection", func() {
 		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
 
 		// Expect the NodeClaim to not be removed since the NodeClaim isn't registered
-		ExpectSingletonReconciled(ctx, garbageCollectionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, garbageCollectionController)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
@@ -206,7 +208,7 @@ var _ = Describe("GarbageCollection", func() {
 				},
 			},
 		})
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 		nodeClaim, node, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
 		Expect(err).ToNot(HaveOccurred())
 
@@ -216,7 +218,7 @@ var _ = Describe("GarbageCollection", func() {
 		fakeClock.SetTime(time.Now().Add(time.Second * 20))
 
 		// Reconcile the NodeClaim. It should not be deleted by this flow since it has never been registered
-		ExpectSingletonReconciled(ctx, garbageCollectionController)
+		operatorpkg.ExpectSingletonReconciled(ctx, garbageCollectionController)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})

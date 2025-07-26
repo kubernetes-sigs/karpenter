@@ -20,7 +20,8 @@ import (
 	"context"
 	"testing"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 

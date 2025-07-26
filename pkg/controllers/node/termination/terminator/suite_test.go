@@ -32,6 +32,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	clock "k8s.io/utils/clock/testing"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
@@ -107,19 +109,19 @@ var _ = Describe("Eviction/Queue", func() {
 
 	Context("Eviction API", func() {
 		It("should succeed with no event when the pod is not found", func() {
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			Expect(recorder.Events()).To(HaveLen(0))
 		})
 		It("should succeed with no event when the pod UID conflicts", func() {
-			ExpectApplied(ctx, env.Client, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod, node)
 			queue.Add(pod)
 			pod.UID = uuid.NewUUID()
 			Expect(queue.Has(pod)).To(BeFalse())
 		})
 		It("should succeed with an evicted event when there are no PDBs", func() {
-			ExpectApplied(ctx, env.Client, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
@@ -128,18 +130,17 @@ var _ = Describe("Eviction/Queue", func() {
 				Labels:         testLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 1},
 			})
-			ExpectApplied(ctx, env.Client, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
-			ExpectApplied(ctx, env.Client, pdb, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pdb, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			//nolint:staticcheck
-			Expect(result.Requeue).To(BeTrue())
+			result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			result.To(HaveField("Requeue", BeTrue()))
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "429"})
 			e := recorder.Events()
 			Expect(e).To(HaveLen(1))
@@ -151,12 +152,11 @@ var _ = Describe("Eviction/Queue", func() {
 				Labels:         testLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
 			})
-			ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			//nolint:staticcheck
-			Expect(result.Requeue).To(BeTrue())
+			result := operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			result.To(HaveField("Requeue", BeTrue()))
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "500"})
 			e := recorder.Events()
 			Expect(e).To(HaveLen(1))
@@ -181,14 +181,14 @@ var _ = Describe("Eviction/Queue", func() {
 			}
 
 			for _, pod = range pods {
-				ExpectObjectReconciled(ctx, env.Client, queue, pod)
+				operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			}
 
 		})
 		It("should increment PodsDrainedTotal metric when a pod is evicted", func() {
-			ExpectApplied(ctx, env.Client, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: ""})
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
@@ -210,10 +210,10 @@ var _ = Describe("Eviction/Queue", func() {
 				Message: "Node is being interrupted",
 			})
 
-			ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, queue, pod)
 
 			ExpectMetricCounterValue(terminator.PodsDrainedTotal, 1, map[string]string{terminator.ReasonLabel: "SpotInterruption"})
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "200"})
@@ -223,7 +223,7 @@ var _ = Describe("Eviction/Queue", func() {
 
 	Context("Pod Deletion API", func() {
 		It("should not delete a pod with no nodeTerminationTime", func() {
-			ExpectApplied(ctx, env.Client, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod, node)
 
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, nil)).To(Succeed())
 			ExpectExists(ctx, env.Client, pod)
@@ -231,7 +231,7 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should not delete a pod with terminationGracePeriodSeconds still remaining before nodeTerminationTime", func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](60)
-			ExpectApplied(ctx, env.Client, pod, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod, node)
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 5)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
@@ -240,11 +240,11 @@ var _ = Describe("Eviction/Queue", func() {
 		})
 		It("should delete a pod with less than terminationGracePeriodSeconds remaining before nodeTerminationTime", func() {
 			pod.Spec.TerminationGracePeriodSeconds = lo.ToPtr[int64](120)
-			ExpectApplied(ctx, env.Client, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod)
 
 			nodeTerminationTime := time.Now().Add(time.Minute * 1)
 			Expect(terminatorInstance.DeleteExpiringPods(ctx, []*corev1.Pod{pod}, &nodeTerminationTime)).To(Succeed())
-			ExpectNotFound(ctx, env.Client, pod)
+			operatorpkg.ExpectNotFound(ctx, env.Client, pod)
 			Expect(recorder.Calls(events.Disrupted)).To(Equal(1))
 		})
 	})

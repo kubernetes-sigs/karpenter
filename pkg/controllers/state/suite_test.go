@@ -38,6 +38,8 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -95,7 +97,7 @@ var _ = BeforeEach(func() {
 	state.ClusterStateUnsyncedTimeSeconds.Reset()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	nodePool = test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
-	ExpectApplied(ctx, env.Client, nodePool)
+	operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
@@ -105,7 +107,7 @@ var _ = AfterEach(func() {
 var _ = Describe("Pod Healthy NodePool", func() {
 	It("should not store pod schedulable time if the nodePool that pod is scheduled to does not have NodeRegistrationHealthy=true", func() {
 		pod := test.Pod()
-		ExpectApplied(ctx, env.Client, pod, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod, nodePool)
 		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
 		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
 		Expect(setTime.IsZero()).To(BeTrue())
@@ -113,7 +115,7 @@ var _ = Describe("Pod Healthy NodePool", func() {
 	It("should store pod schedulable time if the nodePool that pod is scheduled to has NodeRegistrationHealthy=true", func() {
 		pod := test.Pod()
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
-		ExpectApplied(ctx, env.Client, pod, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod, nodePool)
 
 		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
 		setTime := cluster.PodSchedulingSuccessTimeRegistrationHealthyCheck(client.ObjectKeyFromObject(pod))
@@ -122,7 +124,7 @@ var _ = Describe("Pod Healthy NodePool", func() {
 	It("should not update the pod schedulable time if it is already stored for a pod", func() {
 		pod := test.Pod()
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
-		ExpectApplied(ctx, env.Client, pod, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod, nodePool)
 
 		// This will store the pod schedulable time
 		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
@@ -137,7 +139,7 @@ var _ = Describe("Pod Healthy NodePool", func() {
 	It("should delete the pod schedulable time if the pod is deleted", func() {
 		pod := test.Pod()
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
-		ExpectApplied(ctx, env.Client, pod, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod, nodePool)
 
 		// This will store the pod schedulable time
 		cluster.MarkPodSchedulingDecisions(ctx, nil, map[string][]*corev1.Pod{nodePool.Name: {pod}}, nil)
@@ -153,7 +155,7 @@ var _ = Describe("Pod Healthy NodePool", func() {
 var _ = Describe("Pod Ack", func() {
 	It("should only mark pods as schedulable once", func() {
 		pod := test.Pod()
-		ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
 		nn := client.ObjectKeyFromObject(pod)
 
 		setTime := cluster.PodSchedulingSuccessTime(nn)
@@ -169,7 +171,7 @@ var _ = Describe("Pod Ack", func() {
 	})
 	It("should delete pod schedulable time and pod to nodeClaim mapping if we get error for the pod", func() {
 		pod := test.Pod()
-		ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
 		nn := client.ObjectKeyFromObject(pod)
 
 		setTime := cluster.PodSchedulingSuccessTime(nn)
@@ -187,7 +189,7 @@ var _ = Describe("Pod Ack", func() {
 	It("should delete the pod mappings from memory when the pod is deleted", func() {
 		pod := test.Pod()
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
-		ExpectApplied(ctx, env.Client, pod, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod, nodePool)
 
 		nn := client.ObjectKeyFromObject(pod)
 		// This will store the pod mappings
@@ -243,7 +245,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		}
 	})
 	It("should hydrate the volume usage on a Node update", func() {
-		ExpectApplied(ctx, env.Client, sc, node, csiNode)
+		operatorpkg.ExpectApplied(ctx, env.Client, sc, node, csiNode)
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				StorageClassName: lo.ToPtr(sc.Name),
@@ -251,7 +253,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
 			})
-			ExpectApplied(ctx, env.Client, pvc, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, pvc, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -264,7 +266,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		})).ToNot(BeNil())
 	})
 	It("should maintain the volume usage state when receiving NodeClaim updates", func() {
-		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
+		operatorpkg.ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				StorageClassName: lo.ToPtr(sc.Name),
@@ -272,7 +274,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 			pod := test.Pod(test.PodOptions{
 				PersistentVolumeClaims: []string{pvc.Name},
 			})
-			ExpectApplied(ctx, env.Client, pvc, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, pvc, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -294,7 +296,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 		})).ToNot(BeNil())
 	})
 	It("should ignore the volume usage limits breach if the pod update is for an already tracked pod", func() {
-		ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
+		operatorpkg.ExpectApplied(ctx, env.Client, sc, nodeClaim, node, csiNode)
 		var pvcs []*corev1.PersistentVolumeClaim
 		for i := 0; i < 10; i++ {
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
@@ -304,7 +306,7 @@ var _ = Describe("Volume Usage/Limits", func() {
 				PersistentVolumeClaims: []string{pvc.Name},
 			})
 			pvcs = append(pvcs, pvc)
-			ExpectApplied(ctx, env.Client, pvc, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, pvc, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -335,13 +337,13 @@ var _ = Describe("HostPort Usage", func() {
 		})
 	})
 	It("should hydrate the HostPort usage on a Node update", func() {
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		for i := 0; i < 10; i++ {
 			pod := test.Pod(test.PodOptions{
 				HostPorts: []int32{int32(i)},
 			})
-			ExpectApplied(ctx, env.Client, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -358,13 +360,13 @@ var _ = Describe("HostPort Usage", func() {
 		})).ToNot(BeNil())
 	})
 	It("should maintain the host port usage state when receiving NodeClaim updates", func() {
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		for i := 0; i < 10; i++ {
 			pod := test.Pod(test.PodOptions{
 				HostPorts: []int32{int32(i)},
 			})
-			ExpectApplied(ctx, env.Client, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -394,7 +396,7 @@ var _ = Describe("HostPort Usage", func() {
 		})).ToNot(BeNil())
 	})
 	It("should ignore the host port usage conflict if the pod update is for an already tracked pod", func() {
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		var pods []*corev1.Pod
 		for i := 0; i < 10; i++ {
@@ -402,7 +404,7 @@ var _ = Describe("HostPort Usage", func() {
 				HostPorts: []int32{int32(i)},
 			})
 			pods = append(pods, pod)
-			ExpectApplied(ctx, env.Client, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
@@ -433,17 +435,17 @@ var _ = Describe("Node Deletion", func() {
 		})
 		node.Name = nodeClaim.Name
 
-		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		ExpectStateNodeCount("==", 1)
 
 		// Expect that the node isn't leaked due to names matching
-		ExpectDeleted(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectDeleted(ctx, env.Client, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectStateNodeCount("==", 1)
-		ExpectDeleted(ctx, env.Client, node)
+		operatorpkg.ExpectDeleted(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 0)
 	})
@@ -473,8 +475,8 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, pod1, pod2)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod1, pod2)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
@@ -506,8 +508,8 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, pod1, pod2)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod1, pod2)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
@@ -548,8 +550,8 @@ var _ = Describe("Node Resource Level", func() {
 		})
 
 		// simulate a node that already exists in our cluster
-		ExpectApplied(ctx, env.Client, pod1, pod2)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod1, pod2)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectManualBinding(ctx, env.Client, pod1, node)
 		ExpectManualBinding(ctx, env.Client, pod2, node)
 
@@ -580,8 +582,8 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, pod1, pod2)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod1, pod2)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
@@ -595,11 +597,11 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 
 		// delete the pods and the CPU usage should go down
-		ExpectDeleted(ctx, env.Client, pod2)
+		operatorpkg.ExpectDeleted(ctx, env.Client, pod2)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1.5")}, ExpectStateNodeExists(cluster, node).PodRequests())
 
-		ExpectDeleted(ctx, env.Client, pod1)
+		operatorpkg.ExpectDeleted(ctx, env.Client, pod1)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 		ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("0")}, ExpectStateNodeExists(cluster, node).PodRequests())
 	})
@@ -628,8 +630,8 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, pod1, pod2)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod1, pod2)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
@@ -659,8 +661,8 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, pod1)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod1)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
@@ -675,7 +677,7 @@ var _ = Describe("Node Resource Level", func() {
 		})
 
 		// delete the node and the internal state should disappear as well
-		ExpectDeleted(ctx, env.Client, node)
+		operatorpkg.ExpectDeleted(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		cluster.ForEachNode(func(n *state.StateNode) bool {
 			Fail("shouldn't be called as the node was deleted")
@@ -701,7 +703,7 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, pod1, node1)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod1, node1)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node1))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
@@ -714,7 +716,7 @@ var _ = Describe("Node Resource Level", func() {
 			return true
 		})
 
-		ExpectDeleted(ctx, env.Client, pod1)
+		operatorpkg.ExpectDeleted(ctx, env.Client, pod1)
 
 		// second node has more capacity
 		node2 := test.Node(test.NodeOptions{
@@ -737,7 +739,7 @@ var _ = Describe("Node Resource Level", func() {
 				}},
 		})
 
-		ExpectApplied(ctx, env.Client, pod2, node2)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod2, node2)
 		ExpectManualBinding(ctx, env.Client, pod2, node2)
 		// deleted the pod and then recreated it, but simulated only receiving an event on the new pod after it has
 		// bound and not getting the new node event entirely
@@ -779,7 +781,7 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectResources(corev1.ResourceList{
 			corev1.ResourceCPU:  resource.MustParse("0"),
@@ -790,7 +792,7 @@ var _ = Describe("Node Resource Level", func() {
 		sum := 0.0
 		podCount := 0
 		for _, pod := range pods {
-			ExpectApplied(ctx, env.Client, pod)
+			operatorpkg.ExpectApplied(ctx, env.Client, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			podCount++
 
@@ -807,7 +809,7 @@ var _ = Describe("Node Resource Level", func() {
 		}
 
 		for _, pod := range pods {
-			ExpectDeleted(ctx, env.Client, pod)
+			operatorpkg.ExpectDeleted(ctx, env.Client, pod)
 			nReconciles := rand.Intn(3) + 1
 			// or multiply removed
 			for i := 0; i < nReconciles; i++ {
@@ -833,7 +835,7 @@ var _ = Describe("Node Resource Level", func() {
 					corev1.ResourceMemory: resource.MustParse("2Gi")}},
 			}},
 		)
-		ExpectApplied(ctx, env.Client, ds)
+		operatorpkg.ExpectApplied(ctx, env.Client, ds)
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(ds), ds)).To(Succeed())
 
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -870,7 +872,7 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, pod1, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod1, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		ExpectManualBinding(ctx, env.Client, pod1, node)
@@ -886,7 +888,7 @@ var _ = Describe("Node Resource Level", func() {
 			corev1.ResourceCPU: resource.MustParse("1.5"),
 		}, ExpectStateNodeExists(cluster, node).PodRequests())
 
-		ExpectApplied(ctx, env.Client, dsPod)
+		operatorpkg.ExpectApplied(ctx, env.Client, dsPod)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(dsPod))
 		ExpectManualBinding(ctx, env.Client, dsPod, node)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(dsPod))
@@ -916,7 +918,7 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
@@ -974,7 +976,7 @@ var _ = Describe("Node Resource Level", func() {
 			},
 		})
 		node := test.NodeClaimLinkedNode(nodeClaim)
-		ExpectApplied(ctx, env.Client, nodeClaim, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectStateNodeCount("==", 1)
@@ -1000,7 +1002,7 @@ var _ = Describe("Node Resource Level", func() {
 			},
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		cluster.NominateNodeForPod(ctx, node.Spec.ProviderID)
@@ -1014,7 +1016,7 @@ var _ = Describe("Node Resource Level", func() {
 	})
 	It("should handle a node changing from no providerID to registering a providerID", func() {
 		node := test.Node()
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		ExpectStateNodeCount("==", 1)
@@ -1022,7 +1024,7 @@ var _ = Describe("Node Resource Level", func() {
 
 		// Change the providerID; this mocks CCM adding the providerID onto the node after registration
 		node.Spec.ProviderID = fmt.Sprintf("fake://%s", node.Name)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		ExpectStateNodeCount("==", 1)
@@ -1058,8 +1060,8 @@ var _ = Describe("Pod Anti-Affinity", func() {
 			ProviderID: test.RandomProviderID(),
 		})
 
-		ExpectApplied(ctx, env.Client, pod)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -1102,8 +1104,8 @@ var _ = Describe("Pod Anti-Affinity", func() {
 			ProviderID: test.RandomProviderID(),
 		})
 
-		ExpectApplied(ctx, env.Client, pod)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -1143,8 +1145,8 @@ var _ = Describe("Pod Anti-Affinity", func() {
 			ProviderID: test.RandomProviderID(),
 		})
 
-		ExpectApplied(ctx, env.Client, pod)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -1157,7 +1159,7 @@ var _ = Describe("Pod Anti-Affinity", func() {
 		})
 		Expect(foundPodCount).To(BeNumerically("==", 1))
 
-		ExpectDeleted(ctx, env.Client, client.Object(pod))
+		operatorpkg.ExpectDeleted(ctx, env.Client, client.Object(pod))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 		foundPodCount = 0
 		cluster.ForPodsWithAntiAffinity(func(p *corev1.Pod, n *corev1.Node) bool {
@@ -1194,15 +1196,15 @@ var _ = Describe("Pod Anti-Affinity", func() {
 			ProviderID: test.RandomProviderID(),
 		})
 
-		ExpectApplied(ctx, env.Client, pod)
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, pod)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 		ExpectManualBinding(ctx, env.Client, pod, node)
 
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod))
 
 		// simulate receiving the node deletion before the pod deletion
-		ExpectDeleted(ctx, env.Client, node)
+		operatorpkg.ExpectDeleted(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		foundPodCount := 0
@@ -1226,7 +1228,7 @@ var _ = Describe("Cluster State Sync", func() {
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
 				})
-				ExpectApplied(ctx, env.Client, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, node)
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			}()
 		}
@@ -1246,7 +1248,7 @@ var _ = Describe("Cluster State Sync", func() {
 			},
 		})
 		nodeClaim.Status.ProviderID = ""
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 
@@ -1266,7 +1268,7 @@ var _ = Describe("Cluster State Sync", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node()
-				ExpectApplied(ctx, env.Client, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, node)
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			}()
 		}
@@ -1286,7 +1288,7 @@ var _ = Describe("Cluster State Sync", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				node := test.Node()
-				ExpectApplied(ctx, env.Client, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, node)
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 				nodes[index] = node
 			}(i)
@@ -1300,7 +1302,7 @@ var _ = Describe("Cluster State Sync", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				nodes[index].Spec.ProviderID = test.RandomProviderID()
-				ExpectApplied(ctx, env.Client, nodes[index])
+				operatorpkg.ExpectApplied(ctx, env.Client, nodes[index])
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(nodes[index]))
 			}(i)
 		}
@@ -1322,7 +1324,7 @@ var _ = Describe("Cluster State Sync", func() {
 						ProviderID: test.RandomProviderID(),
 					},
 				})
-				ExpectApplied(ctx, env.Client, nodeClaim)
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			}()
 		}
@@ -1345,7 +1347,7 @@ var _ = Describe("Cluster State Sync", func() {
 						ProviderID: node.Spec.ProviderID,
 					},
 				})
-				ExpectApplied(ctx, env.Client, nodeClaim, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			}()
@@ -1360,7 +1362,7 @@ var _ = Describe("Cluster State Sync", func() {
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
 				})
-				ExpectApplied(ctx, env.Client, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, node)
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			}()
 		}
@@ -1376,7 +1378,7 @@ var _ = Describe("Cluster State Sync", func() {
 						ProviderID: test.RandomProviderID(),
 					},
 				})
-				ExpectApplied(ctx, env.Client, nodeClaim)
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			}()
 		}
@@ -1399,7 +1401,7 @@ var _ = Describe("Cluster State Sync", func() {
 				node := test.Node(test.NodeOptions{
 					ProviderID: nodeClaim.Status.ProviderID,
 				})
-				ExpectApplied(ctx, env.Client, nodeClaim, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			}()
@@ -1424,7 +1426,7 @@ var _ = Describe("Cluster State Sync", func() {
 				if index == 900 {
 					nodeClaim.Status.ProviderID = ""
 				}
-				ExpectApplied(ctx, env.Client, nodeClaim)
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			}(i)
 		}
@@ -1444,7 +1446,7 @@ var _ = Describe("Cluster State Sync", func() {
 						ProviderID: test.RandomProviderID(),
 					},
 				})
-				ExpectApplied(ctx, env.Client, nodeClaim)
+				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
 				// One of them doesn't get synced with the reconciliation
 				if i != 900 {
@@ -1466,7 +1468,7 @@ var _ = Describe("Cluster State Sync", func() {
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
 				})
-				ExpectApplied(ctx, env.Client, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 				// One of them doesn't get synced with the reconciliation
 				if i != 900 {
@@ -1493,12 +1495,12 @@ var _ = Describe("Cluster State Sync", func() {
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 0, nil)
 
-		ExpectApplied(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 0, nil)
 
-		ExpectDeleted(ctx, env.Client, nodeClaim)
+		operatorpkg.ExpectDeleted(ctx, env.Client, nodeClaim)
 		ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		Expect(cluster.Synced(ctx)).To(BeTrue())
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 1, nil)
@@ -1520,7 +1522,7 @@ var _ = Describe("Cluster State Sync", func() {
 						ProviderID: node.Spec.ProviderID,
 					},
 				})
-				ExpectApplied(ctx, env.Client, node, nodeClaim)
+				operatorpkg.ExpectApplied(ctx, env.Client, node, nodeClaim)
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			}()
@@ -1535,7 +1537,7 @@ var _ = Describe("Cluster State Sync", func() {
 				node := test.Node(test.NodeOptions{
 					ProviderID: test.RandomProviderID(),
 				})
-				ExpectApplied(ctx, env.Client, node)
+				operatorpkg.ExpectApplied(ctx, env.Client, node)
 				ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 			}()
 		}
@@ -1546,7 +1548,7 @@ var _ = Describe("Cluster State Sync", func() {
 		node := test.Node(test.NodeOptions{
 			ProviderID: test.RandomProviderID(),
 		})
-		ExpectApplied(ctx, env.Client, node)
+		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 		// Cluster state should still be synced because we already synced our changes
 		Expect(cluster.Synced(ctx)).To(BeTrue())
@@ -1560,7 +1562,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
 		)
-		ExpectApplied(ctx, env.Client, daemonset)
+		operatorpkg.ExpectApplied(ctx, env.Client, daemonset)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 		daemonsetPod := cluster.GetDaemonSetPod(daemonset)
 		Expect(daemonsetPod).To(BeNil())
@@ -1571,7 +1573,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
 		)
-		ExpectApplied(ctx, env.Client, daemonset)
+		operatorpkg.ExpectApplied(ctx, env.Client, daemonset)
 		daemonsetPod := test.UnschedulablePod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1588,7 +1590,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				},
 			})
 		daemonsetPod.Spec = daemonset.Spec.Template.Spec
-		ExpectApplied(ctx, env.Client, daemonsetPod)
+		operatorpkg.ExpectApplied(ctx, env.Client, daemonsetPod)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod))
@@ -1599,7 +1601,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
 		)
-		ExpectApplied(ctx, env.Client, daemonset)
+		operatorpkg.ExpectApplied(ctx, env.Client, daemonset)
 		daemonsetPod1 := test.UnschedulablePod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1616,7 +1618,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				},
 			})
 		daemonsetPod1.Spec = daemonset.Spec.Template.Spec
-		ExpectApplied(ctx, env.Client, daemonsetPod1)
+		operatorpkg.ExpectApplied(ctx, env.Client, daemonsetPod1)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod1))
@@ -1638,7 +1640,7 @@ var _ = Describe("DaemonSet Controller", func() {
 			})
 		time.Sleep(time.Second) // Making sure the two pods have different creationTime
 		daemonsetPod2.Spec = daemonset.Spec.Template.Spec
-		ExpectApplied(ctx, env.Client, daemonsetPod2)
+		operatorpkg.ExpectApplied(ctx, env.Client, daemonsetPod2)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod2))
 	})
@@ -1648,7 +1650,7 @@ var _ = Describe("DaemonSet Controller", func() {
 				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
 		)
-		ExpectApplied(ctx, env.Client, daemonset)
+		operatorpkg.ExpectApplied(ctx, env.Client, daemonset)
 		daemonsetPod := test.UnschedulablePod(
 			test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1665,12 +1667,12 @@ var _ = Describe("DaemonSet Controller", func() {
 				},
 			})
 		daemonsetPod.Spec = daemonset.Spec.Template.Spec
-		ExpectApplied(ctx, env.Client, daemonsetPod)
+		operatorpkg.ExpectApplied(ctx, env.Client, daemonsetPod)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(Equal(daemonsetPod))
 
-		ExpectDeleted(ctx, env.Client, daemonset, daemonsetPod)
+		operatorpkg.ExpectDeleted(ctx, env.Client, daemonset, daemonsetPod)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(BeNil())
@@ -1681,13 +1683,13 @@ var _ = Describe("DaemonSet Controller", func() {
 				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			}},
 		)
-		ExpectApplied(ctx, env.Client, daemonset)
+		operatorpkg.ExpectApplied(ctx, env.Client, daemonset)
 		otherPods := test.Pods(1000, test.PodOptions{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: daemonset.Namespace,
 			},
 		})
-		ExpectApplied(ctx, env.Client, lo.Map(otherPods, func(p *corev1.Pod, _ int) client.Object { return p })...)
+		operatorpkg.ExpectApplied(ctx, env.Client, lo.Map(otherPods, func(p *corev1.Pod, _ int) client.Object { return p })...)
 		ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 		Expect(cluster.GetDaemonSetPod(daemonset)).To(BeNil())
 	})
@@ -1719,9 +1721,9 @@ var _ = Describe("Consolidated State", func() {
 	It("should cause consolidation state to change when a NodePool is updated", func() {
 		cluster.MarkUnconsolidated()
 		fakeClock.Step(time.Minute)
-		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
 		state := cluster.ConsolidationState()
-		ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
 		Expect(cluster.ConsolidationState()).ToNot(Equal(state))
 	})
 })
@@ -1756,7 +1758,7 @@ var _ = Describe("Data Races", func() {
 			node := test.Node(test.NodeOptions{
 				ProviderID: test.RandomProviderID(),
 			})
-			ExpectApplied(ctx, env.Client, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 		}
 	})
@@ -1781,7 +1783,7 @@ var _ = Describe("Data Races", func() {
 					ProviderID: test.RandomProviderID(),
 				},
 			})
-			ExpectApplied(ctx, env.Client, nodeClaim)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 		}
 	})
@@ -1809,7 +1811,7 @@ var _ = Describe("Taints", func() {
 				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
-			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
@@ -1817,7 +1819,7 @@ var _ = Describe("Taints", func() {
 			Expect(stateNode.Taints()).To(HaveLen(0))
 		})
 		It("should consider ephemeral taints on a managed node after the node is initialized", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
 			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
@@ -1828,7 +1830,7 @@ var _ = Describe("Taints", func() {
 				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
-			ExpectApplied(ctx, env.Client, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, node)
 
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
@@ -1851,7 +1853,7 @@ var _ = Describe("Taints", func() {
 				{Key: "taint-key", Value: "taint-value", Effect: corev1.TaintEffectNoSchedule},
 				{Key: "taint-key2", Value: "taint-value2", Effect: corev1.TaintEffectNoExecute},
 			}
-			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
@@ -1867,7 +1869,7 @@ var _ = Describe("Taints", func() {
 				{Key: "taint-key", Value: "taint-value", Effect: corev1.TaintEffectNoSchedule},
 				{Key: "taint-key2", Value: "taint-value2", Effect: corev1.TaintEffectNoExecute},
 			}
-			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
 			ExpectMakeNodesInitialized(ctx, env.Client, node)
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
@@ -1890,7 +1892,7 @@ var _ = Describe("Taints", func() {
 				{Key: corev1.TaintNodeUnreachable, Effect: corev1.TaintEffectNoSchedule},
 				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
-			ExpectApplied(ctx, env.Client, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 			stateNode := ExpectStateNodeExists(cluster, node)
@@ -1903,7 +1905,7 @@ var _ = Describe("Taints", func() {
 			))
 		})
 		It("should consider ephemeral taints on an unmanaged node after the node is initialized", func() {
-			ExpectApplied(ctx, env.Client, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, node)
 			ExpectMakeNodesInitialized(ctx, env.Client, node)
 
 			node = ExpectExists(ctx, env.Client, node)
@@ -1914,7 +1916,7 @@ var _ = Describe("Taints", func() {
 				{Key: cloudproviderapi.TaintExternalCloudProvider, Effect: corev1.TaintEffectNoSchedule, Value: "true"},
 			}
 
-			ExpectApplied(ctx, env.Client, node)
+			operatorpkg.ExpectApplied(ctx, env.Client, node)
 			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 			stateNode := ExpectStateNodeExists(cluster, node)
