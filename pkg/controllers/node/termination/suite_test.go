@@ -410,7 +410,8 @@ var _ = Describe("Termination", func() {
 
 			// Attempt to evict the pod
 			_, err := queue.Reconcile(ctx, podNoEvict)
-			Expect(err).ToNot(HaveOccurred()) //nolint: staticcheck
+			Expect(err).ToNot(HaveOccurred())
+			//nolint: staticcheck
 			operatorpkg.ExpectNotRequeued(operatorpkg.ExpectReconciled(ctx, reconciler, podNoEvict))
 
 			// Expect podNoEvict to fail eviction due to PDB, and be retried

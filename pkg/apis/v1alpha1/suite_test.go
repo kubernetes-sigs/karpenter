@@ -19,8 +19,9 @@ package v1alpha1_test
 import (
 	"context"
 	"math/rand/v2"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"testing"
+
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
 	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
