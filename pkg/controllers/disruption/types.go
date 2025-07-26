@@ -106,7 +106,11 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, serrors.Wrap(fmt.Errorf("nodepool not found"), "NodePool", klog.KRef("", nodePoolName))
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
-	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
+	// becuz some other cloud k8s will use the label from the node, and can not change the label value,
+	// but the label in the nodeclaim is only controlled by karpenter, so we need to get this label from nodeclaim.
+	// or I think the best is to make use of a karpenter specific label
+	nodeClaimInstanceType := node.NodeClaim.Labels[corev1.LabelInstanceTypeStable]
+	instanceType := instanceTypeMap[node.Labels()[nodeClaimInstanceType]]
 	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
 		// If the NodeClaim has a TerminationGracePeriod set and the disruption class is eventual, the node should be
 		// considered a candidate even if there's a pod that will block eviction. Other error types should still cause
