@@ -19,9 +19,10 @@ package v1alpha1_test
 import (
 	"context"
 	"math/rand/v2"
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"testing"
 
-	. "github.com/awslabs/operatorpkg/test/expectations"
+	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -30,7 +31,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/test"
-	testexpectations "sigs.k8s.io/karpenter/pkg/test/expectations"
 	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -49,7 +49,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	testexpectations.ExpectCleanedUp(ctx, env.Client)
+	ExpectCleanedUp(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {
@@ -74,7 +74,7 @@ var _ = Describe("NodeOverlay", func() {
 				})
 			})
 			lo.ForEach(nos, func(overlay *v1alpha1.NodeOverlay, _ int) {
-				ExpectApplied(ctx, env.Client, overlay)
+				operatorpkg.ExpectApplied(ctx, env.Client, overlay)
 			})
 			overlayList := &v1alpha1.NodeOverlayList{}
 			Expect(env.Client.List(ctx, overlayList)).To(BeNil())
@@ -102,7 +102,7 @@ var _ = Describe("NodeOverlay", func() {
 				})
 			})
 			lo.ForEach(nos, func(overlay *v1alpha1.NodeOverlay, _ int) {
-				ExpectApplied(ctx, env.Client, overlay)
+				operatorpkg.ExpectApplied(ctx, env.Client, overlay)
 			})
 			overlayList := &v1alpha1.NodeOverlayList{}
 			Expect(env.Client.List(ctx, overlayList)).To(BeNil())
