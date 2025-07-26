@@ -656,10 +656,3 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 	}
 	wg.Wait()
 }
-
-func ExpectObjectReconciledWithResult[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) reconcile.Result {
-	GinkgoHelper()
-	result, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
-	Expect(err).ToNot(HaveOccurred())
-	return result
-}

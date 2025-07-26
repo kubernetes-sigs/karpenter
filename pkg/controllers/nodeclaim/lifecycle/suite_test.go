@@ -113,7 +113,7 @@ var _ = Describe("Finalizer", func() {
 				},
 			})
 			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			_, ok := lo.Find(nodeClaim.Finalizers, func(f string) bool {
@@ -137,7 +137,7 @@ var _ = Describe("Finalizer", func() {
 				},
 			})
 			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			_, ok := lo.Find(nodeClaim.Finalizers, func(f string) bool {
@@ -155,11 +155,11 @@ var _ = Describe("Finalizer", func() {
 			})
 			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			// add a finalizer so we can make assertions about all status conditions
 			operatorpkg.ExpectDeletionTimestampSet(ctx, env.Client, nodeClaim)
-			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue()).To(BeTrue())
@@ -171,7 +171,7 @@ var _ = Describe("Finalizer", func() {
 			Expect(nodeClaim.StatusConditions().Get(status.ConditionReady).IsTrue()).To(BeTrue())
 			Expect(nodeClaim.StatusConditions().Get(status.ConditionReady).ObservedGeneration).To(Equal(nodeClaim.Generation))
 
-			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).ObservedGeneration).To(Equal(nodeClaim.Generation))
@@ -197,7 +197,7 @@ var _ = Describe("Finalizer", func() {
 			},
 		})
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -206,7 +206,7 @@ var _ = Describe("Finalizer", func() {
 		})
 		operatorpkg.ExpectApplied(ctx, env.Client, node)
 
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -225,7 +225,7 @@ var _ = Describe("Finalizer", func() {
 			corev1.ResourcePods:   resource.MustParse("110"),
 		}
 		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
@@ -236,7 +236,7 @@ var _ = Describe("Finalizer", func() {
 		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// Expect that when the object re-reconciles, all of the observedGenerations across all status condition match
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched).IsTrue()).To(BeTrue())

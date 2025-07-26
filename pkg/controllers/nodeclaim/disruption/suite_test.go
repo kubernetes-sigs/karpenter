@@ -138,7 +138,7 @@ var _ = Describe("Disruption", func() {
 
 		// step forward to make the node empty
 		fakeClock.Step(60 * time.Second)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -152,7 +152,7 @@ var _ = Describe("Disruption", func() {
 
 		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-		ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())

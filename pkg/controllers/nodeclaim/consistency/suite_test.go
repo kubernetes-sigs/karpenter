@@ -132,7 +132,7 @@ var _ = Describe("NodeClaimController", func() {
 				nodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeConsistentStateFound)
 				operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 				ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-				ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
+				operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				if isNodeClaimManaged {
 					Expect(nodeClaim.StatusConditions().IsTrue(v1.ConditionTypeConsistentStateFound)).To(BeTrue())
@@ -177,7 +177,7 @@ var _ = Describe("NodeClaimController", func() {
 			}
 			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 			ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-			ExpectObjectReconciledWithResult(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
+			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimConsistencyController, nodeClaim)
 			Expect(recorder.DetectedEvent("expected 128Gi of resource memory, but found 64Gi (50.0% of expected)")).To(BeTrue())
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeConsistentStateFound).IsFalse()).To(BeTrue())
