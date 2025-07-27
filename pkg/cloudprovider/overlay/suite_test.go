@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodeoverlay_test
+package overlay_test
 
 import (
 	"context"
@@ -37,35 +37,43 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
-	nodeoverlayutils "sigs.k8s.io/karpenter/pkg/utils/nodeoverlay"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
 var (
-	ctx           context.Context
-	env           *test.Environment
-	fakeClock     *clock.FakeClock
-	cloudProvider *fake.CloudProvider
-	cluster       *state.Cluster
-	nodePool      *v1.NodePool
-	nodePoolTwo   *v1.NodePool
+	ctx               context.Context
+	env               *test.Environment
+	fakeClock         *clock.FakeClock
+	fakeCloudProvider *fake.CloudProvider
+	cloudProvider     cloudprovider.CloudProvider
+	cluster           *state.Cluster
+	nodePool          *v1.NodePool
+	nodePoolTwo       *v1.NodePool
 )
 
-func TestValidation(t *testing.T) {
+func Test(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "NodeOverlayUtils")
+	RunSpecs(t, "NodeOverlay Decorator")
 }
 
 var _ = BeforeSuite(func() {
+	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+		FeatureGates: test.FeatureGates{
+			NodeOverlay: lo.ToPtr(true),
+		},
+	}))
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 
-	cloudProvider = fake.NewCloudProvider()
+	fakeCloudProvider = fake.NewCloudProvider()
+	cloudProvider = overlay.Decorate(fakeCloudProvider, env.Client)
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 })
@@ -74,7 +82,7 @@ var _ = BeforeEach(func() {
 	nodePool = test.NodePool()
 	nodePoolTwo = test.NodePool()
 	cluster.Reset()
-	cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+	fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 		fake.NewInstanceType(fake.InstanceTypeOptions{
 			Name: "default-instance-type",
 			Offerings: []*cloudprovider.Offering{
@@ -118,13 +126,13 @@ var _ = Describe("Instance Type Controller", func() {
 				overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1001.020))
 
-				instanceTypeList, err = nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePoolTwo)
+				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -148,13 +156,13 @@ var _ = Describe("Instance Type Controller", func() {
 				overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1001.020))
 
-				instanceTypeList, err = nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePoolTwo)
+				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -180,13 +188,13 @@ var _ = Describe("Instance Type Controller", func() {
 				overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
 
-				instanceTypeList, err = nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePoolTwo)
+				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -210,7 +218,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "testing")
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -234,7 +242,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -257,14 +265,14 @@ var _ = Describe("Instance Type Controller", func() {
 			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 			Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1001.020))
 		})
 		It("should apply pricing adjustments for instances types for capacity type", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type",
 					Offerings: []*cloudprovider.Offering{
@@ -304,7 +312,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
@@ -324,7 +332,7 @@ var _ = Describe("Instance Type Controller", func() {
 			Expect(instanceTypeList[0].Offerings.Compatible(spotReq)[0].Price).To(BeNumerically("~", 1.020))
 		})
 		It("should apply pricing adjustments for instances types for availability zone", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type",
 					Offerings: []*cloudprovider.Offering{
@@ -364,7 +372,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
@@ -384,7 +392,7 @@ var _ = Describe("Instance Type Controller", func() {
 			Expect(instanceTypeList[0].Offerings.Compatible(zoneTwoReq)[0].Price).To(BeNumerically("~", 5.020))
 		})
 		It("should update price adjustment offerings instance types from multiple overlays", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type",
 					Offerings: []*cloudprovider.Offering{
@@ -446,7 +454,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlayB.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 3))
@@ -473,7 +481,7 @@ var _ = Describe("Instance Type Controller", func() {
 			Expect(instanceTypeList[0].Offerings.Compatible(capacityReq)[0].Price).To(BeNumerically("~", 0.52))
 		})
 		It("should update price adjustment offerings instance types from multiple overlays with different weights", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type",
 					Offerings: []*cloudprovider.Offering{
@@ -542,7 +550,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 3))
@@ -581,13 +589,13 @@ var _ = Describe("Instance Type Controller", func() {
 				overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 13234.223))
 
-				instanceTypeList, err = nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePoolTwo)
+				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -611,13 +619,13 @@ var _ = Describe("Instance Type Controller", func() {
 				overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 13234.223))
 
-				instanceTypeList, err = nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePoolTwo)
+				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -643,13 +651,13 @@ var _ = Describe("Instance Type Controller", func() {
 				overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
 
-				instanceTypeList, err = nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePoolTwo)
+				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -673,7 +681,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "testing")
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -696,7 +704,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -720,14 +728,14 @@ var _ = Describe("Instance Type Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 			Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("~", 13234.223))
 		})
 		It("should override instance type price by capacity type", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type",
 					Offerings: []*cloudprovider.Offering{
@@ -767,7 +775,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
@@ -787,7 +795,7 @@ var _ = Describe("Instance Type Controller", func() {
 			Expect(instanceTypeList[0].Offerings.Compatible(spotReq)[0].Price).To(BeNumerically("~", 1.020))
 		})
 		It("should override instance type price by availability zone", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type",
 					Offerings: []*cloudprovider.Offering{
@@ -827,7 +835,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 2))
@@ -847,7 +855,7 @@ var _ = Describe("Instance Type Controller", func() {
 			Expect(instanceTypeList[0].Offerings.Compatible(zoneTwoReq)[0].Price).To(BeNumerically("~", 5.020))
 		})
 		It("should update price offerings instance types from multiple overlays", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type",
 					Offerings: []*cloudprovider.Offering{
@@ -910,7 +918,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 3))
@@ -937,7 +945,7 @@ var _ = Describe("Instance Type Controller", func() {
 			Expect(instanceTypeList[0].Offerings.Compatible(capacityReq)[0].Price).To(BeNumerically("~", 165.421))
 		})
 		It("should update price offerings instance types from multiple overlays with different weights", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type",
 					Offerings: []*cloudprovider.Offering{
@@ -999,7 +1007,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlayB.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 3))
@@ -1040,7 +1048,7 @@ var _ = Describe("Instance Type Controller", func() {
 				overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -1048,7 +1056,7 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(exist).To(BeTrue())
 				Expect(resource).To(BeNumerically("==", 1))
 
-				instanceTypeList, err = nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePoolTwo)
+				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -1074,7 +1082,7 @@ var _ = Describe("Instance Type Controller", func() {
 				overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -1082,7 +1090,7 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(exist).To(BeTrue())
 				Expect(resource).To(BeNumerically("==", 1))
 
-				instanceTypeList, err = nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePoolTwo)
+				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -1110,13 +1118,13 @@ var _ = Describe("Instance Type Controller", func() {
 				overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(lo.Keys(instanceTypeList[0].Capacity)).ToNot(ContainElement("smarter-devices/fuse"))
 
-				instanceTypeList, err = nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePoolTwo)
+				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -1144,7 +1152,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "testing")
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -1169,7 +1177,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -1194,7 +1202,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlay.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 			Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
@@ -1203,7 +1211,7 @@ var _ = Describe("Instance Type Controller", func() {
 			Expect(resource).To(BeNumerically("==", 1))
 		})
 		It("should update capacity for instance types from multiple overlays", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type-zone-one",
 					Offerings: []*cloudprovider.Offering{
@@ -1279,7 +1287,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlayB.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 3))
 
@@ -1307,7 +1315,7 @@ var _ = Describe("Instance Type Controller", func() {
 			}
 		})
 		It("should update price offerings instance types from multiple overlays with different weights", func() {
-			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+			fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType(fake.InstanceTypeOptions{
 					Name: "default-instance-type-zone-one",
 					Offerings: []*cloudprovider.Offering{
@@ -1383,7 +1391,7 @@ var _ = Describe("Instance Type Controller", func() {
 			overlayB.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 3))
 
@@ -1438,7 +1446,7 @@ var _ = Describe("Instance Type Controller", func() {
 		overlayCapacity.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice, overlayCapacity)
 
-		instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).To(BeNil())
 
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1449,7 +1457,7 @@ var _ = Describe("Instance Type Controller", func() {
 		Expect(resource).To(BeNumerically("==", 1))
 	})
 	It("should have an empty instance types set when cloudprovider does not return instance types", func() {
-		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{}
+		fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{}
 		overlayPrice := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
 				Requirements: []corev1.NodeSelectorRequirement{
@@ -1469,12 +1477,12 @@ var _ = Describe("Instance Type Controller", func() {
 		overlayPrice.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
 
-		instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).To(BeNil())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 0))
 	})
 	It("should have an empty instance types set when cloudprovider return an error", func() {
-		cloudProvider.ErrorsForNodePool = map[string]error{nodePool.Name: fmt.Errorf("test error")}
+		fakeCloudProvider.ErrorsForNodePool = map[string]error{nodePool.Name: fmt.Errorf("test error")}
 		overlayPrice := test.NodeOverlay(v1alpha1.NodeOverlay{
 			Spec: v1alpha1.NodeOverlaySpec{
 				Requirements: []corev1.NodeSelectorRequirement{
@@ -1494,7 +1502,7 @@ var _ = Describe("Instance Type Controller", func() {
 		overlayPrice.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
 
-		instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).ToNot(BeNil())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 0))
 	})
@@ -1520,7 +1528,7 @@ var _ = Describe("Instance Type Controller", func() {
 		overlayPrice.StatusConditions().SetTrue(v1alpha1.ConditionTypeValidationSucceeded)
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
 
-		instanceTypeList, err := nodeoverlayutils.GetInstanceTypes(ctx, env.Client, cloudProvider, nodePool)
+		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).To(BeNil())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodePoolLabelKey))

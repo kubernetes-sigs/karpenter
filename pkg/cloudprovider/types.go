@@ -119,28 +119,26 @@ type InstanceTypes []*InstanceType
 func (i *InstanceType) precompute() {
 	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
 
-	// subtract the amount of memory that will be allocatable for
-	// application based on hugepage reservations
+	// Adjust allocatable memory to account for hugepage reservations. Hugepages are a
+	// special memory resource that is reserved directly from the system, reducing the
+	// amount of memory available for general application use. Since hugepages are a
+	// Kubernetes well-known resource, we implement first-class accounting for their
+	// allocation impact.
 	for name, quantity := range i.Capacity {
 		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
-			i.allocatable.Memory().Sub(quantity)
 			current := i.allocatable.Memory()
 			current.Sub(quantity)
+			if current.Sign() == -1 {
+				current.Set(0)
+			}
 			i.allocatable[corev1.ResourceMemory] = lo.FromPtr(current)
 		}
-	}
-	// If there there are hugepages resource that consume all the memory on an instance
-	// we will cap the memory used to being zero as negative memory does not make sense.
-	if i.allocatable.Memory().Sign() == -1 {
-		current := i.allocatable.Memory()
-		current.Set(0)
-		i.allocatable[corev1.ResourceMemory] = lo.FromPtr(current)
 	}
 }
 
 func (i *InstanceType) IsPricingOverlayApplied() bool {
 	_, found := lo.Find(i.Offerings, func(of *Offering) bool {
-		return of.IsAnOverlayApplied()
+		return of.IsOverlaid()
 	})
 	return found
 }
@@ -303,7 +301,7 @@ func (o *Offering) ApplyOverlay() {
 	o.overlayApplied = true
 }
 
-func (o *Offering) IsAnOverlayApplied() bool {
+func (o *Offering) IsOverlaid() bool {
 	return o.overlayApplied
 }
 

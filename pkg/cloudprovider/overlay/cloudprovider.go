@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodeoverlay
+package overlay
 
 import (
 	"context"
@@ -23,30 +23,44 @@ import (
 
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
-	lop "github.com/samber/lo/parallel"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-func GetInstanceTypes(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, np *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
-	its, err := pullInstanceTypes(ctx, cloudProvider, np)
+type decorator struct {
+	cloudprovider.CloudProvider
+	kubeClient client.Client
+}
+
+// Decorate returns a new `CloudProvider` instance that will delegate the GetInstanceTypes
+// calls to the argument, `cloudProvider`, and provide instance types with NodeOverlays applied to them. The
+func Decorate(cloudProvider cloudprovider.CloudProvider, kubeClient client.Client) cloudprovider.CloudProvider {
+	return &decorator{CloudProvider: cloudProvider, kubeClient: kubeClient}
+}
+
+func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	its, err := pullInstanceTypes(ctx, d.CloudProvider, nodePool)
 	if err != nil {
 		return []*cloudprovider.InstanceType{}, err
 	}
-	// The additional requirements will be added to the instance type during scheduling simulation
-	// Since getting instance types is done on a NodePool level, these requirnements were always assumed
-	// to be allowed with these instance types.
-	addNodePoolRequirements(np, its)
-	its, err = OverlayInstanceTypes(ctx, kubeClient, its)
-	if err != nil {
-		return []*cloudprovider.InstanceType{}, err
+	if options.FromContext(ctx).FeatureGates.NodeOverlay {
+		// The additional requirements will be added to the instance type during scheduling simulation
+		// Since getting instance types is done on a NodePool level, these requirnements were always assumed
+		// to be allowed with these instance types.
+		addNodePoolRequirements(nodePool, its)
+		its, err = OverlayInstanceTypes(ctx, d.kubeClient, its)
+		if err != nil {
+			return []*cloudprovider.InstanceType{}, err
+		}
+		removeNodePoolRequirements(nodePool, its)
 	}
-	removeNodePoolRequirements(np, its)
 	return its, nil
 }
 
@@ -69,39 +83,17 @@ func OverlayInstanceTypes(ctx context.Context, kubeClient client.Client, instanc
 	sort.Slice(validOverlays, func(x int, y int) bool {
 		return lo.FromPtr(validOverlays[x].Spec.Weight) > lo.FromPtr(validOverlays[y].Spec.Weight)
 	})
-	work := []func(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType){
-		overlayCapacityOnInstanceTypes,
-		overlayPriceOnInstanceTypes,
-	}
-	lop.ForEach(work, func(f func(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType), i int) {
-		f(validOverlays, instanceTypes)
-	})
+	applyOverlayOnInstanceTypes(validOverlays, instanceTypes)
 
 	return instanceTypes, nil
 }
 
-func overlayCapacityOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
-	for _, overlay := range overlays {
-		overlaySelector := scheduling.NewRequirements()
-		overlaySelector.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
-
-		for _, it := range its {
-			if it.Requirements.IsCompatible(overlaySelector) {
-				it.Capacity = lo.Assign(it.Capacity, overlay.Spec.Capacity)
-				it.ApplyResourceOverlay()
-			}
-		}
-	}
-}
-
-func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
+func applyOverlayOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudprovider.InstanceType) {
 	// we will only update instance types once
-	overriddenInstanceType := map[string][]string{}
+	overriddenPriceInstanceType := sets.Set[string]{}
+	overriddenCapacityInstanceType := map[string][]string{}
+
 	for _, overlay := range overlays {
-		// if price or price adjustment is not defined, then we should skip the overlay
-		if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil {
-			continue
-		}
 		overlaySelector := scheduling.NewRequirements()
 		overlaySelector.Add(scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...).Values()...)
 
@@ -109,16 +101,23 @@ func overlayPriceOnInstanceTypes(overlays []v1alpha1.NodeOverlay, its []*cloudpr
 			if !it.Requirements.IsCompatible(overlaySelector) {
 				continue
 			}
-			if _, ok := overriddenInstanceType[it.Name]; !ok {
-				overriddenInstanceType[it.Name] = []string{}
+
+			// Update the Capacity on the instance type
+			for _, resource := range lo.Keys(overlay.Spec.Capacity) {
+				if resourceList, found := overriddenCapacityInstanceType[it.Name]; !found || !lo.Contains(resourceList, resource.String()) {
+					overriddenCapacityInstanceType[it.Name] = append(overriddenCapacityInstanceType[it.Name], resource.String())
+					it.Capacity[resource] = overlay.Spec.Capacity[resource]
+					it.ApplyResourceOverlay()
+				}
 			}
 
-			for _, of := range it.Offerings {
-				offeringRequirementsHash := fmt.Sprint(lo.Must(hashstructure.Hash(of.Requirements.String(), hashstructure.FormatV2, &hashstructure.HashOptions{})))
-				if overlaySelector.IsCompatible(of.Requirements, scheduling.AllowUndefinedWellKnownLabels) && !lo.Contains(overriddenInstanceType[it.Name], offeringRequirementsHash) {
-					of.ApplyOverlay()
-					overriddenInstanceType[it.Name] = append(overriddenInstanceType[it.Name], offeringRequirementsHash)
+			// Update the Price on compatible offerings
+			for _, of := range it.Offerings.Compatible(overlaySelector) {
+				offeringRequirementsHash := fmt.Sprint(lo.Must(hashstructure.Hash(fmt.Sprintf("%s-%s", it.Name, of.Requirements.String()), hashstructure.FormatV2, &hashstructure.HashOptions{})))
+				if !overriddenPriceInstanceType.Has(offeringRequirementsHash) {
+					overriddenPriceInstanceType.Insert(offeringRequirementsHash)
 					of.Price = overlay.AdjustedPrice(of.Price)
+					of.ApplyOverlay()
 				}
 			}
 		}
