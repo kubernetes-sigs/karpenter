@@ -19,6 +19,8 @@ package termination
 import (
 	"context"
 	"fmt"
+	"math"
+	"runtime"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -386,6 +388,9 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*83 + 17))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 100, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -396,7 +401,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 					// 10 qps, 100 bucket size
 					&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 				),
-				MaxConcurrentReconciles: 100,
+				MaxConcurrentReconciles: maxConcurrentReconciles,
 			},
 		).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

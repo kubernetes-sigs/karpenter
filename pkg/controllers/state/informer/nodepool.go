@@ -18,7 +18,10 @@ package informer
 
 import (
 	"context"
+	"math"
+	"runtime"
 
+	"github.com/samber/lo"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -62,10 +65,13 @@ func (c *NodePoolController) Reconcile(ctx context.Context, np *v1.NodePool) (re
 }
 
 func (c *NodePoolController) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*51 - 41))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 3000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.nodepool").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithEventFilter(predicate.Funcs{DeleteFunc: func(event event.DeleteEvent) bool { return false }}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

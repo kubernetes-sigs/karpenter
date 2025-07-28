@@ -18,7 +18,10 @@ package informer
 
 import (
 	"context"
+	"math"
+	"runtime"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -64,9 +67,12 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 }
 
 func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*51 - 41))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 3000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.node").
 		For(&v1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(c)
 }

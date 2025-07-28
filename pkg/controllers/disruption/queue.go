@@ -20,6 +20,8 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"math"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -58,10 +60,9 @@ import (
 )
 
 const (
-	queueBaseDelay          = 1 * time.Second
-	queueMaxDelay           = 10 * time.Second
-	maxRetryDuration        = 10 * time.Minute
-	maxConcurrentReconciles = 100
+	queueBaseDelay   = 1 * time.Second
+	queueMaxDelay    = 10 * time.Second
+	maxRetryDuration = 10 * time.Minute
 )
 
 type UnrecoverableError struct {
@@ -110,6 +111,9 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 }
 
 func (q *Queue) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*15 + 85))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 100, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
 		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).

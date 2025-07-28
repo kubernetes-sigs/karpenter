@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"runtime"
 	"sync"
 	"time"
 
@@ -111,6 +113,9 @@ func (q *Queue) Name() string {
 }
 
 func (q *Queue) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*83 + 17))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 100, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(q.Name()).
 		WatchesRawSource(source.Channel(q.source, handler.TypedFuncs[*corev1.Pod, reconcile.Request]{
@@ -125,7 +130,7 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](evictionQueueBaseDelay, evictionQueueMaxDelay),
 				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
 			),
-			MaxConcurrentReconciles: 100,
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }

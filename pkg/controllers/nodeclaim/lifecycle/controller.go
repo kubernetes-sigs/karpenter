@@ -19,6 +19,8 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"math"
+	"runtime"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -80,6 +82,9 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*68 + 932))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 1000, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -94,7 +99,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				// 10 qps, 100 bucket size
 				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
-			MaxConcurrentReconciles: 1000, // higher concurrency limit since we want fast reaction to node syncing and launch
+			MaxConcurrentReconciles: maxConcurrentReconciles, // higher concurrency limit since we want fast reaction to node syncing and launch
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

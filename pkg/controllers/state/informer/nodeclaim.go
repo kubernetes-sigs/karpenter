@@ -18,7 +18,10 @@ package informer
 
 import (
 	"context"
+	"math"
+	"runtime"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -70,9 +73,12 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 }
 
 func (c *NodeClaimController) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*51 - 41))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 3000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.nodeclaim").
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(c)
 }
