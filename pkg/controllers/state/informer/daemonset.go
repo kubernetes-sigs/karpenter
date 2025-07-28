@@ -18,8 +18,11 @@ package informer
 
 import (
 	"context"
+	"math"
+	"runtime"
 	"time"
 
+	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -64,6 +67,9 @@ func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Reque
 }
 
 func (c *DaemonSetController) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount) * 10))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.daemonset").
 		For(&appsv1.DaemonSet{}).
@@ -82,6 +88,6 @@ func (c *DaemonSetController) Register(_ context.Context, m manager.Manager) err
 				return false
 			},
 		}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(c)
 }

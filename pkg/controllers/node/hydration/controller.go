@@ -19,6 +19,8 @@ package hydration
 import (
 	"context"
 	"fmt"
+	"math"
+	"runtime"
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
@@ -86,13 +88,16 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*50 + 950))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 1000, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&corev1.Node{}).
 		Watches(&v1.NodeClaim{}, nodeutils.NodeClaimEventHandler(c.kubeClient)).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
-			MaxConcurrentReconciles: 1000,
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

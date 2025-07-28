@@ -20,9 +20,12 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"math"
+	"runtime"
 	"time"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -149,6 +152,9 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount) * 10))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.consistency").
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -156,6 +162,6 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			&corev1.Node{},
 			nodeclaimutils.NodeEventHandler(c.kubeClient, c.cloudProvider),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

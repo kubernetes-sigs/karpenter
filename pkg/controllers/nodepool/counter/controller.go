@@ -18,6 +18,8 @@ package counter
 
 import (
 	"context"
+	"math"
+	"runtime"
 	"time"
 
 	"github.com/samber/lo"
@@ -90,6 +92,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount) * 10))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.counter").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
@@ -97,7 +102,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			UpdateFunc: func(e event.UpdateEvent) bool { return false },
 			DeleteFunc: func(e event.DeleteEvent) bool { return false },
 		})).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 
 }

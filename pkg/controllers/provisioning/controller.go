@@ -18,6 +18,8 @@ package provisioning
 
 import (
 	"context"
+	"math"
+	"runtime"
 	"time"
 
 	"github.com/samber/lo"
@@ -111,9 +113,12 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 }
 
 func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
+	cpuCount := runtime.GOMAXPROCS(0)
+	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount) * 10))
+	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.node").
 		For(&corev1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
