@@ -21,7 +21,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"math"
-	"runtime"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -43,6 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -151,10 +151,9 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 	return nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount) * 10))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 1000)
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(10*cpuCount, 10, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.consistency").
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).

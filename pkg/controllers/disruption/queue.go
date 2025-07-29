@@ -21,7 +21,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"math"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +47,7 @@ import (
 
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
@@ -110,10 +110,9 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
-func (q *Queue) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*15 + 85))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 100, 1000)
+func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(15*cpuCount+85, 100, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
 		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).

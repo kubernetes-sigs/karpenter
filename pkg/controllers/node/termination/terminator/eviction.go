@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"sync"
 	"time"
 
@@ -50,6 +49,7 @@ import (
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
@@ -112,10 +112,9 @@ func (q *Queue) Name() string {
 	return "eviction-queue"
 }
 
-func (q *Queue) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*83 + 17))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 100, 5000)
+func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(85*cpuCount+15, 100, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(q.Name()).
 		WatchesRawSource(source.Channel(q.source, handler.TypedFuncs[*corev1.Pod, reconcile.Request]{

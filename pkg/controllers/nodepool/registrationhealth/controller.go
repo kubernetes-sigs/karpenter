@@ -19,13 +19,13 @@ package registrationhealth
 import (
 	"context"
 	"math"
-	"runtime"
 
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -87,10 +87,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	return reconcile.Result{}, nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount) * 10))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 1000)
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(10*cpuCount, 10, 1000)
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.registrationhealth").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).

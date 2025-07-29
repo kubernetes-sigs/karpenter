@@ -19,7 +19,6 @@ package disruption
 import (
 	"context"
 	"math"
-	"runtime"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -42,6 +41,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
@@ -122,10 +122,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	return result.Min(results...), nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount) * 10))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 1000)
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(10*cpuCount, 10, 1000)
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.disruption").
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).

@@ -19,7 +19,6 @@ package informer
 import (
 	"context"
 	"math"
-	"runtime"
 	"time"
 
 	"github.com/samber/lo"
@@ -35,6 +34,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 type DaemonSetController struct {
@@ -66,10 +66,9 @@ func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Reque
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }
 
-func (c *DaemonSetController) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount) * 10))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 1000)
+func (c *DaemonSetController) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(10*cpuCount, 10, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.daemonset").
 		For(&appsv1.DaemonSet{}).

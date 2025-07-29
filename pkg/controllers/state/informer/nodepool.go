@@ -19,7 +19,6 @@ package informer
 import (
 	"context"
 	"math"
-	"runtime"
 
 	"github.com/samber/lo"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -35,6 +34,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
@@ -64,10 +64,9 @@ func (c *NodePoolController) Reconcile(ctx context.Context, np *v1.NodePool) (re
 	return reconcile.Result{}, nil
 }
 
-func (c *NodePoolController) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*51 - 41))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 3000)
+func (c *NodePoolController) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(50*cpuCount-40, 10, 3000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.nodepool").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"runtime"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -43,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -387,10 +387,9 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 	return &expirationTime, nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*83 + 17))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 100, 5000)
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(85*cpuCount+15, 100, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).

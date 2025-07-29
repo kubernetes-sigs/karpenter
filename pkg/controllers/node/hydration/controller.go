@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"runtime"
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
@@ -38,6 +37,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -87,10 +87,9 @@ func (c *Controller) Name() string {
 	return "node.hydration"
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*50 + 950))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 1000, 5000)
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(50*cpuCount+950, 1000, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&corev1.Node{}).

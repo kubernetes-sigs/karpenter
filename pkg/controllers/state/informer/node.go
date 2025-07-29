@@ -19,7 +19,6 @@ package informer
 import (
 	"context"
 	"math"
-	"runtime"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -32,6 +31,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 // NodeController reconciles nodes for the purpose of maintaining state regarding nodes that is expensive to compute.
@@ -66,10 +66,9 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
 
-func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount)*51 - 41))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 3000)
+func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(50*cpuCount-40, 10, 3000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.node").
 		For(&v1.Node{}).

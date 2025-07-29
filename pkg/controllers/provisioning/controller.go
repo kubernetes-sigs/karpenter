@@ -19,7 +19,6 @@ package provisioning
 import (
 	"context"
 	"math"
-	"runtime"
 	"time"
 
 	"github.com/samber/lo"
@@ -33,6 +32,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -112,10 +112,9 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
-	cpuCount := runtime.GOMAXPROCS(0)
-	maxConcurrentReconciles := int(math.Ceil(float64(cpuCount) * 10))
-	maxConcurrentReconciles = lo.Clamp(maxConcurrentReconciles, 10, 1000)
+func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {
+	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+	maxConcurrentReconciles := lo.Clamp(10*cpuCount, 10, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.node").
 		For(&corev1.Node{}).
