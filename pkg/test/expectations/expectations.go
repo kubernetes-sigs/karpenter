@@ -304,53 +304,59 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 	return bindings
 }
 
-//nolint:gocyclo
-func ExpectProvisionedNoNode(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ([]*v1.NodeClaim, error) {
-	GinkgoHelper()
-	nodeClaims := []*v1.NodeClaim{}
+// expectProvisionerScheduleAndPersist handles the common logic of persisting pods and scheduling
+func expectProvisionerScheduleAndPersist(ctx context.Context, c client.Client, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) (scheduling.Results, error) {
 	// Persist objects
 	for _, pod := range pods {
 		ExpectApplied(ctx, c, pod)
 	}
-	//Create nodeclaims
-	results, err := provisioner.Schedule(ctx)
+	// Schedule with provisioner
+	return provisioner.Schedule(ctx)
+}
+
+//nolint:gocyclo
+func ExpectProvisionedNoNode(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) []*v1.NodeClaim {
+	GinkgoHelper()
+	nodeClaims := []*v1.NodeClaim{}
+
+	// Use helper function for common scheduling logic
+	results, err := expectProvisionerScheduleAndPersist(ctx, c, provisioner, pods...)
 	if err != nil {
 		log.Printf("error provisioning in test, %s", err)
-		return nodeClaims, err
+		return nodeClaims
 	}
+
 	for _, m := range results.NewNodeClaims {
 		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
 		if err != nil {
-			return nodeClaims, err
+			return nodeClaims
 		}
 		nodeClaim := &v1.NodeClaim{}
 		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
 		nodeClaim, err = ExpectNodeClaimDeployedNoNode(ctx, c, cloudProvider, nodeClaim)
 		if err != nil {
-			return nodeClaims, err
+			return nodeClaims
 		}
 		//Update state nodes
 		cluster.UpdateNodeClaim(nodeClaim)
 		ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
 		nodeClaims = append(nodeClaims, nodeClaim)
 	}
-	return nodeClaims, nil
+	return nodeClaims
 }
 
 //nolint:gocyclo
 func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
 	GinkgoHelper()
-	// Persist objects
-	for _, pod := range pods {
-		ExpectApplied(ctx, c, pod)
-	}
-	// TODO: Check the error on the provisioner scheduling round
-	results, err := provisioner.Schedule(ctx)
 	bindings := Bindings{}
+
+	// Use helper function for common scheduling logic
+	results, err := expectProvisionerScheduleAndPersist(ctx, c, provisioner, pods...)
 	if err != nil {
 		log.Printf("error provisioning in test, %s", err)
 		return bindings
 	}
+
 	for _, m := range results.NewNodeClaims {
 		// TODO: Check the error on the provisioner launch
 		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
