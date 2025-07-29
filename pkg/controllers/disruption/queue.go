@@ -60,7 +60,6 @@ import (
 const (
 	queueBaseDelay          = 1 * time.Second
 	queueMaxDelay           = 10 * time.Second
-	maxRetryDuration        = 10 * time.Minute
 	maxConcurrentReconciles = 100
 )
 
@@ -168,6 +167,11 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 // Once the replacements are ready, it will terminate the candidates.
 // nolint:gocyclo
 func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
+	q.RLock()
+	numCommands := len(q.providerIDToCommand)
+	q.RUnlock()
+	maxRetryDuration := 10*time.Minute + time.Duration(numCommands)*15*time.Second
+	maxRetryDuration = lo.Clamp(maxRetryDuration, 10*time.Minute, time.Hour)
 	// Wrap an error in an unrecoverable error if it timed out
 	defer func() {
 		if q.clock.Since(cmd.CreationTimestamp) > maxRetryDuration {
