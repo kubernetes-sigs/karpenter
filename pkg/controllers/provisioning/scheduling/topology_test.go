@@ -730,11 +730,9 @@ var _ = Describe("Topology", func() {
 					},
 				},
 			}
-			nodeclaims, err := ExpectProvisionedNoNode(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			Expect(err).ToNot(HaveOccurred())
+			nodeclaims := ExpectProvisionedNoNode(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(nodeclaims).To(HaveLen(1))
-			newNodeclaims, err := ExpectProvisionedNoNode(ctx, env.Client, cluster, cloudProvider, prov, pod)
-			Expect(err).ToNot(HaveOccurred())
+			newNodeclaims := ExpectProvisionedNoNode(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			Expect(newNodeclaims).To(HaveLen(0))
 		})
 	})
