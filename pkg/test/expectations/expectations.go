@@ -317,7 +317,7 @@ func expectProvisionerScheduleAndPersist(ctx context.Context, c client.Client, p
 //nolint:gocyclo
 func ExpectProvisionedNoNode(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) []*v1.NodeClaim {
 	GinkgoHelper()
-	nodeClaims := []*v1.NodeClaim{}
+	var nodeClaims []*v1.NodeClaim
 
 	// Use helper function for common scheduling logic
 	results, err := expectProvisionerScheduleAndPersist(ctx, c, provisioner, pods...)
