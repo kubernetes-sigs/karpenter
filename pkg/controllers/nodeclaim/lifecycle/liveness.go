@@ -44,7 +44,7 @@ type Liveness struct {
 // If we don't see the node within this time, then we should delete the NodeClaim and try again
 
 const (
-	registrationTimeout       = time.Minute * 30
+	registrationTimeout       = time.Minute * 15
 	registrationTimeoutReason = "registration_timeout"
 	launchTimeout             = time.Minute * 5
 	launchTimeoutReason       = "launch_timeout"

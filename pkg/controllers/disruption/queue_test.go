@@ -413,5 +413,79 @@ var _ = Describe("Queue", func() {
 			// And expect the nodeClaim and node to be deleted
 			ExpectNotFound(ctx, env.Client, nodeClaim2, node2)
 		})
+		Context("Dynamic Timeout", func() {
+			DescribeTable("should use dynamic timeout based on queue length",
+				func(numCommands int, testTimeoutMinutes int, shouldTimeout bool) {
+					// commands to simulate queue length (subtract 1 as we add test command after loop)
+					commands := make([]*disruption.Command, numCommands-1)
+					for i := 0; i < numCommands-1; i++ {
+						nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+							ObjectMeta: metav1.ObjectMeta{
+								Labels: map[string]string{
+									v1.NodePoolLabelKey:            nodePool.Name,
+									corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+									v1.CapacityTypeLabelKey:        cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+									corev1.LabelTopologyZone:       cloudProvider.InstanceTypes[0].Offerings.Cheapest().Requirements.Get(corev1.LabelTopologyZone).Any(),
+								},
+							},
+							Status: v1.NodeClaimStatus{
+								ProviderID:  test.RandomProviderID(),
+								Allocatable: map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("32")},
+							},
+						})
+						ExpectApplied(ctx, env.Client, nodeClaim, node)
+						ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+						stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim)
+
+						commands[i] = &disruption.Command{
+							Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+							CreationTimestamp: fakeClock.Now(),
+							ID:                uuid.New(),
+							Results:           scheduling.Results{},
+							Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+							Replacements:      nil,
+						}
+						Expect(queue.StartCommand(ctx, commands[i])).To(BeNil())
+					}
+
+					// create our test command
+					ExpectApplied(ctx, env.Client, nodeClaim1, node1, nodePool)
+					ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+					stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
+					nct := scheduling.NewNodeClaimTemplate(nodePool)
+					nct.InstanceTypeOptions = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
+					cmd := &disruption.Command{
+						Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+						CreationTimestamp: fakeClock.Now(),
+						ID:                uuid.New(),
+						Results:           scheduling.Results{},
+						Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+						Replacements:      []*disruption.Replacement{{NodeClaim: &scheduling.NodeClaim{NodeClaimTemplate: *nct}}},
+					}
+					Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
+
+					// Test the timeout behavior
+					fakeClock.Step(time.Duration(testTimeoutMinutes) * time.Minute)
+					ExpectObjectReconciled(ctx, env.Client, queue, stateNode.NodeClaim)
+
+					if shouldTimeout {
+						node1 = ExpectNodeExists(ctx, env.Client, node1.Name)
+						Expect(node1.Spec.Taints).ToNot(ContainElement(v1.DisruptedNoScheduleTaint))
+					} else {
+						Expect(queue.HasAny(stateNode.ProviderID())).To(BeTrue()) // Should still be in queue
+					}
+				},
+				Entry("very small queue - 1 command", 1, 9, false),                                    // 1 command - min(1*30s, 10min) = 10min > 9min
+				Entry("very small queue - 1 command should timeout", 1, 11, true),                     // 1 command - min(1*30s, 10min) = 10min < 11min
+				Entry("small queue - 30 commands", 30, 14, false),                                     // 30 commands - 30*30s = 15min > 14min
+				Entry("small queue - 30 commands should timeout", 30, 16, true),                       // 30 commands - 30*30s = 15min < 16min
+				Entry("medium queue - 60 commands", 60, 29, false),                                    // 60 commands - 60*30s = 30min > 29min
+				Entry("medium queue - 60 commands should timeout", 60, 31, true),                      // 60 commands - 60*30s = 30min < 31min
+				Entry("large queue - 100 commands", 100, 49, false),                                   // 100 commands - 100*30s = 50min > 49min
+				Entry("large queue - 100 commands should timeout", 100, 51, true),                     // 100 commands - 100*30s = 50min < 51min
+				Entry("very large queue - 200 commands (capped to 1 hour)", 200, 59, false),           // 200 commands - min(200*30s, 1hr) = 1hr > 59 min
+				Entry("very large queue - 200 commands should timeout (after 1 hour)", 200, 61, true), // 200 commands - min(200*30s, 1hr) = 1hr < 61 min
+			)
+		})
 	})
 })

@@ -79,7 +79,7 @@ var _ = Describe("Liveness", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 			// If the node hasn't registered in the registration timeframe, then we deprovision the NodeClaim
-			fakeClock.Step(time.Minute * 35)
+			fakeClock.Step(time.Minute * 20)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 			if isManagedNodeClaim {
@@ -122,7 +122,7 @@ var _ = Describe("Liveness", func() {
 		ExpectApplied(ctx, env.Client, node)
 
 		// Node and nodeClaim should still exist
-		fakeClock.Step(time.Minute * 35)
+		fakeClock.Step(time.Minute * 20)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, node)
@@ -256,7 +256,7 @@ var _ = Describe("Liveness", func() {
 		nodeClaim.Status.Conditions = newConditions
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		// advance the clock to show that the timeout is not based on creation timestamp when considering registration timeout
-		fakeClock.Step(31 * time.Minute)
+		fakeClock.Step(16 * time.Minute)
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		Expect(result.RequeueAfter).To(Not(Equal(0 * time.Second)))
 		Expect(result.RequeueAfter > 0*time.Second && result.RequeueAfter < 15*time.Minute).To(BeTrue())
@@ -290,7 +290,7 @@ var _ = Describe("Liveness", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
-		fakeClock.Step(time.Minute * 35)
+		fakeClock.Step(time.Minute * 20)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		// NodeClaim registration failed, but we should not update the NodeRegistrationHealthy status condition if it is already True
@@ -306,7 +306,7 @@ var _ = Describe("Liveness", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
-		fakeClock.Step(time.Minute * 35)
+		fakeClock.Step(time.Minute * 20)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)

@@ -60,6 +60,8 @@ import (
 const (
 	queueBaseDelay          = 1 * time.Second
 	queueMaxDelay           = 10 * time.Second
+	minRetryDuration        = 10 * time.Minute
+	maxRetryDuration        = 1 * time.Hour
 	maxConcurrentReconciles = 100
 )
 
@@ -170,11 +172,10 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	q.RLock()
 	numCommands := len(q.providerIDToCommand)
 	q.RUnlock()
-	maxRetryDuration := 10*time.Minute + time.Duration(numCommands)*15*time.Second
-	maxRetryDuration = lo.Clamp(maxRetryDuration, 10*time.Minute, time.Hour)
+	retryDuration := lo.Clamp(time.Duration(numCommands)*30*time.Second, minRetryDuration, maxRetryDuration)
 	// Wrap an error in an unrecoverable error if it timed out
 	defer func() {
-		if q.clock.Since(cmd.CreationTimestamp) > maxRetryDuration {
+		if q.clock.Since(cmd.CreationTimestamp) > retryDuration {
 			err = NewUnrecoverableError(serrors.Wrap(fmt.Errorf("command reached timeout, %w", err), "duration", q.clock.Since(cmd.CreationTimestamp)))
 		}
 	}()
