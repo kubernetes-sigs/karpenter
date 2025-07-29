@@ -189,14 +189,14 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 }
 
 // BuildNodePoolMap builds a provName -> nodePool map and a provName -> instanceName -> instance type map
-func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1.NodePool, map[string]map[string]*cloudprovider.InstanceType, error) {
+func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) (map[string]*v1.NodePool, map[string]map[string][]*cloudprovider.InstanceType, error) {
 	nodePoolMap := map[string]*v1.NodePool{}
 	nodePools, err := nodepoolutils.ListManaged(ctx, kubeClient, cloudProvider)
 	if err != nil {
 		return nil, nil, fmt.Errorf("listing node pools, %w", err)
 	}
 
-	nodePoolToInstanceTypesMap := map[string]map[string]*cloudprovider.InstanceType{}
+	nodePoolToInstanceTypesMap := map[string]map[string][]*cloudprovider.InstanceType{}
 	for _, np := range nodePools {
 		nodePoolMap[np.Name] = np
 
@@ -210,10 +210,11 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 		if len(nodePoolInstanceTypes) == 0 {
 			continue
 		}
-		nodePoolToInstanceTypesMap[np.Name] = map[string]*cloudprovider.InstanceType{}
-		for _, it := range nodePoolInstanceTypes {
-			nodePoolToInstanceTypesMap[np.Name][it.Name] = it
-		}
+
+		nodePoolToInstanceTypesMap[np.Name] = lo.GroupBy(nodePoolInstanceTypes, func(item *cloudprovider.InstanceType) string {
+
+			return item.Name
+		})
 	}
 	return nodePoolMap, nodePoolToInstanceTypesMap, nil
 }

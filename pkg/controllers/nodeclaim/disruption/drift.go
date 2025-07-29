@@ -121,12 +121,6 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 // 2. The NodeClaim has an instance type that doesn't exist in the cloudprovider instance types
 // 3. There are no offerings that match the requirements
 func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeClaim) cloudprovider.DriftReason {
-	it, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool {
-		return it.Name == nodeClaim.Labels[corev1.LabelInstanceTypeStable]
-	})
-	if !ok {
-		return InstanceTypeNotFound
-	}
 	reqs := scheduling.NewLabelRequirements(nodeClaim.Labels)
 	// The reserved capacity type is special because a NodeClaim can be demoted from reserved to on-demand after creation.
 	// For this reason, when evaluating drift due to unavailable offerings, we should check both reserved and on-demand for
@@ -137,7 +131,10 @@ func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeC
 		reqs[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
 		delete(reqs, cloudprovider.ReservationIDLabel)
 	}
-	if !it.Offerings.HasCompatible(reqs) {
+
+	if _, ok := lo.Find(its, func(it *cloudprovider.InstanceType) bool {
+		return it.Name == nodeClaim.Labels[corev1.LabelInstanceTypeStable] && it.Offerings.HasCompatible(reqs)
+	}); !ok {
 		return InstanceTypeNotFound
 	}
 	return ""
