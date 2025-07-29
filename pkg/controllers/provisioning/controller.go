@@ -18,7 +18,6 @@ package provisioning
 
 import (
 	"context"
-	"math"
 	"time"
 
 	"github.com/samber/lo"
@@ -32,8 +31,13 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/utils/reconciles"
+)
+
+const (
+	minReconciles = 10
+	maxReconciles = 1000
 )
 
 // PodController for the resource
@@ -113,11 +117,9 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 }
 
 func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
-	maxConcurrentReconciles := lo.Clamp(10*cpuCount, 10, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.node").
 		For(&corev1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

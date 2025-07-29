@@ -18,10 +18,8 @@ package informer
 
 import (
 	"context"
-	"math"
 	"time"
 
-	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -34,7 +32,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/utils/reconciles"
 )
 
 type DaemonSetController struct {
@@ -67,8 +65,6 @@ func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Reque
 }
 
 func (c *DaemonSetController) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
-	maxConcurrentReconciles := lo.Clamp(10*cpuCount, 10, 1000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.daemonset").
 		For(&appsv1.DaemonSet{}).
@@ -87,6 +83,6 @@ func (c *DaemonSetController) Register(ctx context.Context, m manager.Manager) e
 				return false
 			},
 		}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles)}).
 		Complete(c)
 }

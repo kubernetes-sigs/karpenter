@@ -19,7 +19,6 @@ package termination
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -42,8 +41,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+	"sigs.k8s.io/karpenter/pkg/utils/reconciles"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -54,6 +53,11 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
+)
+
+const (
+	minReconciles = 100
+	maxReconciles = 5000
 )
 
 // Controller for the resource
@@ -388,8 +392,6 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
-	maxConcurrentReconciles := lo.Clamp(85*cpuCount+15, 100, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -400,7 +402,7 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 					// 10 qps, 100 bucket size
 					&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 				),
-				MaxConcurrentReconciles: maxConcurrentReconciles,
+				MaxConcurrentReconciles: reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles),
 			},
 		).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

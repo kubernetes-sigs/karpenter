@@ -18,7 +18,6 @@ package hydration
 
 import (
 	"context"
-	"math"
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
@@ -36,8 +35,13 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/utils/reconciles"
+)
+
+const (
+	minReconciles = 1000
+	maxReconciles = 5000
 )
 
 // Controller hydrates information to the NodeClaim which is expected in newer versions of Karpenter, but would not
@@ -81,14 +85,12 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
-	maxConcurrentReconciles := lo.Clamp(50*cpuCount+950, 1000, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
-			MaxConcurrentReconciles: maxConcurrentReconciles,
+			MaxConcurrentReconciles: reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles),
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
