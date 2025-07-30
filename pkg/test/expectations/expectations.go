@@ -23,10 +23,9 @@ import (
 	"log"
 	"reflect"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
-
-	"k8s.io/utils/clock/testing"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/singleton"
@@ -55,6 +54,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -64,7 +64,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 const (
@@ -135,24 +135,6 @@ func ExpectNotScheduled(ctx context.Context, c client.Client, pod *corev1.Pod) *
 	p := ExpectPodExists(ctx, c, pod.Name, pod.Namespace)
 	Eventually(p.Spec.NodeName).Should(BeEmpty(), fmt.Sprintf("expected %s/%s to not be scheduled", pod.Namespace, pod.Name))
 	return p
-}
-
-// ExpectToWait continually polls the wait group to see if there
-// is a timer waiting, incrementing the clock if not.
-func ExpectToWait(fakeClock *testing.FakeClock, wg *sync.WaitGroup) {
-	wg.Add(1)
-	Expect(fakeClock.HasWaiters()).To(BeFalse())
-	go func() {
-		defer GinkgoRecover()
-		defer wg.Done()
-		Eventually(func() bool { return fakeClock.HasWaiters() }).
-			// Caution: if another go routine takes longer than this timeout to
-			// wait on the clock, we will deadlock until the test suite timeout
-			WithTimeout(10 * time.Second).
-			WithPolling(10 * time.Millisecond).
-			Should(BeTrue())
-		fakeClock.Step(45 * time.Second)
-	}()
 }
 
 func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Object) {
@@ -258,8 +240,9 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&corev1.PersistentVolume{},
 		&storagev1.StorageClass{},
 		&v1.NodePool{},
-		&v1alpha1.TestNodeClass{},
+		&testv1alpha1.TestNodeClass{},
 		&v1.NodeClaim{},
+		&v1alpha1.NodeOverlay{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
@@ -306,7 +289,15 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 	for pod, binding := range bindings {
 		// Only bind the pods that are passed through
 		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
-			ExpectManualBinding(ctx, c, pod, binding.Node)
+			// We have to manually bind the pod to the node when using a fakeClient by setting the value for pod.Spec.NodeName
+			if strings.Contains(reflect.TypeOf(c).String(), "fake") {
+				pod.Spec.NodeName = binding.Node.Name
+				err := c.Update(ctx, pod)
+				Expect(err).ToNot(HaveOccurred())
+				ExpectExists(ctx, c, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: binding.Node.Name, Namespace: binding.Node.Namespace}})
+			} else {
+				ExpectManualBinding(ctx, c, pod, binding.Node)
+			}
 			Expect(cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
 		}
 	}
@@ -356,6 +347,16 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 		}
 	}
 	return bindings
+}
+
+func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) scheduling.Results {
+	GinkgoHelper()
+	// Persist objects
+	for _, pod := range pods {
+		ExpectApplied(ctx, c, pod)
+	}
+	results, _ := provisioner.Schedule(ctx)
+	return results
 }
 
 func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, error) {
@@ -740,4 +741,17 @@ func ConsistentlyExpectNotTerminating(ctx context.Context, c client.Client, objs
 			g.Expect(obj.GetDeletionTimestamp().IsZero()).To(BeTrue())
 		}
 	}, time.Second).Should(Succeed())
+}
+
+func ExpectParallelized(fs ...func()) {
+	wg := sync.WaitGroup{}
+	wg.Add(len(fs))
+	for _, f := range fs {
+		go func() {
+			defer GinkgoRecover()
+			defer wg.Done()
+			f()
+		}()
+	}
+	wg.Wait()
 }

@@ -37,6 +37,13 @@ const (
 	PreferencePolicyRespect PreferencePolicy = "Respect"
 )
 
+type MinValuesPolicy string
+
+const (
+	MinValuesPolicyStrict     MinValuesPolicy = "Strict"
+	MinValuesPolicyBestEffort MinValuesPolicy = "BestEffort"
+)
+
 var (
 	validLogLevels          = []string{"", "debug", "info", "error"}
 	validPreferencePolicies = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
@@ -52,6 +59,7 @@ type FeatureGates struct {
 	NodeRepair              bool
 	ReservedCapacity        bool
 	SpotToSpotConsolidation bool
+	NodeOverlay             bool
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -74,6 +82,8 @@ type Options struct {
 	BatchIdleDuration       time.Duration
 	preferencePolicyRaw     string
 	PreferencePolicy        PreferencePolicy
+	minValuesPolicyRaw      string
+	MinValuesPolicy         MinValuesPolicy
 	FeatureGates            FeatureGates
 }
 
@@ -112,7 +122,8 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=false,SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, and SpotToSpotConsolidation")
+	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, and SpotToSpotConsolidation.")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -128,6 +139,9 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	if !lo.Contains(validPreferencePolicies, PreferencePolicy(o.preferencePolicyRaw)) {
 		return fmt.Errorf("validating cli flags / env vars, invalid PREFERENCE_POLICY %q", o.preferencePolicyRaw)
 	}
+	if !lo.Contains([]MinValuesPolicy{MinValuesPolicyStrict, MinValuesPolicyBestEffort}, MinValuesPolicy(o.minValuesPolicyRaw)) {
+		return fmt.Errorf("validating cli flags / env vars, invalid MIN_VALUES_POLICY %q", o.minValuesPolicyRaw)
+	}
 	if o.CPURequests <= 0 {
 		return fmt.Errorf("validating cli flags / env vars, invalid CPU_REQUESTS %d, must be positive", o.CPURequests)
 	}
@@ -137,6 +151,7 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	}
 	o.FeatureGates = gates
 	o.PreferencePolicy = PreferencePolicy(o.preferencePolicyRaw)
+	o.MinValuesPolicy = MinValuesPolicy(o.minValuesPolicyRaw)
 	return nil
 }
 
@@ -144,9 +159,17 @@ func (o *Options) ToContext(ctx context.Context) context.Context {
 	return ToContext(ctx, o)
 }
 
+func DefaultFeatureGates() FeatureGates {
+	return FeatureGates{
+		NodeRepair:              false,
+		ReservedCapacity:        true,
+		SpotToSpotConsolidation: false,
+	}
+}
+
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	gateMap := map[string]bool{}
-	gates := FeatureGates{}
+	gates := DefaultFeatureGates()
 
 	// Parses feature gates with the upstream mechanism. This is meant to be used with flag directly but this enables
 	// simple merging with environment vars.
@@ -161,6 +184,9 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap["ReservedCapacity"]; ok {
 		gates.ReservedCapacity = val
+	}
+	if val, ok := gateMap["NodeOverlay"]; ok {
+		gates.NodeOverlay = val
 	}
 
 	return gates, nil

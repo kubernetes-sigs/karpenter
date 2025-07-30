@@ -137,18 +137,31 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectApplied(ctx, env.Client, pdb, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			Expect(recorder.Calls(events.FailedDraining)).To(Equal(1))
+			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			//nolint:staticcheck
+			Expect(result.Requeue).To(BeTrue())
+			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "429"})
+			e := recorder.Events()
+			Expect(e).To(HaveLen(1))
+			Expect(e[0].Reason).To(Equal(events.FailedDraining))
+			Expect(e[0].Message).To(ContainSubstring("evicting pod violates a PDB"))
 		})
-		It("should fail when two PDBs refer to the same pod", func() {
+		It("should return a NodeDrainError event when two PDBs refer to the same pod", func() {
 			pdb2 := test.PodDisruptionBudget(test.PDBOptions{
 				Labels:         testLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
 			})
 			ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
+			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
-			_ = ExpectObjectReconcileFailed(ctx, env.Client, queue, pod)
+			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
+			//nolint:staticcheck
+			Expect(result.Requeue).To(BeTrue())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "500"})
+			e := recorder.Events()
+			Expect(e).To(HaveLen(1))
+			Expect(e[0].Reason).To(Equal(events.FailedDraining))
+			Expect(e[0].Message).To(ContainSubstring("eviction does not support multiple PDBs"))
 		})
 		It("should ensure that calling Evict() is valid while making Add() calls", func() {
 			// Ensure that we add enough pods to the queue while we are pulling items off of the queue (enough to trigger a DATA RACE)

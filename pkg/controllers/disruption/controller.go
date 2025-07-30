@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/google/uuid"
@@ -64,11 +65,20 @@ type Controller struct {
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
 const pollingPeriod = 10 * time.Second
 
-func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
-	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue,
-) *Controller {
-	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+type ControllerOptions struct {
+	methods []Method
+}
 
+func WithMethods(methods ...Method) option.Function[ControllerOptions] {
+	return func(o *ControllerOptions) {
+		o.methods = methods
+	}
+}
+
+func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
+	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue, opts ...option.Function[ControllerOptions]) *Controller {
+
+	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue)...)}, opts...)...)
 	return &Controller{
 		queue:         queue,
 		clock:         clk,
@@ -78,16 +88,21 @@ func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provi
 		recorder:      recorder,
 		cloudProvider: cp,
 		lastRun:       map[string]time.Time{},
-		methods: []Method{
-			// Delete any empty NodeClaims as there is zero cost in terms of disruption.
-			NewEmptiness(c),
-			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-			NewDrift(kubeClient, cluster, provisioner, recorder),
-			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
-			NewMultiNodeConsolidation(c),
-			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
-			NewSingleNodeConsolidation(c),
-		},
+		methods:       o.methods,
+	}
+}
+
+func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) []Method {
+	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+	return []Method{
+		// Delete any empty NodeClaims as there is zero cost in terms of disruption.
+		NewEmptiness(c),
+		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
+		NewDrift(kubeClient, cluster, provisioner, recorder),
+		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
+		NewMultiNodeConsolidation(c),
+		// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
+		NewSingleNodeConsolidation(c),
 	}
 }
 

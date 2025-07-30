@@ -97,6 +97,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduling.IgnorePreferences)
 	}
+	opts = append(opts, scheduling.MinValuesPolicy(options.FromContext(ctx).MinValuesPolicy))
 	scheduler, err := provisioner.NewScheduler(
 		log.IntoContext(ctx, operatorlogging.NopLogger),
 		pods,
@@ -115,7 +116,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("scheduling pods, %w", err)
 	}
-	results = results.TruncateInstanceTypes(scheduling.MaxInstanceTypes)
+	results = results.TruncateInstanceTypes(ctx, scheduling.MaxInstanceTypes)
 	for _, n := range results.ExistingNodes {
 		// We consider existing nodes for scheduling. When these nodes are unmanaged, their taint logic should
 		// tell us if we can schedule to them or not; however, if these nodes are managed, we will still schedule to them

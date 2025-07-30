@@ -51,12 +51,13 @@ For full Karpenter documentation please checkout [https://karpenter.sh](https://
 | serviceMonitor.additionalLabels | object | `{}` | Additional labels for the ServiceMonitor. |
 | serviceMonitor.enabled | bool | `false` | Specifies whether a ServiceMonitor should be created. |
 | serviceMonitor.endpointConfig | object | `{}` | Endpoint configuration for the ServiceMonitor. |
-| settings | object | `{"batchIdleDuration":"1s","batchMaxDuration":"10s","featureGates":{"nodeRepair":false,"spotToSpotConsolidation":false},"preferencePolicy":"Respect"}` | Global Settings to configure Karpenter |
+| settings | object | `{"batchIdleDuration":"1s","batchMaxDuration":"10s","featureGates":{"nodeRepair":false,"spotToSpotConsolidation":false},"minValuesPolicy":"Strict","preferencePolicy":"Respect"}` | Global Settings to configure Karpenter |
 | settings.batchIdleDuration | string | `"1s"` | The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately. |
 | settings.batchMaxDuration | string | `"10s"` | The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes. |
 | settings.featureGates | object | `{"nodeRepair":false,"spotToSpotConsolidation":false}` | Feature Gate configuration values. Feature Gates will follow the same graduation process and requirements as feature gates in Kubernetes. More information here https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/#feature-gates-for-alpha-or-beta-features |
 | settings.featureGates.nodeRepair | bool | `false` | nodeRepair is ALPHA and is disabled by default. Setting this to true will enable node repair. |
 | settings.featureGates.spotToSpotConsolidation | bool | `false` | spotToSpotConsolidation is ALPHA and is disabled by default. Setting this to true will enable spot replacement consolidation for both single and multi-node consolidation. |
+| settings.minValuesPolicy | string | `"Strict"` | How the Karpenter scheduler treats min values. Options include 'Strict' (fails scheduling when min values can't be met) and 'BestEffort' (relaxes min values when they can't be met). |
 | settings.preferencePolicy | string | `"Respect"` | How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect' |
 | strategy | object | `{"rollingUpdate":{"maxUnavailable":1}}` | Strategy for updating the pod. |
 | terminationGracePeriodSeconds | string | `nil` | Override the default termination grace period for the pod. |
