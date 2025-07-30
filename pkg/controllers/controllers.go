@@ -22,6 +22,7 @@ import (
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
