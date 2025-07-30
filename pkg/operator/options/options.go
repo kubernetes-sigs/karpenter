@@ -70,6 +70,7 @@ type Options struct {
 	KubeClientQPS           int
 	KubeClientBurst         int
 	EnableProfiling         bool
+	SimplifiedMetrics       bool
 	DisableLeaderElection   bool
 	LeaderElectionName      string
 	LeaderElectionNamespace string
@@ -111,6 +112,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.IntVar(&o.KubeClientQPS, "kube-client-qps", env.WithDefaultInt("KUBE_CLIENT_QPS", 200), "The smoothed rate of qps to kube-apiserver")
 	fs.IntVar(&o.KubeClientBurst, "kube-client-burst", env.WithDefaultInt("KUBE_CLIENT_BURST", 300), "The maximum allowed burst of queries to the kube-apiserver")
 	fs.BoolVarWithEnv(&o.EnableProfiling, "enable-profiling", "ENABLE_PROFILING", false, "Enable the profiling on the metric endpoint")
+	fs.BoolVarWithEnv(&o.SimplifiedMetrics, "simplified-metrics", "SIMPLIFIED_METRICS", false, "Enable simplified metrics for the controllers")
 	fs.BoolVarWithEnv(&o.DisableLeaderElection, "disable-leader-election", "DISABLE_LEADER_ELECTION", false, "Disable the leader election client before executing the main loop. Disable when running replicated components for high availability is not desired.")
 	fs.StringVar(&o.LeaderElectionName, "leader-election-name", env.WithDefaultString("LEADER_ELECTION_NAME", "karpenter-leader-election"), "Leader election name to create and monitor the lease if running outside the cluster")
 	fs.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", env.WithDefaultString("LEADER_ELECTION_NAMESPACE", ""), "Leader election namespace to create and monitor the lease if running outside the cluster")

@@ -34,6 +34,7 @@ type OptionsFields struct {
 	KubeClientQPS           *int
 	KubeClientBurst         *int
 	EnableProfiling         *bool
+	SimplifiedMetrics       *bool
 	DisableLeaderElection   *bool
 	LeaderElectionName      *string
 	LeaderElectionNamespace *string
@@ -71,6 +72,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		KubeClientQPS:         lo.FromPtrOr(opts.KubeClientQPS, 200),
 		KubeClientBurst:       lo.FromPtrOr(opts.KubeClientBurst, 300),
 		EnableProfiling:       lo.FromPtrOr(opts.EnableProfiling, false),
+		SimplifiedMetrics:     lo.FromPtrOr(opts.SimplifiedMetrics, false),
 		DisableLeaderElection: lo.FromPtrOr(opts.DisableLeaderElection, false),
 		MemoryLimit:           lo.FromPtrOr(opts.MemoryLimit, -1),
 		CPURequests:           lo.FromPtrOr(opts.CPURequests, 5000), // use 5 threads to enforce parallelism
