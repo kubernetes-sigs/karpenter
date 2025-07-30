@@ -19,7 +19,9 @@ package options_test
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -58,6 +60,8 @@ var _ = Describe("Options", func() {
 		"LOG_ERROR_OUTPUT_PATHS",
 		"BATCH_MAX_DURATION",
 		"BATCH_IDLE_DURATION",
+		"PREFERENCE_POLICY",
+		"MIN_VALUES_POLICY",
 		"FEATURE_GATES",
 	}
 
@@ -110,10 +114,13 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("stderr"),
 				BatchMaxDuration:        lo.ToPtr(10 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyRespect),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(false),
+					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(false),
 					SpotToSpotConsolidation: lo.ToPtr(false),
+					NodeOverlay:             lo.ToPtr(false),
 				},
 			}))
 		})
@@ -138,7 +145,9 @@ var _ = Describe("Options", func() {
 				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
 				"--batch-idle-duration", "5s",
-				"--feature-gates", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true",
+				"--preference-policy", "Ignore",
+				"--min-values-policy", "BestEffort",
+				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -157,10 +166,13 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyIgnore),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(true),
+					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
+					NodeOverlay:             lo.ToPtr(true),
 				},
 			}))
 		})
@@ -181,7 +193,9 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("PREFERENCE_POLICY", "Ignore")
+			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -204,10 +218,13 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyIgnore),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyBestEffort),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(true),
+					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
+					NodeOverlay:             lo.ToPtr(true),
 				},
 			}))
 		})
@@ -223,7 +240,9 @@ var _ = Describe("Options", func() {
 			os.Setenv("LOG_LEVEL", "debug")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=true,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("PREFERENCE_POLICY", "Ignore")
+			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -233,6 +252,8 @@ var _ = Describe("Options", func() {
 				"--karpenter-service", "cli",
 				"--log-output-paths", "/etc/k8s/test",
 				"--log-error-output-paths", "/etc/k8s/testerror",
+				"--preference-policy", "Respect",
+				"--min-values-policy", "Strict",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -251,13 +272,45 @@ var _ = Describe("Options", func() {
 				LogErrorOutputPaths:     lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:        lo.ToPtr(5 * time.Second),
 				BatchIdleDuration:       lo.ToPtr(5 * time.Second),
+				PreferencePolicy:        lo.ToPtr(options.PreferencePolicyRespect),
+				MinValuesPolicy:         lo.ToPtr(options.MinValuesPolicyStrict),
 				FeatureGates: test.FeatureGates{
-					ReservedCapacity:        lo.ToPtr(true),
+					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
+					NodeOverlay:             lo.ToPtr(true),
 				},
 			}))
 		})
+
+		DescribeTable(
+			"should correctly set defaults when a subset of FeatureGates are specified",
+			func(gate string) {
+				expected, args := func() (options.FeatureGates, []string) {
+					expected := lo.ToPtr(options.DefaultFeatureGates())
+
+					// Use reflection to find the field for the gate and flip the value
+					gateField := reflect.ValueOf(expected).Elem().FieldByName(gate)
+					Expect(gateField.IsValid()).To(BeTrue())
+					Expect(gateField.Kind()).To(Equal(reflect.Bool))
+					expectedGateVal := !gateField.Bool()
+					gateField.SetBool(expectedGateVal)
+
+					return *expected, []string{"--feature-gates", fmt.Sprintf("%s=%t", gate, expectedGateVal)}
+				}()
+
+				fs = &options.FlagSet{
+					FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
+				}
+				opts.AddFlags(fs)
+				Expect(opts.Parse(fs, args...)).To(Succeed())
+				Expect(opts.FeatureGates).To(Equal(expected))
+			},
+			Entry("when ReservedCapacity is overridden", "ReservedCapacity"),
+			Entry("when NodeRepair is overridden", "NodeRepair"),
+			Entry("when SpotToSpotConsolidation is overridden", "SpotToSpotConsolidation"),
+			Entry("when NodeOverlay is overridden", "NodeOverlay"),
+		)
 	})
 
 	DescribeTable(
@@ -308,7 +361,10 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.LogErrorOutputPaths).To(Equal(optsB.LogErrorOutputPaths))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
 	Expect(optsA.BatchIdleDuration).To(Equal(optsB.BatchIdleDuration))
+	Expect(optsA.PreferencePolicy).To(Equal(optsB.PreferencePolicy))
+	Expect(optsA.MinValuesPolicy).To(Equal(optsB.MinValuesPolicy))
 	Expect(optsA.FeatureGates.ReservedCapacity).To(Equal(optsB.FeatureGates.ReservedCapacity))
 	Expect(optsA.FeatureGates.NodeRepair).To(Equal(optsB.FeatureGates.NodeRepair))
+	Expect(optsA.FeatureGates.NodeOverlay).To(Equal(optsB.FeatureGates.NodeOverlay))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
 }

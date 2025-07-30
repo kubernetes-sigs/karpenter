@@ -19,6 +19,7 @@ package pdb
 import (
 	"context"
 
+	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,62 +61,70 @@ func NewLimits(ctx context.Context, kubeClient client.Client) (Limits, error) {
 // CanEvictPods returns true if every pod in the list is evictable. They may not all be evictable simultaneously, but
 // for every PDB that controls the pods at least one pod can be evicted.
 // nolint:gocyclo
-func (l Limits) CanEvictPods(pods []*v1.Pod) (client.ObjectKey, bool) {
+func (l Limits) CanEvictPods(pods []*v1.Pod) ([]client.ObjectKey, bool) {
 	for _, pod := range pods {
-		pdb, evictable := l.isEvictable(pod, zeroDisruptions)
+		pdbs, evictable := l.isEvictable(pod, zeroDisruptions)
 
 		if !evictable {
-			return pdb, false
+			return pdbs, false
 		}
 	}
-	return client.ObjectKey{}, true
+	return []client.ObjectKey{}, true
 }
 
 // isFullyBlocked returns true if the given pod is fully blocked by a PDB.
-func (l Limits) isFullyBlocked(pod *v1.Pod) (client.ObjectKey, bool) {
-	pdb, evictable := l.isEvictable(pod, fullyBlockingPDBs)
+func (l Limits) isFullyBlocked(pod *v1.Pod) ([]client.ObjectKey, bool) {
+	pdbs, evictable := l.isEvictable(pod, fullyBlockingPDBs)
 
 	if !evictable {
-		return pdb, true
+		return pdbs, true
 	}
-	return client.ObjectKey{}, false
+	return []client.ObjectKey{}, false
 }
 
 // nolint:gocyclo
-func (l Limits) isEvictable(pod *v1.Pod, evictionBlocker evictionBlocker) (client.ObjectKey, bool) {
+func (l Limits) isEvictable(pod *v1.Pod, evictionBlocker evictionBlocker) ([]client.ObjectKey, bool) {
 	// If the pod isn't eligible for being evicted, then the predicate doesn't matter
 	// This is due to the fact that we won't call the eviction API on these pods when we are disrupting the node
 	if !podutil.IsEvictable(pod) {
-		return client.ObjectKey{}, true
+		return []client.ObjectKey{}, true
 	}
-	for _, pdb := range l {
-		if pdb.key.Namespace == pod.ObjectMeta.Namespace {
-			if pdb.selector.Matches(labels.Set(pod.Labels)) {
 
-				// if the PDB policy is set to allow evicting unhealthy pods, then it won't stop us from
-				// evicting unhealthy pods
-				if pdb.canAlwaysEvictUnhealthyPods {
-					for _, c := range pod.Status.Conditions {
-						if c.Type == v1.PodReady && c.Status == v1.ConditionFalse {
-							return client.ObjectKey{}, true
-						}
-					}
-				}
+	matchingPDBs := lo.Filter(l, func(pdb *pdbItem, _ int) bool {
+		return pdb.key.Namespace == pod.ObjectMeta.Namespace && pdb.selector.Matches(labels.Set(pod.Labels))
+	})
 
-				switch evictionBlocker {
-				case zeroDisruptions:
-					if pdb.disruptionsAllowed == 0 {
-						return pdb.key, false
-					}
-				case fullyBlockingPDBs:
-					if pdb.isFullyBlocking {
-						return pdb.key, false
-					}
+	// Regardless of whether the PDBs allow disruptions, Kubernetes doesn't support multiple PDBs on a single pod:
+	// https://github.com/kubernetes/kubernetes/blob/84cacae7046df93c1f6f8ea97c912d948e1ad06a/pkg/registry/core/pod/storage/eviction.go#L226
+	if len(matchingPDBs) > 1 {
+		return lo.Map(matchingPDBs, func(pdb *pdbItem, _ int) client.ObjectKey {
+			return pdb.key
+		}), false
+	}
+
+	for _, pdb := range matchingPDBs {
+		// if the PDB policy is set to allow evicting unhealthy pods, then it won't stop us from
+		// evicting unhealthy pods
+		if pdb.canAlwaysEvictUnhealthyPods {
+			for _, c := range pod.Status.Conditions {
+				if c.Type == v1.PodReady && c.Status == v1.ConditionFalse {
+					return []client.ObjectKey{}, true
 				}
 			}
 		}
+
+		switch evictionBlocker {
+		case zeroDisruptions:
+			if pdb.disruptionsAllowed == 0 {
+				return []client.ObjectKey{pdb.key}, false
+			}
+		case fullyBlockingPDBs:
+			if pdb.isFullyBlocking {
+				return []client.ObjectKey{pdb.key}, false
+			}
+		}
 	}
-	return client.ObjectKey{}, true
+	return []client.ObjectKey{}, true
 }
 
 // IsCurrentlyReschedulable checks if a Karpenter should consider this pod when re-scheduling to new capacity by ensuring that the pod:

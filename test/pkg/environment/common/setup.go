@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -66,6 +67,7 @@ var (
 		&schedulingv1.PriorityClass{},
 		&corev1.Node{},
 		&v1.NodeClaim{},
+		&v1alpha1.NodeOverlay{},
 		&admissionregistrationv1.ValidatingAdmissionPolicy{},
 		&admissionregistrationv1.ValidatingAdmissionPolicyBinding{},
 	}
