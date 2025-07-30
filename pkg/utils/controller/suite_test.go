@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package reconciles_test
+package controller_test
 
 import (
 	"context"
@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
-	"sigs.k8s.io/karpenter/pkg/utils/reconciles"
+	"sigs.k8s.io/karpenter/pkg/utils/controller"
 )
 
 func TestReconciles(t *testing.T) {
@@ -45,27 +45,27 @@ var _ = Describe("Reconciles", func() {
 	Context("LinearScaleReconciles Calculations", func() {
 		It("should calculate minReconciles for 0.5 CPU core", func() {
 			ctx := contextWithCPURequests(0.5 * 1000.0)
-			result := reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+			result := controller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
 			Expect(result).To(Equal(minReconciles))
 		})
 		It("should calculate minReconciles for 1 CPU core", func() {
 			ctx := contextWithCPURequests(1 * 1000)
-			result := reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+			result := controller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
 			Expect(result).To(Equal(minReconciles))
 		})
 		It("should calculate maxReconciles for 60 CPU cores", func() {
 			ctx := contextWithCPURequests(60 * 1000)
-			result := reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+			result := controller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
 			Expect(result).To(Equal(maxReconciles))
 		})
 		It("should calculate maxReconciles for 100 CPU cores", func() {
 			ctx := contextWithCPURequests(100 * 1000)
-			result := reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+			result := controller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
 			Expect(result).To(Equal(maxReconciles))
 		})
 		It("should follow the linear scaling formula", func() {
 			ctx := contextWithCPURequests(15 * 1000) // 15 cores
-			result := reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+			result := controller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
 			// At 15 cores
 			// slope = (maxReconciles - minReconciles)/59 = (1000-10)/59 = 990/59 = ~16.78
 			// result = int(slope * (cores - 1)) + minReconciles ~= 16.78 * (15-1) + 10 = 234 + 10 = 244
@@ -74,7 +74,7 @@ var _ = Describe("Reconciles", func() {
 		})
 		It("should handle fractional CPU cores correctly", func() {
 			ctx := contextWithCPURequests(1.5 * 1000.0) // 1.5 cores
-			result := reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+			result := controller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
 			// At 2 cores (ceil(1.5))
 			// slope = (maxReconciles - minReconciles)/59 = (1000-10)/59 = 990/59 = ~16.78
 			// result = int(slope * (cores - 1)) + minReconciles ~= 16.78 * (2-1) + 10 = 16 + 10 = 26

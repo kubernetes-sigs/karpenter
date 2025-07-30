@@ -32,7 +32,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/utils/reconciles"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 )
 
 type DaemonSetController struct {
@@ -83,6 +83,6 @@ func (c *DaemonSetController) Register(ctx context.Context, m manager.Manager) e
 				return false
 			},
 		}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: reconciles.LinearScaleReconciles(ctx, minReconciles, maxReconciles)}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)}).
 		Complete(c)
 }
