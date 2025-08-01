@@ -319,9 +319,11 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
-			PodStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
-			if !schedulableTime.IsZero() {
-				PodProvisioningStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+			if ready {
+				PodStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
+				if !schedulableTime.IsZero() {
+					PodProvisioningStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
+				}
 			}
 			c.pendingPods.Delete(key)
 			// Clear cluster state's representation of these pods as we don't need to keep track of them anymore

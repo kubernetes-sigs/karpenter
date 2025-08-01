@@ -61,6 +61,8 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterEach(func() {
 	cluster.Reset()
+	pod.PodStartupDurationSeconds.Reset()
+	pod.PodProvisioningStartupDurationSeconds.Reset()
 })
 
 var _ = AfterSuite(func() {
@@ -287,9 +289,9 @@ var _ = Describe("Pod Metrics", func() {
 		Expect(found).To(BeFalse())
 
 		_, found = FindMetricWithLabelValues("karpenter_pods_startup_duration_seconds", nil)
-		Expect(found).To(BeTrue())
+		Expect(found).To(BeFalse())
 		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_startup_duration_seconds", nil)
-		Expect(found).To(BeTrue())
+		Expect(found).To(BeFalse())
 	})
 	It("should update the pod startup and unstarted time metrics when the pod has failed", func() {
 		p := test.Pod()
@@ -330,9 +332,9 @@ var _ = Describe("Pod Metrics", func() {
 		Expect(found).To(BeFalse())
 
 		_, found = FindMetricWithLabelValues("karpenter_pods_startup_duration_seconds", nil)
-		Expect(found).To(BeTrue())
+		Expect(found).To(BeFalse())
 		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_startup_duration_seconds", nil)
-		Expect(found).To(BeTrue())
+		Expect(found).To(BeFalse())
 	})
 	It("should create and delete provisioning undecided metrics based on scheduling simulatinos", func() {
 		p := test.Pod()
