@@ -88,13 +88,16 @@ func (s InstanceTypeOverlayStore) ListOverlaidInstanceTypes(nodeOverlay v1alpha1
 }
 
 func (s InstanceTypeOverlayStore) UpdateInstanceTypeCapacity(nodePool v1.NodePool, nodeOverlay v1alpha1.NodeOverlay, it *cloudprovider.InstanceType) {
-	s[key(nodePool, nodeOverlay, it)] = &InstanceTypeUpdate{
-		instanceTypeName: it.Name,
-		nodePoolName:     nodePool.Name,
-		overlayName:      nodeOverlay.Name,
-		Offering:         map[string]*string{},
-		Capacity:         corev1.ResourceList{},
-		weight:           nodeOverlay.Spec.Weight,
+	_, found := s[key(nodePool, nodeOverlay, it)]
+	if !found {
+		s[key(nodePool, nodeOverlay, it)] = &InstanceTypeUpdate{
+			instanceTypeName: it.Name,
+			nodePoolName:     nodePool.Name,
+			overlayName:      nodeOverlay.Name,
+			Offering:         map[string]*string{},
+			Capacity:         corev1.ResourceList{},
+			weight:           nodeOverlay.Spec.Weight,
+		}
 	}
 	for k, v := range nodeOverlay.Spec.Capacity {
 		s[key(nodePool, nodeOverlay, it)].Capacity[k] = v
@@ -102,15 +105,19 @@ func (s InstanceTypeOverlayStore) UpdateInstanceTypeCapacity(nodePool v1.NodePoo
 }
 
 func (s InstanceTypeOverlayStore) UpdateInstanceTypeOffering(nodePool v1.NodePool, nodeOverlay v1alpha1.NodeOverlay, it *cloudprovider.InstanceType, offering *cloudprovider.Offering) {
+	_, found := s[key(nodePool, nodeOverlay, it)]
 	overlayPriceChange := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
-	s[key(nodePool, nodeOverlay, it)] = &InstanceTypeUpdate{
-		instanceTypeName: it.Name,
-		nodePoolName:     nodePool.Name,
-		overlayName:      nodeOverlay.Name,
-		Offering:         map[string]*string{offering.Requirements.String(): overlayPriceChange},
-		Capacity:         corev1.ResourceList{},
-		weight:           nodeOverlay.Spec.Weight,
+	if !found {
+		s[key(nodePool, nodeOverlay, it)] = &InstanceTypeUpdate{
+			instanceTypeName: it.Name,
+			nodePoolName:     nodePool.Name,
+			overlayName:      nodeOverlay.Name,
+			Offering:         map[string]*string{offering.Requirements.String(): overlayPriceChange},
+			Capacity:         corev1.ResourceList{},
+			weight:           nodeOverlay.Spec.Weight,
+		}
 	}
+	s[key(nodePool, nodeOverlay, it)].Offering[offering.Requirements.String()] = overlayPriceChange
 }
 
 func (s InstanceTypeOverlayStore) RemoveForUpdatesForOverlay(nodeOverlay v1alpha1.NodeOverlay) {
@@ -257,13 +264,14 @@ func (c *Controller) isPriceAlreadyUpdated(nodePool v1.NodePool, it *cloudprovid
 	for _, of := range offerings {
 		for _, instanceTypeUpdate := range c.instanceTypeOverlayStore.ListOverlaidInstanceTypes(overlay, it) {
 			offeringPrice, foundOffering := instanceTypeUpdate.Offering[of.Requirements.String()]
-			if lo.FromPtr(overlay.Spec.Weight) == lo.FromPtr(instanceTypeUpdate.weight) && (offeringPrice != nil || overlayPriceChange != nil) {
+			if lo.FromPtr(overlay.Spec.Weight) == lo.FromPtr(instanceTypeUpdate.weight) && (offeringPrice != nil && overlayPriceChange != nil) {
 				if (lo.FromPtr(offeringPrice) == lo.FromPtr(overlayPriceChange)) || !foundOffering {
 					c.instanceTypeOverlayStore.UpdateInstanceTypeOffering(nodePool, overlay, it, of)
 				} else {
 					result = append(result, instanceTypeUpdate.overlayName)
 				}
-
+			} else if (lo.FromPtr(offeringPrice) == lo.FromPtr(overlayPriceChange)) || !foundOffering {
+				c.instanceTypeOverlayStore.UpdateInstanceTypeOffering(nodePool, overlay, it, of)
 			}
 		}
 	}
@@ -275,13 +283,15 @@ func (c *Controller) isCapacityAlreadyUpdated(nodePool v1.NodePool, it *cloudpro
 	result := []string{}
 
 	for _, instanceTypeUpdate := range c.instanceTypeOverlayStore.ListOverlaidInstanceTypes(overlay, it) {
-		if lo.FromPtr(overlay.Spec.Weight) == lo.FromPtr(instanceTypeUpdate.weight) && overlay.Spec.Capacity != nil && instanceTypeUpdate.Capacity != nil {
+		if lo.FromPtr(overlay.Spec.Weight) == lo.FromPtr(instanceTypeUpdate.weight) && overlay.Spec.Capacity != nil {
 			resource := findConflictingResources(overlay.Spec.Capacity, instanceTypeUpdate.Capacity)
 			if len(resource) == 0 {
 				c.instanceTypeOverlayStore.UpdateInstanceTypeCapacity(nodePool, overlay, it)
 			} else {
 				result = append(result, instanceTypeUpdate.overlayName)
 			}
+		} else if overlay.Spec.Capacity != nil {
+			c.instanceTypeOverlayStore.UpdateInstanceTypeCapacity(nodePool, overlay, it)
 		}
 	}
 
