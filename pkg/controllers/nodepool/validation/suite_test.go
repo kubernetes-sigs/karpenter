@@ -59,7 +59,7 @@ var _ = BeforeSuite(func() {
 	nodePoolValidationController = NewController(env.Client, cp)
 })
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {

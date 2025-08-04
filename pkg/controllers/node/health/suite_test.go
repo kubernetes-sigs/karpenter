@@ -93,7 +93,7 @@ var _ = Describe("Node Health", func() {
 	})
 
 	AfterEach(func() {
-		ExpectCleanedUp(ctx, env.Client)
+		ExpectForceCleanedUpAll(ctx, env.Client)
 
 		// Reset the metrics collectors
 		metrics.NodeClaimsDisruptedTotal.Reset()

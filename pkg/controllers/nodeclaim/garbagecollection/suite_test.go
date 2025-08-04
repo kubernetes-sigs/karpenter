@@ -74,7 +74,7 @@ var _ = AfterSuite(func() {
 
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 	cloudProvider.Reset()
 })
 

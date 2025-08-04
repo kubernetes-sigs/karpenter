@@ -78,7 +78,7 @@ var _ = BeforeEach(func() {
 
 var _ = AfterEach(func() {
 	fakeClock.SetTime(time.Now())
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 })
 
 var _ = Describe("NodeClaimController", func() {
