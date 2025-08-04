@@ -172,11 +172,12 @@ spec:
                   description: |-
                     Replicas is the desired number of nodes for the NodePool. When specified, the NodePool will
                     maintain this fixed number of replicas rather than scaling based on pod demand.
-                    When replicas is set, the following fields are not supported:
+                    When replicas is set, the following fields are simply ignored:
                     - disruption.consolidationPolicy
                     - disruption.consolidateAfter
-                    - limits
-                    Note that the Disruption struct itself is allowed, but the specific fields above are restricted.
+                    - limits.cpu
+                    - limits.memory
+                    Note that to set limits on number of static nodes in a Nodepool use limits.nodes
                   format: int64
                   minimum: 0
                   type: integer
@@ -451,12 +452,8 @@ spec:
                 - template
               type: object
               x-kubernetes-validations:
-                - message: When replicas is set, consolidationPolicy must not be explicitly set
-                  rule: '!(has(self.replicas)) || self.disruption.consolidationPolicy == "WhenEmptyOrUnderutilized"'
-                - message: When replicas is set, consolidateAfter must be either default '0s' or 'Never'
-                  rule: '!(has(self.replicas)) || (self.disruption.consolidateAfter == ''0s'' || self.disruption.consolidateAfter == ''Never'')'
-                - message: limits is not supported when setting replicas
-                  rule: '!(has(self.replicas)) || (!has(self.limits))'
+                - message: Cannot transition NodePool between static (replicas set) and dynamic (replicas unset) provisioning modes
+                  rule: has(self.replicas) == has(oldSelf.replicas)
             status:
               description: NodePoolStatus defines the observed state of NodePool
               properties:
