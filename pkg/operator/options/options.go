@@ -60,6 +60,7 @@ type FeatureGates struct {
 	ReservedCapacity        bool
 	SpotToSpotConsolidation bool
 	NodeOverlay             bool
+	SkipDRAScheduling       bool
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
@@ -123,7 +124,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, and SpotToSpotConsolidation.")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,SkipDRAScheduling=true"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, and SkipDRAScheduling.")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -164,6 +165,7 @@ func DefaultFeatureGates() FeatureGates {
 		NodeRepair:              false,
 		ReservedCapacity:        true,
 		SpotToSpotConsolidation: false,
+		SkipDRAScheduling:       true, // temporarily DRA scheduling is skipped by default until DRA is supported
 	}
 }
 
@@ -187,6 +189,9 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap["NodeOverlay"]; ok {
 		gates.NodeOverlay = val
+	}
+	if val, ok := gateMap["SkipDRAScheduling"]; ok {
+		gates.SkipDRAScheduling = val
 	}
 
 	return gates, nil

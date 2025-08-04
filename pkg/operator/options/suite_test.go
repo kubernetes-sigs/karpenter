@@ -121,6 +121,7 @@ var _ = Describe("Options", func() {
 					NodeRepair:              lo.ToPtr(false),
 					SpotToSpotConsolidation: lo.ToPtr(false),
 					NodeOverlay:             lo.ToPtr(false),
+					SkipDRAScheduling:       lo.ToPtr(true),
 				},
 			}))
 		})
@@ -173,6 +174,7 @@ var _ = Describe("Options", func() {
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
 					NodeOverlay:             lo.ToPtr(true),
+					SkipDRAScheduling:       lo.ToPtr(true),
 				},
 			}))
 		})
@@ -225,6 +227,7 @@ var _ = Describe("Options", func() {
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
 					NodeOverlay:             lo.ToPtr(true),
+					SkipDRAScheduling:       lo.ToPtr(true),
 				},
 			}))
 		})
@@ -279,6 +282,7 @@ var _ = Describe("Options", func() {
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
 					NodeOverlay:             lo.ToPtr(true),
+					SkipDRAScheduling:       lo.ToPtr(true),
 				},
 			}))
 		})
@@ -310,6 +314,7 @@ var _ = Describe("Options", func() {
 			Entry("when NodeRepair is overridden", "NodeRepair"),
 			Entry("when SpotToSpotConsolidation is overridden", "SpotToSpotConsolidation"),
 			Entry("when NodeOverlay is overridden", "NodeOverlay"),
+			Entry("when SkipDRAScheduling is overridden", "SkipDRAScheduling"),
 		)
 	})
 
@@ -367,4 +372,5 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.NodeRepair).To(Equal(optsB.FeatureGates.NodeRepair))
 	Expect(optsA.FeatureGates.NodeOverlay).To(Equal(optsB.FeatureGates.NodeOverlay))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
+	Expect(optsA.FeatureGates.SkipDRAScheduling).To(Equal(optsB.FeatureGates.SkipDRAScheduling))
 }

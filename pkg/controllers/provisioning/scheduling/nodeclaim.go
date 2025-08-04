@@ -78,6 +78,25 @@ func (e ReservedOfferingError) Unwrap() error {
 	return e.error
 }
 
+// DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
+// that are not yet supported by Karpenter
+type DRAError struct {
+	error
+}
+
+func NewDRAError(err error) DRAError {
+	return DRAError{error: err}
+}
+
+func IsDRAError(err error) bool {
+	draErr := &DRAError{}
+	return errors.As(err, draErr)
+}
+
+func (e DRAError) Unwrap() error {
+	return e.error
+}
+
 var nodeID int64
 
 func NewNodeClaim(

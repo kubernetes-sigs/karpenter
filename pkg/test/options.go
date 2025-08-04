@@ -54,6 +54,7 @@ type FeatureGates struct {
 	ReservedCapacity        *bool
 	SpotToSpotConsolidation *bool
 	NodeOverlay             *bool
+	SkipDRAScheduling       *bool
 }
 
 func Options(overrides ...OptionsFields) *options.Options {
@@ -86,6 +87,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 			ReservedCapacity:        lo.FromPtrOr(opts.FeatureGates.ReservedCapacity, true),
 			SpotToSpotConsolidation: lo.FromPtrOr(opts.FeatureGates.SpotToSpotConsolidation, false),
 			NodeOverlay:             lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
+			SkipDRAScheduling:       lo.FromPtrOr(opts.FeatureGates.SkipDRAScheduling, true),
 		},
 	}
 }
