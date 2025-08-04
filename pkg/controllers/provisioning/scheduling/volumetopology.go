@@ -206,7 +206,7 @@ func (v *VolumeTopology) validateStorageClass(ctx context.Context, storageClassN
 	}
 	// Ignore pods than have unbound pvc for voluemBindingMode immediate
 	if storageClass.VolumeBindingMode != nil && *storageClass.VolumeBindingMode == storagev1.VolumeBindingImmediate {
-		return serrors.Wrap(fmt.Errorf("persistentVolumeClaim is unbound"), "VolumeBindingMode", klog.KRef("", string(*storageClass.VolumeBindingMode)))
+		return serrors.Wrap(fmt.Errorf("persistentVolumeClaim is unbound for volumeBindingMode: Immediate"), "StorageClass", klog.KRef("", storageClass.Provisioner))
 	}
 	return nil
 }

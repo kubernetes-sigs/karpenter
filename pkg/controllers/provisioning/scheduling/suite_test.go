@@ -3342,12 +3342,18 @@ var _ = Context("Scheduling", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, nodePool, pvc, pod)
+			cluster.AckPods(pod)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
 
 			var nodeList corev1.NodeList
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			// no nodes should be created as the storage class is using volumeBindingMode immediate the pvc is unbound
 			Expect(nodeList.Items).To(HaveLen(0))
+			nn := client.ObjectKeyFromObject(pod)
+			Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
+			Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeFalse())
+			ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 1, nil)
 		})
 		DescribeTable(
 			"should launch nodes for pods with ephemeral volume without a storage class when the PVC is bound",
