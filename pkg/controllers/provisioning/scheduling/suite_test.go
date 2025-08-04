@@ -3298,7 +3298,7 @@ var _ = Context("Scheduling", func() {
 			// no nodes should be created as the storage class is using an unsupported provisioner
 			Expect(nodeList.Items).To(HaveLen(0))
 		})
-		It("should not launch nodes for pod with unbound volume for voluemBindingMode immediate", func() {
+		It("should not launch nodes for pod with unbound volume for volumeBindingMode immediate", func() {
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
