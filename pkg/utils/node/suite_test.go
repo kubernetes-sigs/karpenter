@@ -20,13 +20,11 @@ import (
 	"context"
 	"testing"
 
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -67,7 +65,7 @@ var _ = Describe("NodeUtils", func() {
 	})
 	It("should return nodeClaim for node which has the same provider ID", func() {
 		testNode = test.NodeClaimLinkedNode(nodeClaim)
-		operatorpkg.ExpectApplied(ctx, env.Client, testNode, nodeClaim)
+		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
 
 		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())
@@ -80,7 +78,7 @@ var _ = Describe("NodeUtils", func() {
 		testNode = test.Node(test.NodeOptions{
 			ProviderID: "testID",
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, testNode, nodeClaim)
+		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
 
 		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
 		Expect(err).NotTo(HaveOccurred())

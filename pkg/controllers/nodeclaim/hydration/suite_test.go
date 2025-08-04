@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -84,8 +84,8 @@ var _ = Describe("Hydration", func() {
 				},
 			})
 			delete(nodeClaim.Labels, v1.NodeClassLabelKey(nodeClassRef.GroupKind()))
-			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
-			operatorpkg.ExpectObjectReconciled(ctx, env.Client, hydrationController, nodeClaim)
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, hydrationController, nodeClaim)
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			value, ok := nodeClaim.Labels[v1.NodeClassLabelKey(nodeClassRef.GroupKind())]

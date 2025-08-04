@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -187,7 +187,7 @@ func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 	var pods []*corev1.Pod
 	ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 	rs := test.ReplicaSet()
-	operatorpkg.ExpectApplied(ctx, env.Client, rs)
+	ExpectApplied(ctx, env.Client, rs)
 	pods = test.Pods(1, test.PodOptions{
 		ResourceRequirements: corev1.ResourceRequirements{
 			Requests: map[corev1.ResourceName]resource.Quantity{
@@ -207,7 +207,7 @@ func churn(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {
 					BlockOwnerDeletion: lo.ToPtr(true),
 				},
 			}}})
-	operatorpkg.ExpectApplied(ctx, env.Client, pods[0])
+	ExpectApplied(ctx, env.Client, pods[0])
 	ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
 	cluster.NominateNodeForPod(ctx, nodes[0].Spec.ProviderID)
 	Expect(cluster.UpdateNode(ctx, nodes[0])).To(Succeed())
@@ -218,7 +218,7 @@ func blockingBudget(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{
 		Nodes: "0%",
 	}}
-	operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+	ExpectApplied(ctx, env.Client, nodePool)
 }
 
 func nominated(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim) {

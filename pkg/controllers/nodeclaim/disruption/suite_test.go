@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -126,19 +126,19 @@ var _ = Describe("Disruption", func() {
 		})
 		// set the lastPodEvent to 5 minutes in the past
 		nodeClaim.Status.LastPodEventTime.Time = fakeClock.Now().Add(-5 * time.Minute)
-		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 	})
 	It("should set multiple disruption conditions simultaneously", func() {
 		cp.Drifted = "drifted"
 		nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmpty
 		nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
 
 		// step forward to make the node empty
 		fakeClock.Step(60 * time.Second)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
@@ -150,9 +150,9 @@ var _ = Describe("Disruption", func() {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 		ExpectMakeNodeClaimsInitialized(ctx, env.Client, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())

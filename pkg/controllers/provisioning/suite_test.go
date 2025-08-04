@@ -39,7 +39,7 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -109,7 +109,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 	cloudProvider.Reset()
 	cluster.Reset()
 	pscheduling.IgnoredPodCount.Set(0, nil)
@@ -119,7 +119,7 @@ var _ = Describe("Provisioning", func() {
 	Context("Batcher", func() {
 		It("should provision single pod if no other pod is received within the batch idle duration", func() {
 			pod := test.UnschedulablePod()
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), pod)
+			ExpectApplied(ctx, env.Client, test.NodePool(), pod)
 			prov.Trigger(pod.UID)
 
 			ExpectParallelized(
@@ -128,7 +128,7 @@ var _ = Describe("Provisioning", func() {
 					fakeClock.Step(time.Second * 11)
 				},
 				func() {
-					result := operatorpkg.ExpectSingletonReconciled(ctx, prov)
+					result := ExpectSingletonReconciled(ctx, prov)
 					Expect(result.RequeueAfter).ToNot(BeNil())
 				},
 			)
@@ -139,7 +139,7 @@ var _ = Describe("Provisioning", func() {
 				BatchIdleDuration: lo.ToPtr(5 * time.Second),
 			}))
 			pod := test.UnschedulablePod()
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), pod)
+			ExpectApplied(ctx, env.Client, test.NodePool(), pod)
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
@@ -170,7 +170,7 @@ var _ = Describe("Provisioning", func() {
 				fakeClock.Step(3 * time.Second)
 				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeFalse())
 			}()
-			operatorpkg.ExpectSingletonReconciled(ctx, prov)
+			ExpectSingletonReconciled(ctx, prov)
 			wg.Wait()
 		})
 		It("should extend the timeout if we receive a new pod within the batch idle duration", func() {
@@ -179,10 +179,10 @@ var _ = Describe("Provisioning", func() {
 				BatchIdleDuration: lo.ToPtr(5 * time.Second),
 			}))
 			pod := test.UnschedulablePod()
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), pod)
+			ExpectApplied(ctx, env.Client, test.NodePool(), pod)
 
 			pod2 := test.UnschedulablePod()
-			operatorpkg.ExpectApplied(ctx, env.Client, pod2)
+			ExpectApplied(ctx, env.Client, pod2)
 
 			wg := sync.WaitGroup{}
 			wg.Add(1)
@@ -217,12 +217,12 @@ var _ = Describe("Provisioning", func() {
 				fakeClock.Step(3 * time.Second)
 				Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second).Should(BeFalse())
 			}()
-			operatorpkg.ExpectSingletonReconciled(ctx, prov)
+			ExpectSingletonReconciled(ctx, prov)
 			wg.Wait()
 		})
 	})
 	It("should provision nodes", func() {
-		operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+		ExpectApplied(ctx, env.Client, test.NodePool())
 		pod := test.UnschedulablePod()
 		cluster.AckPods(pod)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -233,7 +233,7 @@ var _ = Describe("Provisioning", func() {
 		ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 1, nil)
 	})
 	It("Should provision nodes for multiple pods", func() {
-		operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+		ExpectApplied(ctx, env.Client, test.NodePool())
 		pods := test.UnschedulablePods(test.PodOptions{}, 100)
 		cluster.AckPods(pods...)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
@@ -246,7 +246,7 @@ var _ = Describe("Provisioning", func() {
 	It("should expect nodeclaim terminationGracePeriod to be the global value when the nodepool terminationGracePeriod is not set", func() {
 		nodePool := test.NodePool()
 		pscheduling.DefaultTerminationGracePeriod = &metav1.Duration{Duration: 98 * time.Hour}
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		ExpectScheduled(ctx, env.Client, pod)
@@ -257,7 +257,7 @@ var _ = Describe("Provisioning", func() {
 	})
 	It("should expect nodeclaim terminationGracePeriod to be the nil when the nodepool terminationGracePeriod and global terminationGracePeriod is not set", func() {
 		nodePool := test.NodePool()
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		ExpectScheduled(ctx, env.Client, pod)
@@ -270,7 +270,7 @@ var _ = Describe("Provisioning", func() {
 		nodePool := test.NodePool()
 		nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: 223 * time.Hour}
 		pscheduling.DefaultTerminationGracePeriod = &metav1.Duration{Duration: 47 * time.Hour}
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		ExpectScheduled(ctx, env.Client, pod)
@@ -281,8 +281,8 @@ var _ = Describe("Provisioning", func() {
 	})
 	It("should ignore NodePools that are deleting", func() {
 		nodePool := test.NodePool()
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
-		operatorpkg.ExpectDeletionTimestampSet(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectDeletionTimestampSet(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		nodes := &corev1.NodeList{}
@@ -292,8 +292,8 @@ var _ = Describe("Provisioning", func() {
 	})
 	It("should mark pod as unschedulable if there are no valid nodepools", func() {
 		nodePool := test.NodePool()
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
-		operatorpkg.ExpectDeletionTimestampSet(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectDeletionTimestampSet(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		cluster.AckPods(pod)
 		nn := client.ObjectKeyFromObject(pod)
@@ -309,7 +309,7 @@ var _ = Describe("Provisioning", func() {
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		nodes := &corev1.NodeList{}
@@ -323,7 +323,7 @@ var _ = Describe("Provisioning", func() {
 		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "unhealthy", "unhealthy")
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
 		nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
 		pod := test.UnschedulablePod()
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 		nodes := &corev1.NodeList{}
@@ -362,7 +362,7 @@ var _ = Describe("Provisioning", func() {
 			// Ignored, label selector does not match
 			test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{"foo": "bar"}}),
 		}
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, schedulable...)
 		for _, pod := range schedulable {
 			ExpectScheduled(ctx, env.Client, pod)
@@ -402,7 +402,7 @@ var _ = Describe("Provisioning", func() {
 			// Ignored, label selector does not match
 			test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{{Key: "foo", Operator: corev1.NodeSelectorOpIn, Values: []string{"bar"}}}}),
 		}
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, schedulable...)
 		for _, pod := range schedulable {
 			ExpectScheduled(ctx, env.Client, pod)
@@ -413,7 +413,7 @@ var _ = Describe("Provisioning", func() {
 		}
 	})
 	It("should provision nodes for accelerators", func() {
-		operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+		ExpectApplied(ctx, env.Client, test.NodePool())
 		pods := []*corev1.Pod{
 			test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: corev1.ResourceRequirements{Limits: corev1.ResourceList{fake.ResourceGPUVendorA: resource.MustParse("1")}},
@@ -430,7 +430,7 @@ var _ = Describe("Provisioning", func() {
 	It("should provision multiple nodes when maxPods is set", func() {
 		// Kubelet is actually not observed here, the scheduler is relying on the
 		// pods resource value which is statically set in the fake cloudprovider
-		operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+		ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Template: v1.NodeClaimTemplate{
 					Spec: v1.NodeClaimTemplateSpec{
@@ -466,7 +466,7 @@ var _ = Describe("Provisioning", func() {
 		nodePool := test.NodePool()
 		pod := test.UnschedulablePod()
 		hash := nodePool.Hash()
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, pod)
+		ExpectApplied(ctx, env.Client, nodePool, pod)
 
 		results, err := prov.Schedule(ctx)
 		Expect(err).ToNot(HaveOccurred())
@@ -478,7 +478,7 @@ var _ = Describe("Provisioning", func() {
 			"new-label": "new-value",
 		})
 		Expect(nodePool.Hash()).ToNot(Equal(hash))
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool) // apply the changed NodePool but expect no change in the hash on the NodeClaim
+		ExpectApplied(ctx, env.Client, nodePool) // apply the changed NodePool but expect no change in the hash on the NodeClaim
 
 		nodeClaims, err := prov.CreateNodeClaims(ctx, results.NewNodeClaims)
 		Expect(err).ToNot(HaveOccurred())
@@ -504,13 +504,13 @@ var _ = Describe("Provisioning", func() {
 			},
 		},
 		)
-		operatorpkg.ExpectApplied(ctx, env.Client, node, nodePool)
+		ExpectApplied(ctx, env.Client, node, nodePool)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
 
 		// Schedule 3 pods to the node that currently exists
 		for i := 0; i < 3; i++ {
 			pod := test.UnschedulablePod()
-			operatorpkg.ExpectApplied(ctx, env.Client, pod)
+			ExpectApplied(ctx, env.Client, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 		}
 
@@ -535,7 +535,7 @@ var _ = Describe("Provisioning", func() {
 			Skip("Native Sidecar containers is only on by default starting in K8s version >= 1.29.x")
 		}
 
-		operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+		ExpectApplied(ctx, env.Client, test.NodePool())
 
 		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
 		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
@@ -586,7 +586,7 @@ var _ = Describe("Provisioning", func() {
 			Skip("Native Sidecar containers is only on by default starting in K8s version >= 1.29.x")
 		}
 
-		operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+		ExpectApplied(ctx, env.Client, test.NodePool())
 
 		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
 		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
@@ -637,7 +637,7 @@ var _ = Describe("Provisioning", func() {
 			Skip("Native Sidecar containers is only on by default starting in K8s version >= 1.29.x")
 		}
 
-		operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+		ExpectApplied(ctx, env.Client, test.NodePool())
 
 		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
 		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
@@ -691,7 +691,7 @@ var _ = Describe("Provisioning", func() {
 					Limits: v1.Limits(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("20")}),
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			cluster.UpdateNodeClaim(test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -709,7 +709,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should schedule if limits would be met", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Limits: v1.Limits(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}),
 				},
@@ -726,7 +726,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 		})
 		It("should partially schedule if limits would be exceeded", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Limits: v1.Limits(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3")}),
 				},
@@ -776,7 +776,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(unscheduledPodCount).To(Equal(1))
 		})
 		It("should not schedule if limits would be exceeded", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Limits: v1.Limits(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}),
 				},
@@ -791,7 +791,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should not schedule if limits would be exceeded (GPU)", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Limits: v1.Limits(corev1.ResourceList{corev1.ResourcePods: resource.MustParse("1")}),
 				},
@@ -807,7 +807,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should not schedule to a nodepool after a scheduling round if limits would be exceeded", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
+			ExpectApplied(ctx, env.Client, test.NodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Limits: v1.Limits(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}),
 				},
@@ -837,7 +837,7 @@ var _ = Describe("Provisioning", func() {
 	})
 	Context("Daemonsets", func() {
 		It("should account for daemonsets", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
 				}},
@@ -858,7 +858,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
 		It("should account for daemonset hostports", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
 					HostPorts:            []int32{8080},
@@ -885,7 +885,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, test.DaemonSet(
+			ExpectApplied(ctx, env.Client, nodePool, test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
 				}},
@@ -906,7 +906,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
 		It("should not schedule if daemonset overhead is too large", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10000"), corev1.ResourceMemory: resource.MustParse("10000Gi")}},
 				}},
@@ -923,7 +923,7 @@ var _ = Describe("Provisioning", func() {
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi")}},
 				}},
 			)
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, daemonset)
+			ExpectApplied(ctx, env.Client, nodePool, daemonset)
 			// Create the actual daemonSet pod with lower resource requests and expect to use the pod
 			daemonsetPod := test.UnschedulablePod(
 				test.PodOptions{
@@ -941,7 +941,7 @@ var _ = Describe("Provisioning", func() {
 					},
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
 				})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, daemonsetPod)
+			ExpectApplied(ctx, env.Client, nodePool, daemonsetPod)
 			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 			pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
@@ -959,7 +959,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
 		It("should not schedule if resource requests are not defined and limits (requests) are too large", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{
 						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10000"), corev1.ResourceMemory: resource.MustParse("10000Gi")},
@@ -972,7 +972,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should schedule based on the max resource requests of containers and initContainers", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{
 						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10000"), corev1.ResourceMemory: resource.MustParse("1Gi")},
@@ -1000,7 +1000,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
 		It("should not schedule if combined max resources are too large for any node", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{
 						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10000"), corev1.ResourceMemory: resource.MustParse("1Gi")},
@@ -1021,7 +1021,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should not schedule if initContainer resources are too large", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					InitContainers: []corev1.Container{
 						{
@@ -1037,7 +1037,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should be able to schedule pods if resource requests and limits are not defined", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{}},
 			))
 			pod := test.UnschedulablePod()
@@ -1045,7 +1045,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 		})
 		It("should ignore daemonsets without matching tolerations", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client,
+			ExpectApplied(ctx, env.Client,
 				test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
 						Template: v1.NodeClaimTemplate{
@@ -1077,7 +1077,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
 		})
 		It("should ignore daemonsets with an invalid selector", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					NodeSelector:         map[string]string{"node": "invalid"},
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
@@ -1099,7 +1099,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("2Gi")))
 		})
 		It("should account daemonsets with NotIn operator and unspecified key", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					NodeRequirements:     []corev1.NodeSelectorRequirement{{Key: "foo", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"bar"}}},
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
@@ -1147,7 +1147,7 @@ var _ = Describe("Provisioning", func() {
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi")}},
 				}},
 			)
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, daemonset)
+			ExpectApplied(ctx, env.Client, nodePool, daemonset)
 			daemonsetPod := test.UnschedulablePod(
 				test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
@@ -1172,7 +1172,7 @@ var _ = Describe("Provisioning", func() {
 					// We specifically make this different from the actual DaemonSet requests to mock a LimitRange overriding pod
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
 				})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, daemonsetPod)
+			ExpectApplied(ctx, env.Client, nodePool, daemonsetPod)
 			ExpectReconcileSucceeded(ctx, daemonsetController, client.ObjectKeyFromObject(daemonset))
 
 			// Deploy pod
@@ -1235,7 +1235,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			}
-			operatorpkg.ExpectApplied(ctx, env.Client, daemonSet, nodePool)
+			ExpectApplied(ctx, env.Client, daemonSet, nodePool)
 			pod := test.UnschedulablePod(
 				test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
@@ -1252,7 +1252,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
 		It("should consider a daemonset schedulable with an incompatible node affinity preference", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("2Gi")}},
 				}},
@@ -1273,7 +1273,7 @@ var _ = Describe("Provisioning", func() {
 			Expect(*allocatable.Memory()).To(Equal(resource.MustParse("4Gi")))
 		})
 		It("should consider a daemonset schedulable with a PreferNoSchedule taint", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client,
+			ExpectApplied(ctx, env.Client,
 				test.NodePool(v1.NodePool{
 					Spec: v1.NodePoolSpec{
 						Template: v1.NodeClaimTemplate{
@@ -1321,7 +1321,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
@@ -1349,7 +1349,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
@@ -1373,7 +1373,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 				})
-				operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
 						NodeRequirements: []corev1.NodeSelectorRequirement{{Key: domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}},
@@ -1395,7 +1395,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 				})
-				operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod(
 					test.PodOptions{
 						NodeRequirements: []corev1.NodeSelectorRequirement{{Key: "subdomain." + domain + "/test", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}}},
@@ -1418,7 +1418,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pods := []*corev1.Pod{
 				test.UnschedulablePod(
 					test.PodOptions{Tolerations: []corev1.Toleration{
@@ -1460,7 +1460,7 @@ var _ = Describe("Provisioning", func() {
 	Context("NodeClaim Creation", func() {
 		It("should create a nodeclaim request with expected requirements", func() {
 			nodePool := test.NodePool()
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
@@ -1504,7 +1504,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
@@ -1551,7 +1551,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
@@ -1590,7 +1590,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
@@ -1613,7 +1613,7 @@ var _ = Describe("Provisioning", func() {
 		})
 		It("should create a nodeclaim request restricting instance types based on pod resource requests", func() {
 			nodePool := test.NodePool()
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
@@ -1640,7 +1640,7 @@ var _ = Describe("Provisioning", func() {
 		})
 		It("should create a nodeclaim request with the correct owner reference", func() {
 			nodePool := test.NodePool()
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
@@ -1670,7 +1670,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 
@@ -1685,7 +1685,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 		})
 		It("should create a nodeclaim with resource requests", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+			ExpectApplied(ctx, env.Client, test.NodePool())
 			pod := test.UnschedulablePod(
 				test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{
@@ -1711,7 +1711,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 		})
 		It("should create a nodeclaim with resource requests with daemon overhead", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
+			ExpectApplied(ctx, env.Client, test.NodePool(), test.DaemonSet(
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Mi")}},
 				}},
@@ -1740,7 +1740,7 @@ var _ = Describe("Provisioning", func() {
 			})
 		})
 		It("should not schedule if invalid pvc", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+			ExpectApplied(ctx, env.Client, test.NodePool())
 			pod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{"invalid"},
 			})
@@ -1761,7 +1761,7 @@ var _ = Describe("Provisioning", func() {
 				},
 				StorageClassName: storageClass,
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim, persistentVolume)
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim, persistentVolume)
 			pod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 			})
@@ -1771,7 +1771,7 @@ var _ = Describe("Provisioning", func() {
 		It("should not schedule with an empty storage class if the pvc is not bound", func() {
 			storageClass := ""
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
 			pod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 			})
@@ -1791,7 +1791,7 @@ var _ = Describe("Provisioning", func() {
 				},
 				StorageClassName: missingStorageClass,
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim, persistentVolume)
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim, persistentVolume)
 			pod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 			})
@@ -1803,7 +1803,7 @@ var _ = Describe("Provisioning", func() {
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				StorageClassName: &missingStorageClass,
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
 			pod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 			})
@@ -1811,7 +1811,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should schedule valid pods when a pod with an invalid pvc is encountered (pvc)", func() {
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+			ExpectApplied(ctx, env.Client, test.NodePool())
 			invalidPod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{"invalid"},
 			})
@@ -1824,7 +1824,7 @@ var _ = Describe("Provisioning", func() {
 		It("should schedule valid pods when a pod with an invalid pvc is encountered (storage class)", func() {
 			invalidStorageClass := "invalid-storage-class"
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &invalidStorageClass})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
 			invalidPod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 			})
@@ -1837,7 +1837,7 @@ var _ = Describe("Provisioning", func() {
 		It("should schedule valid pods when a pod with an invalid pvc is encountered (volume name)", func() {
 			invalidVolumeName := "invalid-volume-name"
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: invalidVolumeName})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
+			ExpectApplied(ctx, env.Client, test.NodePool(), persistentVolumeClaim)
 			invalidPod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 			})
@@ -1849,7 +1849,7 @@ var _ = Describe("Provisioning", func() {
 		})
 		It("should schedule to storage class zones if volume does not exist", func() {
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass.Name})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim)
+			ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim)
 			pod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 				NodeRequirements: []corev1.NodeSelectorRequirement{{
@@ -1878,14 +1878,14 @@ var _ = Describe("Provisioning", func() {
 				},
 				StorageClassName: &storageClass.Name,
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, pod, persistentVolumeClaim, persistentVolume)
+			ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, pod, persistentVolumeClaim, persistentVolume)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-3"))
 		})
 		It("should not schedule if storage class zones are incompatible", func() {
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{StorageClassName: &storageClass.Name})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim)
+			ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim)
 			pod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
 				NodeRequirements: []corev1.NodeSelectorRequirement{{
@@ -1913,14 +1913,14 @@ var _ = Describe("Provisioning", func() {
 				},
 				StorageClassName: &storageClass.Name,
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, pod, persistentVolumeClaim, persistentVolume)
+			ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, pod, persistentVolumeClaim, persistentVolume)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		It("should not relax an added volume topology zone node-selector away", func() {
 			persistentVolume := test.PersistentVolume(test.PersistentVolumeOptions{Zones: []string{"test-zone-3"}})
 			persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
-			operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim, persistentVolume)
+			ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim, persistentVolume)
 
 			pod := test.UnschedulablePod(test.PodOptions{
 				PersistentVolumeClaims: []string{persistentVolumeClaim.Name},
@@ -1970,7 +1970,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 				})
-				operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
@@ -1991,7 +1991,7 @@ var _ = Describe("Provisioning", func() {
 					}},
 				}}}}
 				// Success
-				operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectApplied(ctx, env.Client, test.NodePool())
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-1"))
@@ -2013,7 +2013,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				}}}
 				// Success
-				operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectApplied(ctx, env.Client, test.NodePool())
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectScheduled(ctx, env.Client, pod)
 			})
@@ -2046,7 +2046,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 				})
-				operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
@@ -2075,7 +2075,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 				})
-				operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Spec.Taints).To(ContainElement(corev1.Taint{Key: "foo", Value: "bar", Effect: corev1.TaintEffectPreferNoSchedule}))
@@ -2114,7 +2114,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 				})
-				operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectApplied(ctx, env.Client, test.NodePool())
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod1, nodePreferencePod)
 
 				pod1Node := ExpectScheduled(ctx, env.Client, pod1)
@@ -2183,7 +2183,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 				})
-				operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectApplied(ctx, env.Client, test.NodePool())
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], nodeAffinityPod)
 
 				zone1Node := ExpectScheduled(ctx, env.Client, zone1Pod)
@@ -2213,7 +2213,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				}
 				pods := test.UnschedulablePods(opts, 5)
-				operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectApplied(ctx, env.Client, test.NodePool())
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 
 				// If we were respecting preferences, we would add these pods on separate nodes
@@ -2247,7 +2247,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				}
 				pods := test.UnschedulablePods(opts, 5)
-				operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectApplied(ctx, env.Client, test.NodePool())
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 
 				// If we were respecting preferences, we would add these pods on separate nodes
@@ -2320,7 +2320,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 				})
-				operatorpkg.ExpectApplied(ctx, env.Client, test.NodePool())
+				ExpectApplied(ctx, env.Client, test.NodePool())
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, zone1Pod, zone2Pods[0], zone2Pods[1], affinityPod)
 
 				zone1Node := ExpectScheduled(ctx, env.Client, zone1Pod)
@@ -2339,7 +2339,7 @@ var _ = Describe("Provisioning", func() {
 	Context("Multiple NodePools", func() {
 		It("should schedule to an explicitly selected NodePool", func() {
 			nodePool := test.NodePool()
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, test.NodePool())
+			ExpectApplied(ctx, env.Client, nodePool, test.NodePool())
 			pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.NodePoolLabelKey: nodePool.Name}})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
@@ -2355,7 +2355,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, test.NodePool())
+			ExpectApplied(ctx, env.Client, nodePool, test.NodePool())
 			pod := test.UnschedulablePod(test.PodOptions{NodeSelector: nodePool.Spec.Template.Labels})
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
@@ -2371,7 +2371,7 @@ var _ = Describe("Provisioning", func() {
 					},
 				},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, test.NodePool())
+			ExpectApplied(ctx, env.Client, nodePool, test.NodePool())
 			pod := test.UnschedulablePod()
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			node := ExpectScheduled(ctx, env.Client, pod)
@@ -2384,7 +2384,7 @@ var _ = Describe("Provisioning", func() {
 					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: lo.ToPtr(int32(20))}}),
 					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: lo.ToPtr(int32(100))}}),
 				}
-				operatorpkg.ExpectApplied(ctx, env.Client, nodePools...)
+				ExpectApplied(ctx, env.Client, nodePools...)
 				pods := []*corev1.Pod{
 					test.UnschedulablePod(), test.UnschedulablePod(), test.UnschedulablePod(),
 				}
@@ -2401,7 +2401,7 @@ var _ = Describe("Provisioning", func() {
 					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: lo.ToPtr(int32(20))}}),
 					test.NodePool(v1.NodePool{Spec: v1.NodePoolSpec{Weight: lo.ToPtr(int32(100))}}),
 				}
-				operatorpkg.ExpectApplied(ctx, env.Client, nodePools...)
+				ExpectApplied(ctx, env.Client, nodePools...)
 				pod := test.UnschedulablePod(test.PodOptions{NodeSelector: map[string]string{v1.NodePoolLabelKey: targetedNodePool.Name}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				node := ExpectScheduled(ctx, env.Client, pod)
@@ -2486,7 +2486,7 @@ var _ = Describe("Provisioning", func() {
 					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
 					cloudProvider.InstanceTypes = instanceTypes
 
-					operatorpkg.ExpectApplied(ctx, env.Client, defaultNodePool)
+					ExpectApplied(ctx, env.Client, defaultNodePool)
 					pod := test.UnschedulablePod(test.PodOptions{
 						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("0.9"),
@@ -2544,7 +2544,7 @@ var _ = Describe("Provisioning", func() {
 					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
 					cloudProvider.InstanceTypes = instanceTypes
 
-					operatorpkg.ExpectApplied(ctx, env.Client, defaultNodePool)
+					ExpectApplied(ctx, env.Client, defaultNodePool)
 					pod := test.UnschedulablePod(test.PodOptions{
 						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("0.9"),
@@ -2613,7 +2613,7 @@ var _ = Describe("Provisioning", func() {
 					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
 					cloudProvider.InstanceTypes = instanceTypes
 
-					operatorpkg.ExpectApplied(ctx, env.Client, defaultNodePool)
+					ExpectApplied(ctx, env.Client, defaultNodePool)
 
 					nodePoolWithNoMinValues := test.NodePool(v1.NodePool{
 						Spec: v1.NodePoolSpec{
@@ -2634,7 +2634,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					})
 
-					operatorpkg.ExpectApplied(ctx, env.Client, nodePoolWithNoMinValues)
+					ExpectApplied(ctx, env.Client, nodePoolWithNoMinValues)
 
 					pod := test.UnschedulablePod(test.PodOptions{
 						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
@@ -2699,7 +2699,7 @@ var _ = Describe("Provisioning", func() {
 					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
 					cloudProvider.InstanceTypes = instanceTypes
 
-					operatorpkg.ExpectApplied(ctx, env.Client, defaultNodePool)
+					ExpectApplied(ctx, env.Client, defaultNodePool)
 
 					lowerWeightNodePool := test.NodePool(v1.NodePool{
 						Spec: v1.NodePoolSpec{
@@ -2721,7 +2721,7 @@ var _ = Describe("Provisioning", func() {
 						},
 					})
 
-					operatorpkg.ExpectApplied(ctx, env.Client, lowerWeightNodePool)
+					ExpectApplied(ctx, env.Client, lowerWeightNodePool)
 
 					pod := test.UnschedulablePod(test.PodOptions{
 						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
@@ -2813,7 +2813,7 @@ var _ = Describe("Provisioning", func() {
 					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
 					cloudProvider.InstanceTypes = instanceTypes
 
-					operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+					ExpectApplied(ctx, env.Client, nodePool)
 					pod := test.UnschedulablePod(test.PodOptions{
 						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("0.9"),
@@ -2858,7 +2858,7 @@ var _ = Describe("Provisioning", func() {
 					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
 					cloudProvider.InstanceTypes = instanceTypes
 
-					operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+					ExpectApplied(ctx, env.Client, nodePool)
 					pod := test.UnschedulablePod(test.PodOptions{
 						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("0.9"),
@@ -2956,7 +2956,7 @@ var _ = Describe("Provisioning", func() {
 					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
 					cloudProvider.InstanceTypes = instanceTypes
 
-					operatorpkg.ExpectApplied(ctx, env.Client, defaultNodePool)
+					ExpectApplied(ctx, env.Client, defaultNodePool)
 					pod := test.UnschedulablePod(test.PodOptions{
 						ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("0.9"),
