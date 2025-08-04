@@ -26,7 +26,7 @@ import (
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -70,24 +70,24 @@ var _ = Describe("Initialization", func() {
 				})
 			}
 			nodeClaim := test.NodeClaim(nodeClaimOpts...)
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 			node := test.Node(test.NodeOptions{
 				ProviderID: nodeClaim.Status.ProviderID,
 				Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 			})
-			operatorpkg.ExpectApplied(ctx, env.Client, node)
+			ExpectApplied(ctx, env.Client, node)
 
-			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 			ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 			// If we're testing that Karpenter correctly ignores unmanaged NodeClaims, we must set the registered
 			// status condition manually since the registration sub-reconciler should also ignore it.
 			if !isNodeClaimManaged {
 				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeRegistered)
-				operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectApplied(ctx, env.Client, nodeClaim)
 			}
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -105,8 +105,8 @@ var _ = Describe("Initialization", func() {
 				corev1.ResourceMemory: resource.MustParse("80Mi"),
 				corev1.ResourcePods:   resource.MustParse("110"),
 			}
-			operatorpkg.ExpectApplied(ctx, env.Client, node)
-			operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+			ExpectApplied(ctx, env.Client, node)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
@@ -117,8 +117,8 @@ var _ = Describe("Initialization", func() {
 	)
 	It("shouldn't consider the nodeClaim initialized when it has not registered", func() {
 		nodeClaim := test.NodeClaim()
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node1 := test.Node(test.NodeOptions{
@@ -127,10 +127,10 @@ var _ = Describe("Initialization", func() {
 		node2 := test.Node(test.NodeOptions{
 			ProviderID: nodeClaim.Status.ProviderID,
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, node1, node2)
+		ExpectApplied(ctx, env.Client, node1, node2)
 
 		// does not error but will not be registered because this reconcile returned multiple nodes
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node1, node2) // Remove the not-ready taint
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -159,8 +159,8 @@ var _ = Describe("Initialization", func() {
 			corev1.ResourceMemory: resource.MustParse("80Mi"),
 			corev1.ResourcePods:   resource.MustParse("110"),
 		}
-		operatorpkg.ExpectApplied(ctx, env.Client, node1, node2)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, node1, node2)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionFalse))
@@ -183,8 +183,8 @@ var _ = Describe("Initialization", func() {
 				},
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -201,10 +201,10 @@ var _ = Describe("Initialization", func() {
 			},
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Labels).To(HaveKeyWithValue(v1.NodeInitializedLabelKey, "true"))
@@ -226,8 +226,8 @@ var _ = Describe("Initialization", func() {
 				},
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -245,9 +245,9 @@ var _ = Describe("Initialization", func() {
 			ReadyStatus: corev1.ConditionFalse,
 			Taints:      []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -271,14 +271,14 @@ var _ = Describe("Initialization", func() {
 				},
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// Update the nodeClaim to add mock the instance type having an extended resource
 		nodeClaim.Status.Capacity[fake.ResourceGPUVendorA] = resource.MustParse("2")
 		nodeClaim.Status.Allocatable[fake.ResourceGPUVendorA] = resource.MustParse("2")
-		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// Extended resource hasn't registered yet by the daemonset
 		node := test.Node(test.NodeOptions{
@@ -295,10 +295,10 @@ var _ = Describe("Initialization", func() {
 			},
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -322,14 +322,14 @@ var _ = Describe("Initialization", func() {
 				},
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		// Update the nodeClaim to add mock the instance type having an extended resource
 		nodeClaim.Status.Capacity[fake.ResourceGPUVendorA] = resource.MustParse("2")
 		nodeClaim.Status.Allocatable[fake.ResourceGPUVendorA] = resource.MustParse("2")
-		operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodeClaim)
 
 		// Extended resource hasn't registered yet by the daemonset
 		node := test.Node(test.NodeOptions{
@@ -346,11 +346,11 @@ var _ = Describe("Initialization", func() {
 			},
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
@@ -360,10 +360,10 @@ var _ = Describe("Initialization", func() {
 		node = ExpectExists(ctx, env.Client, node)
 		node.Status.Capacity[fake.ResourceGPUVendorA] = resource.MustParse("2")
 		node.Status.Allocatable[fake.ResourceGPUVendorA] = resource.MustParse("2")
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
+		ExpectApplied(ctx, env.Client, node)
 
 		// Reconcile the nodeClaim and the nodeClaim/Node should now be initilized
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
@@ -397,8 +397,8 @@ var _ = Describe("Initialization", func() {
 				},
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -415,12 +415,12 @@ var _ = Describe("Initialization", func() {
 			},
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Should add the startup taints to the node
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		node = ExpectExists(ctx, env.Client, node)
 		Expect(node.Spec.Taints).To(ContainElements(
 			corev1.Taint{
@@ -436,7 +436,7 @@ var _ = Describe("Initialization", func() {
 		))
 
 		// Shouldn't consider the node ready since the startup taints still exist
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
@@ -470,8 +470,8 @@ var _ = Describe("Initialization", func() {
 				},
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -488,22 +488,22 @@ var _ = Describe("Initialization", func() {
 			},
 			Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		ExpectMakeNodesReady(ctx, env.Client, node) // Remove the not-ready taint
 
 		// Shouldn't consider the node ready since the startup taints still exist
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
 
 		node = ExpectExists(ctx, env.Client, node)
 		node.Spec.Taints = []corev1.Taint{}
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
+		ExpectApplied(ctx, env.Client, node)
 
 		// nodeClaim should now be ready since all startup taints are removed
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))
@@ -537,8 +537,8 @@ var _ = Describe("Initialization", func() {
 				},
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -570,10 +570,10 @@ var _ = Describe("Initialization", func() {
 				v1.UnregisteredNoExecuteTaint,
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
+		ExpectApplied(ctx, env.Client, node)
 
 		// Shouldn't consider the node ready since the ephemeral taints still exist
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
@@ -607,8 +607,8 @@ var _ = Describe("Initialization", func() {
 				},
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
 		node := test.Node(test.NodeOptions{
@@ -640,20 +640,20 @@ var _ = Describe("Initialization", func() {
 				v1.UnregisteredNoExecuteTaint,
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
+		ExpectApplied(ctx, env.Client, node)
 
 		// Shouldn't consider the node ready since the ephemeral taints still exist
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionUnknown))
 
 		node = ExpectExists(ctx, env.Client, node)
 		node.Spec.Taints = []corev1.Taint{}
-		operatorpkg.ExpectApplied(ctx, env.Client, node)
+		ExpectApplied(ctx, env.Client, node)
 
 		// nodeClaim should now be ready since all startup taints are removed
-		operatorpkg.ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeRegistered).Status).To(Equal(metav1.ConditionTrue))
 		Expect(ExpectStatusConditionExists(nodeClaim, v1.ConditionTypeInitialized).Status).To(Equal(metav1.ConditionTrue))

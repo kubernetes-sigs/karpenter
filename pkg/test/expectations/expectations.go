@@ -27,6 +27,11 @@ import (
 	"sync"
 	"time"
 
+	v2 "k8s.io/api/apps/v1"
+
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	v1alpha2 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
@@ -34,11 +39,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	prometheusmodel "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
-	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,10 +51,9 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations" //nolint:stylecheck
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -62,7 +63,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 const (
@@ -175,7 +175,7 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	GinkgoHelper()
 	// Persist objects
 	for _, pod := range pods {
-		operatorpkg.ExpectApplied(ctx, c, pod)
+		ExpectApplied(ctx, c, pod)
 	}
 	// TODO: Check the error on the provisioner scheduling round
 	results, err := provisioner.Schedule(ctx)
@@ -219,7 +219,7 @@ func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *sta
 	GinkgoHelper()
 	// Persist objects
 	for _, pod := range pods {
-		operatorpkg.ExpectApplied(ctx, c, pod)
+		ExpectApplied(ctx, c, pod)
 	}
 	results, _ := provisioner.Schedule(ctx)
 	return results
@@ -238,7 +238,7 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudPr
 	// Make the nodeclaim ready in the status conditions
 	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
 	nc.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
-	operatorpkg.ExpectApplied(ctx, c, nc)
+	ExpectApplied(ctx, c, nc)
 	return nc, nil
 }
 
@@ -255,7 +255,7 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 	node := test.NodeClaimLinkedNode(nc)
 	node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1.NodeRegisteredLabelKey: "true"})
-	operatorpkg.ExpectApplied(ctx, c, nc, node)
+	ExpectApplied(ctx, c, nc, node)
 	return nc, node, nil
 }
 
@@ -283,7 +283,7 @@ func ExpectNodeClaimsCascadeDeletion(ctx context.Context, c client.Client, nodeC
 			if node.Spec.ProviderID == nodeClaim.Status.ProviderID {
 				Expect(c.Delete(ctx, node))
 				ExpectFinalizersRemoved(ctx, c, node)
-				operatorpkg.ExpectNotFound(ctx, c, node)
+				ExpectNotFound(ctx, c, node)
 			}
 		}
 	}
@@ -296,7 +296,7 @@ func ExpectMakeNodeClaimsInitialized(ctx context.Context, c client.Client, nodeC
 		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeRegistered)
 		nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeInitialized)
-		operatorpkg.ExpectApplied(ctx, c, nodeClaims[i])
+		ExpectApplied(ctx, c, nodeClaims[i])
 	}
 }
 
@@ -308,7 +308,7 @@ func ExpectMakeNodesInitialized(ctx context.Context, c client.Client, nodes ...*
 		nodes[i].Spec.Taints = lo.Reject(nodes[i].Spec.Taints, func(t corev1.Taint, _ int) bool { return t.MatchTaint(&v1.UnregisteredNoExecuteTaint) })
 		nodes[i].Labels[v1.NodeRegisteredLabelKey] = "true"
 		nodes[i].Labels[v1.NodeInitializedLabelKey] = "true"
-		operatorpkg.ExpectApplied(ctx, c, nodes[i])
+		ExpectApplied(ctx, c, nodes[i])
 	}
 }
 
@@ -328,7 +328,7 @@ func ExpectMakeNodesNotReady(ctx context.Context, c client.Client, nodes ...*cor
 		if nodes[i].Labels == nil {
 			nodes[i].Labels = map[string]string{}
 		}
-		operatorpkg.ExpectApplied(ctx, c, nodes[i])
+		ExpectApplied(ctx, c, nodes[i])
 	}
 }
 
@@ -355,7 +355,7 @@ func ExpectMakeNodesReady(ctx context.Context, c client.Client, nodes ...*corev1
 			})
 			return found
 		})
-		operatorpkg.ExpectApplied(ctx, c, nodes[i])
+		ExpectApplied(ctx, c, nodes[i])
 	}
 }
 
@@ -622,36 +622,8 @@ func ExpectParallelized(fs ...func()) {
 	wg.Wait()
 }
 
-func ExpectCleanedUp(ctx context.Context, c client.Client) {
-	GinkgoHelper()
-	wg := sync.WaitGroup{}
-	namespaces := &corev1.NamespaceList{}
-	Expect(c.List(ctx, namespaces)).To(Succeed())
-	ExpectFinalizersRemovedFromList(ctx, c, &corev1.NodeList{}, &v1.NodeClaimList{}, &corev1.PersistentVolumeClaimList{})
-	for _, object := range []client.Object{
-		&corev1.Pod{},
-		&corev1.Node{},
-		&appsv1.DaemonSet{},
-		&nodev1.RuntimeClass{},
-		&policyv1.PodDisruptionBudget{},
-		&corev1.PersistentVolumeClaim{},
-		&corev1.PersistentVolume{},
-		&storagev1.StorageClass{},
-		&v1.NodePool{},
-		&testv1alpha1.TestNodeClass{},
-		&v1.NodeClaim{},
-		&v1alpha1.NodeOverlay{},
-	} {
-		for _, namespace := range namespaces.Items {
-			wg.Add(1)
-			go func(object client.Object, namespace string) {
-				GinkgoHelper()
-				defer wg.Done()
-				defer GinkgoRecover()
-				Expect(c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
-					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}})).ToNot(HaveOccurred())
-			}(object, namespace.Name)
-		}
-	}
-	wg.Wait()
+func ExpectForceCleanedUpAll(ctx context.Context, c client.Client) {
+	ExpectForceCleanedUp(ctx, c, &corev1.NodeList{}, &v1.NodeClaimList{}, &corev1.PersistentVolumeClaimList{}, &corev1.PersistentVolumeList{},
+		&corev1.PodList{}, &policyv1.PodDisruptionBudgetList{}, &v2.StatefulSetList{}, &v1.NodePoolList{},
+		&v1alpha1.NodeOverlayList{}, &v1alpha2.TestNodeClassList{}, &v2.DaemonSetList{})
 }

@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -77,7 +77,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 				},
 			},
 		})
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool1, nodePool2, nodePool3)
+		ExpectApplied(ctx, env.Client, nodePool1, nodePool2, nodePool3)
 
 		// Set up NodePool maps for candidate creation
 		nodePoolMap = map[string]*v1.NodePool{
@@ -257,11 +257,11 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 				},
 			})
 			pod := test.Pod()
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
-			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectApplied(ctx, env.Client, nodeClaim)
 
 			// Ensure the state is updated after all changes
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))

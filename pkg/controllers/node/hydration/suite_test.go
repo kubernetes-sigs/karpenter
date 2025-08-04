@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -84,8 +84,8 @@ var _ = Describe("Hydration", func() {
 				},
 			})
 			delete(node.Labels, v1.NodeClassLabelKey(nodeClassRef.GroupKind()))
-			operatorpkg.ExpectApplied(ctx, env.Client, nodeClaim, node)
-			operatorpkg.ExpectObjectReconciled(ctx, env.Client, hydrationController, node)
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+			ExpectObjectReconciled(ctx, env.Client, hydrationController, node)
 
 			// The missing NodeClass label should have been propagated to the Node
 			node = ExpectExists(ctx, env.Client, node)

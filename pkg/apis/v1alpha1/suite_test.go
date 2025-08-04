@@ -23,7 +23,7 @@ import (
 
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -50,7 +50,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {
@@ -75,7 +75,7 @@ var _ = Describe("NodeOverlay", func() {
 				})
 			})
 			lo.ForEach(nos, func(overlay *v1alpha1.NodeOverlay, _ int) {
-				operatorpkg.ExpectApplied(ctx, env.Client, overlay)
+				ExpectApplied(ctx, env.Client, overlay)
 			})
 			overlayList := &v1alpha1.NodeOverlayList{}
 			Expect(env.Client.List(ctx, overlayList)).To(BeNil())
@@ -103,7 +103,7 @@ var _ = Describe("NodeOverlay", func() {
 				})
 			})
 			lo.ForEach(nos, func(overlay *v1alpha1.NodeOverlay, _ int) {
-				operatorpkg.ExpectApplied(ctx, env.Client, overlay)
+				ExpectApplied(ctx, env.Client, overlay)
 			})
 			overlayList := &v1alpha1.NodeOverlayList{}
 			Expect(env.Client.List(ctx, overlayList)).To(BeNil())

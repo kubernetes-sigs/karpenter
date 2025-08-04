@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -93,7 +93,7 @@ var _ = Describe("Metrics", func() {
 					Name:  "default",
 				}
 			}
-			operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, nodePool)
 			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 			for k, v := range limits {
@@ -118,7 +118,7 @@ var _ = Describe("Metrics", func() {
 		}
 		nodePool.Status.Resources = resources
 
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for k, v := range resources {
@@ -142,7 +142,7 @@ var _ = Describe("Metrics", func() {
 			corev1.ResourceMemory:           resource.MustParse("10Mi"),
 			corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
 		}
-		operatorpkg.ExpectApplied(ctx, env.Client, nodePool)
+		ExpectApplied(ctx, env.Client, nodePool)
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for _, name := range expectedMetrics {
@@ -152,7 +152,7 @@ var _ = Describe("Metrics", func() {
 			Expect(found).To(BeTrue())
 		}
 
-		operatorpkg.ExpectDeleted(ctx, env.Client, nodePool)
+		ExpectDeleted(ctx, env.Client, nodePool)
 		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
 		for _, name := range expectedMetrics {
