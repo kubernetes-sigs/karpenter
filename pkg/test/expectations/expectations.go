@@ -20,6 +20,7 @@ package expectations
 import (
 	"context"
 	"fmt"
+	v3 "k8s.io/api/storage/v1"
 	"log"
 	"reflect"
 	"regexp"
@@ -625,5 +626,5 @@ func ExpectParallelized(fs ...func()) {
 func ExpectForceCleanedUpAll(ctx context.Context, c client.Client) {
 	ExpectForceCleanedUp(ctx, c, &corev1.NodeList{}, &v1.NodeClaimList{}, &corev1.PersistentVolumeClaimList{}, &corev1.PersistentVolumeList{},
 		&corev1.PodList{}, &policyv1.PodDisruptionBudgetList{}, &v2.StatefulSetList{}, &v1.NodePoolList{},
-		&v1alpha1.NodeOverlayList{}, &v1alpha2.TestNodeClassList{}, &v2.DaemonSetList{})
+		&v1alpha1.NodeOverlayList{}, &v1alpha2.TestNodeClassList{}, &v2.DaemonSetList{}, &v3.StorageClassList{})
 }
