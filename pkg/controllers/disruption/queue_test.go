@@ -475,16 +475,14 @@ var _ = Describe("Queue", func() {
 						Expect(queue.HasAny(stateNode.ProviderID())).To(BeTrue()) // Should still be in queue
 					}
 				},
-				Entry("very small queue - 1 command", 1, 9, false),                                    // 1 command - min(1*30s, 10min) = 10min > 9min
-				Entry("very small queue - 1 command should timeout", 1, 11, true),                     // 1 command - min(1*30s, 10min) = 10min < 11min
-				Entry("small queue - 30 commands", 30, 14, false),                                     // 30 commands - 30*30s = 15min > 14min
-				Entry("small queue - 30 commands should timeout", 30, 16, true),                       // 30 commands - 30*30s = 15min < 16min
-				Entry("medium queue - 60 commands", 60, 29, false),                                    // 60 commands - 60*30s = 30min > 29min
-				Entry("medium queue - 60 commands should timeout", 60, 31, true),                      // 60 commands - 60*30s = 30min < 31min
-				Entry("large queue - 100 commands", 100, 49, false),                                   // 100 commands - 100*30s = 50min > 49min
-				Entry("large queue - 100 commands should timeout", 100, 51, true),                     // 100 commands - 100*30s = 50min < 51min
-				Entry("very large queue - 200 commands (capped to 1 hour)", 200, 59, false),           // 200 commands - min(200*30s, 1hr) = 1hr > 59 min
-				Entry("very large queue - 200 commands should timeout (after 1 hour)", 200, 61, true), // 200 commands - min(200*30s, 1hr) = 1hr < 61 min
+				Entry("small queue - 4000 commands", 4000, 9, false),                                      // 4000 commands - max(4000*80ms, 10min) = 10min > 9min
+				Entry("small queue - 4000 commands should timeout", 4000, 11, true),                       // 4000 commands - max(4000*80ms, 10min) = 10min < 11min
+				Entry("medium queue - 10000 commands", 10000, 12, false),                                  // 10000 commands - 10000*80ms ~= 13.3min > 12min
+				Entry("medium queue - 10000 commands should timeout", 10000, 14, true),                    // 10000 commands - 10000*80ms ~= 13.3min < 14min
+				Entry("large queue - 40000 commands", 40000, 52, false),                                   // 40000 commands - 40000*80ms ~= 53.3min > 52min
+				Entry("large queue - 40000 commands should timeout", 40000, 54, true),                     // 40000 commands - 40000*80ms ~= 53.3min < 54min
+				Entry("very large queue - 80000 commands (capped to 1 hour)", 80000, 59, false),           // 80000 commands - min(80000*80ms, 1hr) = 1hr > 59 min
+				Entry("very large queue - 80000 commands should timeout (after 1 hour)", 80000, 61, true), // 80000 commands - min(80000*80ms, 1hr) = 1hr < 61 min
 			)
 		})
 	})
