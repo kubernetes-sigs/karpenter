@@ -20,13 +20,14 @@ package expectations
 import (
 	"context"
 	"fmt"
-	v3 "k8s.io/api/storage/v1"
 	"log"
 	"reflect"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	v3 "k8s.io/api/storage/v1"
 
 	v2 "k8s.io/api/apps/v1"
 
