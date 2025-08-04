@@ -172,7 +172,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	q.RLock()
 	numCommands := len(q.providerIDToCommand)
 	q.RUnlock()
-	retryDuration := lo.Clamp(time.Duration(numCommands)*30*time.Second, minRetryDuration, maxRetryDuration)
+	retryDuration := lo.Clamp(time.Duration(numCommands)*80*time.Millisecond, minRetryDuration, maxRetryDuration)
 	// Wrap an error in an unrecoverable error if it timed out
 	defer func() {
 		if q.clock.Since(cmd.CreationTimestamp) > retryDuration {
