@@ -71,7 +71,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 })
 
 var _ = Describe("Expiration", func() {

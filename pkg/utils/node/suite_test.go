@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -54,7 +56,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 })
 
 var _ = Describe("NodeUtils", func() {

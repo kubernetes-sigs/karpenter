@@ -61,7 +61,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 	cloudProvider.Reset()
 })
 
