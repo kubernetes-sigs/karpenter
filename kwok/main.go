@@ -33,7 +33,7 @@ func main() {
 		log.FromContext(ctx).Error(err, "failed constructing instance types")
 	}
 
-	instanceTypeStore := validation.InstanceTypeOverlayStore{}
+	instanceTypeStore := validation.NewInstanceTypeStore()
 	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
 	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
 	op.

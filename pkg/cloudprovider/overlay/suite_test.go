@@ -58,7 +58,7 @@ var (
 	nodePool                        *v1.NodePool
 	nodePoolTwo                     *v1.NodePool
 	nodeOverlayValidationController *validation.Controller
-	store                           validation.InstanceTypeOverlayStore
+	store                           *validation.InstanceTypeStore
 )
 
 func Test(t *testing.T) {
@@ -76,7 +76,7 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 
 	fakeCloudProvider = fake.NewCloudProvider()
-	store = validation.InstanceTypeOverlayStore{}
+	store = validation.NewInstanceTypeStore()
 	cloudProvider = overlay.Decorate(fakeCloudProvider, env.Client, store)
 	nodeOverlayValidationController = validation.NewController(env.Client, fakeCloudProvider, store)
 	fakeClock = clock.NewFakeClock(time.Now())
@@ -87,7 +87,7 @@ var _ = BeforeEach(func() {
 	nodePool = test.NodePool()
 	nodePoolTwo = test.NodePool()
 	cluster.Reset()
-	store.Reset()
+	store = validation.NewInstanceTypeStore()
 	fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 		fake.NewInstanceType(fake.InstanceTypeOptions{
 			Name: "default-instance-type",

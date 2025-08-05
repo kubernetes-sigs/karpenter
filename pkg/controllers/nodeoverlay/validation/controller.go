@@ -19,6 +19,7 @@ package validation
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
@@ -33,6 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	nodeoverlayutils "sigs.k8s.io/karpenter/pkg/utils/nodeoverlay"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -40,109 +44,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-type InstanceTypeUpdate struct {
-	instanceTypeName string
-	nodePoolName     string
-	overlayName      string
-	Offering         map[string]*string
-	Capacity         corev1.ResourceList
-	weight           *int32
-}
-
-type InstanceTypeOverlayStore map[string]*InstanceTypeUpdate
-
-func (s InstanceTypeOverlayStore) FindOverlaidInstanceTypes(nodePool v1.NodePool, nodeOverlay v1alpha1.NodeOverlay, it *cloudprovider.InstanceType) (*InstanceTypeUpdate, bool) {
-	item, found := s[key(nodePool, nodeOverlay, it)]
-	return item, found
-}
-
-func (s InstanceTypeOverlayStore) AddInstanceTypeUpdates(nodePool v1.NodePool, nodeOverlay v1alpha1.NodeOverlay, it *cloudprovider.InstanceType, offerings cloudprovider.Offerings) {
-	// if both are not defined, price will be set to nil
-	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
-	offeringMap := map[string]*string{}
-	if price != nil {
-		for _, of := range offerings {
-			offeringMap[of.Requirements.String()] = price
-		}
-	}
-	s[key(nodePool, nodeOverlay, it)] = &InstanceTypeUpdate{
-		instanceTypeName: it.Name,
-		nodePoolName:     nodePool.Name,
-		overlayName:      nodeOverlay.Name,
-		Offering:         offeringMap,
-		Capacity:         nodeOverlay.Spec.Capacity,
-		weight:           nodeOverlay.Spec.Weight,
-	}
-}
-
-func (s InstanceTypeOverlayStore) ListInstanceTypes(it *cloudprovider.InstanceType) []*InstanceTypeUpdate {
-	return lo.Filter(lo.Values(s), func(item *InstanceTypeUpdate, _ int) bool {
-		return item.instanceTypeName == it.Name
-	})
-}
-
-func (s InstanceTypeOverlayStore) ListOverlaidInstanceTypes(nodeOverlay v1alpha1.NodeOverlay, it *cloudprovider.InstanceType) []*InstanceTypeUpdate {
-	return lo.Filter(lo.Values(s), func(item *InstanceTypeUpdate, _ int) bool {
-		return item.overlayName != nodeOverlay.Name && item.instanceTypeName == it.Name
-	})
-}
-
-func (s InstanceTypeOverlayStore) UpdateInstanceTypeCapacity(nodePool v1.NodePool, nodeOverlay v1alpha1.NodeOverlay, it *cloudprovider.InstanceType) {
-	_, found := s[key(nodePool, nodeOverlay, it)]
-	if !found {
-		s[key(nodePool, nodeOverlay, it)] = &InstanceTypeUpdate{
-			instanceTypeName: it.Name,
-			nodePoolName:     nodePool.Name,
-			overlayName:      nodeOverlay.Name,
-			Offering:         map[string]*string{},
-			Capacity:         corev1.ResourceList{},
-			weight:           nodeOverlay.Spec.Weight,
-		}
-	}
-	for k, v := range nodeOverlay.Spec.Capacity {
-		s[key(nodePool, nodeOverlay, it)].Capacity[k] = v
-	}
-}
-
-func (s InstanceTypeOverlayStore) UpdateInstanceTypeOffering(nodePool v1.NodePool, nodeOverlay v1alpha1.NodeOverlay, it *cloudprovider.InstanceType, offering *cloudprovider.Offering) {
-	_, found := s[key(nodePool, nodeOverlay, it)]
-	overlayPriceChange := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
-	if !found {
-		s[key(nodePool, nodeOverlay, it)] = &InstanceTypeUpdate{
-			instanceTypeName: it.Name,
-			nodePoolName:     nodePool.Name,
-			overlayName:      nodeOverlay.Name,
-			Offering:         map[string]*string{offering.Requirements.String(): overlayPriceChange},
-			Capacity:         corev1.ResourceList{},
-			weight:           nodeOverlay.Spec.Weight,
-		}
-	}
-	s[key(nodePool, nodeOverlay, it)].Offering[offering.Requirements.String()] = overlayPriceChange
-}
-
-func (s InstanceTypeOverlayStore) RemoveForUpdatesForOverlay(nodeOverlay v1alpha1.NodeOverlay) {
-	for k, v := range s {
-		if v.overlayName == nodeOverlay.Name {
-			delete(s, k)
-		}
-	}
-}
-
-func key(nodePool v1.NodePool, nodeOverlay v1alpha1.NodeOverlay, it *cloudprovider.InstanceType) string {
-	return fmt.Sprintf("%s-%s-%s", nodePool.Name, nodeOverlay.Name, it.Name)
-}
-
-func (s InstanceTypeOverlayStore) Reset() {
-	for key := range s {
-		delete(s, key)
-	}
-}
-
 // Controller for validating NodeOverlay configuration and surfacing conflicts to the user
 type Controller struct {
-	kubeClient               client.Client
-	cloudProvider            cloudprovider.CloudProvider
-	instanceTypeOverlayStore InstanceTypeOverlayStore
+	kubeClient        client.Client
+	cloudProvider     cloudprovider.CloudProvider
+	instanceTypeStore *InstanceTypeStore
+
+	temporaryStore *InstanceTypeStore
 }
 
 func (c *Controller) Name() string {
@@ -150,11 +58,12 @@ func (c *Controller) Name() string {
 }
 
 // NewController constructs a controller for node overlay validation
-func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeOverlayStore InstanceTypeOverlayStore) *Controller {
+func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeStore *InstanceTypeStore) *Controller {
 	return &Controller{
-		kubeClient:               kubeClient,
-		cloudProvider:            cp,
-		instanceTypeOverlayStore: instanceTypeOverlayStore,
+		kubeClient:        kubeClient,
+		cloudProvider:     cp,
+		instanceTypeStore: instanceTypeStore,
+		temporaryStore:    NewInstanceTypeStore(),
 	}
 }
 
@@ -174,10 +83,10 @@ func (c *Controller) Reconcile(ctx context.Context, _ *v1alpha1.NodeOverlay) (re
 
 	overlayWithRuntimeValidationFailure := map[string]error{}
 	overlaysWithConflict := []string{}
+	c.temporaryStore = NewInstanceTypeStore()
 
 	overlayList.OrderByWeight()
 	for i := range overlayList.Items {
-		c.instanceTypeOverlayStore.RemoveForUpdatesForOverlay(overlayList.Items[i])
 		if err := overlayList.Items[i].RuntimeValidate(ctx); err != nil {
 			overlayWithRuntimeValidationFailure[overlayList.Items[i].Name] = err
 			continue
@@ -187,21 +96,21 @@ func (c *Controller) Reconcile(ctx context.Context, _ *v1alpha1.NodeOverlay) (re
 		// We will need to make sure we are validating against each nodepool to make sure. This will ensure that
 		// overlays that are targeting reserved instance offerings will be able to apply the offering.
 		for _, np := range nodePoolList.Items {
-			its, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
+			its, err := nodepoolutils.PullInstanceTypes(ctx, c.cloudProvider, &np)
 			if err != nil {
-				return reconcile.Result{}, fmt.Errorf("listing instance types for nodepool, %w", err)
+				return reconcile.Result{}, err
 			}
 			// The additional requirements will be added to the instance type during scheduling simulation
-			// Since getting instance types is done on a NodePool level, these requirnements were always assumed
+			// Since getting instance types is done on a NodePool level, these requirements were always assumed
 			// to be allowed with these instance types.
 			addNodePoolRequirements(np, its)
-			overlaysWithConflict = append(overlaysWithConflict, c.checkOverlayPerNodePool(np, its, overlayList.Items[i])...)
+			overlaysWithConflict = append(overlaysWithConflict, c.checkOverlayPerNodePool(np.Name, its, overlayList.Items[i])...)
 			removeNodePoolRequirements(np, its)
 		}
 	}
 
 	filterOverlaysWithConflict := lo.Filter(lo.Uniq(overlaysWithConflict), func(val string, _ int) bool { return val != "" })
-	return reconcile.Result{}, c.updateOverlayStatuses(ctx, overlayList.Items, filterOverlaysWithConflict, overlayWithRuntimeValidationFailure)
+	return reconcile.Result{RequeueAfter: 6 * time.Hour}, c.updateOverlayStatuses(ctx, overlayList.Items, filterOverlaysWithConflict, overlayWithRuntimeValidationFailure)
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
@@ -210,6 +119,10 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		// The reconciled overlay does not matter in this case as one reconcile loop
 		// will compare every overlay against every other overlay in the cluster.
 		For(&v1alpha1.NodeOverlay{}).
+		Watches(
+			&v1.NodePool{},
+			nodeoverlayutils.NodePoolEventHandler(c.kubeClient),
+		).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 1,
@@ -218,7 +131,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
-func (c *Controller) checkOverlayPerNodePool(nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) []string {
+func (c *Controller) checkOverlayPerNodePool(nodePoolName string, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) []string {
 	overlaysWithConflict := []string{}
 	overlayRequirements := scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...)
 
@@ -227,13 +140,15 @@ func (c *Controller) checkOverlayPerNodePool(nodePool v1.NodePool, its []*cloudp
 		// if we are not able to find any offerings for an instance type
 		// This will mean that the overlay does not select on the instance all together
 		if len(offerings) != 0 {
-			if len(c.instanceTypeOverlayStore.ListInstanceTypes(it)) == 0 {
-				c.instanceTypeOverlayStore.AddInstanceTypeUpdates(nodePool, overlay, it, offerings)
+			// if we are not able to find an update, we will add the update to the store and skip the conflict check
+			instanceTypeUpdate, foundUpdate := c.temporaryStore.FindInstanceTypesUpdate(nodePoolName, it)
+			if !foundUpdate {
+				c.temporaryStore.AddInstanceTypeUpdates(nodePoolName, overlay, it, offerings)
 				continue
 			}
 
-			conflictingPriceOverlay := c.isPriceAlreadyUpdated(nodePool, it, offerings, overlay)
-			conflictingCapacityOverlay := c.isCapacityAlreadyUpdated(nodePool, it, overlay)
+			conflictingPriceOverlay := c.isPriceAlreadyUpdated(nodePoolName, it.Name, instanceTypeUpdate, offerings, overlay)
+			conflictingCapacityOverlay := c.isCapacityAlreadyUpdated(nodePoolName, it.Name, instanceTypeUpdate, overlay)
 			// When we find an instance type that is matches a set offering, we will track that based on the
 			// overlay that is applied
 			if len(conflictingPriceOverlay) != 0 || len(conflictingCapacityOverlay) != 0 {
@@ -248,8 +163,11 @@ func (c *Controller) checkOverlayPerNodePool(nodePool v1.NodePool, its []*cloudp
 	return overlaysWithConflict
 }
 
-// isOfferingsForCompatibleInstanceType will validate that an instance type matches a set of node overlay requirements
-// if true, the set of Compatible offering
+// getOverlaidOfferings will validate that an instance type matches a set of node overlay requirements
+// if true, the set of Compatible offering. This function effectively assumes, that if the if there are no offering returned then
+// the instance type is not Compatible with the overlay requirements. In cases, were an capacity overlay is being intended to be applied
+// based on the offerings, this will be an all or nothing operation. If one offering matches to the requirements
+// it will be applied at the instance type level or all the offerings.
 func getOverlaidOfferings(it *cloudprovider.InstanceType, overlayReq scheduling.Requirements) cloudprovider.Offerings {
 	if !it.Requirements.IsCompatible(overlayReq) {
 		return nil
@@ -257,44 +175,94 @@ func getOverlaidOfferings(it *cloudprovider.InstanceType, overlayReq scheduling.
 	return it.Offerings.Compatible(overlayReq)
 }
 
-func (c *Controller) isPriceAlreadyUpdated(nodePool v1.NodePool, it *cloudprovider.InstanceType, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay) []string {
+func (c *Controller) isPriceAlreadyUpdated(nodePoolName string, instanceTypeName string, itUpdate *InstanceTypeUpdate, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay) []string {
 	result := []string{}
-	overlayPriceChange := lo.Ternary(overlay.Spec.Price == nil, overlay.Spec.PriceAdjustment, overlay.Spec.Price)
+	if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil {
+		return result
+	}
 
-	for _, of := range offerings {
-		for _, instanceTypeUpdate := range c.instanceTypeOverlayStore.ListOverlaidInstanceTypes(overlay, it) {
-			offeringPrice, foundOffering := instanceTypeUpdate.Offering[of.Requirements.String()]
-			if lo.FromPtr(overlay.Spec.Weight) == lo.FromPtr(instanceTypeUpdate.weight) && (offeringPrice != nil && overlayPriceChange != nil) {
-				if (lo.FromPtr(offeringPrice) == lo.FromPtr(overlayPriceChange)) || !foundOffering {
-					c.instanceTypeOverlayStore.UpdateInstanceTypeOffering(nodePool, overlay, it, of)
-				} else {
-					result = append(result, instanceTypeUpdate.overlayName)
-				}
-			} else if (lo.FromPtr(offeringPrice) == lo.FromPtr(overlayPriceChange)) || !foundOffering {
-				c.instanceTypeOverlayStore.UpdateInstanceTypeOffering(nodePool, overlay, it, of)
-			}
+	priceWithMatchingWeight := lo.Filter(itUpdate.Price, func(update PriceUpdate, _ int) bool {
+		return lo.FromPtr(update.weight) == lo.FromPtr(overlay.Spec.Weight)
+	})
+
+	// We will validate that overlays with the same weight are not updating the same offering
+	for _, priceUpdate := range priceWithMatchingWeight {
+		offeringsSet := lo.Map(offerings, func(of *cloudprovider.Offering, _ int) string {
+			return of.Requirements.String()
+		})
+		priceOfferingsSet := lo.Map(priceUpdate.Offerings, func(of *cloudprovider.Offering, _ int) string {
+			return of.Requirements.String()
+		})
+
+		if len(lo.FindDuplicates(append(offeringsSet, priceOfferingsSet...))) != 0 {
+			result = append(result, priceUpdate.overlayName)
 		}
 	}
 
+	if len(result) != 0 {
+		return result
+	}
+
+	// We only want to consider resources that are not applied by a different overlay that has a higher weight.
+	// We know in this case that the resource value will not be applied that that it is not in conflict with the any other overlays
+	updatesWithGreaterWeights := lo.Filter(itUpdate.Price, func(update PriceUpdate, _ int) bool {
+		return lo.FromPtr(update.weight) > lo.FromPtr(overlay.Spec.Weight)
+	})
+	offeringToUpdate := cloudprovider.Offerings{}
+	for _, offering := range offerings {
+		if lo.EveryBy(updatesWithGreaterWeights, func(update PriceUpdate) bool {
+			return !update.Offerings.HasCompatible(offering.Requirements)
+		}) {
+			offeringToUpdate = append(offeringToUpdate, offering)
+		}
+
+	}
+	c.temporaryStore.UpdateInstanceTypeOffering(nodePoolName, instanceTypeName, overlay, offeringToUpdate)
 	return result
 }
 
-func (c *Controller) isCapacityAlreadyUpdated(nodePool v1.NodePool, it *cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) []string {
+func (c *Controller) isCapacityAlreadyUpdated(nodePoolName string, instanceTypeName string, itUpdate *InstanceTypeUpdate, overlay v1alpha1.NodeOverlay) []string {
 	result := []string{}
+	if overlay.Spec.Capacity == nil {
+		return result
+	}
 
-	for _, instanceTypeUpdate := range c.instanceTypeOverlayStore.ListOverlaidInstanceTypes(overlay, it) {
-		if lo.FromPtr(overlay.Spec.Weight) == lo.FromPtr(instanceTypeUpdate.weight) && overlay.Spec.Capacity != nil {
-			resource := findConflictingResources(overlay.Spec.Capacity, instanceTypeUpdate.Capacity)
-			if len(resource) == 0 {
-				c.instanceTypeOverlayStore.UpdateInstanceTypeCapacity(nodePool, overlay, it)
-			} else {
-				result = append(result, instanceTypeUpdate.overlayName)
+	capacityWithMatchingWeight := lo.Filter(itUpdate.Capacity, func(update CapacityUpdate, _ int) bool {
+		return lo.FromPtr(update.weight) == lo.FromPtr(overlay.Spec.Weight)
+	})
+
+	// We will validate that overlays with the same weight are not updating the same offering
+	for _, capacityUpdate := range capacityWithMatchingWeight {
+		// Once we find resource that matches the update
+		// we will short circuit since we know that will fail
+		for resource := range overlay.Spec.Capacity {
+			_, matchingResource := capacityUpdate.OverlayUpdate[resource]
+			if matchingResource {
+				result = append(result, capacityUpdate.overlayName)
+				break
 			}
-		} else if overlay.Spec.Capacity != nil {
-			c.instanceTypeOverlayStore.UpdateInstanceTypeCapacity(nodePool, overlay, it)
+		}
+	}
+	if len(result) != 0 {
+		return result
+	}
+
+	// We only want to consider resources that are not applied by a different overlay that has a higher weight.
+	// We know in this case that the resource value will not be applied that that it is not in conflict with the any other overlays
+	updatesWithGreaterWeights := lo.Filter(itUpdate.Capacity, func(update CapacityUpdate, _ int) bool {
+		return lo.FromPtr(update.weight) > lo.FromPtr(overlay.Spec.Weight)
+	})
+	resourceToUpdate := corev1.ResourceList{}
+	for resource, quantity := range overlay.Spec.Capacity {
+		if lo.EveryBy(updatesWithGreaterWeights, func(update CapacityUpdate) bool {
+			_, found := update.OverlayUpdate[resource]
+			return !found
+		}) {
+			resourceToUpdate[resource] = quantity
 		}
 	}
 
+	c.temporaryStore.UpdateInstanceTypeCapacity(nodePoolName, instanceTypeName, overlay, resourceToUpdate)
 	return result
 }
 
@@ -307,8 +275,10 @@ func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1
 			overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "RuntimeValidation", err.Error())
 		} else if lo.Contains(overlaysWithConflict, overlay.Name) {
 			overlay.StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "conflict with another overlay")
-			c.instanceTypeOverlayStore.RemoveForUpdatesForOverlay(overlay)
+			c.temporaryStore.RemoveAllInstanceTypeUpdateFromOverlay(overlay.Name)
 		}
+
+		c.instanceTypeStore.UpdateStore(c.temporaryStore.updates)
 
 		if !equality.Semantic.DeepEqual(stored, overlay) {
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
@@ -320,18 +290,6 @@ func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1
 		}
 	}
 	return multierr.Combine(errs...)
-}
-
-// findConflictingResources compares two resource field with each other, and validated that
-// the same resource is not set to different values within the resource list
-func findConflictingResources(capacityOne corev1.ResourceList, capacityTwo corev1.ResourceList) []string {
-	result := []string{}
-	for key, quantity := range capacityOne {
-		if _, ok := capacityTwo[key]; ok && !quantity.Equal(capacityTwo[key]) {
-			result = append(result, string(key))
-		}
-	}
-	return result
 }
 
 func addNodePoolRequirements(nodePool v1.NodePool, its []*cloudprovider.InstanceType) {

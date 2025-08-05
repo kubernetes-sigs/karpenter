@@ -50,7 +50,7 @@ var (
 	cloudProvider                   *fake.CloudProvider
 	nodePool                        *v1.NodePool
 	nodeOverlayValidationController *validation.Controller
-	store                           validation.InstanceTypeOverlayStore
+	store                           *validation.InstanceTypeStore
 )
 
 func TestValidation(t *testing.T) {
@@ -62,14 +62,15 @@ func TestValidation(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 	cloudProvider = fake.NewCloudProvider()
-	store = validation.InstanceTypeOverlayStore{}
+	store = validation.NewInstanceTypeStore()
 	nodeOverlayValidationController = validation.NewController(env.Client, cloudProvider, store)
 })
 
 var _ = BeforeEach(func() {
 	nodePool = test.NodePool()
 	cloudProvider.Reset()
-	store.Reset()
+	store = validation.NewInstanceTypeStore()
+
 	ExpectApplied(ctx, env.Client, nodePool)
 })
 
@@ -496,7 +497,7 @@ var _ = Describe("Validation", func() {
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
 			Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 		})
-		It("should pass with price are the same overlays with overlapping requirements", func() {
+		It("should fail with price are the same overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
@@ -531,10 +532,12 @@ var _ = Describe("Validation", func() {
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
-			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 		})
 		It("should pass with conflicting price overlays with mutually exclusive requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -662,7 +665,7 @@ var _ = Describe("Validation", func() {
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
 			Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 		})
-		It("should pass with pricing adjustment are the same overlays with overlapping requirements", func() {
+		It("should fail with pricing adjustment are the same overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
@@ -697,10 +700,12 @@ var _ = Describe("Validation", func() {
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
-			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 		})
 		It("should pass with conflicting price adjustments overlays with mutually exclusive requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -944,10 +949,12 @@ var _ = Describe("Validation", func() {
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
-			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 		})
 		It("should pass with conflicting capacity overlays with mutually exclusive requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -1083,6 +1090,39 @@ var _ = Describe("Validation", func() {
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+		})
+	})
+	Context("AdjustedPrice", func() {
+		DescribeTable("should adjust price based overlay values",
+			func(priceAdjustment string, basePrice float64, expectedPrice float64) {
+				adjustedPrice := validation.AdjustedPrice(basePrice, lo.ToPtr(priceAdjustment))
+				Expect(adjustedPrice).To(BeNumerically("==", expectedPrice))
+			},
+			// Percentage adjustment
+			Entry("10% decrease", "-10%", 10.0, 9.0),
+			Entry("10% increase", "+10%", 10.0, 11.0),
+			Entry("50% decrease", "-50%", 10.0, 5.0),
+			Entry("100% increase", "+100%", 10.0, 20.0),
+			Entry("Zero price", "-100%", 10.0, 0.0),
+			Entry("Zero price", "-200%", 10.0, 0.0),
+			Entry("Fractional price", "-25%", 1.5, 1.125),
+			// Raw adjustment
+			Entry("No change", "+0", 10.0, 10.0),
+			Entry("Add 5", "+5", 10.0, 15.0),
+			Entry("Subtract 2.5", "-2.5", 10.0, 7.5),
+			Entry("Subtract to zero", "-10", 10.0, 0.0),
+			Entry("Negative Result", "-15", 10.0, 0.0),
+			Entry("Fractional price", "+0.75", 1.25, 2.0),
+			Entry("Large price adjustment", "+100", 0.001, 100.001),
+			Entry("Small price adjustment", "+0.0001", 0.0001, 0.0002),
+		)
+		It("should override price", func() {
+			adjustedPrice := validation.AdjustedPrice(82781.0, lo.ToPtr("80.0"))
+			Expect(adjustedPrice).To(BeNumerically("==", 80))
+		})
+		It("should provide the same if price or priceAdjustment is not provided", func() {
+			adjustedPrice := validation.AdjustedPrice(82781.0, lo.ToPtr(""))
+			Expect(adjustedPrice).To(BeNumerically("==", 82781))
 		})
 	})
 })
