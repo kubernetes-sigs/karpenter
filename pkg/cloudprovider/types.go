@@ -129,8 +129,12 @@ func (i *InstanceType) IsPricingOverlayApplied() bool {
 	return found
 }
 
-func (i *InstanceType) ResetAllocatable() {
-	i.once = sync.Once{}
+func (i *InstanceType) ApplyCapacityOverlay() {
+	i.capacityOverlayApplied = true
+}
+
+func (i *InstanceType) IsCapacityOverlayApplied() bool {
+	return i.capacityOverlayApplied
 }
 
 func (i *InstanceType) Allocatable() corev1.ResourceList {

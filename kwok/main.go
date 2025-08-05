@@ -21,7 +21,7 @@ import (
 
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay/validation"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator"
 )
@@ -33,7 +33,7 @@ func main() {
 		log.FromContext(ctx).Error(err, "failed constructing instance types")
 	}
 
-	instanceTypeStore := validation.InstanceTypeOverlayStore{}
+	instanceTypeStore := nodeoverlay.NewInstanceTypeStore()
 	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
 	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
 	op.

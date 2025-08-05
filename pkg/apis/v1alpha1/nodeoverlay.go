@@ -18,8 +18,6 @@ package v1alpha1
 
 import (
 	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/samber/lo"
 	v1 "k8s.io/api/core/v1"
@@ -100,37 +98,4 @@ func (nol *NodeOverlayList) OrderByWeight() {
 		}
 		return weightA > weightB
 	})
-}
-
-func (in *NodeOverlay) AdjustedPrice(instanceTypePrice float64) float64 {
-	// if price or price adjustment is not defined, then we will return the same price
-	if in.Spec.Price == nil && in.Spec.PriceAdjustment == nil {
-		return instanceTypePrice
-	}
-	// if price is defined, then we will return the value given in the overlay
-	if in.Spec.Price != nil {
-		return lo.Must(strconv.ParseFloat(lo.FromPtr(in.Spec.Price), 64))
-	}
-
-	// Check if adjustment is a percentage
-	isPercentage := strings.HasSuffix(lo.FromPtr(in.Spec.PriceAdjustment), "%")
-	adjustment := lo.FromPtr(in.Spec.PriceAdjustment)
-
-	var adjustedPrice float64
-	if isPercentage {
-		adjustment = strings.TrimSuffix(lo.FromPtr(in.Spec.PriceAdjustment), "%")
-		// Parse the adjustment value
-		// Due to the CEL validation we can assume that
-		// there will always be a valid float provided into the spec
-		adjustedPrice = instanceTypePrice * (1 + (lo.Must(strconv.ParseFloat(adjustment, 64)) / 100))
-	} else {
-		adjustedPrice = instanceTypePrice + lo.Must(strconv.ParseFloat(adjustment, 64))
-	}
-
-	// Parse the adjustment value
-	// Due to the CEL validation we can assume that
-	// there will always be a valid float provided into the spec
-
-	// Apply the adjustment
-	return lo.Ternary(adjustedPrice >= 0, adjustedPrice, 0)
 }
