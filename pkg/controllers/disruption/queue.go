@@ -81,6 +81,11 @@ func IsUnrecoverableError(err error) bool {
 	return stderrors.As(err, &unrecoverableError)
 }
 
+func CalculateRetryDuration(numCommands int) time.Duration {
+	retryDuration := time.Duration(numCommands)*80*time.Millisecond
+	return lo.Clamp(retryDuration, minRetryDuration, maxRetryDuration)
+}
+
 type Queue struct {
 	sync.RWMutex
 	providerIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
@@ -172,7 +177,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	q.RLock()
 	numCommands := len(q.providerIDToCommand)
 	q.RUnlock()
-	retryDuration := lo.Clamp(time.Duration(numCommands)*80*time.Millisecond, minRetryDuration, maxRetryDuration)
+	retryDuration := CalculateRetryDuration(numCommands)
 	// Wrap an error in an unrecoverable error if it timed out
 	defer func() {
 		if q.clock.Since(cmd.CreationTimestamp) > retryDuration {
