@@ -98,7 +98,7 @@ func NewControllers(
 		nodehydration.NewController(kubeClient, cloudProvider),
 	}
 
-	if !options.FromContext(ctx).SimplifiedMetrics {
+	if !options.FromContext(ctx).DisableClusterStateObservability {
 		controllers = append(controllers,
 			metricspod.NewController(kubeClient, cluster),
 			metricsnodepool.NewController(kubeClient, cloudProvider),
