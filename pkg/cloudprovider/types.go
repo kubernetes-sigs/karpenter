@@ -143,7 +143,7 @@ func (i *InstanceType) IsPricingOverlayApplied() bool {
 	return found
 }
 
-func (i *InstanceType) ApplyResourceOverlay() {
+func (i *InstanceType) ApplyCapacityOverlay() {
 	i.capacityOverlayApplied = true
 }
 

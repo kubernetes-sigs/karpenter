@@ -32,13 +32,15 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay/validation"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -49,16 +51,16 @@ import (
 )
 
 var (
-	ctx                             context.Context
-	env                             *test.Environment
-	fakeClock                       *clock.FakeClock
-	fakeCloudProvider               *fake.CloudProvider
-	cloudProvider                   cloudprovider.CloudProvider
-	cluster                         *state.Cluster
-	nodePool                        *v1.NodePool
-	nodePoolTwo                     *v1.NodePool
-	nodeOverlayValidationController *validation.Controller
-	store                           validation.InstanceTypeOverlayStore
+	ctx                   context.Context
+	env                   *test.Environment
+	fakeClock             *clock.FakeClock
+	fakeCloudProvider     *fake.CloudProvider
+	cloudProvider         cloudprovider.CloudProvider
+	cluster               *state.Cluster
+	nodePool              *v1.NodePool
+	nodePoolTwo           *v1.NodePool
+	nodeOverlayController *nodeoverlay.Controller
+	store                 *nodeoverlay.InstanceTypeStore
 )
 
 func Test(t *testing.T) {
@@ -76,9 +78,9 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 
 	fakeCloudProvider = fake.NewCloudProvider()
-	store = validation.InstanceTypeOverlayStore{}
+	store = nodeoverlay.NewInstanceTypeStore()
 	cloudProvider = overlay.Decorate(fakeCloudProvider, env.Client, store)
-	nodeOverlayValidationController = validation.NewController(env.Client, fakeCloudProvider, store)
+	nodeOverlayController = nodeoverlay.NewController(env.Client, fakeCloudProvider, store)
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 })
@@ -87,7 +89,7 @@ var _ = BeforeEach(func() {
 	nodePool = test.NodePool()
 	nodePoolTwo = test.NodePool()
 	cluster.Reset()
-	store.Reset()
+	store = nodeoverlay.NewInstanceTypeStore()
 	fakeCloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 		fake.NewInstanceType(fake.InstanceTypeOptions{
 			Name: "default-instance-type",
@@ -131,7 +133,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -161,7 +163,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -193,7 +195,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -226,7 +228,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -249,7 +251,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -272,7 +274,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -318,7 +320,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -376,7 +378,7 @@ var _ = Describe("Instance Type Controller", func() {
 				},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
@@ -458,8 +460,7 @@ var _ = Describe("Instance Type Controller", func() {
 			// should not be valid
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
@@ -554,8 +555,7 @@ var _ = Describe("Instance Type Controller", func() {
 			// should not be valid
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -594,7 +594,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -624,7 +624,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -656,7 +656,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -689,7 +689,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -735,7 +735,7 @@ var _ = Describe("Instance Type Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -781,7 +781,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -840,7 +840,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -920,8 +920,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1008,8 +1007,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1050,7 +1048,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1084,7 +1082,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1120,7 +1118,7 @@ var _ = Describe("Instance Type Controller", func() {
 				})
 				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
 
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 				Expect(err).To(BeNil())
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1154,7 +1152,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1179,7 +1177,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1204,7 +1202,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlay)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
@@ -1287,8 +1285,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 3))
@@ -1390,8 +1387,7 @@ var _ = Describe("Instance Type Controller", func() {
 			})
 			ExpectApplied(ctx, env.Client, nodePool, overlayA, overlayB)
 
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 			instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 			Expect(err).To(BeNil())
 			Expect(len(instanceTypeList)).To(BeNumerically("==", 3))
@@ -1444,8 +1440,7 @@ var _ = Describe("Instance Type Controller", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice, overlayCapacity)
 
-		ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayPrice)
-		ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayCapacity)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).To(BeNil())
 
@@ -1500,39 +1495,9 @@ var _ = Describe("Instance Type Controller", func() {
 		})
 		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
 
-		err := ExpectObjectReconcileFailed(ctx, env.Client, nodeOverlayValidationController, overlayPrice)
-		Expect(err).ToNot(BeNil())
+		ExpectReconciledFailed(ctx, nodeOverlayController, reconcile.Request{})
 		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
 		Expect(err).ToNot(BeNil())
 		Expect(len(instanceTypeList)).To(BeNumerically("==", 0))
-	})
-	It("should not return instance type requirements with nodepool, nodeclass, and custom nodepool labels", func() {
-		nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{
-			"test-label": "test-value",
-		})
-		overlayPrice := test.NodeOverlay(v1alpha1.NodeOverlay{
-			Spec: v1alpha1.NodeOverlaySpec{
-				Requirements: []corev1.NodeSelectorRequirement{
-					{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"default-instance-type"},
-					},
-				},
-				Capacity: corev1.ResourceList{
-					corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
-				},
-				Weight: lo.ToPtr(int32(10)),
-			},
-		})
-		ExpectApplied(ctx, env.Client, nodePool, overlayPrice)
-
-		ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayPrice)
-		instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
-		Expect(err).To(BeNil())
-		Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodePoolLabelKey))
-		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElement(v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind())))
-		Expect(instanceTypeList[0].Requirements.Keys()).NotTo(ContainElements(lo.Keys(nodePool.Spec.Template.ObjectMeta.Labels)))
 	})
 })

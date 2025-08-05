@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package validation_test
+package nodeoverlay_test
 
 import (
 	"context"
@@ -31,12 +31,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay/validation"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -45,15 +47,15 @@ import (
 )
 
 var (
-	ctx                             context.Context
-	env                             *test.Environment
-	cloudProvider                   *fake.CloudProvider
-	nodePool                        *v1.NodePool
-	nodeOverlayValidationController *validation.Controller
-	store                           validation.InstanceTypeOverlayStore
+	ctx                   context.Context
+	env                   *test.Environment
+	cloudProvider         *fake.CloudProvider
+	nodePool              *v1.NodePool
+	nodeOverlayController *nodeoverlay.Controller
+	store                 *nodeoverlay.InstanceTypeStore
 )
 
-func TestValidation(t *testing.T) {
+func TestNodeOverlay(t *testing.T) {
 	ctx = TestContextWithLogger(t)
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "NodeOverlay Status")
@@ -62,14 +64,15 @@ func TestValidation(t *testing.T) {
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 	cloudProvider = fake.NewCloudProvider()
-	store = validation.InstanceTypeOverlayStore{}
-	nodeOverlayValidationController = validation.NewController(env.Client, cloudProvider, store)
+	store = nodeoverlay.NewInstanceTypeStore()
+	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, store)
 })
 
 var _ = BeforeEach(func() {
 	nodePool = test.NodePool()
 	cloudProvider.Reset()
 	store.Reset()
+
 	ExpectApplied(ctx, env.Client, nodePool)
 })
 
@@ -96,7 +99,7 @@ var _ = Describe("Validation", func() {
 			},
 		})
 		ExpectApplied(ctx, env.Client, overlay)
-		ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+		ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 		// Check that the condition was set correctly
 		updatedOverlay := ExpectExists(ctx, env.Client, overlay)
@@ -117,7 +120,7 @@ var _ = Describe("Validation", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, overlay)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			updatedOverlay := ExpectExists(ctx, env.Client, overlay)
 			Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
@@ -142,7 +145,7 @@ var _ = Describe("Validation", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, overlay)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlay)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			updatedOverlay := ExpectExists(ctx, env.Client, overlay)
 			Expect(updatedOverlay.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
@@ -151,8 +154,11 @@ var _ = Describe("Validation", func() {
 	})
 	Context("Requirements Validations", func() {
 		Describe("Instance types Requirements", func() {
-			It("should fail with requirements overlays overlap", func() {
+			It("should fail when requirements overlays overlap", func() {
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-a",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -166,6 +172,9 @@ var _ = Describe("Validation", func() {
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-b",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -180,8 +189,7 @@ var _ = Describe("Validation", func() {
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 				// Reconcile both overlays
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 				// Check that the conditions were set correctly
 				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -189,8 +197,8 @@ var _ = Describe("Validation", func() {
 				Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
-				Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+
 			})
 			It("should succeed with requirements overlays don't overlap", func() {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
@@ -206,6 +214,9 @@ var _ = Describe("Validation", func() {
 					}),
 				}
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-a",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -219,6 +230,9 @@ var _ = Describe("Validation", func() {
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-b",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -234,8 +248,7 @@ var _ = Describe("Validation", func() {
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 				// Reconcile both overlays
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 				// Check that the conditions were set correctly
 				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -289,6 +302,9 @@ var _ = Describe("Validation", func() {
 			})
 			It("should fail with requirements overlays overlap on zone", func() {
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-a",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -302,6 +318,9 @@ var _ = Describe("Validation", func() {
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-b",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -316,8 +335,7 @@ var _ = Describe("Validation", func() {
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 				// Reconcile both overlays
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 				// Check that the conditions were set correctly
 				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -325,11 +343,13 @@ var _ = Describe("Validation", func() {
 				Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
-				Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			})
-			It("should fail with requirements overlays overlap on capacity", func() {
+			It("should fail with requirements overlays overlap on capacity type", func() {
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-a",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -342,6 +362,9 @@ var _ = Describe("Validation", func() {
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-b",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -357,8 +380,7 @@ var _ = Describe("Validation", func() {
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 				// Reconcile both overlays
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 				// Check that the conditions were set correctly
 				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -366,11 +388,13 @@ var _ = Describe("Validation", func() {
 				Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
-				Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			})
 			It("should succeed with requirements overlays don't overlap", func() {
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-a",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -384,6 +408,9 @@ var _ = Describe("Validation", func() {
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-b",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -399,8 +426,7 @@ var _ = Describe("Validation", func() {
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 				// Reconcile both overlays
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 				// Check that the conditions were set correctly
 				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -411,6 +437,9 @@ var _ = Describe("Validation", func() {
 			})
 			It("should fail with requirements overlays overlap", func() {
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-a",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -424,6 +453,9 @@ var _ = Describe("Validation", func() {
 					},
 				})
 				overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "overlay-b",
+					},
 					Spec: v1alpha1.NodeOverlaySpec{
 						Requirements: []corev1.NodeSelectorRequirement{
 							{
@@ -439,8 +471,7 @@ var _ = Describe("Validation", func() {
 				ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 				// Reconcile both overlays
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-				ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 				// Check that the conditions were set correctly
 				updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -448,14 +479,16 @@ var _ = Describe("Validation", func() {
 				Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 				updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
-				Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+				Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 			})
 		})
 	})
 	Context("Price", func() {
 		It("should fail with conflicting price overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -469,6 +502,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -484,8 +520,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -493,11 +528,13 @@ var _ = Describe("Validation", func() {
 			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
-			Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
-		It("should pass with price are the same overlays with overlapping requirements", func() {
+		It("should fail with price are the same overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -511,6 +548,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -526,18 +566,21 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
-			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
 		It("should pass with conflicting price overlays with mutually exclusive requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -551,6 +594,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -567,8 +613,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -579,6 +624,9 @@ var _ = Describe("Validation", func() {
 		})
 		It("should pass with conflicting price overlays with mutually exclusive weights", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -592,6 +640,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -608,8 +659,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -622,6 +672,9 @@ var _ = Describe("Validation", func() {
 	Context("Pricing adjustment", func() {
 		It("should fail with conflicting price adjustment overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -635,6 +688,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -650,8 +706,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -659,11 +714,13 @@ var _ = Describe("Validation", func() {
 			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
-			Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
-		It("should pass with pricing adjustment are the same overlays with overlapping requirements", func() {
+		It("should fail with pricing adjustment are the same overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -677,6 +734,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -692,18 +752,21 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
-			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
 		It("should pass with conflicting price adjustments overlays with mutually exclusive requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -717,6 +780,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -733,8 +799,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -745,6 +810,9 @@ var _ = Describe("Validation", func() {
 		})
 		It("should pass with conflicting price adjustment overlays with mutually exclusive weights", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -758,6 +826,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -774,8 +845,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -788,6 +858,9 @@ var _ = Describe("Validation", func() {
 	Context("Capacity Adjustment", func() {
 		It("should fail with conflicting capacity overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -803,6 +876,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -820,8 +896,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -829,8 +904,7 @@ var _ = Describe("Validation", func() {
 			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
-			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
-			Expect(updatedOverlayB.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
 		It("should fail with conflicting capacity overlays with multiple overlays", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
@@ -890,8 +964,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB, overlayC)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -902,11 +975,13 @@ var _ = Describe("Validation", func() {
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 
 			updatedOverlayC := ExpectExists(ctx, env.Client, overlayC)
-			Expect(updatedOverlayC.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
-			Expect(updatedOverlayC.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
+			Expect(updatedOverlayC.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
 		It("should pass with capacity adjustment are the same overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -922,6 +997,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -939,18 +1017,21 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
-			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+			Expect(updatedOverlayA.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeFalse())
+			Expect(updatedOverlayA.StatusConditions().Get(v1alpha1.ConditionTypeValidationSucceeded).Reason).To(Equal("Conflict"))
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
 		})
 		It("should pass with conflicting capacity overlays with mutually exclusive requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -966,6 +1047,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -984,8 +1068,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -996,6 +1079,9 @@ var _ = Describe("Validation", func() {
 		})
 		It("should pass with conflicting capacity overlays with mutually exclusive weights", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -1011,6 +1097,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -1029,8 +1118,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -1041,6 +1129,9 @@ var _ = Describe("Validation", func() {
 		})
 		It("should pass with non conflicting capacity overlays with overlapping requirements", func() {
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-a",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -1056,6 +1147,9 @@ var _ = Describe("Validation", func() {
 				},
 			})
 			overlayB := test.NodeOverlay(v1alpha1.NodeOverlay{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "overlay-b",
+				},
 				Spec: v1alpha1.NodeOverlaySpec{
 					Requirements: []corev1.NodeSelectorRequirement{
 						{
@@ -1074,8 +1168,7 @@ var _ = Describe("Validation", func() {
 			ExpectApplied(ctx, env.Client, overlayA, overlayB)
 
 			// Reconcile both overlays
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayA)
-			ExpectObjectReconciled(ctx, env.Client, nodeOverlayValidationController, overlayB)
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
 
 			// Check that the conditions were set correctly
 			updatedOverlayA := ExpectExists(ctx, env.Client, overlayA)
@@ -1083,6 +1176,39 @@ var _ = Describe("Validation", func() {
 
 			updatedOverlayB := ExpectExists(ctx, env.Client, overlayB)
 			Expect(updatedOverlayB.StatusConditions().IsTrue(v1alpha1.ConditionTypeValidationSucceeded)).To(BeTrue())
+		})
+	})
+	Context("AdjustedPrice", func() {
+		DescribeTable("should adjust price based overlay values",
+			func(priceAdjustment string, basePrice float64, expectedPrice float64) {
+				adjustedPrice := nodeoverlay.AdjustedPrice(basePrice, lo.ToPtr(priceAdjustment))
+				Expect(adjustedPrice).To(BeNumerically("==", expectedPrice))
+			},
+			// Percentage adjustment
+			Entry("10% decrease", "-10%", 10.0, 9.0),
+			Entry("10% increase", "+10%", 10.0, 11.0),
+			Entry("50% decrease", "-50%", 10.0, 5.0),
+			Entry("100% increase", "+100%", 10.0, 20.0),
+			Entry("Zero price", "-100%", 10.0, 0.0),
+			Entry("Zero price", "-200%", 10.0, 0.0),
+			Entry("Fractional price", "-25%", 1.5, 1.125),
+			// Raw adjustment
+			Entry("No change", "+0", 10.0, 10.0),
+			Entry("Add 5", "+5", 10.0, 15.0),
+			Entry("Subtract 2.5", "-2.5", 10.0, 7.5),
+			Entry("Subtract to zero", "-10", 10.0, 0.0),
+			Entry("Negative Result", "-15", 10.0, 0.0),
+			Entry("Fractional price", "+0.75", 1.25, 2.0),
+			Entry("Large price adjustment", "+100", 0.001, 100.001),
+			Entry("Small price adjustment", "+0.0001", 0.0001, 0.0002),
+		)
+		It("should override price", func() {
+			adjustedPrice := nodeoverlay.AdjustedPrice(82781.0, lo.ToPtr("80.0"))
+			Expect(adjustedPrice).To(BeNumerically("==", 80))
+		})
+		It("should provide the same if price or priceAdjustment is not provided", func() {
+			adjustedPrice := nodeoverlay.AdjustedPrice(82781.0, lo.ToPtr(""))
+			Expect(adjustedPrice).To(BeNumerically("==", 82781))
 		})
 	})
 })
