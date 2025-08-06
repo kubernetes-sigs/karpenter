@@ -63,6 +63,7 @@ const (
 	minRetryDuration        = 10 * time.Minute
 	maxRetryDuration        = 1 * time.Hour
 	maxConcurrentReconciles = 100
+	retryDurationScale      = 80 * time.Millisecond
 )
 
 type UnrecoverableError struct {
@@ -82,7 +83,7 @@ func IsUnrecoverableError(err error) bool {
 }
 
 func CalculateRetryDuration(numCommands int) time.Duration {
-	retryDuration := time.Duration(numCommands) * 80 * time.Millisecond
+	retryDuration := retryDurationScale * time.Duration(numCommands)
 	return lo.Clamp(retryDuration, minRetryDuration, maxRetryDuration)
 }
 
