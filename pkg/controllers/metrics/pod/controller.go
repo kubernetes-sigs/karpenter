@@ -309,7 +309,7 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 		return c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue
 	})
 	if c.pendingPods.Has(key) {
-		if ready || podutils.IsTerminal(pod) {
+		if ready {
 			// Delete the unstarted metric since the pod is now started
 			PodUnstartedTimeSeconds.Delete(map[string]string{
 				podName:      pod.Name,
@@ -319,12 +319,26 @@ func (c *Controller) recordPodStartupMetric(pod *corev1.Pod, schedulableTime tim
 				podName:      pod.Name,
 				podNamespace: pod.Namespace,
 			})
-			if ready {
-				PodStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
-				if !schedulableTime.IsZero() {
-					PodProvisioningStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
-				}
+			PodStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(pod.CreationTimestamp.Time).Seconds(), nil)
+			if !schedulableTime.IsZero() {
+				PodProvisioningStartupDurationSeconds.Observe(cond.LastTransitionTime.Sub(schedulableTime).Seconds(), nil)
 			}
+			c.pendingPods.Delete(key)
+			// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
+			c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))
+		} else if podutils.IsTerminal(pod) {
+			// We do not emit the startup duration metric for pods that are terminal because such pods will have
+			// Ready status condition set to False which will cause the metric to take negative values.
+
+			// Delete the unstarted metric since the pod is now started
+			PodUnstartedTimeSeconds.Delete(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			})
+			PodProvisioningUnstartedTimeSeconds.Delete(map[string]string{
+				podName:      pod.Name,
+				podNamespace: pod.Namespace,
+			})
 			c.pendingPods.Delete(key)
 			// Clear cluster state's representation of these pods as we don't need to keep track of them anymore
 			c.cluster.ClearPodSchedulingMappings(client.ObjectKeyFromObject(pod))

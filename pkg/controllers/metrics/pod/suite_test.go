@@ -250,7 +250,7 @@ var _ = Describe("Pod Metrics", func() {
 		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_startup_duration_seconds", nil)
 		Expect(found).To(BeTrue())
 	})
-	It("should update the pod startup and unstarted time metrics when the pod has succeeded", func() {
+	It("should update the pod unstarted time metrics when the pod has succeeded", func() {
 		p := test.Pod()
 		p.Status.Phase = corev1.PodPending
 
@@ -293,7 +293,7 @@ var _ = Describe("Pod Metrics", func() {
 		_, found = FindMetricWithLabelValues("karpenter_pods_provisioning_startup_duration_seconds", nil)
 		Expect(found).To(BeFalse())
 	})
-	It("should update the pod startup and unstarted time metrics when the pod has failed", func() {
+	It("should update the pod unstarted time metrics when the pod has failed", func() {
 		p := test.Pod()
 		p.Status.Phase = corev1.PodPending
 
