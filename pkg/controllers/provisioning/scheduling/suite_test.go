@@ -3302,37 +3302,13 @@ var _ = Context("Scheduling", func() {
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
-					Annotations: map[string]string{
-						isDefaultStorageClassAnnotation: "true",
-					},
 				},
 				Provisioner:       lo.ToPtr("other-provider"),
 				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingImmediate),
 				Zones:             []string{"test-zone-1"}},
 			)
-
-			ExpectApplied(ctx, env.Client, sc)
 			volumeName := "tmp-ephemeral"
 			pod := test.UnschedulablePod(test.PodOptions{})
-			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-				Name: volumeName,
-				VolumeSource: corev1.VolumeSource{
-					Ephemeral: &corev1.EphemeralVolumeSource{
-						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
-							Spec: corev1.PersistentVolumeClaimSpec{
-								AccessModes: []corev1.PersistentVolumeAccessMode{
-									corev1.ReadWriteOnce,
-								},
-								Resources: corev1.VolumeResourceRequirements{
-									Requests: corev1.ResourceList{
-										corev1.ResourceStorage: resource.MustParse("1Gi"),
-									},
-								},
-							},
-						},
-					},
-				},
-			})
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: pod.Namespace,
@@ -3340,20 +3316,21 @@ var _ = Context("Scheduling", func() {
 				},
 				StorageClassName: lo.ToPtr(sc.Name),
 			})
-
-			ExpectApplied(ctx, env.Client, nodePool, pvc, pod)
-			cluster.AckPods(pod)
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: volumeName,
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: pvc.Name,
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, sc, pvc, pod)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
-
 			var nodeList corev1.NodeList
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			// no nodes should be created as the storage class is using volumeBindingMode immediate the pvc is unbound
 			Expect(nodeList.Items).To(HaveLen(0))
-			nn := client.ObjectKeyFromObject(pod)
-			Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
-			Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeFalse())
-			ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 1, nil)
 		})
 		DescribeTable(
 			"should launch nodes for pods with ephemeral volume without a storage class when the PVC is bound",

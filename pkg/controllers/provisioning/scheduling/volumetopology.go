@@ -178,8 +178,16 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 		if storageClassName == "" {
 			return serrors.Wrap(fmt.Errorf("unbound pvc must define a storage class"), "PersistentVolumeClaim", klog.KRef("", pvc.Name))
 		}
-		if err := v.validateStorageClass(ctx, storageClassName); err != nil {
-			return serrors.Wrap(fmt.Errorf("failed to validate storage class, %w", err), "PersistentVolumeClaim", klog.KRef("", pvc.Name), "StorageClass", klog.KRef("", storageClassName))
+		storageClass := &storagev1.StorageClass{}
+		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
+			return serrors.Wrap(fmt.Errorf("failed to validate storage class, %w", err), "persistentVolumeClaim", klog.KRef("", pvc.Name), "storageClass", klog.KRef("", storageClassName))
+		}
+		if UnsupportedProvisioners.Has(storageClass.Provisioner) {
+			return serrors.Wrap(fmt.Errorf("storageClass provisioner is not supported"), "storageClass provisioner", klog.KRef("", storageClass.Provisioner))
+		}
+		// Ignore pods than have unbound pvc for voluemBindingMode immediate
+		if storageClass.VolumeBindingMode != nil && *storageClass.VolumeBindingMode == storagev1.VolumeBindingImmediate {
+			return serrors.Wrap(fmt.Errorf("unbound persistentvolumeclaim with immediate volume binding mode must be bound"), "storageClass", klog.KObj(storageClass))
 		}
 	}
 	return nil
@@ -192,21 +200,6 @@ func (v *VolumeTopology) validateVolume(ctx context.Context, volumeName string) 
 		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: volumeName}, pv); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (v *VolumeTopology) validateStorageClass(ctx context.Context, storageClassName string) error {
-	storageClass := &storagev1.StorageClass{}
-	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
-		return err
-	}
-	if UnsupportedProvisioners.Has(storageClass.Provisioner) {
-		return serrors.Wrap(fmt.Errorf("storageClass provisioner is not supported"), "StorageClass", klog.KRef("", storageClass.Provisioner))
-	}
-	// Ignore pods than have unbound pvc for voluemBindingMode immediate
-	if storageClass.VolumeBindingMode != nil && *storageClass.VolumeBindingMode == storagev1.VolumeBindingImmediate {
-		return serrors.Wrap(fmt.Errorf("persistentVolumeClaim is unbound for volumeBindingMode: Immediate"), "StorageClass", klog.KRef("", storageClass.Provisioner))
 	}
 	return nil
 }
