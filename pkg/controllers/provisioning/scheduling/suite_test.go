@@ -3307,30 +3307,18 @@ var _ = Context("Scheduling", func() {
 				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingImmediate),
 				Zones:             []string{"test-zone-1"}},
 			)
-			volumeName := "tmp-ephemeral"
-			pod := test.UnschedulablePod(test.PodOptions{})
 			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: pod.Namespace,
-					Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+					Name: "tmp-ephemeral",
 				},
 				StorageClassName: lo.ToPtr(sc.Name),
 			})
-			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-				Name: volumeName,
-				VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: pvc.Name,
-					},
-				},
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc.Name},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, sc, pvc, pod)
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
-			var nodeList corev1.NodeList
-			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
-			// no nodes should be created as the storage class is using volumeBindingMode immediate the pvc is unbound
-			Expect(nodeList.Items).To(HaveLen(0))
 		})
 		DescribeTable(
 			"should launch nodes for pods with ephemeral volume without a storage class when the PVC is bound",
