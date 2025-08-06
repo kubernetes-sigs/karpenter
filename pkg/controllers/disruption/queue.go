@@ -82,7 +82,7 @@ func IsUnrecoverableError(err error) bool {
 }
 
 func CalculateRetryDuration(numCommands int) time.Duration {
-	retryDuration := time.Duration(numCommands)*80*time.Millisecond
+	retryDuration := time.Duration(numCommands) * 80 * time.Millisecond
 	return lo.Clamp(retryDuration, minRetryDuration, maxRetryDuration)
 }
 
