@@ -2798,9 +2798,10 @@ var _ = Context("Scheduling", func() {
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
 			sc := test.StorageClass(test.StorageClassOptions{
-				ObjectMeta:  metav1.ObjectMeta{Name: "my-storage-class"},
-				Provisioner: lo.ToPtr(csiProvider),
-				Zones:       []string{"test-zone-1"}})
+				ObjectMeta:        metav1.ObjectMeta{Name: "my-storage-class"},
+				Provisioner:       lo.ToPtr(csiProvider),
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				Zones:             []string{"test-zone-1"}})
 			ExpectApplied(ctx, env.Client, sc)
 
 			var pods []*corev1.Pod
@@ -2922,8 +2923,9 @@ var _ = Context("Scheduling", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "my-storage-class",
 				},
-				Provisioner: lo.ToPtr(csiProvider),
-				Zones:       []string{"test-zone-1"}})
+				Provisioner:       lo.ToPtr(csiProvider),
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				Zones:             []string{"test-zone-1"}})
 			// Create another default storage class that shouldn't be used and has no associated limits
 			sc2 := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -2932,8 +2934,9 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: lo.ToPtr("other-provider"),
-				Zones:       []string{"test-zone-1"}})
+				Provisioner:       lo.ToPtr("other-provider"),
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				Zones:             []string{"test-zone-1"}})
 
 			initialPod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has a specified storage class, so it should use the one specified
@@ -3037,8 +3040,9 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: lo.ToPtr(csiProvider),
-				Zones:       []string{"test-zone-1"}})
+				Provisioner:       lo.ToPtr(csiProvider),
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				Zones:             []string{"test-zone-1"}})
 
 			initialPod := test.UnschedulablePod(test.PodOptions{})
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
@@ -3135,8 +3139,9 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: lo.ToPtr("other-provider"),
-				Zones:       []string{"test-zone-1"}})
+				Provisioner:       lo.ToPtr("other-provider"),
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				Zones:             []string{"test-zone-1"}})
 			sc2 := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "newer-default-storage-class",
@@ -3144,8 +3149,9 @@ var _ = Context("Scheduling", func() {
 						isDefaultStorageClassAnnotation: "true",
 					},
 				},
-				Provisioner: lo.ToPtr(csiProvider),
-				Zones:       []string{"test-zone-1"}})
+				Provisioner:       lo.ToPtr(csiProvider),
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				Zones:             []string{"test-zone-1"}})
 
 			ExpectApplied(ctx, env.Client, sc)
 			// Wait a few seconds to apply the second storage class to get a newer creationTimestamp
@@ -3243,7 +3249,6 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should not launch nodes for pod with storageClass that uses an unsupported provisioner", func() {
 			scheduling.UnsupportedProvisioners = lo.Assign(scheduling.UnsupportedProvisioners, sets.New("other-provider"))
-			// Launch an initial pod onto a node and register the CSI Node with a volume count limit of 1
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
@@ -3292,6 +3297,28 @@ var _ = Context("Scheduling", func() {
 			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
 			// no nodes should be created as the storage class is using an unsupported provisioner
 			Expect(nodeList.Items).To(HaveLen(0))
+		})
+		It("should not launch nodes for pod with unbound volume for volumeBindingMode immediate", func() {
+			sc := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "default-storage-class",
+				},
+				Provisioner:       lo.ToPtr("other-provider"),
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingImmediate),
+				Zones:             []string{"test-zone-1"}},
+			)
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tmp-ephemeral",
+				},
+				StorageClassName: lo.ToPtr(sc.Name),
+			})
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc.Name},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, sc, pvc, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 		DescribeTable(
 			"should launch nodes for pods with ephemeral volume without a storage class when the PVC is bound",
@@ -3392,8 +3419,9 @@ var _ = Context("Scheduling", func() {
 							isDefaultStorageClassAnnotation: "true",
 						},
 					},
-					Provisioner: lo.ToPtr(plugins.AWSEBSInTreePluginName),
-					Zones:       []string{"test-zone-1"}})
+					Provisioner:       lo.ToPtr(plugins.AWSEBSInTreePluginName),
+					VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+					Zones:             []string{"test-zone-1"}})
 				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
 					StorageClassName: lo.ToPtr(sc.Name),
 				})
@@ -3450,8 +3478,9 @@ var _ = Context("Scheduling", func() {
 							isDefaultStorageClassAnnotation: "true",
 						},
 					},
-					Provisioner: lo.ToPtr(plugins.AWSEBSInTreePluginName),
-					Zones:       []string{"test-zone-1"}})
+					Provisioner:       lo.ToPtr(plugins.AWSEBSInTreePluginName),
+					VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+					Zones:             []string{"test-zone-1"}})
 
 				initialPod := test.UnschedulablePod(test.PodOptions{})
 				// Pod has an ephemeral volume claim that references the in-tree storage provider
