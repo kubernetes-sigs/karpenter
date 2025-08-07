@@ -180,7 +180,7 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 		}
 		storageClass := &storagev1.StorageClass{}
 		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
-			return serrors.Wrap(fmt.Errorf("failed to validate pvc, failed to get storage class, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", storageClassName)
+			return serrors.Wrap(fmt.Errorf("failed to validate pvc, failed to get storage class, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
 		}
 		if UnsupportedProvisioners.Has(storageClass.Provisioner) {
 			return serrors.Wrap(fmt.Errorf("failed to validate pvc, provisioner is not supported"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KObj(storageClass), "Provisioner", storageClass.Provisioner)
