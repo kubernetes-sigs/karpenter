@@ -62,8 +62,6 @@ type NodePoolSpec struct {
 	// When replicas is set, the following fields are simply ignored:
 	// - disruption.consolidationPolicy
 	// - disruption.consolidateAfter
-	// - limits.cpu
-	// - limits.memory
 	// Note that to set limits on number of static nodes in a Nodepool use limits.nodes
 	// +kubebuilder:validation:Minimum:=0
 	// +optional

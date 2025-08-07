@@ -34,8 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	. "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
@@ -724,21 +722,28 @@ var _ = Describe("CEL/Validation", func() {
 		Context("Invalid Replicas Values", func() {
 			It("should fail when replicas is set to a negative value", func() {
 				nodePool.Spec.Replicas = lo.ToPtr(int64(-100))
-				nodePool.Spec.Disruption.ConsolidateAfter = MustParseNillableDuration("0s")
 				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 			})
 		})
 
-		Context("Compatible Fields", func() {
-			It("should succeed with replicas and comprehensive static nodepool configuration", func() {
-				nodePool.Spec.Replicas = lo.ToPtr(int64(10))
-				nodePool.Spec.Weight = lo.ToPtr(int32(25))
-				nodePool.Spec.Limits = Limits{
+		DescribeTable("Compatible fields for static nodepools",
+			func(modify func(*NodePool)) {
+				modify(nodePool)
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+			},
+			Entry("weight", func(np *NodePool) {
+				np.Spec.Weight = lo.ToPtr(int32(25))
+			}),
+			Entry("limits.cpu, limits.memory and limits.nodes", func(np *NodePool) {
+				np.Spec.Limits = Limits{
 					v1.ResourceCPU:    resource.MustParse("1000"),
 					v1.ResourceMemory: resource.MustParse("2000Gi"),
 					"nodes":           resource.MustParse("100"),
 				}
-				nodePool.Spec.Disruption = Disruption{
+			}),
+			Entry("disruption with multiple budgets", func(np *NodePool) {
+				np.Spec.Disruption = Disruption{
 					ConsolidationPolicy: ConsolidationPolicyWhenEmptyOrUnderutilized,
 					ConsolidateAfter:    MustParseNillableDuration("5m"),
 					Budgets: []Budget{
@@ -754,24 +759,32 @@ var _ = Describe("CEL/Validation", func() {
 							Duration: &metav1.Duration{Duration: 4 * time.Hour},
 							Reasons:  []DisruptionReason{DisruptionReasonUnderutilized},
 						},
-						{
-							Nodes: "5",
-						},
+						{Nodes: "5"},
 					},
 				}
-				nodePool.Spec.Template.Labels = map[string]string{
+			}),
+			Entry("template labels", func(np *NodePool) {
+				np.Spec.Template.Labels = map[string]string{
 					"environment": "production",
 				}
-				nodePool.Spec.Template.Annotations = map[string]string{
+			}),
+			Entry("template annotations", func(np *NodePool) {
+				np.Spec.Template.Annotations = map[string]string{
 					"example.com/last-updated": "2024-01-01",
 				}
-				nodePool.Spec.Template.Spec.Taints = []v1.Taint{
+			}),
+			Entry("taints", func(np *NodePool) {
+				np.Spec.Template.Spec.Taints = []v1.Taint{
 					{Key: "gpu-workload", Value: "enabled", Effect: v1.TaintEffectNoSchedule},
 				}
-				nodePool.Spec.Template.Spec.StartupTaints = []v1.Taint{
+			}),
+			Entry("startup taints", func(np *NodePool) {
+				np.Spec.Template.Spec.StartupTaints = []v1.Taint{
 					{Key: "example.com/initializing", Value: "true", Effect: v1.TaintEffectNoSchedule},
 				}
-				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
+			}),
+			Entry("requirements", func(np *NodePool) {
+				np.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelInstanceTypeStable, Operator: v1.NodeSelectorOpIn, Values: []string{"m5.large", "m5.xlarge", "m5.2xlarge", "c5.large", "c5.xlarge", "r5.large", "r5.xlarge"}}, MinValues: lo.ToPtr(3)},
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: v1.LabelTopologyZone, Operator: v1.NodeSelectorOpIn, Values: []string{"us-west-2a", "us-west-2b", "us-west-2c"}}},
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: CapacityTypeLabelKey, Operator: v1.NodeSelectorOpIn, Values: []string{"on-demand", "spot"}}},
@@ -779,14 +792,14 @@ var _ = Describe("CEL/Validation", func() {
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "karpenter.k8s.aws/instance-memory", Operator: v1.NodeSelectorOpGt, Values: []string{"8192"}}},
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "karpenter.k8s.aws/instance-cpu", Operator: v1.NodeSelectorOpLt, Values: []string{"64"}}},
 				}
-
-				nodePool.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("72h")
-				nodePool.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
-
-				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
-			})
-		})
+			}),
+			Entry("expireAfter", func(np *NodePool) {
+				np.Spec.Template.Spec.ExpireAfter = MustParseNillableDuration("72h")
+			}),
+			Entry("terminationGracePeriod", func(np *NodePool) {
+				np.Spec.Template.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			}),
+		)
 
 		Context("Update Scenarios", func() {
 			It("should succeed when increasing replicas in a NodePool", func() {
@@ -795,11 +808,9 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 
 				// Update the replicas
-				updatedNodePool := &NodePool{}
-				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodePool), updatedNodePool)).To(Succeed())
-				updatedNodePool.Spec.Replicas = lo.ToPtr(int64(5))
-				Expect(env.Client.Update(ctx, updatedNodePool)).To(Succeed())
-				Expect(updatedNodePool.RuntimeValidate(ctx)).To(Succeed())
+				nodePool.Spec.Replicas = lo.ToPtr(int64(5))
+				Expect(env.Client.Update(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
 			})
 
 			It("should fail when changing the Nodepool from static to dynamic", func() {
@@ -808,10 +819,8 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 
 				// Update to remove replicas
-				updatedNodePool := &NodePool{}
-				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodePool), updatedNodePool)).To(Succeed())
-				updatedNodePool.Spec.Replicas = nil
-				Expect(env.Client.Update(ctx, updatedNodePool)).ToNot(Succeed())
+				nodePool.Spec.Replicas = nil
+				Expect(env.Client.Update(ctx, nodePool)).ToNot(Succeed())
 			})
 
 			It("should fail when changing the Nodepool from dynamic to static", func() {
@@ -819,10 +828,8 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 
 				// Update to add replicas field
-				updatedNodePool := &NodePool{}
-				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodePool), updatedNodePool)).To(Succeed())
-				updatedNodePool.Spec.Replicas = lo.ToPtr(int64(3))
-				Expect(env.Client.Update(ctx, updatedNodePool)).ToNot(Succeed())
+				nodePool.Spec.Replicas = lo.ToPtr(int64(3))
+				Expect(env.Client.Update(ctx, nodePool)).ToNot(Succeed())
 			})
 
 			It("should succeed when changing the static Nodepool nodes limit", func() {
@@ -835,12 +842,10 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 
 				// Update Nodepool limit
-				updatedNodePool := &NodePool{}
-				Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(nodePool), updatedNodePool)).To(Succeed())
-				updatedNodePool.Spec.Limits = Limits{
+				nodePool.Spec.Limits = Limits{
 					"nodes": resource.MustParse("100"),
 				}
-				Expect(env.Client.Update(ctx, updatedNodePool)).To(Succeed())
+				Expect(env.Client.Update(ctx, nodePool)).To(Succeed())
 			})
 		})
 	})
