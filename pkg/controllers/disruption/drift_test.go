@@ -49,7 +49,7 @@ var _ = Describe("Drift", func() {
 		nodePool = test.NodePool(v1.NodePool{
 			Spec: v1.NodePoolSpec{
 				Disruption: v1.Disruption{
-					ConsolidateAfter: v1.MustParseNillableDuration("Never"),
+					ConsolidateAfter: v1.MustParseNillableDuration("1h"),
 					// Disrupt away!
 					Budgets: []v1.Budget{{
 						Nodes: "100%",
@@ -396,6 +396,7 @@ var _ = Describe("Drift", func() {
 	Context("Drift", func() {
 		BeforeEach(func() {
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			Expect(nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)).To(BeNil())
 		})
 		It("should continue to the next drifted node if the first cannot reschedule all pods", func() {
 			pod := test.Pod(test.PodOptions{
@@ -726,6 +727,48 @@ var _ = Describe("Drift", func() {
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+		})
+		It("should delete drifted nodes when they are empty and consolidation is disabled", func() {
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
+				metrics.ReasonLabel: "drifted",
+			})
+		})
+		It("should give emptiness priority to delete drifted nodes when they are empty and consolidatable", func() {
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(0))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 1, map[string]string{
+				metrics.ReasonLabel: "empty",
+			})
 		})
 		It("should untaint nodes when drift replacement fails", func() {
 			labels := map[string]string{
