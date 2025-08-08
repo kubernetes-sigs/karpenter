@@ -29,7 +29,7 @@ import (
 
 func TestReconciles(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Reconciles")
+	RunSpecs(t, "ControllerUtils")
 }
 
 func contextWithCPURequests(cpuRequests int64) context.Context {
@@ -39,7 +39,7 @@ func contextWithCPURequests(cpuRequests int64) context.Context {
 	return opts.ToContext(context.Background())
 }
 
-var _ = Describe("Reconciles", func() {
+var _ = Describe("ControllerUtils", func() {
 	minReconciles := 10
 	maxReconciles := 1000
 	Context("LinearScaleReconciles Calculations", func() {
@@ -81,5 +81,20 @@ var _ = Describe("Reconciles", func() {
 			expected := 26
 			Expect(result).To(Equal(expected))
 		})
+	})
+	Context("GetTypedBucketConfigs calculations", func() {
+		DescribeTable("should calculate QPS and bucket size correctly",
+			func(minQPS, minReconciles, concurrentReconciles, expectedQPS, expectedBucketSize int) {
+				qps, bucketSize := controller.GetTypedBucketConfigs(minQPS, minReconciles, concurrentReconciles)
+				Expect(qps).To(Equal(expectedQPS))
+				Expect(bucketSize).To(Equal(expectedBucketSize))
+			},
+			// Arguments are: minQPS, minReconciles, concurrentReconciles, expectedQPS, expectedBucketSize
+			Entry("scale of QPS is 100%, concurrentReconciles is equal to minimumReconciles", 10, 10, 10, 10, 100),
+			Entry("scale of QPS is 100%, concurrentReconciles is double minimumReconciles", 10, 10, 20, 20, 200),
+			Entry("scale of QPS is 10%, concurrentReconciles is equal to minimumReconciles", 10, 100, 100, 10, 100),
+			Entry("scale of QPS is 10%, concurrentReconciles is double minimumReconciles", 10, 100, 200, 20, 200),
+			Entry("scale of QPS is 25%, concurrentReconciles is 1.5x minimumReconciles", 25, 100, 150, 38, 380),
+		)
 	})
 })

@@ -58,6 +58,7 @@ import (
 const (
 	minReconciles = 100
 	maxReconciles = 5000
+	minQPS        = 10
 )
 
 // Controller for the resource
@@ -393,8 +394,7 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	concurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
-	qps := concurrentReconciles / 10
-	bucketSize := 10 * qps
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(minQPS, minReconciles, concurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).

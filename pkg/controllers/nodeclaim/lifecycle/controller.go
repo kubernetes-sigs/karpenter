@@ -56,6 +56,7 @@ const (
 	// higher concurrency limit since we want fast reaction to node syncing and launch
 	minReconciles = 1000
 	maxReconciles = 5000
+	minQPS        = 10
 )
 
 // Controller is a NodeClaim Lifecycle controller that manages the lifecycle of the NodeClaim up until its termination
@@ -88,8 +89,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	concurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
-	qps := concurrentReconciles / 100
-	bucketSize := 10 * qps
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(minQPS, minReconciles, concurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).

@@ -58,6 +58,7 @@ const (
 	evictionQueueMaxDelay  = 10 * time.Second
 	minReconciles          = 100
 	maxReconciles          = 5000
+	minQPS                 = 100
 
 	multiplePodDisruptionBudgetsError = "This pod has more than one PodDisruptionBudget, which the eviction subresource does not support."
 )
@@ -115,8 +116,7 @@ func (q *Queue) Name() string {
 
 func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 	concurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
-	qps := concurrentReconciles
-	bucketSize := 10 * qps
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(minQPS, minReconciles, concurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(q.Name()).
 		WatchesRawSource(source.Channel(q.source, handler.TypedFuncs[*corev1.Pod, reconcile.Request]{
