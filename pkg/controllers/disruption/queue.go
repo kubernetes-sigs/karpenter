@@ -60,8 +60,10 @@ import (
 const (
 	queueBaseDelay          = 1 * time.Second
 	queueMaxDelay           = 10 * time.Second
-	maxRetryDuration        = 10 * time.Minute
+	minRetryDuration        = 10 * time.Minute
+	maxRetryDuration        = 1 * time.Hour
 	maxConcurrentReconciles = 100
+	retryDurationScale      = 80 * time.Millisecond
 )
 
 type UnrecoverableError struct {
@@ -78,6 +80,11 @@ func IsUnrecoverableError(err error) bool {
 	}
 	var unrecoverableError *UnrecoverableError
 	return stderrors.As(err, &unrecoverableError)
+}
+
+func CalculateRetryDuration(numCommands int) time.Duration {
+	retryDuration := retryDurationScale * time.Duration(numCommands)
+	return lo.Clamp(retryDuration, minRetryDuration, maxRetryDuration)
 }
 
 type Queue struct {
@@ -168,9 +175,13 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 // Once the replacements are ready, it will terminate the candidates.
 // nolint:gocyclo
 func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
+	q.RLock()
+	numCommands := len(q.providerIDToCommand)
+	q.RUnlock()
+	retryDuration := CalculateRetryDuration(numCommands)
 	// Wrap an error in an unrecoverable error if it timed out
 	defer func() {
-		if q.clock.Since(cmd.CreationTimestamp) > maxRetryDuration {
+		if q.clock.Since(cmd.CreationTimestamp) > retryDuration {
 			err = NewUnrecoverableError(serrors.Wrap(fmt.Errorf("command reached timeout, %w", err), "duration", q.clock.Since(cmd.CreationTimestamp)))
 		}
 	}()
