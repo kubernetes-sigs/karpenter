@@ -54,14 +54,16 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 const (
-	queueBaseDelay          = 1 * time.Second
-	queueMaxDelay           = 10 * time.Second
-	maxRetryDuration        = 10 * time.Minute
-	maxConcurrentReconciles = 100
+	queueBaseDelay   = 1 * time.Second
+	queueMaxDelay    = 10 * time.Second
+	maxRetryDuration = 10 * time.Minute
+	minReconciles    = 100
+	maxReconciles    = 1000
 )
 
 type UnrecoverableError struct {
@@ -109,7 +111,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
-func (q *Queue) Register(_ context.Context, m manager.Manager) error {
+func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
 		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).
@@ -118,7 +120,7 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](queueBaseDelay, queueMaxDelay),
 				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
 			),
-			MaxConcurrentReconciles: maxConcurrentReconciles,
+			MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles),
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }

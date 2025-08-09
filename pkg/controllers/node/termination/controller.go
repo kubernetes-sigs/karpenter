@@ -49,9 +49,15 @@ import (
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
+)
+
+const (
+	minReconciles = 100
+	maxReconciles = 5000
 )
 
 // Controller for the resource
@@ -385,7 +391,7 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 	return &expirationTime, nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -396,7 +402,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 					// 10 qps, 100 bucket size
 					&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 				),
-				MaxConcurrentReconciles: 100,
+				MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles),
 			},
 		).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
