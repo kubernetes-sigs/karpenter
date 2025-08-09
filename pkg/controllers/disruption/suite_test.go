@@ -44,6 +44,8 @@ import (
 	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	coreapis "sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -156,7 +158,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 
 	// Reset the metrics collectors
 	disruption.DecisionsPerformedTotal.Reset()

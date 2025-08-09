@@ -21,6 +21,8 @@ import (
 	"math/rand/v2"
 	"testing"
 
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	. "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,7 +32,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/apis"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/test"
-	testexpectations "sigs.k8s.io/karpenter/pkg/test/expectations"
 	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
@@ -49,7 +50,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterEach(func() {
-	testexpectations.ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 })
 
 var _ = AfterSuite(func() {

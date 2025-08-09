@@ -27,34 +27,35 @@ import (
 	"sync"
 	"time"
 
+	v3 "k8s.io/api/storage/v1"
+
+	v2 "k8s.io/api/apps/v1"
+
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	v1alpha2 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
-	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,stylecheck
 	. "github.com/onsi/gomega"    //nolint:revive,stylecheck
 	"github.com/prometheus/client_golang/prometheus"
 	prometheusmodel "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
-	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	. "github.com/awslabs/operatorpkg/test/expectations" //nolint:stylecheck
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -64,7 +65,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 const (
@@ -105,17 +105,6 @@ func ExpectNodeExists(ctx context.Context, c client.Client, name string) *corev1
 	return ExpectExists(ctx, c, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
 }
 
-func ExpectNotFound(ctx context.Context, c client.Client, objects ...client.Object) {
-	GinkgoHelper()
-	for _, object := range objects {
-		Eventually(func() bool {
-			return errors.IsNotFound(c.Get(ctx, types.NamespacedName{Name: object.GetName(), Namespace: object.GetNamespace()}, object))
-		}, ReconcilerPropagationTime, RequestInterval).Should(BeTrue(), func() string {
-			return fmt.Sprintf("expected %s/%s to be deleted, but it still exists", lo.Must(apiutil.GVKForObject(object, scheme.Scheme)), client.ObjectKeyFromObject(object))
-		})
-	}
-}
-
 func ExpectScheduled(ctx context.Context, c client.Client, pod *corev1.Pod) *corev1.Node {
 	GinkgoHelper()
 	p := ExpectPodExists(ctx, c, pod.Name, pod.Namespace)
@@ -135,127 +124,6 @@ func ExpectNotScheduled(ctx context.Context, c client.Client, pod *corev1.Pod) *
 	p := ExpectPodExists(ctx, c, pod.Name, pod.Namespace)
 	Eventually(p.Spec.NodeName).Should(BeEmpty(), fmt.Sprintf("expected %s/%s to not be scheduled", pod.Namespace, pod.Name))
 	return p
-}
-
-func ExpectApplied(ctx context.Context, c client.Client, objects ...client.Object) {
-	GinkgoHelper()
-	for _, object := range objects {
-		deletionTimestampSet := !object.GetDeletionTimestamp().IsZero()
-		current := object.DeepCopyObject().(client.Object)
-		statuscopy := object.DeepCopyObject().(client.Object) // Snapshot the status, since create/update may override
-
-		// Create or Update
-		if err := c.Get(ctx, client.ObjectKeyFromObject(current), current); err != nil {
-			if errors.IsNotFound(err) {
-				Expect(c.Create(ctx, object)).To(Succeed())
-			} else {
-				Expect(err).ToNot(HaveOccurred())
-			}
-		} else {
-			object.SetResourceVersion(current.GetResourceVersion())
-			Expect(c.Update(ctx, object)).To(Succeed())
-		}
-		// Update status
-		statuscopy.SetResourceVersion(object.GetResourceVersion())
-		Expect(c.Status().Update(ctx, statuscopy)).To(Or(Succeed(), MatchError("the server could not find the requested resource"))) // Some objects do not have a status
-
-		// Re-get the object to grab the updated spec and status
-		Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
-
-		// Set the deletion timestamp by adding a finalizer and deleting
-		if deletionTimestampSet {
-			ExpectDeletionTimestampSet(ctx, c, object)
-		}
-	}
-}
-
-func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Object) {
-	GinkgoHelper()
-	for _, object := range objects {
-		if err := c.Delete(ctx, object, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}); !errors.IsNotFound(err) {
-			Expect(err).To(BeNil())
-		}
-		ExpectNotFound(ctx, c, object)
-	}
-}
-
-func ExpectSingletonReconciled(ctx context.Context, reconciler singleton.Reconciler) reconcile.Result {
-	GinkgoHelper()
-	result, err := singleton.AsReconciler(reconciler).Reconcile(ctx, reconcile.Request{})
-	Expect(err).ToNot(HaveOccurred())
-	return result
-}
-
-func ExpectSingletonReconcileFailed(ctx context.Context, reconciler singleton.Reconciler) error {
-	GinkgoHelper()
-	_, err := singleton.AsReconciler(reconciler).Reconcile(ctx, reconcile.Request{})
-	Expect(err).To(HaveOccurred())
-	return err
-}
-
-func ExpectObjectReconciled[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) reconcile.Result {
-	GinkgoHelper()
-	result, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
-	Expect(err).ToNot(HaveOccurred())
-	return result
-}
-
-func ExpectObjectReconcileFailed[T client.Object](ctx context.Context, c client.Client, reconciler reconcile.ObjectReconciler[T], object T) error {
-	GinkgoHelper()
-	_, err := reconcile.AsReconciler(c, reconciler).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)})
-	Expect(err).To(HaveOccurred())
-	return err
-}
-
-// ExpectDeletionTimestampSetWithOffset ensures that the deletion timestamp is set on the objects by adding a finalizer
-// and then deleting the object immediately after. This holds the object until the finalizer is patched out in the DeferCleanup
-func ExpectDeletionTimestampSet(ctx context.Context, c client.Client, objects ...client.Object) {
-	GinkgoHelper()
-	for _, object := range objects {
-		Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
-		controllerutil.AddFinalizer(object, "testing/finalizer")
-		Expect(c.Update(ctx, object)).To(Succeed())
-		Expect(c.Delete(ctx, object)).To(Succeed())
-		DeferCleanup(func(obj client.Object) {
-			mergeFrom := client.MergeFrom(obj.DeepCopyObject().(client.Object))
-			obj.SetFinalizers([]string{})
-			Expect(client.IgnoreNotFound(c.Patch(ctx, obj, mergeFrom))).To(Succeed())
-		}, object)
-	}
-}
-
-func ExpectCleanedUp(ctx context.Context, c client.Client) {
-	GinkgoHelper()
-	wg := sync.WaitGroup{}
-	namespaces := &corev1.NamespaceList{}
-	Expect(c.List(ctx, namespaces)).To(Succeed())
-	ExpectFinalizersRemovedFromList(ctx, c, &corev1.NodeList{}, &v1.NodeClaimList{}, &corev1.PersistentVolumeClaimList{})
-	for _, object := range []client.Object{
-		&corev1.Pod{},
-		&corev1.Node{},
-		&appsv1.DaemonSet{},
-		&nodev1.RuntimeClass{},
-		&policyv1.PodDisruptionBudget{},
-		&corev1.PersistentVolumeClaim{},
-		&corev1.PersistentVolume{},
-		&storagev1.StorageClass{},
-		&v1.NodePool{},
-		&testv1alpha1.TestNodeClass{},
-		&v1.NodeClaim{},
-		&v1alpha1.NodeOverlay{},
-	} {
-		for _, namespace := range namespaces.Items {
-			wg.Add(1)
-			go func(object client.Object, namespace string) {
-				GinkgoHelper()
-				defer wg.Done()
-				defer GinkgoRecover()
-				Expect(c.DeleteAllOf(ctx, object, client.InNamespace(namespace),
-					&client.DeleteAllOfOptions{DeleteOptions: client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}})).ToNot(HaveOccurred())
-			}(object, namespace.Name)
-		}
-	}
-	wg.Wait()
 }
 
 func ExpectFinalizersRemovedFromList(ctx context.Context, c client.Client, objectLists ...client.ObjectList) {
@@ -754,4 +622,10 @@ func ExpectParallelized(fs ...func()) {
 		}()
 	}
 	wg.Wait()
+}
+
+func ExpectForceCleanedUpAll(ctx context.Context, c client.Client) {
+	ExpectForceCleanedUp(ctx, c, &corev1.NodeList{}, &v1.NodeClaimList{}, &corev1.PersistentVolumeClaimList{}, &corev1.PersistentVolumeList{},
+		&corev1.PodList{}, &policyv1.PodDisruptionBudgetList{}, &v2.StatefulSetList{}, &v1.NodePoolList{},
+		&v1alpha1.NodeOverlayList{}, &v1alpha2.TestNodeClassList{}, &v2.DaemonSetList{}, &v3.StorageClassList{})
 }
