@@ -31,6 +31,20 @@ const (
 	ConditionTypeNodeRegistrationHealthy = "NodeRegistrationHealthy"
 )
 
+type DisruptionStatus struct {
+	// AllowedDisruptionCount is the number of nodes that can be disrupted based on the disruption budget
+	// +optional
+	AllowedDisruptionCount int `json:"allowedDisruptionCount,omitempty"`
+
+	// CurrentDisruptionCount is the number of nodes in the nodepool that are currently marked as disrupted
+	// +optional
+	CurrentDisruptionCount int `json:"currentDisruptionCount,omitempty"`
+
+	// DisruptionReasonCount captures count of nodes in the nodepool that are currently marked as disrupted by a specific reason
+	// +optional
+	DisruptionReasonCount map[DisruptionReason]int `json:"disruptionReasonCount,omitempty"`
+}
+
 // NodePoolStatus defines the observed state of NodePool
 type NodePoolStatus struct {
 	// Resources is the list of resources that have been provisioned.
@@ -43,6 +57,9 @@ type NodePoolStatus struct {
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
+	// Disruptions track allowed vs currently disrupted nodes along with disruption reason
+	// +optional
+	Disruptions DisruptionStatus `json:"disruptions,omitempty"`
 }
 
 func (in *NodePool) StatusConditions() status.ConditionSet {
