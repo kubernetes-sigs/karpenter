@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,10 +106,10 @@ type InstanceType struct {
 	Capacity corev1.ResourceList
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
-	Overhead *InstanceTypeOverhead
-
-	once        sync.Once
-	allocatable corev1.ResourceList
+	Overhead               *InstanceTypeOverhead
+	once                   sync.Once
+	allocatable            corev1.ResourceList
+	capacityOverlayApplied bool
 }
 
 type InstanceTypes []*InstanceType
@@ -117,6 +118,37 @@ type InstanceTypes []*InstanceType
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {
 	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
+
+	// Adjust allocatable memory to account for hugepage reservations. Hugepages are a
+	// special memory resource that is reserved directly from the system, reducing the
+	// amount of memory available for general application use. Since hugepages are a
+	// Kubernetes well-known resource, we implement first-class accounting for their
+	// allocation impact.
+	for name, quantity := range i.Capacity {
+		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
+			current := i.allocatable.Memory()
+			current.Sub(quantity)
+			if current.Sign() == -1 {
+				current.Set(0)
+			}
+			i.allocatable[corev1.ResourceMemory] = lo.FromPtr(current)
+		}
+	}
+}
+
+func (i *InstanceType) IsPricingOverlayApplied() bool {
+	_, found := lo.Find(i.Offerings, func(of *Offering) bool {
+		return of.IsOverlaid()
+	})
+	return found
+}
+
+func (i *InstanceType) ApplyResourceOverlay() {
+	i.capacityOverlayApplied = true
+}
+
+func (i *InstanceType) IsCapacityOverlayApplied() bool {
+	return i.capacityOverlayApplied
 }
 
 func (i *InstanceType) Allocatable() corev1.ResourceList {
@@ -261,6 +293,16 @@ type Offering struct {
 	Price               float64
 	Available           bool
 	ReservationCapacity int
+
+	overlayApplied bool
+}
+
+func (o *Offering) ApplyOverlay() {
+	o.overlayApplied = true
+}
+
+func (o *Offering) IsOverlaid() bool {
+	return o.overlayApplied
 }
 
 func (o *Offering) CapacityType() string {

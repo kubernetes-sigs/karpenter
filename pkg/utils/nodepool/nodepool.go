@@ -31,6 +31,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 func IsManaged(nodePool *v1.NodePool, cp cloudprovider.CloudProvider) bool {
@@ -127,5 +128,45 @@ func OrderByWeight(nps []*v1.NodePool) {
 			return nps[a].Name > nps[b].Name
 		}
 		return weightA > weightB
+	})
+}
+
+// As the instance types values are returned are pointers, we need to make sure that we are not
+// updating the instances returned by the cloud provider. We need to get a fresh copy of the instances types
+// Such that we only overlay currently defined set of overrides
+func PullInstanceTypes(ctx context.Context, cp cloudprovider.CloudProvider, nodePool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
+	its, err := cp.GetInstanceTypes(ctx, nodePool)
+	if err != nil {
+		return []*cloudprovider.InstanceType{}, err
+	}
+
+	// Since we are altering the instance type data we need to copy the instance types into a new struct
+	// The main things that have been copied are the offerings, capacity and overhead
+	return lo.Map(its, func(it *cloudprovider.InstanceType, _ int) *cloudprovider.InstanceType {
+		// The additional requirements will be added to the instance type during scheduling simulation
+		// Since getting instance types is done on a NodePool level, these requirnements were always assumed
+		// to be allowed with these instance types.
+		return &cloudprovider.InstanceType{
+			Name:         it.Name,
+			Requirements: scheduling.NewRequirements(it.Requirements.Values()...),
+			Offerings:    CopyOfferings(it.Offerings),
+			Capacity:     it.Capacity.DeepCopy(),
+			Overhead: &cloudprovider.InstanceTypeOverhead{
+				KubeReserved:      it.Overhead.KubeReserved.DeepCopy(),
+				SystemReserved:    it.Overhead.SystemReserved.DeepCopy(),
+				EvictionThreshold: it.Overhead.EvictionThreshold.DeepCopy(),
+			},
+		}
+	}), nil
+}
+
+func CopyOfferings(offerings cloudprovider.Offerings) []*cloudprovider.Offering {
+	return lo.Map(offerings, func(of *cloudprovider.Offering, _ int) *cloudprovider.Offering {
+		return &cloudprovider.Offering{
+			Requirements:        of.Requirements,
+			Price:               of.Price,
+			Available:           of.Available,
+			ReservationCapacity: of.ReservationCapacity,
+		}
 	})
 }
