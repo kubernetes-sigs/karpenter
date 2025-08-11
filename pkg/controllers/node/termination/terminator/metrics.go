@@ -47,7 +47,7 @@ var PodsDrainedTotal = opmetrics.NewPrometheusCounter(
 	prometheus.CounterOpts{
 		Namespace: metrics.Namespace,
 		Subsystem: metrics.PodSubsystem,
-		Name:      "pods_drained_total",
+		Name:      "drained_total",
 		Help:      "The total number of pods drained during node termination by Karpenter, labeled by reason",
 	},
 	[]string{ReasonLabel},
