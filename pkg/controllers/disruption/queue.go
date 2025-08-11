@@ -125,7 +125,9 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 
 func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "disruption.queue")
+	q.RLock()
 	cmd, exists := q.providerIDToCommand[nodeClaim.Status.ProviderID]
+	q.RUnlock()
 	if !exists {
 		log.FromContext(ctx).Error(fmt.Errorf("no command found"), "")
 		return reconcile.Result{}, nil
@@ -240,14 +242,13 @@ func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, 
 		// refresh nodeclaim before updating status
 		nodeClaim := &v1.NodeClaim{}
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
-			return q.kubeClient.Get(ctx, client.ObjectKeyFromObject(cmd.Candidates[i].NodeClaim), nodeClaim)
+			if e := q.kubeClient.Get(ctx, client.ObjectKeyFromObject(cmd.Candidates[i].NodeClaim), nodeClaim); e != nil {
+				return e
+			}
+			stored := nodeClaim.DeepCopy()
+			nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(cmd.Reason()), string(cmd.Reason()))
+			return q.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored))
 		}); err != nil {
-			errs[i] = client.IgnoreNotFound(err)
-			return
-		}
-		stored := nodeClaim.DeepCopy()
-		nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, string(cmd.Reason()), string(cmd.Reason()))
-		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error { return q.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFrom(stored)) }); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}

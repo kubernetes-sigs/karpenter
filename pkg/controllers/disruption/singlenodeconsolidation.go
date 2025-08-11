@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -38,14 +39,15 @@ const SingleNodeConsolidationType = "single"
 type SingleNodeConsolidation struct {
 	consolidation
 	PreviouslyUnseenNodePools sets.Set[string]
-	Validator
+	validator                 Validator
 }
 
-func NewSingleNodeConsolidation(c consolidation) *SingleNodeConsolidation {
+func NewSingleNodeConsolidation(c consolidation, opts ...option.Function[MethodOptions]) *SingleNodeConsolidation {
+	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewSingleConsolidationValidator(c))}, opts...)...)
 	return &SingleNodeConsolidation{
 		consolidation:             c,
 		PreviouslyUnseenNodePools: sets.New[string](),
-		Validator:                 NewSingleConsolidationValidator(c),
+		validator:                 o.validator,
 	}
 }
 
@@ -98,7 +100,7 @@ func (s *SingleNodeConsolidation) ComputeCommand(ctx context.Context, disruption
 		if cmd.Decision() == NoOpDecision {
 			continue
 		}
-		if _, err = s.Validate(ctx, cmd, consolidationTTL); err != nil {
+		if _, err = s.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 			if IsValidationError(err) {
 				log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid")
 				return Command{}, nil

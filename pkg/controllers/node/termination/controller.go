@@ -134,14 +134,15 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 	if nodeClaim != nil {
 		stored = nodeClaim.DeepCopy()
 	}
+	var terminationErr error
 	var result reconcile.Result
 	for _, f := range []terminationFunc{
 		c.awaitDrain,
 		c.awaitVolumeDetachment,
 		c.awaitInstanceTermination,
 	} {
-		result, err = f(ctx, nodeClaim, node, nodeTerminationTime)
-		if !lo.IsEmpty(result) || err != nil {
+		result, terminationErr = f(ctx, nodeClaim, node, nodeTerminationTime)
+		if !lo.IsEmpty(result) || terminationErr != nil {
 			break
 		}
 	}
@@ -169,8 +170,8 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 		// USE CAUTION when determining whether to increase this timeout or remove this line
 		time.After(time.Second)
 	}
-	if err != nil {
-		return reconcile.Result{}, err
+	if terminationErr != nil {
+		return reconcile.Result{}, terminationErr
 	}
 	if !lo.IsEmpty(result) {
 		return result, nil
