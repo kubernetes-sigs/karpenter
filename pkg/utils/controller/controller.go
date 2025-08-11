@@ -25,17 +25,16 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
-// cpuCount calculates CPU count in cores from context options (in millicores)
-func cpuCount(ctx context.Context) int {
-	return int(math.Ceil(float64(options.FromContext(ctx).CPURequests) / 1000.0))
+// CPUCount calculates CPU count (in cores) from context options (in millicores)
+func CPUCount(ctx context.Context) float64 {
+	return float64(options.FromContext(ctx).CPURequests) / 1000.0
 }
 
 // LinearScaleReconciles calculates maxConcurrentReconciles using linear scaling
-func LinearScaleReconciles(ctx context.Context, minReconciles int, maxReconciles int) int {
-	cpuCount := cpuCount(ctx)
+func LinearScaleReconciles(cpuCount float64, minReconciles int, maxReconciles int) int {
 	// At 1 core: minReconciles; At 60 cores: maxReconciles
 	slope := float64(maxReconciles-minReconciles) / 59.0
-	result := int(slope*float64(cpuCount-1)) + minReconciles
+	result := int(slope*float64(int(math.Ceil(cpuCount))-1)) + minReconciles
 	// Clamp to ensure we stay within bounds
 	return lo.Clamp(result, minReconciles, maxReconciles)
 }
