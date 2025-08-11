@@ -39,7 +39,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	dynamicprovisioning "sigs.k8s.io/karpenter/pkg/controllers/provisioning/dynamic"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -49,40 +49,40 @@ import (
 )
 
 type Controller struct {
-	queue         *Queue
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	clock         clock.Clock
-	cloudProvider cloudprovider.CloudProvider
-	methods       []Method
-	mu            sync.Mutex
-	lastRun       map[string]time.Time
+	queue                  *Queue
+	kubeClient             client.Client
+	cluster                *state.Cluster
+	provisioningController *dynamicprovisioning.ProvisioningController
+	recorder               events.Recorder
+	clock                  clock.Clock
+	cloudProvider          cloudprovider.CloudProvider
+	methods                []Method
+	mu                     sync.Mutex
+	lastRun                map[string]time.Time
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
 const pollingPeriod = 10 * time.Second
 
-func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
+func NewController(clk clock.Clock, kubeClient client.Client, provisioningController *dynamicprovisioning.ProvisioningController,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue,
 ) *Controller {
-	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+	c := MakeConsolidation(clk, cluster, kubeClient, provisioningController, cp, recorder, queue)
 
 	return &Controller{
-		queue:         queue,
-		clock:         clk,
-		kubeClient:    kubeClient,
-		cluster:       cluster,
-		provisioner:   provisioner,
-		recorder:      recorder,
-		cloudProvider: cp,
-		lastRun:       map[string]time.Time{},
+		queue:                  queue,
+		clock:                  clk,
+		kubeClient:             kubeClient,
+		cluster:                cluster,
+		provisioningController: provisioningController,
+		recorder:               recorder,
+		cloudProvider:          cp,
+		lastRun:                map[string]time.Time{},
 		methods: []Method{
 			// Delete any empty NodeClaims as there is zero cost in terms of disruption.
 			NewEmptiness(c),
 			// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-			NewDrift(kubeClient, cluster, provisioner, recorder),
+			NewDrift(kubeClient, cluster, provisioningController, recorder),
 			// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 			NewMultiNodeConsolidation(c),
 			// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.

@@ -35,29 +35,29 @@ import (
 )
 
 // PodController for the resource
-type PodController struct {
-	kubeClient  client.Client
-	provisioner *Provisioner
-	cluster     *state.Cluster
+type PodTriggerController struct {
+	kubeClient             client.Client
+	provisioningController *ProvisioningController
+	cluster                *state.Cluster
 }
 
 // NewPodController constructs a controller instance
-func NewPodController(kubeClient client.Client, provisioner *Provisioner, cluster *state.Cluster) *PodController {
-	return &PodController{
-		kubeClient:  kubeClient,
-		provisioner: provisioner,
-		cluster:     cluster,
+func NewPodTriggerController(kubeClient client.Client, provisioningController *ProvisioningController, cluster *state.Cluster) *PodTriggerController {
+	return &PodTriggerController{
+		kubeClient:             kubeClient,
+		provisioningController: provisioningController,
+		cluster:                cluster,
 	}
 }
 
 // Reconcile the resource
-func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile.Result, error) {
+func (c *PodTriggerController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "provisioner.trigger.pod") //nolint:ineffassign,staticcheck
 
 	if !pod.IsProvisionable(p) {
 		return reconcile.Result{}, nil
 	}
-	c.provisioner.Trigger(p.UID)
+	c.provisioningController.Trigger(p.UID)
 	// ACK the pending pod when first observed so that total time spent pending due to Karpenter is tracked.
 	c.cluster.AckPods(p)
 	// Continue to requeue until the pod is no longer provisionable. Pods may
@@ -67,7 +67,7 @@ func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *PodController) Register(_ context.Context, m manager.Manager) error {
+func (c *PodTriggerController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.pod").
 		For(&corev1.Pod{}).
@@ -76,21 +76,21 @@ func (c *PodController) Register(_ context.Context, m manager.Manager) error {
 }
 
 // NodeController for the resource
-type NodeController struct {
-	kubeClient  client.Client
-	provisioner *Provisioner
+type NodeTriggerController struct {
+	kubeClient             client.Client
+	provisioningController *ProvisioningController
 }
 
 // NewNodeController constructs a controller instance
-func NewNodeController(kubeClient client.Client, provisioner *Provisioner) *NodeController {
-	return &NodeController{
-		kubeClient:  kubeClient,
-		provisioner: provisioner,
+func NewNodeTriggerController(kubeClient client.Client, provisioningController *ProvisioningController) *NodeTriggerController {
+	return &NodeTriggerController{
+		kubeClient:             kubeClient,
+		provisioningController: provisioningController,
 	}
 }
 
 // Reconcile the resource
-func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.Result, error) {
+func (c *NodeTriggerController) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.Result, error) {
 	//nolint:ineffassign
 	ctx = injection.WithControllerName(ctx, "provisioner.trigger.node") //nolint:ineffassign,staticcheck
 
@@ -102,7 +102,7 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 	}) {
 		return reconcile.Result{}, nil
 	}
-	c.provisioner.Trigger(n.UID)
+	c.provisioningController.Trigger(n.UID)
 	// Continue to requeue until the node is no longer provisionable. Pods may
 	// not be scheduled as expected if new pods are created while nodes are
 	// coming online. Even if a provisioning loop is successful, the pod may
@@ -110,7 +110,7 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
+func (c *NodeTriggerController) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.node").
 		For(&corev1.Node{}).

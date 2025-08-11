@@ -47,7 +47,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	provisioning "sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	dynamicprovisioning "sigs.k8s.io/karpenter/pkg/controllers/provisioning/dynamic"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
@@ -63,7 +64,8 @@ var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
 var disruptionController *disruption.Controller
-var prov *provisioning.Provisioner
+var provisioningController *dynamicprovisioning.ProvisioningController
+var provisioner *provisioning.Provisioner
 var cloudProvider *fake.CloudProvider
 var nodeStateController *informer.NodeController
 var nodeClaimStateController *informer.NodeClaimController
@@ -94,9 +96,10 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	recorder = test.NewEventRecorder()
-	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
-	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
-	disruptionController = disruption.NewController(fakeClock, env.Client, prov, cloudProvider, recorder, cluster, queue)
+	provisioningController = dynamicprovisioning.NewProvisioningController(env.Client, recorder, cloudProvider, cluster, fakeClock)
+	provisioner = provisioning.NewProvisioner(env.Client, recorder, cluster)
+	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, provisioner)
+	disruptionController = disruption.NewController(fakeClock, env.Client, provisioningController, cloudProvider, recorder, cluster, queue)
 })
 
 var _ = AfterSuite(func() {
@@ -115,7 +118,7 @@ var _ = BeforeEach(func() {
 	}
 	fakeClock.SetTime(time.Now())
 	cluster.Reset()
-	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov))
+	*queue = lo.FromPtr(disruption.NewQueue(env.Client, recorder, cluster, fakeClock, provisioner))
 	cluster.MarkUnconsolidated()
 
 	// Reset Feature Flags to test defaults
@@ -236,7 +239,7 @@ var _ = Describe("Simulate Scheduling", func() {
 		candidate, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, stateNode, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(Succeed())
 
-		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, prov, candidate)
+		results, err := disruption.SimulateScheduling(ctx, env.Client, cluster, provisioningController, candidate)
 		Expect(err).To(Succeed())
 		Expect(results.PodErrors[pod]).To(BeNil())
 	})
@@ -459,8 +462,9 @@ var _ = Describe("Simulate Scheduling", func() {
 		hangCreateClient := newHangCreateClient(env.Client)
 		defer hangCreateClient.Stop()
 
-		p := provisioning.NewProvisioner(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
-		q := disruption.NewQueue(hangCreateClient, recorder, cluster, fakeClock, p)
+		p := dynamicprovisioning.NewProvisioningController(hangCreateClient, recorder, cloudProvider, cluster, fakeClock)
+		ncp := provisioning.NewProvisioner(hangCreateClient, recorder, cluster)
+		q := disruption.NewQueue(hangCreateClient, recorder, cluster, fakeClock, ncp)
 		dc := disruption.NewController(fakeClock, hangCreateClient, p, cloudProvider, recorder, cluster, q)
 
 		nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -518,7 +522,7 @@ var _ = Describe("Simulate Scheduling", func() {
 
 		// If our code works correctly, the provisioner should not try to create a new NodeClaim since we shouldn't have marked
 		// our nodes for disruption until the new NodeClaims have been successfully launched
-		results, err := prov.Schedule(ctx)
+		results, err := provisioningController.Schedule(ctx)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(results.NewNodeClaims).To(BeEmpty())
 	})
@@ -1843,7 +1847,7 @@ var _ = Describe("Candidate Filtering", func() {
 		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 		Expect(cluster.Nodes()).To(HaveLen(1))
-		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, prov, recorder), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.Nodes()[0]}}, Replacements: nil}
+		cmd := &disruption.Command{Method: disruption.NewDrift(env.Client, cluster, provisioningController, recorder), Results: pscheduling.Results{}, Candidates: []*disruption.Candidate{{StateNode: cluster.Nodes()[0]}}, Replacements: nil}
 		Expect(queue.StartCommand(ctx, cmd))
 
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.Nodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)

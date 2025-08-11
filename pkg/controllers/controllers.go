@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	nodeclaimconsistency "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
+	staticdeprovisioning "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/deprovisioning/static"
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/expiration"
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
@@ -52,6 +53,9 @@ import (
 	nodepoolregistrationhealth "sigs.k8s.io/karpenter/pkg/controllers/nodepool/registrationhealth"
 	nodepoolvalidation "sigs.k8s.io/karpenter/pkg/controllers/nodepool/validation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	dynamicprovisioning "sigs.k8s.io/karpenter/pkg/controllers/provisioning/dynamic"
+	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/provisioning/static"
+
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -67,15 +71,19 @@ func NewControllers(
 	cloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
 ) []controller.Controller {
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
+	provisioningController := dynamicprovisioning.NewProvisioningController(kubeClient, recorder, cloudProvider, cluster, clock)
+	provisioner := provisioning.NewProvisioner(kubeClient, recorder, cluster)
+
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
-	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
+	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, provisioner)
 
 	controllers := []controller.Controller{
-		p, evictionQueue, disruptionQueue,
-		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
-		provisioning.NewPodController(kubeClient, p, cluster),
-		provisioning.NewNodeController(kubeClient, p),
+		provisioningController, evictionQueue, disruptionQueue,
+		disruption.NewController(clock, kubeClient, provisioningController, cloudProvider, recorder, cluster, disruptionQueue),
+		dynamicprovisioning.NewPodTriggerController(kubeClient, provisioningController, cluster),
+		dynamicprovisioning.NewNodeTriggerController(kubeClient, provisioningController),
+		staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider),
+		staticdeprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider),
 		nodepoolhash.NewController(kubeClient, cloudProvider),
 		expiration.NewController(clock, kubeClient, cloudProvider),
 		informer.NewDaemonSetController(kubeClient, cluster),

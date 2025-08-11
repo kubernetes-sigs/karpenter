@@ -967,4 +967,5 @@ var _ = Describe("Drift", func() {
 			ExpectExists(ctx, env.Client, node)
 		})
 	})
+	// rsumukha@ todo : Add drift tests for Static Nodepool
 })

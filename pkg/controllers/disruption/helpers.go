@@ -33,7 +33,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	dynamicprovisioning "sigs.k8s.io/karpenter/pkg/controllers/provisioning/dynamic"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -47,7 +47,7 @@ import (
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
 
 //nolint:gocyclo
-func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner,
+func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *state.Cluster, provisioningController *dynamicprovisioning.ProvisioningController,
 	candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
@@ -67,7 +67,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 
 	// start by getting all pending pods
-	pods, err := provisioner.GetPendingPods(ctx)
+	pods, err := provisioningController.GetPendingPods(ctx)
 	if err != nil {
 		return scheduling.Results{}, fmt.Errorf("determining pending pods, %w", err)
 	}
@@ -97,7 +97,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduling.IgnorePreferences)
 	}
-	scheduler, err := provisioner.NewScheduler(
+	scheduler, err := provisioningController.NewScheduler(
 		log.IntoContext(ctx, operatorlogging.NopLogger),
 		pods,
 		stateNodes,
@@ -136,6 +136,23 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 			}
 		}
 	}
+	staticNodeMapping := map[string]int{}
+	for _, c := range candidates {
+		if c.NodePool.Spec.Replicas != nil {
+			staticNodeMapping[c.NodePool.Name]++
+		}
+	}
+	// We should only launch static nodes equivalent to the count that we are disrupting
+	// The other NodeClaims will get launched by the provisioner and should come eventually
+	results.NewNodeClaims = lo.Filter(results.NewNodeClaims, func(n *scheduling.NodeClaim, _ int) bool {
+		if v, ok := staticNodeMapping[n.NodePoolName]; ok {
+			if v == 0 {
+				return false
+			}
+			staticNodeMapping[n.NodePoolName]--
+		}
+		return true
+	})
 	return results, nil
 }
 

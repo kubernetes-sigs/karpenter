@@ -165,6 +165,9 @@ func (l Limits) ExceededBy(resources v1.ResourceList) error {
 	return nil
 }
 
+// ResourceNodes is our custom resource name for node limits
+const ResourceNodes v1.ResourceName = "nodes"
+
 type NodeClaimTemplate struct {
 	ObjectMeta `json:"metadata,omitempty"`
 	// +required
