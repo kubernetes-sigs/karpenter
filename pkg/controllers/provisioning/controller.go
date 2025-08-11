@@ -117,9 +117,11 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 }
 
 func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("provisioner.trigger.node maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.node").
 		For(&corev1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

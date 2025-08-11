@@ -92,13 +92,15 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("node.hydration maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&corev1.Node{}).
 		Watches(&v1.NodeClaim{}, nodeutils.NodeClaimEventHandler(c.kubeClient)).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
-			MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles),
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

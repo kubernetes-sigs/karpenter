@@ -87,6 +87,8 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("nodeclaim.lifecycle maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -101,7 +103,7 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 				// 10 qps, 100 bucket size
 				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
 			),
-			MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles),
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

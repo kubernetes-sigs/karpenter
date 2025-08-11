@@ -126,10 +126,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("nodeclaim.disruption maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.disruption").
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
-		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Watches(&v1.NodePool{}, nodeclaimutils.NodePoolEventHandler(c.kubeClient, c.cloudProvider)).
 		Watches(&corev1.Pod{}, nodeclaimutils.PodEventHandler(c.kubeClient, c.cloudProvider))
 

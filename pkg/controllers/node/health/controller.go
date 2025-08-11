@@ -74,12 +74,14 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("node.health maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.health").
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
-			MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles),
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

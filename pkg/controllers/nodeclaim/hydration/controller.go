@@ -85,12 +85,14 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("nodeclaim.hydration maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
-			MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles),
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

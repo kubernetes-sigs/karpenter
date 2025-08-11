@@ -75,9 +75,11 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 }
 
 func (c *PodController) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("state.pod maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.pod").
 		For(&v1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(c)
 }

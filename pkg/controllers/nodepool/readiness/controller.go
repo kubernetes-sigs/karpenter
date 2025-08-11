@@ -102,10 +102,12 @@ func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.O
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("nodepool.readiness maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.readiness").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
-		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)})
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles})
 	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
 		b.Watches(nodeClass, nodepoolutils.NodeClassEventHandler(c.kubeClient))
 	}
