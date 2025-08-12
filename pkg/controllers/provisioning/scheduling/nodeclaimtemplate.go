@@ -37,7 +37,7 @@ var DefaultTerminationGracePeriod *metav1.Duration = nil
 
 // MaxInstanceTypes is a constant that restricts the number of instance types to be sent for launch. Note that this
 // is intentionally changed to var just to help in testing the code.
-var MaxInstanceTypes = 60
+var MaxInstanceTypes = 600
 
 // NodeClaimTemplate encapsulates the fields required to create a node and mirrors
 // the fields in NodePool. These structs are maintained separately in order
@@ -74,7 +74,7 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 }
 
 func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
-	// Order the instance types by price and only take the first 100 of them to decrease the instance type size in the requirements
+	// Order the instance types by price and only take up to MaxInstanceTypes of them to decrease the instance type size in the requirements
 	instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
 	i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
 		return i.Name
