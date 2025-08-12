@@ -37,6 +37,8 @@ import (
 // is capable of managing a diverse set of nodes. Node properties are determined
 // from a combination of nodepool and pod scheduling constraints.
 // +kubebuilder:validation:XValidation:rule="has(self.replicas) == has(oldSelf.replicas)",message="Cannot transition NodePool between static (replicas set) and dynamic (replicas unset) provisioning modes"
+// +kubebuilder:validation:XValidation:rule="!has(self.replicas) || (!has(self.limits) || size(self.limits) == 0 || (size(self.limits) == 1 && 'nodes' in self.limits))",message="When replicas is set, only limits.nodes may be specified"
+// +kubebuilder:validation:XValidation:rule="!has(self.replicas) || !has(self.weight)",message="When replicas is set, weight should not be specified"
 type NodePoolSpec struct {
 	// Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
 	// NodeClaims launched from this NodePool will often be further constrained than the template specifies.
@@ -47,22 +49,26 @@ type NodePoolSpec struct {
 	// +optional
 	Disruption Disruption `json:"disruption"`
 	// Limits define a set of bounds for provisioning capacity.
+	// Limits other than limits.nodes is not supported when replicas is set
 	// +optional
 	Limits Limits `json:"limits,omitempty"`
 	// Weight is the priority given to the nodepool during scheduling. A higher
 	// numerical weight indicates that this nodepool will be ordered
 	// ahead of other nodepools with lower weights. A nodepool with no weight
 	// will be treated as if it is a nodepool with a weight of 0.
+	// Weight is not supported when replicas is set
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
 	Weight *int32 `json:"weight,omitempty"`
 	// Replicas is the desired number of nodes for the NodePool. When specified, the NodePool will
 	// maintain this fixed number of replicas rather than scaling based on pod demand.
-	// When replicas is set, the following fields are simply ignored:
-	// - disruption.consolidationPolicy
-	// - disruption.consolidateAfter
-	// Note that to set limits on number of static nodes in a Nodepool use limits.nodes
+	// When replicas is set:
+	//   - The following fields are ignored:
+	//       * disruption.consolidationPolicy
+	//       * disruption.consolidateAfter
+	//   - Only limits.nodes is supported; other resource limits (e.g., CPU, memory) must not be specified.
+	//   - Weight is not supported.
 	// +kubebuilder:validation:Minimum:=0
 	// +optional
 	Replicas *int64 `json:"replicas,omitempty"`
@@ -72,6 +78,7 @@ type Disruption struct {
 	// ConsolidateAfter is the duration the controller will wait
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
+	// When replicas is set, ConsolidateAfter is simply ignored
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
@@ -79,6 +86,7 @@ type Disruption struct {
 	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified
+	// When replicas is set, ConsolidationPolicy is simply ignored
 	// +kubebuilder:default:="WhenEmptyOrUnderutilized"
 	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized}
 	// +optional

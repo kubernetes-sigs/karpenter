@@ -788,6 +788,35 @@ var _ = Describe("Termination", func() {
 			Expect(pod.DeletionTimestamp.IsZero()).To(BeFalse())
 
 		})
+		It("should update deletion timestamp for terminating pods when it is after node deletion timestamp", func() {
+			nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
+			fakeClock.SetTime(time.Now())
+			nodeTerminationTimestamp := time.Now().Add(nodeClaim.Spec.TerminationGracePeriod.Duration)
+			nodeClaim.Annotations = map[string]string{
+				v1.NodeClaimTerminationTimestampAnnotationKey: nodeTerminationTimestamp.Format(time.RFC3339),
+			}
+			pod := test.Pod(test.PodOptions{
+				NodeName: node.Name,
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+					OwnerReferences: defaultOwnerRefs,
+				},
+				TerminationGracePeriodSeconds: lo.ToPtr(int64(6000)),
+			})
+			ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, pod)
+			ExpectDeletionTimestampSet(ctx, env.Client, pod)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+
+			// expect pod still exists
+			fakeClock.Step(90 * time.Second)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // DrainInitiation
+			ExpectNodeWithNodeClaimDraining(env.Client, node.Name)
+			ExpectNodeExists(ctx, env.Client, node.Name)
+			pod = ExpectExists(ctx, env.Client, pod)
+			Expect(pod.DeletionTimestamp.Time).To((BeTemporally("~", nodeTerminationTimestamp, 10*time.Second)))
+		})
 		Context("VolumeAttachments", func() {
 			It("should wait for volume attachments", func() {
 				va := test.VolumeAttachment(test.VolumeAttachmentOptions{

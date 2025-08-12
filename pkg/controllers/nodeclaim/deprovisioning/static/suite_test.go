@@ -116,7 +116,7 @@ var _ = AfterEach(func() {
 var _ = Describe("Static Deprovisioning Controller", func() {
 	Context("Reconcile", func() {
 		It("should return early if nodepool is not managed by cloud provider", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
 				Group: "test.group",
@@ -131,7 +131,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 		})
 
 		It("should return early if nodepool root condition is not true", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			nodePool.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "ValidationFailed", "Validation failed")
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -142,7 +142,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 		})
 
 		It("should return early if nodepool replicas is nil", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = nil
 			ExpectApplied(ctx, env.Client, nodePool)
 
@@ -152,7 +152,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 		})
 
 		It("should return early if current node count is less than or equal to desired replicas", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
 
 			// Create 2 nodes (less than desired 3)
@@ -189,7 +189,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 		})
 
 		It("should terminate excess nodeclaims when current count exceeds desired replicas", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 
 			nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
@@ -227,7 +227,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 		})
 
 		It("should prioritize empty nodes (with only reschedulable pods) for termination", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 
 			nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
@@ -290,7 +290,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 		})
 
 		It("should terminate non-empty nodes when empty nodes are insufficient", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 
 			nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
@@ -339,7 +339,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 		})
 
 		It("should handle zero replicas by terminating all nodeclaims", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(0))
 
 			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
@@ -378,7 +378,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 		})
 
 		It("should handle nodes with mixed pod types correctly", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			ExpectApplied(ctx, env.Client, nodePool)
 
@@ -451,7 +451,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 		})
 
 		It("should handle no active nodeclaims gracefully", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(0))
 			ExpectApplied(ctx, env.Client, nodePool)
 
@@ -465,7 +465,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 
 		Context("Requeue Scenarios", func() {
 			It("should requeue when there is a failure while deleting nodeclaims", func() {
-				nodePool := test.NodePool()
+				nodePool := test.StaticNodePool()
 				nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 				ExpectApplied(ctx, env.Client, nodePool)
 

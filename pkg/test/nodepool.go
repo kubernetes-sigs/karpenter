@@ -91,3 +91,11 @@ func ReplaceRequirements(nodePool *v1.NodePool, reqs ...v1.NodeSelectorRequireme
 	nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, reqs...)
 	return nodePool
 }
+
+// StaticNodePool creates a test NodePool suitable for static provisioning (without limits)
+func StaticNodePool(overrides ...v1.NodePool) *v1.NodePool {
+	nodePool := NodePool(overrides...)
+	// Remove limits for static provisioning
+	nodePool.Spec.Limits = nil
+	return nodePool
+}

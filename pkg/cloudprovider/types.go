@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -156,7 +157,7 @@ func (its InstanceTypes) Compatible(requirements scheduling.Requirements) Instan
 }
 
 // SatisfiesMinValues validates whether the InstanceTypes satisfies the minValues requirements
-// It returns the minimum number of needed instance types to satisfy the minValues requirement and an error
+// It returns the minimum number of needed instance types to satisfy the minValues requirement, and if min values isn't satisfied, a map containing the keys which don't satisfy min values and an error
 // that indicates whether the InstanceTypes satisfy the passed-in requirements
 // This minNeededInstanceTypes value is dependent on the ordering of instance types, so relying on this value in a
 // deterministic way implies that the instance types are sorted ahead of using this method
@@ -186,14 +187,14 @@ func (its InstanceTypes) Compatible(requirements scheduling.Requirements) Instan
 //			karpenter.k8s.aws/instance-family: ["c4","c5"] // minimum requirement failed for this.
 //		}
 //	  so it returns 3 and a non-nil error to indicate that the instance types weren't able to fulfill the minValues requirements
-func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements) (minNeededInstanceTypes int, err error) {
+func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements) (minNeededInstanceTypes int, unsatisfiableMinValues map[string]int, err error) {
 	if !requirements.HasMinValues() {
-		return 0, nil
+		return 0, nil, nil
 	}
+	incompatibleKeys := map[string]int{}
 	valuesForKey := map[string]sets.Set[string]{}
 	// We validate if sorting by price and truncating the number of instance types to minItems breaks the minValue requirement.
 	// If minValue requirement fails, we return an error that indicates the first requirement key that couldn't be satisfied.
-	var incompatibleKey string
 	for i, it := range its {
 		for _, req := range requirements {
 			if req.MinValues != nil {
@@ -203,33 +204,36 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 				valuesForKey[req.Key] = valuesForKey[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
 			}
 		}
-		incompatibleKey = func() string {
-			for k, v := range valuesForKey {
-				// Break if any of the MinValues of requirement is not honored
-				if len(v) < lo.FromPtr(requirements.Get(k).MinValues) {
-					return k
-				}
+		for k, v := range valuesForKey {
+			// Collect all the min values that are violated
+			if len(v) < lo.FromPtr(requirements.Get(k).MinValues) {
+				incompatibleKeys[k] = len(v)
+			} else {
+				// If the key now satisfies min values, remove it from the map.
+				delete(incompatibleKeys, k)
 			}
-			return ""
-		}()
-		if incompatibleKey == "" {
-			return i + 1, nil
+		}
+		if len(incompatibleKeys) == 0 {
+			return i + 1, nil, nil
 		}
 	}
-	if incompatibleKey != "" {
-		return len(its), serrors.Wrap(fmt.Errorf("minValues requirement is not met for label"), "label", incompatibleKey)
+	if len(incompatibleKeys) != 0 {
+		return len(its), incompatibleKeys, serrors.Wrap(fmt.Errorf("minValues requirement is not met for label(s)"), "label(s)", lo.Keys(incompatibleKeys))
 	}
-	return len(its), nil
+	return len(its), nil, nil
 }
 
 // Truncate truncates the InstanceTypes based on the passed-in requirements
 // It returns an error if it isn't possible to truncate the instance types on maxItems without violating minValues
-func (its InstanceTypes) Truncate(requirements scheduling.Requirements, maxItems int) (InstanceTypes, error) {
+func (its InstanceTypes) Truncate(ctx context.Context, requirements scheduling.Requirements, maxItems int) (InstanceTypes, error) {
 	truncatedInstanceTypes := lo.Slice(its.OrderByPrice(requirements), 0, maxItems)
 	// Only check for a validity of NodeClaim if its requirement has minValues in it.
 	if requirements.HasMinValues() {
-		if _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil {
-			return its, fmt.Errorf("validating minValues, %w", err)
+		// If minValues is NOT met for any of the requirement across InstanceTypes, then only allow it if min values policy is set to BestEffort.
+		if options.FromContext(ctx).MinValuesPolicy != options.MinValuesPolicyBestEffort {
+			if _, _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil {
+				return its, fmt.Errorf("validating minValues, %w", err)
+			}
 		}
 	}
 	return truncatedInstanceTypes, nil

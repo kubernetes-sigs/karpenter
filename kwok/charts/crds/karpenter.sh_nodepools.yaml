@@ -145,6 +145,7 @@ spec:
                         ConsolidateAfter is the duration the controller will wait
                         before attempting to terminate nodes that are underutilized.
                         Refer to ConsolidationPolicy for how underutilization is considered.
+                        When replicas is set, ConsolidateAfter is simply ignored
                       pattern: ^(([0-9]+(s|m|h))+|Never)$
                       type: string
                     consolidationPolicy:
@@ -152,6 +153,7 @@ spec:
                       description: |-
                         ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
                         algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified
+                        When replicas is set, ConsolidationPolicy is simply ignored
                       enum:
                         - WhenEmpty
                         - WhenEmptyOrUnderutilized
@@ -166,16 +168,20 @@ spec:
                       - type: string
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
-                  description: Limits define a set of bounds for provisioning capacity.
+                  description: |-
+                    Limits define a set of bounds for provisioning capacity.
+                    Limits other than limits.nodes is not supported when replicas is set
                   type: object
                 replicas:
                   description: |-
                     Replicas is the desired number of nodes for the NodePool. When specified, the NodePool will
                     maintain this fixed number of replicas rather than scaling based on pod demand.
-                    When replicas is set, the following fields are simply ignored:
-                    - disruption.consolidationPolicy
-                    - disruption.consolidateAfter
-                    Note that to set limits on number of static nodes in a Nodepool use limits.nodes
+                    When replicas is set:
+                      - The following fields are ignored:
+                          * disruption.consolidationPolicy
+                          * disruption.consolidateAfter
+                      - Only limits.nodes is supported; other resource limits (e.g., CPU, memory) must not be specified.
+                      - Weight is not supported.
                   format: int64
                   minimum: 0
                   type: integer
@@ -444,6 +450,7 @@ spec:
                     numerical weight indicates that this nodepool will be ordered
                     ahead of other nodepools with lower weights. A nodepool with no weight
                     will be treated as if it is a nodepool with a weight of 0.
+                    Weight is not supported when replicas is set
                   format: int32
                   maximum: 100
                   minimum: 1
@@ -454,6 +461,10 @@ spec:
               x-kubernetes-validations:
                 - message: Cannot transition NodePool between static (replicas set) and dynamic (replicas unset) provisioning modes
                   rule: has(self.replicas) == has(oldSelf.replicas)
+                - message: When replicas is set, only limits.nodes may be specified
+                  rule: '!has(self.replicas) || (!has(self.limits) || size(self.limits) == 0 || (size(self.limits) == 1 && ''nodes'' in self.limits))'
+                - message: When replicas is set, weight should not be specified
+                  rule: '!has(self.replicas) || !has(self.weight)'
             status:
               description: NodePoolStatus defines the observed state of NodePool
               properties:

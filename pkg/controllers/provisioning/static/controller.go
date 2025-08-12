@@ -161,12 +161,13 @@ func (c *Controller) provisionStaticNodes(
 	var nodeClaims []*scheduling.NodeClaim
 	for range count {
 		nct := scheduling.NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions, _ = scheduling.FilterInstanceTypesByRequirements(
+		nct.InstanceTypeOptions, _, _ = scheduling.FilterInstanceTypesByRequirements(
 			instanceTypes,
 			nct.Requirements,
 			corev1.ResourceList{},
 			corev1.ResourceList{},
 			corev1.ResourceList{},
+			true,
 		)
 		nodeClaims = append(nodeClaims, &scheduling.NodeClaim{
 			NodeClaimTemplate: *nct,

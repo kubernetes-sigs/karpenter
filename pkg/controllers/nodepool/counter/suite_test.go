@@ -322,7 +322,7 @@ var _ = Describe("Counter", func() {
 
 		It("should handle multiple nodepools including static with different node counts", func() {
 			// Create a second nodepool
-			nodePool2 := test.NodePool(v1.NodePool{
+			nodePool2 := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Replicas: lo.ToPtr(int64(2)),
 				},
@@ -378,7 +378,7 @@ var _ = Describe("Counter", func() {
 
 		It("should handle static nodepools with replicas correctly", func() {
 			// Create a static nodepool with 3 desired replicas
-			staticNodePool := test.NodePool(v1.NodePool{
+			staticNodePool := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Replicas: lo.ToPtr(int64(3)),
 				},

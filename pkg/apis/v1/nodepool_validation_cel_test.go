@@ -584,7 +584,6 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should fail for restricted label domains", func() {
 			for label := range RestrictedLabelDomains {
-				fmt.Println(label)
 				nodePool.Spec.Template.Labels = map[string]string{label + "/unknown": randomdata.SillyName()}
 				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
@@ -601,7 +600,6 @@ var _ = Describe("CEL/Validation", func() {
 		It("should allow labels in restricted domains exceptions list", func() {
 			oldNodePool := nodePool.DeepCopy()
 			for label := range LabelDomainExceptions {
-				fmt.Println(label)
 				nodePool.Spec.Template.Labels = map[string]string{
 					label: "test-value",
 				}
@@ -726,20 +724,47 @@ var _ = Describe("CEL/Validation", func() {
 			})
 		})
 
-		DescribeTable("Compatible fields for static nodepools",
+		DescribeTable("should fail for incompatible fields",
 			func(modify func(*NodePool)) {
 				modify(nodePool)
-				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
-				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+				nodePool.Spec.Replicas = lo.ToPtr(int64(10))
+				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 			},
+			Entry("limits.cpu", func(np *NodePool) {
+				np.Spec.Limits = Limits{
+					v1.ResourceCPU: resource.MustParse("1000"),
+				}
+			}),
+			Entry("limits.memory", func(np *NodePool) {
+				np.Spec.Limits = Limits{
+					v1.ResourceMemory: resource.MustParse("2000Gi"),
+				}
+			}),
+			Entry("limits.pods", func(np *NodePool) {
+				np.Spec.Limits = Limits{
+					v1.ResourcePods: resource.MustParse("10"),
+				}
+			}),
+			Entry("limits.ephemeral-storage", func(np *NodePool) {
+				np.Spec.Limits = Limits{
+					v1.ResourceEphemeralStorage: resource.MustParse("10Gi"),
+				}
+			}),
 			Entry("weight", func(np *NodePool) {
 				np.Spec.Weight = lo.ToPtr(int32(25))
 			}),
-			Entry("limits.cpu, limits.memory and limits.nodes", func(np *NodePool) {
+		)
+
+		DescribeTable("should succeed for compatible fields",
+			func(modify func(*NodePool)) {
+				modify(nodePool)
+				nodePool.Spec.Replicas = lo.ToPtr(int64(10))
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+			},
+			Entry("limits.nodes", func(np *NodePool) {
 				np.Spec.Limits = Limits{
-					v1.ResourceCPU:    resource.MustParse("1000"),
-					v1.ResourceMemory: resource.MustParse("2000Gi"),
-					"nodes":           resource.MustParse("100"),
+					"nodes": resource.MustParse("100"),
 				}
 			}),
 			Entry("disruption with multiple budgets", func(np *NodePool) {
@@ -813,7 +838,7 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
 			})
 
-			It("should fail when changing the Nodepool from static to dynamic", func() {
+			It("should fail when changing the NodePool from static to dynamic", func() {
 				// Create NodePool without replicas
 				nodePool.Spec.Replicas = lo.ToPtr(int64(3))
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
@@ -823,7 +848,7 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(env.Client.Update(ctx, nodePool)).ToNot(Succeed())
 			})
 
-			It("should fail when changing the Nodepool from dynamic to static", func() {
+			It("should fail when changing the NodePool from dynamic to static", func() {
 				// Create NodePool without replicas
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 
@@ -832,7 +857,7 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(env.Client.Update(ctx, nodePool)).ToNot(Succeed())
 			})
 
-			It("should succeed when changing the static Nodepool nodes limit", func() {
+			It("should succeed when changing the static NodePool nodes limit", func() {
 				// Create NodePool with limits
 				nodePool.Spec.Replicas = lo.ToPtr(int64(3))
 				nodePool.Spec.Limits = Limits{
@@ -841,7 +866,7 @@ var _ = Describe("CEL/Validation", func() {
 
 				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 
-				// Update Nodepool limit
+				// Update NodePool limit
 				nodePool.Spec.Limits = Limits{
 					"nodes": resource.MustParse("100"),
 				}

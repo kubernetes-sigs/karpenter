@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/google/uuid"
 	"github.com/samber/lo"
@@ -46,6 +47,16 @@ const (
 	GracefulDisruptionClass = "graceful" // graceful disruption always respects blocking pod PDBs and the do-not-disrupt annotation
 	EventualDisruptionClass = "eventual" // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
 )
+
+type MethodOptions struct {
+	validator Validator
+}
+
+func WithValidator(v Validator) option.Function[MethodOptions] {
+	return func(o *MethodOptions) {
+		o.validator = v
+	}
+}
 
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool

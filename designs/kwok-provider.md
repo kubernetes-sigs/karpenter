@@ -43,6 +43,7 @@ The pricing for each of the instance types will be a function of the size and ca
 AWS: Discount is [< 90%](https://aws.amazon.com/ec2/spot/pricing/#:~:text=Spot%20Instances%20are%20available%20at%20a%20discount%20of%20up%20to%2090%25%20off%20compared%20to%20On%2DDemand%20pricing.)
 AKS: Discount is [48-90%](https://azure.microsoft.com/en-us/pricing/details/virtual-machine-scale-sets/linux/)
 GCE: Discount is [60-91%](https://cloud.google.com/compute/docs/instances/create-use-spot#:~:text=Spot%20VMs%20are%20available%20at%20a%2060%2D91%25%20discount%20compared%20to%20the%20price%20of%20standard%20VMs.)
+OCI: Discount is [50%](https://docs.oracle.com/en-us/iaas/Content/Compute/Concepts/preemptible.htm)
 
 We'll define the pricing functions:
 

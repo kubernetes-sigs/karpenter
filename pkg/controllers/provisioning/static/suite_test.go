@@ -114,7 +114,7 @@ var _ = AfterEach(func() {
 var _ = Describe("Static Provisioning Controller", func() {
 	Context("Reconcile", func() {
 		It("should handle CreateNodeClaims errors gracefully", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			ExpectApplied(ctx, env.Client, nodePool)
 
@@ -133,7 +133,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should return early if nodepool is not managed by cloud provider", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
 				Group: "test.group",
@@ -152,7 +152,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should return early if nodepool root condition is not true", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			nodePool.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "ValidationFailed", "Validation failed")
 			ExpectApplied(ctx, env.Client, nodePool)
@@ -167,7 +167,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should return early if nodepool replicas is nil", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = nil
 			ExpectApplied(ctx, env.Client, nodePool)
 
@@ -181,7 +181,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should return early if current node count exceeds desired replicas", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			// Create 2 nodes and nodeclaims that belong to this nodepool (exceeds desired replicas of 1)
 			nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
@@ -230,7 +230,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should create nodeclaims when current node count is less than desired replicas", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 			ExpectApplied(ctx, env.Client, nodePool)
 
@@ -250,7 +250,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should create additional nodeclaims to reach desired replicas", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
 			// Create 2 nodes and nodeclaims that belong to this nodepool (exceeds desired replicas of 1)
 			nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
@@ -283,7 +283,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should not create additional nodeclaims when node limits are reached", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
 			nodePool.Spec.Limits = v1.Limits{
 				corev1.ResourceName("nodes"): resource.MustParse("1"),
@@ -319,7 +319,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should handle zero replicas", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(0))
 			ExpectApplied(ctx, env.Client, nodePool)
 
@@ -343,7 +343,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64", "arm64"}}},
 				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"on-demand", "reserved", "spot"}}},
 			}
-			nodePool := test.NodePool(v1.NodePool{
+			nodePool := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Replicas: lo.ToPtr(int64(4)),
 					Template: v1.NodeClaimTemplate{
@@ -378,7 +378,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should respect instance-type specifications", func() {
-			nodePool := test.NodePool(v1.NodePool{
+			nodePool := test.StaticNodePool(v1.NodePool{
 				Spec: v1.NodePoolSpec{
 					Replicas: lo.ToPtr(int64(1)),
 					Template: v1.NodeClaimTemplate{},
@@ -407,7 +407,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should handle large replica counts", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(500))
 			ExpectApplied(ctx, env.Client, nodePool)
 
@@ -421,7 +421,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should handle existing nodes correctly", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
 			ExpectApplied(ctx, env.Client, nodePool)
 
@@ -447,7 +447,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should handle concurrent reconciliation safely", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 			nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -484,7 +484,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 
 		It("should handle nodepool deletion gracefully", func() {
-			nodePool := test.NodePool()
+			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 			ExpectApplied(ctx, env.Client, nodePool)
 
