@@ -416,7 +416,7 @@ var _ = Describe("Queue", func() {
 		Context("CalculateRetryDuration", func() {
 			DescribeTable("should calculate correct timeout based on queue length",
 				func(numCommands int, expectedDuration time.Duration) {
-					actualDuration := disruption.CalculateRetryDuration(numCommands)
+					actualDuration := disruption.GetMaxRetryDuration(numCommands)
 					Expect(actualDuration).To(Equal(expectedDuration))
 				},
 				Entry("very small queue - 100 commands", 100, 10*time.Minute),                  // max(100*80ms, 10min) = 10min
