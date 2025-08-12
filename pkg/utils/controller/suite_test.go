@@ -17,13 +17,11 @@ limitations under the License.
 package controller_test
 
 import (
-	"context"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/controller"
 )
 
@@ -32,21 +30,13 @@ func TestReconciles(t *testing.T) {
 	RunSpecs(t, "ControllerUtils")
 }
 
-func contextWithCPURequests(cpuRequests int64) context.Context {
-	opts := &options.Options{
-		CPURequests: cpuRequests,
-	}
-	return opts.ToContext(context.Background())
-}
-
 var _ = Describe("ControllerUtils", func() {
 	minReconciles := 10
 	maxReconciles := 1000
 	Context("LinearScaleReconciles Calculations", func() {
 		DescribeTable("should calculate reconciles correctly based on CPU cores",
 			func(cpuRequests float64, expectedReconciles int) {
-				ctx := contextWithCPURequests(int64(cpuRequests * 1000))
-				result := controller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
+				result := controller.LinearScaleReconciles(cpuRequests, minReconciles, maxReconciles)
 				Expect(result).To(Equal(expectedReconciles))
 			},
 			// Arguments are: cpuRequests (in cores), expectedReconciles

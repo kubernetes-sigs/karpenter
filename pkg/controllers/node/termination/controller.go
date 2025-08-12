@@ -393,8 +393,10 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	concurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
-	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(minQPS, minReconciles, concurrentReconciles)
+	cpuCount := utilscontroller.CPUCount(ctx)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("node.termination maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(minQPS, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -405,7 +407,7 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 					// qps scales linearly at 10% of concurrentReconciles, bucket size is 10 * qps
 					&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(qps), bucketSize)},
 				),
-				MaxConcurrentReconciles: concurrentReconciles,
+				MaxConcurrentReconciles: maxConcurrentReconciles,
 			},
 		).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))

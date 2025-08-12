@@ -115,8 +115,10 @@ func (q *Queue) Name() string {
 }
 
 func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
-	concurrentReconciles := utilscontroller.LinearScaleReconciles(ctx, minReconciles, maxReconciles)
-	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(minQPS, minReconciles, concurrentReconciles)
+	cpuCount := utilscontroller.CPUCount(ctx)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
+	log.FromContext(ctx).Info("eviction-queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(minQPS, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(q.Name()).
 		WatchesRawSource(source.Channel(q.source, handler.TypedFuncs[*corev1.Pod, reconcile.Request]{
@@ -132,7 +134,7 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 				// qps scales linearly with concurrentReconciles, bucket size is 10 * qps
 				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(qps), bucketSize)},
 			),
-			MaxConcurrentReconciles: concurrentReconciles,
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }
