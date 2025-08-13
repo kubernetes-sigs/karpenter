@@ -103,12 +103,19 @@ type Operator struct {
 	Clock               clock.Clock
 }
 
-type OperatorOpts struct {
+type Options struct {
 	LeaderElectionLabels map[string]string
 }
 
+// Adds LeaderElectionLabels to the underlying manager's LeaderElectionOptions
+func WithLeaderElectionLabels(labels map[string]string) option.Function[Options] {
+	return func(opts *Options) {
+		opts.LeaderElectionLabels = labels
+	}
+}
+
 // NewOperator instantiates a controller manager or panics
-func NewOperator(o ...option.Function[OperatorOpts]) (context.Context, *Operator) {
+func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	opts := option.Resolve(o...)
 
 	// Root Context
