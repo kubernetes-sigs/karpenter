@@ -112,9 +112,8 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 }
 
 func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := utilscontroller.CPUCount(ctx)
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
-	log.FromContext(ctx).Info("disruption.queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	log.FromContext(ctx).V(1).Info("disruption.queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
 		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).

@@ -75,8 +75,8 @@ func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile
 }
 
 func (c *PodController) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := utilscontroller.CPUCount(ctx)
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	log.FromContext(ctx).V(1).Info("provisioner.trigger.pod maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.pod").
 		For(&corev1.Pod{}).
@@ -120,9 +120,8 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 }
 
 func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := utilscontroller.CPUCount(ctx)
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
-	log.FromContext(ctx).Info("provisioner.trigger.node maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	log.FromContext(ctx).V(1).Info("provisioner.trigger.node maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.node").
 		For(&corev1.Node{}).

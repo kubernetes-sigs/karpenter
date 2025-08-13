@@ -66,9 +66,8 @@ func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Reque
 }
 
 func (c *DaemonSetController) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := utilscontroller.CPUCount(ctx)
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
-	log.FromContext(ctx).Info("state.daemonset maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	log.FromContext(ctx).V(1).Info("state.daemonset maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.daemonset").
 		For(&appsv1.DaemonSet{}).

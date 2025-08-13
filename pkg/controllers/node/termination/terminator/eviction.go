@@ -114,9 +114,8 @@ func (q *Queue) Name() string {
 }
 
 func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := utilscontroller.CPUCount(ctx)
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
-	log.FromContext(ctx).Info("eviction-queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	log.FromContext(ctx).V(1).Info("eviction-queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(q.Name()).
 		WatchesRawSource(source.Channel(q.source, handler.TypedFuncs[*corev1.Pod, reconcile.Request]{

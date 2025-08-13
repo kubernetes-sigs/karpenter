@@ -85,9 +85,8 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := utilscontroller.CPUCount(ctx)
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
-	log.FromContext(ctx).Info("nodepool.hash maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	log.FromContext(ctx).V(1).Info("nodepool.hash maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.hash").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).

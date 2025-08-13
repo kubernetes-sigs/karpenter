@@ -103,9 +103,8 @@ func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.O
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := utilscontroller.CPUCount(ctx)
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
-	log.FromContext(ctx).Info("nodepool.readiness maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	log.FromContext(ctx).V(1).Info("nodepool.readiness maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.readiness").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
