@@ -17,6 +17,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -416,7 +417,13 @@ var _ = Describe("Queue", func() {
 		Context("CalculateRetryDuration", func() {
 			DescribeTable("should calculate correct timeout based on queue length",
 				func(numCommands int, expectedDuration time.Duration) {
-					actualDuration := disruption.GetMaxRetryDuration(numCommands)
+					q := disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
+					q.Lock()
+					for i := range numCommands {
+						q.ProviderIDToCommand[strconv.Itoa(i)] = &disruption.Command{}
+					}
+					q.Unlock()
+					actualDuration := disruption.GetMaxRetryDuration(q)
 					Expect(actualDuration).To(Equal(expectedDuration))
 				},
 				Entry("very small queue - 100 commands", 100, 10*time.Minute),                  // max(100*80ms, 10min) = 10min
