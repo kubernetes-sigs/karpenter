@@ -58,6 +58,9 @@ type PodOptions struct {
 	LivenessProbe                 *v1.Probe
 	PreStopSleep                  *int64
 	Command                       []string
+	ResourceClaims                []v1.PodResourceClaim
+	ContainerResourceClaims       []v1.ResourceClaim
+	InitContainerResourceClaims   []v1.ResourceClaim
 }
 
 type PDBOptions struct {
@@ -131,7 +134,7 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 			Containers: []v1.Container{{
 				Name:      RandomName(),
 				Image:     options.Image,
-				Resources: options.ResourceRequirements,
+				Resources: buildResourceRequirements(options),
 				Ports: lo.Map(options.HostPorts, func(p int32, _ int) v1.ContainerPort {
 					return v1.ContainerPort{
 						HostPort:      p,
@@ -147,6 +150,7 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 			PriorityClassName:             options.PriorityClassName,
 			RestartPolicy:                 options.RestartPolicy,
 			TerminationGracePeriodSeconds: options.TerminationGracePeriodSeconds,
+			ResourceClaims:                options.ResourceClaims,
 		},
 		Status: v1.PodStatus{
 			Conditions: options.Conditions,
@@ -184,13 +188,23 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 			if init.Image == "" {
 				init.Image = DefaultImage
 			}
+			// Add init container resource claims if specified
+			if len(options.InitContainerResourceClaims) > 0 {
+				init.Resources.Claims = options.InitContainerResourceClaims
+			}
 			p.Spec.InitContainers = append(p.Spec.InitContainers, init)
 		}
 	}
 	return p
 }
 
-// Pods creates homogeneous groups of pods based on the passed in options, evenly divided by the total pods requested
+func buildResourceRequirements(options PodOptions) v1.ResourceRequirements {
+	resources := options.ResourceRequirements
+	if len(options.ContainerResourceClaims) > 0 {
+		resources.Claims = options.ContainerResourceClaims
+	}
+	return resources
+} // Pods creates homogeneous groups of pods based on the passed in options, evenly divided by the total pods requested
 func Pods(total int, options ...PodOptions) []*v1.Pod {
 	pods := []*v1.Pod{}
 	for _, opts := range options {
@@ -411,6 +425,24 @@ func MakeDiversePodOptions() []PodOptions {
 	pods = append(pods, MakePodAffinityPodOptions(v1.LabelTopologyZone))
 	pods = append(pods, MakePodAntiAffinityPodOptions(v1.LabelHostname))
 	return pods
+}
+
+func MakeDRAPodOptions(claimName string) PodOptions {
+	return PodOptions{
+		ObjectMeta: metav1.ObjectMeta{Labels: lo.Assign(RandomLabels(), map[string]string{DiscoveryLabel: "owned"})},
+		ResourceRequirements: v1.ResourceRequirements{
+			Requests: v1.ResourceList{
+				v1.ResourceCPU:    RandomCPU(),
+				v1.ResourceMemory: RandomMemory(),
+			},
+		},
+		ContainerResourceClaims: []v1.ResourceClaim{
+			{Name: claimName},
+		},
+		ResourceClaims: []v1.PodResourceClaim{
+			{Name: claimName},
+		},
+	}
 }
 
 func RandomAffinityLabels() map[string]string {
