@@ -41,11 +41,6 @@ import (
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
-const (
-	minReconciles = 1000
-	maxReconciles = 5000
-)
-
 // Controller hydrates information to the Node which is expected in newer versions of Karpenter, but would not exist on
 // pre-existing nodes.
 type Controller struct {
@@ -92,7 +87,7 @@ func (c *Controller) Name() string {
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 1000, 5000)
 	log.FromContext(ctx).V(1).Info("node.hydration maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).

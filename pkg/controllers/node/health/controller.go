@@ -48,11 +48,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
-const (
-	minReconciles = 10
-	maxReconciles = 1000
-)
-
 var allowedUnhealthyPercent = intstr.FromString("20%")
 
 // Controller for the resource
@@ -74,7 +69,7 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)
 	log.FromContext(ctx).V(1).Info("node.health maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.health").

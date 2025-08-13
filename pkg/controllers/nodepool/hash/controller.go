@@ -38,11 +38,6 @@ import (
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
-const (
-	minReconciles = 10
-	maxReconciles = 1000
-)
-
 // Controller is hash controller that constructs a hash based on the fields that are considered for static drift.
 // The hash is placed in the metadata for increased observability and should be found on each object.
 type Controller struct {
@@ -85,7 +80,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)
 	log.FromContext(ctx).V(1).Info("nodepool.hash maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.hash").

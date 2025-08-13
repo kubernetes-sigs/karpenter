@@ -44,11 +44,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
 
-const (
-	minReconciles = 10
-	maxReconciles = 1000
-)
-
 type nodeClaimReconciler interface {
 	Reconcile(context.Context, *v1.NodePool, *v1.NodeClaim) (reconcile.Result, error)
 }
@@ -126,7 +121,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)
 	log.FromContext(ctx).V(1).Info("nodeclaim.disruption maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.disruption").

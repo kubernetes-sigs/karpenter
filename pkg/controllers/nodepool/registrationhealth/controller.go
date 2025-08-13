@@ -38,11 +38,6 @@ import (
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
-const (
-	minReconciles = 10
-	maxReconciles = 1000
-)
-
 // Controller for the resource
 type Controller struct {
 	kubeClient    client.Client
@@ -92,7 +87,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)
 	log.FromContext(ctx).V(1).Info("nodepool.registrationhealth maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.registrationhealth").

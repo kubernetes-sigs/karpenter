@@ -62,8 +62,6 @@ const (
 	queueBaseDelay   = 1 * time.Second
 	queueMaxDelay    = 10 * time.Second
 	maxRetryDuration = 10 * time.Minute
-	minReconciles    = 100
-	maxReconciles    = 1000
 )
 
 type UnrecoverableError struct {
@@ -112,7 +110,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 }
 
 func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 100, 1000)
 	log.FromContext(ctx).V(1).Info("disruption.queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
