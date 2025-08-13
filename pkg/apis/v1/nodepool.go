@@ -45,6 +45,9 @@ type NodePoolSpec struct {
 	// +kubebuilder:default:={consolidateAfter: "0s"}
 	// +optional
 	Disruption Disruption `json:"disruption"`
+	// Repair defines the repair policies for nodes in this NodePool
+	// +optional
+	Repair *RepairSpec `json:"repair,omitempty"`
 	// Limits define a set of bounds for provisioning capacity.
 	// +optional
 	Limits Limits `json:"limits,omitempty"`
@@ -88,7 +91,6 @@ type Disruption struct {
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
 	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
-	// Otherwise, this will apply to each reason defined.
 	// allowed reasons are Underutilized, Empty, and Drifted.
 	// +optional
 	Reasons []DisruptionReason `json:"reasons,omitempty"`
@@ -127,6 +129,37 @@ const (
 	ConsolidationPolicyWhenEmpty                ConsolidationPolicy = "WhenEmpty"
 	ConsolidationPolicyWhenEmptyOrUnderutilized ConsolidationPolicy = "WhenEmptyOrUnderutilized"
 )
+
+type RepairSpec struct {
+	// Policies defines the repair policies for different node conditions.
+	// These policies override the default tolerationDuration from the CloudProvider.
+	// +optional
+	Policies []RepairPolicy `json:"policies,omitempty"`
+
+	// DefaultTolerationDuration is the default duration to wait before repairing
+	// nodes for any condition not explicitly configured in Policies.
+	// If not specified, uses the CloudProvider's default durations.
+	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
+	// +kubebuilder:validation:Type="string"
+	// +optional
+	DefaultTolerationDuration *metav1.Duration `json:"defaultTolerationDuration,omitempty"`
+}
+
+type RepairPolicy struct {
+	// ConditionType specifies the node condition to monitor
+	// +required
+	ConditionType v1.NodeConditionType `json:"conditionType"`
+	// Status specifies the condition status that indicates unhealthy state
+	// +required
+	Status v1.ConditionStatus `json:"status"`
+	// Toleration is the duration to wait before attempting to terminate
+	// nodes that match this repair policy. If not specified, defaults to the
+	// cloud provider's recommended duration for this condition type.
+	// +kubebuilder:validation:Pattern=`^([0-9]+(s|m|h))+$`
+	// +kubebuilder:validation:Type="string"
+	// +optional
+	Toleration *metav1.Duration `json:"toleration,omitempty"`
+}
 
 // DisruptionReason defines valid reasons for disruption budgets.
 // +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
