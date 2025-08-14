@@ -23,6 +23,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,13 +38,14 @@ const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
 	consolidation
-	Validator
+	validator Validator
 }
 
-func NewMultiNodeConsolidation(c consolidation) *MultiNodeConsolidation {
+func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOptions]) *MultiNodeConsolidation {
+	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewMultiConsolidationValidator(c))}, opts...)...)
 	return &MultiNodeConsolidation{
 		consolidation: c,
-		Validator:     NewMultiConsolidationValidator(c),
+		validator:     o.validator,
 	}
 }
 
@@ -99,7 +101,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, nil
 	}
 
-	if cmd, err = m.Validate(ctx, cmd, consolidationTTL); err != nil {
+	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
 			return Command{}, nil

@@ -99,7 +99,7 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
 	podsToDelete := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return podutil.IsWaitingEviction(p, t.clock) && !podutil.IsTerminating(p)
+		return podutil.IsWaitingEviction(p, t.clock) && (!podutil.IsTerminating(p) || podutil.IsPodEligibleForForcedEviction(p, nodeGracePeriodExpirationTime))
 	})
 	if err := t.DeleteExpiringPods(ctx, podsToDelete, nodeGracePeriodExpirationTime); err != nil {
 		return fmt.Errorf("deleting expiring pods, %w", err)

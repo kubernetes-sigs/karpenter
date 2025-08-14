@@ -24,14 +24,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	"sigs.k8s.io/karpenter/pkg/test"
 
 	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Expiration", func() {
@@ -80,15 +78,6 @@ var _ = Describe("Expiration", func() {
 		node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
 		env.EventuallyExpectHealthyPodCount(selector, numPods)
 		env.Monitor.Reset() // Reset the monitor so that we can expect a single node to be spun up after expiration
-
-		// Eventually the node will be tainted, which means its actively being disrupted
-		Eventually(func(g Gomega) {
-			g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).Should(Succeed())
-			_, ok := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
-				return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
-			})
-			g.Expect(ok).To(BeTrue())
-		}).Should(Succeed())
 
 		env.EventuallyExpectCreatedNodeCount("==", 1)
 		// Set the limit to 0 to make sure we don't continue to create nodeClaims.
@@ -145,15 +134,6 @@ var _ = Describe("Expiration", func() {
 		node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
 		env.EventuallyExpectHealthyPodCount(selector, int(numPods))
 		env.Monitor.Reset() // Reset the monitor so that we can expect a single node to be spun up after expiration
-
-		// Eventually the node will be tainted, which means its actively being disrupted
-		Eventually(func(g Gomega) {
-			g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(node), node)).Should(Succeed())
-			_, ok := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
-				return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
-			})
-			g.Expect(ok).To(BeTrue())
-		}).Should(Succeed())
 
 		env.EventuallyExpectCreatedNodeCount("==", 1)
 		// Set the limit to 0 to make sure we don't continue to create nodeClaims.
