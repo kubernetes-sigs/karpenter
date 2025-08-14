@@ -122,7 +122,6 @@ spec:
                                 - Empty
                                 - Drifted
                               type: string
-                            maxItems: 50
                             type: array
                           schedule:
                             description: |-

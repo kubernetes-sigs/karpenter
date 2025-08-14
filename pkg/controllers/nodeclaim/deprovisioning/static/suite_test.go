@@ -217,7 +217,6 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 			Expect(cluster.Nodes()).To(HaveLen(4))
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-
 			Expect(result.RequeueAfter).To(BeZero())
 
 			// Should terminate 2 NodeClaims (4 current - 2 desired = 2 to terminate)
@@ -226,7 +225,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 			Expect(remainingNodeClaims.Items).To(HaveLen(2))
 		})
 
-		It("should prioritize empty nodes (with only reschedulable pods) for termination", func() {
+		It("should prioritize empty nodes (with only daemonset pods) for termination", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 
@@ -286,7 +285,7 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 				return nc.Name
 			})
 			Expect(activeNodeClaimNames).To(HaveLen(2))
-			Expect(activeNodeClaimNames).To(ContainElements(nodeClaims[0].Name, nodeClaims[2].Name))
+			Expect(activeNodeClaimNames).To(ContainElements(nodeClaims[1].Name, nodeClaims[3].Name))
 		})
 
 		It("should terminate non-empty nodes when empty nodes are insufficient", func() {

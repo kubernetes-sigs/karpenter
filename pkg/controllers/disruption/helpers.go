@@ -137,23 +137,6 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 			}
 		}
 	}
-	staticNodeMapping := map[string]int{}
-	for _, c := range candidates {
-		if c.NodePool.Spec.Replicas != nil {
-			staticNodeMapping[c.NodePool.Name]++
-		}
-	}
-	// We should only launch static nodes equivalent to the count that we are disrupting
-	// The other NodeClaims will get launched by the provisioner and should come eventually
-	results.NewNodeClaims = lo.Filter(results.NewNodeClaims, func(n *scheduling.NodeClaim, _ int) bool {
-		if v, ok := staticNodeMapping[n.NodePoolName]; ok {
-			if v == 0 {
-				return false
-			}
-			staticNodeMapping[n.NodePoolName]--
-		}
-		return true
-	})
 	return results, nil
 }
 

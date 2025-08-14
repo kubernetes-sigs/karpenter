@@ -20,12 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/samber/lo"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -46,8 +43,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -89,8 +84,8 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	nodeClaimsToProvision := c.computeNodeClaimsToProvision(np, nodes)
-	if nodeClaimsToProvision <= 0 {
+	countNodeClaimsToProvision := ComputeNodeClaimsToProvision(np, nodes)
+	if countNodeClaimsToProvision <= 0 {
 		log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("nodepool node limit reached")
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 	}
@@ -104,8 +99,11 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, fmt.Errorf("failed to resolve instance types: %w", err)
 	}
 
-	if err := c.provisionStaticNodes(ctx, np, its, nodeClaimsToProvision); err != nil {
-		return reconcile.Result{}, err
+	nodeClaims := GetStaticNodeClaimsToProvision(np, its, countNodeClaimsToProvision)
+
+	_, err = c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("creating nodeclaims, %w", err)
 	}
 
 	return reconcile.Result{}, nil
@@ -150,43 +148,4 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 func HasNodePoolReplicaOrStatusChanged(oldNP, newNP *v1.NodePool) bool {
 	return lo.FromPtr(oldNP.Spec.Replicas) != lo.FromPtr(newNP.Spec.Replicas) || (!oldNP.StatusConditions().Root().IsTrue() && newNP.StatusConditions().Root().IsTrue())
-}
-
-func (c *Controller) provisionStaticNodes(
-	ctx context.Context,
-	np *v1.NodePool,
-	instanceTypes []*cloudprovider.InstanceType,
-	count int64,
-) error {
-	var nodeClaims []*scheduling.NodeClaim
-	for range count {
-		nct := scheduling.NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions, _, _ = scheduling.FilterInstanceTypesByRequirements(
-			instanceTypes,
-			nct.Requirements,
-			corev1.ResourceList{},
-			corev1.ResourceList{},
-			corev1.ResourceList{},
-			true,
-		)
-		nodeClaims = append(nodeClaims, &scheduling.NodeClaim{
-			NodeClaimTemplate: *nct,
-			IsStaticNode:      true,
-		})
-	}
-	_, err := c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
-	if err != nil {
-		return fmt.Errorf("creating nodeclaims, %w", err)
-	}
-	return nil
-}
-
-func (c *Controller) computeNodeClaimsToProvision(np *v1.NodePool, nodes resource.Quantity) int64 {
-	nodeLimit := func() int64 {
-		if v, ok := np.Spec.Limits[v1.ResourceNodes]; ok {
-			return v.Value()
-		}
-		return int64(math.MaxInt64)
-	}()
-	return lo.Min([]int64{lo.FromPtr(np.Spec.Replicas), nodeLimit}) - nodes.Value()
 }

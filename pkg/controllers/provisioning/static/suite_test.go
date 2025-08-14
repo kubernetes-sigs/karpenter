@@ -282,6 +282,58 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(nodeClaims.Items).To(HaveLen(3))
 		})
 
+		It("should not create additional nodeclaims when the node doesnt join", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
+
+			nodeClaimOpts := []v1.NodeClaim{{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+				Spec: v1.NodeClaimSpec{
+					Resources: v1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("50Mi"),
+						},
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			}}
+			nodeClaim1 := test.NodeClaim(nodeClaimOpts...) // has no node
+			nodeClaim2 := test.NodeClaim(nodeClaimOpts...) // has node unregistered
+			nodeClaim3 := test.NodeClaim(nodeClaimOpts...) // has just providerId
+			node2 := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim2.Status.ProviderID,
+				Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
+			})
+			node3 := test.Node(test.NodeOptions{
+				ProviderID: nodeClaim3.Status.ProviderID,
+			})
+
+			ExpectApplied(ctx, env.Client, nodeClaim1)
+			ExpectApplied(ctx, env.Client, nodeClaim2, node2)
+			ExpectApplied(ctx, env.Client, nodeClaim3, node3)
+
+			// 	// Update cluster state to track the nodes
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{node3, node2}, []*v1.NodeClaim{nodeClaim1, nodeClaim2, nodeClaim3})
+
+			// Reconcile multiple times
+			for i := 0; i < 10; i++ {
+				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+				Expect(result.RequeueAfter).To(BeZero())
+			}
+
+			// Should have just 3 NodeClaims
+			existingNodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, existingNodeClaims)).To(Succeed())
+			Expect(existingNodeClaims.Items).To(HaveLen(3))
+		})
+
 		It("should not create additional nodeclaims when node limits are reached", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))

@@ -92,10 +92,32 @@ func ReplaceRequirements(nodePool *v1.NodePool, reqs ...v1.NodeSelectorRequireme
 	return nodePool
 }
 
-// StaticNodePool creates a test NodePool suitable for static provisioning (without limits)
+// StaticNodePool creates a test NodePool suitable for static provisioning
+// It will keep limits.nodes if provided in overrides, otherwise limits will be nil
 func StaticNodePool(overrides ...v1.NodePool) *v1.NodePool {
+	// First create the NodePool with all overrides
 	nodePool := NodePool(overrides...)
-	// Remove limits for static provisioning
-	nodePool.Spec.Limits = nil
+
+	var hasNodesLimit bool
+	var nodesLimit resource.Quantity
+	for _, override := range overrides {
+		if override.Spec.Limits != nil {
+			if limit, ok := override.Spec.Limits[v1.ResourceNodes]; ok {
+				hasNodesLimit = true
+				nodesLimit = limit
+				break
+			}
+		}
+	}
+
+	// Set limits based on whether nodes limit was provided
+	if !hasNodesLimit {
+		nodePool.Spec.Limits = nil
+	} else {
+		nodePool.Spec.Limits = v1.Limits(corev1.ResourceList{
+			v1.ResourceNodes: nodesLimit,
+		})
+	}
+
 	return nodePool
 }

@@ -50,6 +50,7 @@ func NewMethodsWithNopValidator() []disruption.Method {
 	singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 	return []disruption.Method{
 		emptiness,
+		disruption.NewStaticDrift(env.Client, cluster, provisioningController, cloudProvider, recorder),
 		disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 		multiNodeConsolidation,
 		singleNodeConsolidation,

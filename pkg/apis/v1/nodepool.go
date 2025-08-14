@@ -108,7 +108,6 @@ type Budget struct {
 	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
 	// allowed reasons are Underutilized, Empty, and Drifted.
-	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool

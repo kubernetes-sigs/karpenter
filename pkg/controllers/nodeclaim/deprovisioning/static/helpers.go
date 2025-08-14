@@ -18,7 +18,6 @@ package static
 
 import (
 	"context"
-	"sort"
 
 	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,33 +32,22 @@ const (
 )
 
 func GetDeprovisioningCandidates(ctx context.Context, kubeClient client.Client, nodes []*state.StateNode, count int) []*state.StateNode {
-	var emptyNodes, nonEmptyNodes []*state.StateNode
-
-	for _, node := range nodes {
+	emptyNodes := lo.Filter(nodes, func(node *state.StateNode, _ int) bool {
 		pods, err := node.Pods(ctx, kubeClient)
 		if err != nil {
 			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, treating as non-empty")
-			nonEmptyNodes = append(nonEmptyNodes, node)
-			continue
+			return false
 		}
+		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet)
+	})
 
-		if lo.EveryBy(pods, pod.IsReschedulable) {
-			emptyNodes = append(emptyNodes, node)
-		} else {
-			nonEmptyNodes = append(nonEmptyNodes, node)
-		}
-	}
+	nonEmptyNodes := lo.Filter(nodes, func(node *state.StateNode, _ int) bool {
+		return !lo.Contains(emptyNodes, node)
+	})
 
 	candidates := lo.Slice(emptyNodes, 0, count)
-
-	// If more candidates are needed, use non-empty nodes (prefer oldest)
 	if len(candidates) < count {
-		remaining := count - len(candidates)
-		sort.Slice(nonEmptyNodes, func(i, j int) bool {
-			return nonEmptyNodes[i].NodeClaim.CreationTimestamp.Before(&nonEmptyNodes[j].NodeClaim.CreationTimestamp)
-		})
-		candidates = append(candidates, lo.Slice(nonEmptyNodes, 0, remaining)...)
+		candidates = append(candidates, lo.Slice(nonEmptyNodes, 0, count-len(candidates))...)
 	}
-
 	return candidates
 }
