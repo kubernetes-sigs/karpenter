@@ -90,7 +90,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 		}
 
 		// Create a single node consolidation controller
-		c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue)
+		c := disruption.MakeConsolidation(fakeClock, cluster, env.Client, provisioningController, cloudProvider, recorder, queue)
 		consolidation = disruption.NewSingleNodeConsolidation(c)
 	})
 

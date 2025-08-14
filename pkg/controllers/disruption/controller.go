@@ -30,7 +30,9 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/google/uuid"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,7 +42,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	dynamicprovisioning "sigs.k8s.io/karpenter/pkg/controllers/provisioning/dynamic"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -50,16 +52,16 @@ import (
 )
 
 type Controller struct {
-	queue         *Queue
-	kubeClient    client.Client
-	cluster       *state.Cluster
-	provisioner   *provisioning.Provisioner
-	recorder      events.Recorder
-	clock         clock.Clock
-	cloudProvider cloudprovider.CloudProvider
-	methods       []Method
-	mu            sync.Mutex
-	lastRun       map[string]time.Time
+	queue                  *Queue
+	kubeClient             client.Client
+	cluster                *state.Cluster
+	provisioningController *dynamicprovisioning.ProvisioningController
+	recorder               events.Recorder
+	clock                  clock.Clock
+	cloudProvider          cloudprovider.CloudProvider
+	methods                []Method
+	mu                     sync.Mutex
+	lastRun                map[string]time.Time
 }
 
 // pollingPeriod that we inspect cluster to look for opportunities to disrupt
@@ -75,30 +77,32 @@ func WithMethods(methods ...Method) option.Function[ControllerOptions] {
 	}
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, provisioner *provisioning.Provisioner,
+func NewController(clk clock.Clock, kubeClient client.Client, provisioningController *dynamicprovisioning.ProvisioningController,
 	cp cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster, queue *Queue, opts ...option.Function[ControllerOptions]) *Controller {
 
-	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioner, cp, recorder, queue)...)}, opts...)...)
+	o := option.Resolve(append([]option.Function[ControllerOptions]{WithMethods(NewMethods(clk, cluster, kubeClient, provisioningController, cp, recorder, queue)...)}, opts...)...)
 	return &Controller{
-		queue:         queue,
-		clock:         clk,
-		kubeClient:    kubeClient,
-		cluster:       cluster,
-		provisioner:   provisioner,
-		recorder:      recorder,
-		cloudProvider: cp,
-		lastRun:       map[string]time.Time{},
-		methods:       o.methods,
+		queue:                  queue,
+		clock:                  clk,
+		kubeClient:             kubeClient,
+		cluster:                cluster,
+		provisioningController: provisioningController,
+		recorder:               recorder,
+		cloudProvider:          cp,
+		lastRun:                map[string]time.Time{},
+		methods:                o.methods,
 	}
 }
 
-func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioner *provisioning.Provisioner, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) []Method {
-	c := MakeConsolidation(clk, cluster, kubeClient, provisioner, cp, recorder, queue)
+func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Client, provisioningController *dynamicprovisioning.ProvisioningController, cp cloudprovider.CloudProvider, recorder events.Recorder, queue *Queue) []Method {
+	c := MakeConsolidation(clk, cluster, kubeClient, provisioningController, cp, recorder, queue)
 	return []Method{
 		// Delete any empty NodeClaims as there is zero cost in terms of disruption.
 		NewEmptiness(c),
+		// Terminate any Static NodeClaims that have drifted
+		NewStaticDrift(kubeClient, cluster, provisioningController, cp, recorder),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
-		NewDrift(kubeClient, cluster, provisioner, recorder),
+		NewDrift(kubeClient, cluster, provisioningController, recorder),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn
 		NewMultiNodeConsolidation(c),
 		// And finally fall back our single NodeClaim consolidation to further reduce cluster cost.
@@ -192,19 +196,31 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
 	// Determine the disruption action
-	cmd, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
+	cmds, err := disruption.ComputeCommand(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
-	if cmd.Decision() == NoOpDecision {
+	cmds = lo.Filter(cmds, func(c Command, _ int) bool { return c.Decision() != NoOpDecision })
+	if len(cmds) == 0 {
 		return false, nil
 	}
-	// Assign common fields to the command after creation
-	cmd.CreationTimestamp = c.clock.Now()
-	cmd.ID = uuid.New()
-	cmd.Method = disruption
-	// Attempt to disrupt
-	if err = c.queue.StartCommand(ctx, &cmd); err != nil {
+
+	errs := make([]error, len(cmds))
+	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) {
+		// Create a local copy of the command
+		cmd := cmds[i]
+
+		// Assign common fields
+		cmd.CreationTimestamp = c.clock.Now()
+		cmd.ID = uuid.New()
+		cmd.Method = disruption
+
+		// Attempt to disrupt
+		if err := c.queue.StartCommand(ctx, &cmd); err != nil {
+			errs[i] = fmt.Errorf("disrupting candidates, %w", err)
+		}
+	})
+	if err = multierr.Combine(errs...); err != nil {
 		return false, fmt.Errorf("disrupting candidates, %w", err)
 	}
 	return true, nil

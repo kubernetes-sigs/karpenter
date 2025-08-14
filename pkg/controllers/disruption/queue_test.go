@@ -97,7 +97,7 @@ var _ = Describe("Queue", func() {
 
 			stateNode := ExpectStateNodeExists(cluster, node1)
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				Method:            disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -131,7 +131,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				Method:            disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -156,7 +156,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				Method:            disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -187,7 +187,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				Method:            disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -217,7 +217,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				Method:            disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -270,7 +270,7 @@ var _ = Describe("Queue", func() {
 			}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				Method:            disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -314,7 +314,7 @@ var _ = Describe("Queue", func() {
 			stateNode := ExpectStateNodeExistsForNodeClaim(cluster, nodeClaim1)
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				Method:            disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -351,7 +351,7 @@ var _ = Describe("Queue", func() {
 			}}
 
 			cmd := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				Method:            disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
@@ -360,7 +360,7 @@ var _ = Describe("Queue", func() {
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
 			cmd2 := &disruption.Command{
-				Method:            disruption.NewDrift(env.Client, cluster, prov, recorder),
+				Method:            disruption.NewDrift(env.Client, cluster, provisioningController, recorder),
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},

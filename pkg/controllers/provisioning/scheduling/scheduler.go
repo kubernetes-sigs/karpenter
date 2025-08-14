@@ -131,6 +131,12 @@ func NewScheduler(
 	// if any of the nodePools add a taint with a prefer no schedule effect, we add a toleration for the taint
 	// during preference relaxation
 	toleratePreferNoSchedule := false
+
+	// Split up the static NodePools and the standard NodePools so that we can simulate static capacity being created
+	staticNodePools, nodePools := lo.FilterReject(nodePools, func(np *v1.NodePool, _ int) bool {
+		return np.Spec.Replicas != nil
+	})
+
 	for _, np := range nodePools {
 		for _, taint := range np.Spec.Template.Spec.Taints {
 			if taint.Effect == corev1.TaintEffectPreferNoSchedule {
@@ -143,7 +149,7 @@ func NewScheduler(
 	templates := lo.FilterMap(nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
 		var err error
 		nct := NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
+		nct.InstanceTypeOptions, _, err = FilterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
 		if len(nct.InstanceTypeOptions) == 0 {
 			if instanceTypeFilterErr, ok := lo.ErrorsAs[InstanceTypeFilterError](err); ok && instanceTypeFilterErr.minValuesIncompatibleErr != nil {
 				recorder.Publish(NoCompatibleInstanceTypes(np, true))
@@ -156,14 +162,34 @@ func NewScheduler(
 		}
 		return nct, true
 	})
+
+	// static templates
+	staticTemplates := lo.FilterMap(staticNodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
+		var err error
+		nct := NewNodeClaimTemplate(np)
+		nct.InstanceTypeOptions, _, err = FilterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
+		if len(nct.InstanceTypeOptions) == 0 {
+			if instanceTypeFilterErr, ok := lo.ErrorsAs[InstanceTypeFilterError](err); ok && instanceTypeFilterErr.minValuesIncompatibleErr != nil {
+				recorder.Publish(NoCompatibleInstanceTypes(np, true))
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, static nodepool requirements filtered out all instance types", "minValuesIncompatibleErr", instanceTypeFilterErr.minValuesIncompatibleErr)
+			} else {
+				recorder.Publish(NoCompatibleInstanceTypes(np, false))
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("skipping, static nodepool requirements filtered out all instance types")
+			}
+		}
+		return nct, true
+	})
+
+	allTemplates := append(templates, staticTemplates...)
+
 	s := &Scheduler{
 		uuid:                uuid.NewUUID(),
 		kubeClient:          kubeClient,
 		nodeClaimTemplates:  templates,
 		topology:            topology,
 		cluster:             cluster,
-		daemonOverhead:      getDaemonOverhead(templates, daemonSetPods),
-		daemonHostPortUsage: getDaemonHostPortUsage(templates, daemonSetPods),
+		daemonOverhead:      getDaemonOverhead(allTemplates, daemonSetPods),
+		daemonHostPortUsage: getDaemonHostPortUsage(allTemplates, daemonSetPods),
 		cachedPodData:       map[types.UID]*PodData{}, // cache pod data to avoid having to continually recompute it
 		recorder:            recorder,
 		preferences:         &Preferences{ToleratePreferNoSchedule: toleratePreferNoSchedule},
@@ -178,6 +204,7 @@ func NewScheduler(
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
 	}
 	s.calculateExistingNodeClaims(stateNodes, daemonSetPods)
+	s.calculateStaticNodeClaims(staticNodePools, staticTemplates)
 	return s
 }
 
@@ -668,6 +695,34 @@ func (s *Scheduler) calculateExistingNodeClaims(stateNodes []*state.StateNode, d
 		}
 		return s.existingNodes[i].Name() < s.existingNodes[j].Name()
 	})
+}
+
+func (s *Scheduler) calculateStaticNodeClaims(staticNodePools []*v1.NodePool, staticNct []*NodeClaimTemplate) {
+	nodePoolToNodeMap := lo.GroupBy(s.existingNodes, func(n *ExistingNode) string { return n.Labels()[v1.NodePoolLabelKey] })
+	templateMap := lo.SliceToMap(staticNct, func(nct *NodeClaimTemplate) (string, *NodeClaimTemplate) {
+		return nct.NodePoolName, nct
+	})
+	for _, nodePool := range staticNodePools {
+		nct, ok := templateMap[nodePool.Name]
+		if !ok {
+			// Skip nodepool if no valid template is available
+			continue
+		}
+		nodeLimits := func() int64 {
+			if v, ok := nodePool.Spec.Limits[v1.ResourceNodes]; ok {
+				return v.Value()
+			}
+			return int64(math.MaxInt64)
+		}()
+		nodeClaimCount := lo.Min([]int64{lo.FromPtr(nodePool.Spec.Replicas), nodeLimits}) - int64(len(nodePoolToNodeMap[nodePool.Name]))
+		for range nodeClaimCount {
+			// TODO: Eventually we should support scoping down the instance type options here by limits
+			// Here we started to use nct instead of
+			nc := NewNodeClaim(nct, s.topology, s.daemonOverhead[nct], s.daemonHostPortUsage[nct], nct.InstanceTypeOptions, s.reservationManager, s.reservedOfferingMode)
+			nc.IsStaticNode = true
+			s.newNodeClaims = append(s.newNodeClaims, nc)
+		}
+	}
 }
 
 // parallelizeUntil is an implementation of workqueue.ParallelizeUntil that modifies the
