@@ -120,6 +120,8 @@ var _ = Describe("Options", func() {
 					ReservedCapacity:        lo.ToPtr(true),
 					NodeRepair:              lo.ToPtr(false),
 					SpotToSpotConsolidation: lo.ToPtr(false),
+					NodeOverlay:             lo.ToPtr(false),
+					StaticCapacity:          lo.ToPtr(false),
 				},
 			}))
 		})
@@ -146,7 +148,7 @@ var _ = Describe("Options", func() {
 				"--batch-idle-duration", "5s",
 				"--preference-policy", "Ignore",
 				"--min-values-policy", "BestEffort",
-				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true",
+				"--feature-gates", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true",
 			)
 			Expect(err).To(BeNil())
 			expectOptionsMatch(opts, test.Options(test.OptionsFields{
@@ -171,6 +173,8 @@ var _ = Describe("Options", func() {
 					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
+					NodeOverlay:             lo.ToPtr(true),
+					StaticCapacity:          lo.ToPtr(true),
 				},
 			}))
 		})
@@ -193,7 +197,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -222,6 +226,8 @@ var _ = Describe("Options", func() {
 					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
+					NodeOverlay:             lo.ToPtr(true),
+					StaticCapacity:          lo.ToPtr(true),
 				},
 			}))
 		})
@@ -239,7 +245,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
-			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true")
+			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
 			}
@@ -275,6 +281,8 @@ var _ = Describe("Options", func() {
 					ReservedCapacity:        lo.ToPtr(false),
 					NodeRepair:              lo.ToPtr(true),
 					SpotToSpotConsolidation: lo.ToPtr(true),
+					NodeOverlay:             lo.ToPtr(true),
+					StaticCapacity:          lo.ToPtr(true),
 				},
 			}))
 		})
@@ -305,6 +313,8 @@ var _ = Describe("Options", func() {
 			Entry("when ReservedCapacity is overridden", "ReservedCapacity"),
 			Entry("when NodeRepair is overridden", "NodeRepair"),
 			Entry("when SpotToSpotConsolidation is overridden", "SpotToSpotConsolidation"),
+			Entry("when NodeOverlay is overridden", "NodeOverlay"),
+			Entry("when StaticCapacity is overridden", "StaticCapacity"),
 		)
 	})
 
@@ -360,5 +370,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.MinValuesPolicy).To(Equal(optsB.MinValuesPolicy))
 	Expect(optsA.FeatureGates.ReservedCapacity).To(Equal(optsB.FeatureGates.ReservedCapacity))
 	Expect(optsA.FeatureGates.NodeRepair).To(Equal(optsB.FeatureGates.NodeRepair))
+	Expect(optsA.FeatureGates.NodeOverlay).To(Equal(optsB.FeatureGates.NodeOverlay))
+	Expect(optsA.FeatureGates.StaticCapacity).To(Equal(optsB.FeatureGates.StaticCapacity))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
 }

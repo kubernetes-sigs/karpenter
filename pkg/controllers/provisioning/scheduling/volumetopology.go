@@ -25,12 +25,17 @@ import (
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
+
+// UnsupportedProvisioners is a map of volume plugins that are not supported. When a pod requests storage using a PersistentVolumeClaim (PVC)
+// that uses a StorageClass with any of these unsupported provisioners, Karpenter will skip scheduling that pod.
+var UnsupportedProvisioners = sets.New[string]()
 
 func NewVolumeTopology(kubeClient client.Client) *VolumeTopology {
 	return &VolumeTopology{kubeClient: kubeClient}
@@ -173,8 +178,16 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 		if storageClassName == "" {
 			return serrors.Wrap(fmt.Errorf("unbound pvc must define a storage class"), "PersistentVolumeClaim", klog.KRef("", pvc.Name))
 		}
-		if err := v.validateStorageClass(ctx, storageClassName); err != nil {
-			return serrors.Wrap(fmt.Errorf("failed to validate storage class, %w", err), "PersistentVolumeClaim", klog.KRef("", pvc.Name), "StorageClass", klog.KRef("", storageClassName))
+		storageClass := &storagev1.StorageClass{}
+		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
+			return serrors.Wrap(fmt.Errorf("failed to validate pvc, failed to get storage class, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+		}
+		if UnsupportedProvisioners.Has(storageClass.Provisioner) {
+			return serrors.Wrap(fmt.Errorf("failed to validate pvc, provisioner is not supported"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KObj(storageClass), "Provisioner", storageClass.Provisioner)
+		}
+		// Ignore pods than have unbound pvc for voluemBindingMode immediate
+		if storageClass.VolumeBindingMode != nil && *storageClass.VolumeBindingMode == storagev1.VolumeBindingImmediate {
+			return serrors.Wrap(fmt.Errorf("failed to validate pvc, pvc with immediate volume binding mode must be bound"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KObj(storageClass))
 		}
 	}
 	return nil
@@ -187,14 +200,6 @@ func (v *VolumeTopology) validateVolume(ctx context.Context, volumeName string) 
 		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: volumeName}, pv); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (v *VolumeTopology) validateStorageClass(ctx context.Context, storageClassName string) error {
-	storageClass := &storagev1.StorageClass{}
-	if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
-		return err
 	}
 	return nil
 }
