@@ -28,6 +28,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/go-logr/zapr"
 	"github.com/prometheus/client_golang/prometheus"
@@ -102,8 +103,21 @@ type Operator struct {
 	Clock               clock.Clock
 }
 
+type Options struct {
+	LeaderElectionLabels map[string]string
+}
+
+// Adds LeaderElectionLabels to the underlying manager's LeaderElectionOptions
+func WithLeaderElectionLabels(labels map[string]string) option.Function[Options] {
+	return func(opts *Options) {
+		opts.LeaderElectionLabels = labels
+	}
+}
+
 // NewOperator instantiates a controller manager or panics
-func NewOperator() (context.Context, *Operator) {
+func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
+	opts := option.Resolve(o...)
+
 	// Root Context
 	ctx := context.Background()
 
@@ -149,6 +163,7 @@ func NewOperator() (context.Context, *Operator) {
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionReleaseOnCancel: true,
 		LeaderElectionConfig:          leaderConfig,
+		LeaderElectionLabels:          opts.LeaderElectionLabels,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},
