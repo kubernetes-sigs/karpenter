@@ -179,6 +179,20 @@ func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Objec
 	}
 }
 
+func ExpectReconciled(ctx context.Context, reconciler reconcile.Reconciler, request reconcile.Request) reconcile.Result {
+	GinkgoHelper()
+	result, err := reconciler.Reconcile(ctx, request)
+	Expect(err).ToNot(HaveOccurred())
+	return result
+}
+
+func ExpectReconciledFailed(ctx context.Context, reconciler reconcile.Reconciler, request reconcile.Request) reconcile.Result {
+	GinkgoHelper()
+	result, err := reconciler.Reconcile(ctx, request)
+	Expect(err).To(HaveOccurred())
+	return result
+}
+
 func ExpectSingletonReconciled(ctx context.Context, reconciler singleton.Reconciler) reconcile.Result {
 	GinkgoHelper()
 	result, err := singleton.AsReconciler(reconciler).Reconcile(ctx, reconcile.Request{})
