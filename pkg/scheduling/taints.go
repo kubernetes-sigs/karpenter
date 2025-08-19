@@ -58,7 +58,7 @@ func (ts Taints) Tolerates(tolerations []corev1.Toleration) (errs error) {
 			tolerates = tolerates || t.ToleratesTaint(&taint)
 		}
 		if !tolerates {
-			errs = multierr.Append(errs, serrors.Wrap(fmt.Errorf("did not tolerate taint from nodepool"), "taint", pretty.Taint(taint)))
+			errs = multierr.Append(errs, serrors.Wrap(fmt.Errorf("did not tolerate taint"), "taint", pretty.Taint(taint)))
 		}
 	}
 	return errs
