@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -114,7 +115,7 @@ func NewNodeClaim(
 func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, relaxMinValues bool) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, serrors.Wrap(err, "nodepool", n.NodePoolName)
 	}
 
 	// exposed host ports on the node
@@ -126,7 +127,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 
 	// Check NodeClaim Affinity Requirements
 	if err := nodeClaimRequirements.Compatible(podData.Requirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, fmt.Errorf("incompatible requirements, %w", err)
+		return nil, nil, nil, serrors.Wrap(fmt.Errorf("incompatible requirements, %w", err), "nodepool", n.NodePoolName)
 	}
 	nodeClaimRequirements.Add(podData.Requirements.Values()...)
 
@@ -136,7 +137,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 		return nil, nil, nil, err
 	}
 	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, serrors.Wrap(err, "nodepool", n.NodePoolName)
 	}
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
 
