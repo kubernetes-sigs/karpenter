@@ -749,6 +749,68 @@ var _ = Describe("Drift", func() {
 				metrics.ReasonLabel: "drifted",
 			})
 		})
+		It("should drift non-empty nodes before empty nodes", func() {
+			nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("Never")
+			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+
+			labels := map[string]string{
+				"app": "test",
+			}
+			// create replicaset
+			rs := test.ReplicaSet()
+			ExpectApplied(ctx, env.Client, rs)
+			Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+
+			pod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         "apps/v1",
+							Kind:               "ReplicaSet",
+							Name:               rs.Name,
+							UID:                rs.UID,
+							Controller:         lo.ToPtr(true),
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
+					}}})
+			nodeClaim2, node2 := test.NodeClaimAndNode(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			nodeClaim2.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+
+			ExpectApplied(ctx, env.Client, rs, pod, nodePool, nodeClaim, nodeClaim2, node, node2)
+			ExpectManualBinding(ctx, env.Client, pod, node)
+
+			// inform cluster state about nodes and nodeclaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node, node2}, []*v1.NodeClaim{nodeClaim, nodeClaim2})
+			ExpectSingletonReconciled(ctx, disruptionController)
+			ExpectObjectReconciled(ctx, env.Client, queue, nodeClaim)
+
+			// Cascade any deletion of the nodeClaim to the node
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim)
+
+			// we should delete the non-empty node
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
+			ExpectNotFound(ctx, env.Client, nodeClaim, node)
+			ExpectMetricGaugeValue(disruption.EligibleNodes, 2, map[string]string{
+				metrics.ReasonLabel: "drifted",
+			})
+		})
 		It("should give emptiness priority to delete drifted nodes when they are empty and consolidatable", func() {
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)

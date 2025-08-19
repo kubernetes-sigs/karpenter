@@ -63,11 +63,8 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
 	})
 
-	emptyCandidates := lo.Filter(candidates, func(c *Candidate, _ int) bool {
+	emptyCandidates, nonEmptyCandidates := lo.FilterReject(candidates, func(c *Candidate, _ int) bool {
 		return len(c.reschedulablePods) == 0
-	})
-	nonEmptyCandidates := lo.Filter(candidates, func(c *Candidate, _ int) bool {
-		return len(c.reschedulablePods) > 0
 	})
 
 	// Prioritize non-empty candidates since we want them to get priority over empty candidates if the budget is constrained.
