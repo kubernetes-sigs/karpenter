@@ -67,8 +67,8 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 		return len(c.reschedulablePods) == 0
 	})
 
-	// Prioritize non-empty candidates since we want them to get priority over empty candidates if the budget is constrained.
-	for _, candidate := range slices.Concat(nonEmptyCandidates, emptyCandidates) {
+	// Prioritize empty candidates since we want them to get priority over non-empty candidates if the budget is constrained.
+	for _, candidate := range slices.Concat(emptyCandidates, nonEmptyCandidates) {
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since drift commands can only have one candidate.
