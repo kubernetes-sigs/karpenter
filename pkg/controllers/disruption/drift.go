@@ -53,11 +53,11 @@ func NewDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *pro
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (d *Drift) ShouldDisrupt(ctx context.Context, c *Candidate) bool {
-	return c.NodeClaim.StatusConditions().Get(string(d.Reason())).IsTrue()
+	return !isCandidatePartOfStaticNodePool(c) && c.NodeClaim.StatusConditions().Get(string(d.Reason())).IsTrue()
 }
 
 // ComputeCommand generates a disruption command given candidates
-func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (d *Drift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	sort.Slice(candidates, func(i int, j int) bool {
 		return candidates[i].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time.Before(
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
@@ -84,7 +84,7 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			if errors.Is(err, errCandidateDeleting) {
 				continue
 			}
-			return Command{}, err
+			return []Command{}, err
 		}
 		// Emit an event that we couldn't reschedule the pods on the node.
 		if !results.AllNonPendingPodsScheduled() {
@@ -92,13 +92,15 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			continue
 		}
 
-		return Command{
+		cmd := Command{
 			Candidates:   []*Candidate{candidate},
 			Replacements: replacementsFromNodeClaims(results.NewNodeClaims...),
 			Results:      results,
-		}, nil
+		}
+		return []Command{cmd}, nil
+
 	}
-	return Command{}, nil
+	return []Command{}, nil
 }
 
 func (d *Drift) Reason() v1.DisruptionReason {
