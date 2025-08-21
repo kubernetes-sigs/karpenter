@@ -68,6 +68,8 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 	})
 
 	// Prioritize empty candidates since we want them to get priority over non-empty candidates if the budget is constrained.
+	// Disrupting empty candidates first also helps reduce the overall churn because if a non-empty candidate is disrupted first,
+	// the pods from that node can reschedule on the empty nodes and will need to move again when those nodes get disrupted.
 	for _, candidate := range slices.Concat(emptyCandidates, nonEmptyCandidates) {
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
