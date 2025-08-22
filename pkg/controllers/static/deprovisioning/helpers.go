@@ -99,6 +99,6 @@ func GetDeprovisioningCandidates(ctx context.Context, kubeClient client.Client, 
 }
 
 func RunningNodesForNodePool(c *state.Cluster, np *v1.NodePool) int64 {
-	running, _ := c.NodePoolNodeCounts(np.Name)
+	running, _ := c.NodePoolState.GetNodeCount(np.Name)
 	return int64(running)
 }

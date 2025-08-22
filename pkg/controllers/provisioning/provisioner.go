@@ -163,6 +163,9 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 		} else {
 			nodeClaimNames[i] = name
 		}
+		if nodeClaims[i].IsStaticNode {
+			p.cluster.NodePoolState.ReleaseNodeCount(nodeClaims[i].NodePoolName, 1)
+		}
 	})
 	return nodeClaimNames, multierr.Combine(errs...)
 }

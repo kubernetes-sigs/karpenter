@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"net"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,6 +43,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	static "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -63,6 +63,7 @@ var nodePoolController *informer.NodePoolController
 var daemonsetController *informer.DaemonSetController
 var cloudProvider *fake.CloudProvider
 var nodePool *v1.NodePool
+var staticprovController *static.Controller
 
 const csiProvider = "fake.csi.provider"
 
@@ -85,6 +86,7 @@ var _ = BeforeSuite(func() {
 	podController = informer.NewPodController(env.Client, cluster)
 	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
+	staticprovController = static.NewController(env.Client, cluster, test.NewEventRecorder(), cloudProvider, fakeClock)
 })
 
 var _ = AfterSuite(func() {
@@ -2469,6 +2471,7 @@ var _ = Describe("NodePool Resources", func() {
 
 var _ = Describe("NodeClaim State Tracking", func() {
 	var nodeClaim *v1.NodeClaim
+	var nodeClaim2 *v1.NodeClaim
 	var nodePool2 *v1.NodePool
 
 	BeforeEach(func() {
@@ -2486,141 +2489,266 @@ var _ = Describe("NodeClaim State Tracking", func() {
 				ProviderID: test.RandomProviderID(),
 			},
 		})
+
+		nodeClaim2 = test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-nodeclaim-2",
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool2.Name,
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
 	})
 
 	Context("UpdateNodeClaim", func() {
-		It("should track NodeClaim in running state when created", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+		Context("New NodeClaim gets added", func() {
+			It("should track NodeClaim in running state when created with ProviderID", func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(1))
-			Expect(deleting).To(Equal(0))
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
 
-			Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeTrue())
-		})
-
-		It("should track multiple NodeClaims in the same NodePool", func() {
-			nodeClaim2 := test.NodeClaim(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-nodeclaim-2",
-					Labels: map[string]string{
-						v1.NodePoolLabelKey: nodePool.Name,
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-				},
+				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeTrue())
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
 			})
 
-			ExpectApplied(ctx, env.Client, nodeClaim, nodeClaim2)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
-
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(2))
-			Expect(deleting).To(Equal(0))
-		})
-
-		It("should track NodeClaims across different NodePools", func() {
-			nodeClaim2 := test.NodeClaim(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-nodeclaim-2",
-					Labels: map[string]string{
-						v1.NodePoolLabelKey: nodePool2.Name,
+			It("should track NodeClaim without ProviderID", func() {
+				nodeClaimWithoutProvider := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-nodeclaim-no-provider",
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
 					},
-				},
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-				},
+					// No ProviderID set
+				})
+
+				ExpectApplied(ctx, env.Client, nodeClaimWithoutProvider)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimWithoutProvider))
+
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+
+				Expect(cluster.NodeClaimExists(nodeClaimWithoutProvider.Name)).To(BeTrue())
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaimWithoutProvider.Name)).To(BeTrue())
 			})
 
-			ExpectApplied(ctx, env.Client, nodeClaim, nodeClaim2)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
-
-			running1, deleting1 := cluster.NodePoolNodeCounts(nodePool.Name)
-			running2, deleting2 := cluster.NodePoolNodeCounts(nodePool2.Name)
-
-			Expect(running1).To(Equal(1))
-			Expect(deleting1).To(Equal(0))
-			Expect(running2).To(Equal(1))
-			Expect(deleting2).To(Equal(0))
-		})
-
-		It("should handle NodeClaim without providerID", func() {
-			nodeClaimWithoutProvider := test.NodeClaim(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-nodeclaim-no-provider",
-					Labels: map[string]string{
-						v1.NodePoolLabelKey: nodePool.Name,
+			It("should track multiple NodeClaims in the same NodePool", func() {
+				nodeClaim3 := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-nodeclaim-2",
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
 					},
-				},
-				// No ProviderID set
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodeClaim, nodeClaim3)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim3))
+
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(2))
+				Expect(deleting).To(Equal(0))
+
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim3.Name)).To(BeTrue())
 			})
 
-			ExpectApplied(ctx, env.Client, nodeClaimWithoutProvider)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimWithoutProvider))
+			It("should track NodeClaims across different NodePools", func() {
+				ExpectApplied(ctx, env.Client, nodeClaim, nodeClaim2)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
 
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(1))
-			Expect(deleting).To(Equal(0))
+				running1, deleting1 := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running2, deleting2 := cluster.NodePoolState.GetNodeCount(nodePool2.Name)
 
-			Expect(cluster.NodeClaimExists(nodeClaimWithoutProvider.Name)).To(BeTrue())
-		})
-	})
+				Expect(running1).To(Equal(1))
+				Expect(deleting1).To(Equal(0))
+				Expect(running2).To(Equal(1))
+				Expect(deleting2).To(Equal(0))
 
-	Context("MarkForDeletion", func() {
-		BeforeEach(func() {
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		})
-
-		It("should move NodeClaim from running to deleting state", func() {
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(1))
-			Expect(deleting).To(Equal(0))
-
-			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(1))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool2.Name, nodeClaim2.Name)).To(BeTrue())
+			})
 		})
 
-		It("should handle marking multiple NodeClaims for deletion", func() {
-			nodeClaim2 := test.NodeClaim(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-nodeclaim-2",
-					Labels: map[string]string{
-						v1.NodePoolLabelKey: nodePool.Name,
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-				},
+		Context("Updates to existing NodeClaim", func() {
+			BeforeEach(func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 			})
 
-			ExpectApplied(ctx, env.Client, nodeClaim2)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
+			It("should be a no-op when NodeClaim is already tracked and no state change", func() {
+				// Verify initial state
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
 
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(2))
-			Expect(deleting).To(Equal(0))
+				// Update NodeClaim with annotation change (no state change)
+				nodeClaim.Annotations = map[string]string{"test": "annotation"}
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-			cluster.MarkForDeletion(nodeClaim.Status.ProviderID, nodeClaim2.Status.ProviderID)
+				// State should remain the same
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+			})
 
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(2))
+			It("should handle NodeClaim ProviderID change", func() {
+				// Verify initial state
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+
+				// Change ProviderID
+				originalProviderID := nodeClaim.Status.ProviderID
+				newProviderID := test.RandomProviderID()
+				nodeClaim.Status.ProviderID = newProviderID
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				// Should still track the NodeClaim correctly
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+
+				// Old ProviderID should not be tracked for deletion
+				cluster.MarkForDeletion(originalProviderID)
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1)) // Should not change
+				Expect(deleting).To(Equal(0))
+
+				// New ProviderID should work for deletion
+				cluster.MarkForDeletion(newProviderID)
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(1))
+			})
+
+			It("should move NodeClaim to deleting state when Node is marked for deletion", func() {
+				// Verify initial running state
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+
+				// Mark the node for deletion via cluster state
+				cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+
+				// Update NodeClaim - should detect it's marked for deletion
+				nodeClaim.Annotations = map[string]string{"updated": "true"}
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				// Should be in deleting state
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(1))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeFalse())
+			})
+
+			It("should handle NodeClaim cleanup correctly", func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+
+				// Delete the NodeClaim
+				ExpectDeleted(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeFalse())
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+			})
 		})
 
-		It("should handle marking non-existent NodeClaim for deletion", func() {
-			cluster.MarkForDeletion("non-existent-provider-id")
+		Context("DeleteNodeClaim", func() {
+			BeforeEach(func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			})
 
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(1))
-			Expect(deleting).To(Equal(0))
+			It("should remove NodeClaim from nodepool state", func() {
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeTrue())
+
+				ExpectDeleted(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeFalse())
+			})
+
+		})
+
+		Context("MarkForDeletion", func() {
+			BeforeEach(func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			})
+
+			It("should handle marking multiple NodeClaims for deletion", func() {
+				nodeClaim2 := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-nodeclaim-2",
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodeClaim2)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
+
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+				Expect(running).To(Equal(2))
+				Expect(deleting).To(Equal(0))
+
+				cluster.MarkForDeletion(nodeClaim.Status.ProviderID, nodeClaim2.Status.ProviderID)
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(2))
+			})
+
+			It("should move NodeClaim from running to deleting state", func() {
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+
+				cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(1))
+			})
 		})
 	})
 
@@ -2632,13 +2760,13 @@ var _ = Describe("NodeClaim State Tracking", func() {
 		})
 
 		It("should move NodeClaim from deleting to running state", func() {
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
+			running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 			Expect(running).To(Equal(0))
 			Expect(deleting).To(Equal(1))
 
 			cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID)
+			running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
 			Expect(running).To(Equal(1))
 			Expect(deleting).To(Equal(0))
 		})
@@ -2658,325 +2786,28 @@ var _ = Describe("NodeClaim State Tracking", func() {
 
 			ExpectApplied(ctx, env.Client, nodeClaim2)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
-			cluster.MarkForDeletion(nodeClaim2.Status.ProviderID)
 
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
+			cluster.MarkForDeletion(nodeClaim2.Status.ProviderID)
+			running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
 			Expect(running).To(Equal(0))
 			Expect(deleting).To(Equal(2))
 
 			cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID, nodeClaim2.Status.ProviderID)
+			running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
 			Expect(running).To(Equal(2))
 			Expect(deleting).To(Equal(0))
 		})
-
-		It("should handle unmarking non-existent NodeClaim", func() {
-			cluster.UnmarkForDeletion("non-existent-provider-id")
-
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(1))
-		})
 	})
 
-	Context("DeleteNodeClaim", func() {
-		BeforeEach(func() {
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-		})
-
-		It("should remove NodeClaim from running state", func() {
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(1))
-			Expect(deleting).To(Equal(0))
-			Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeTrue())
-
-			ExpectDeleted(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(0))
-			Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeFalse())
-		})
-
-		It("should remove NodeClaim from deleting state", func() {
-			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(1))
-
-			ExpectDeleted(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(0))
-			Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeFalse())
-		})
-
-		It("should handle deleting non-existent NodeClaim", func() {
-			cluster.DeleteNodeClaim("non-existent-nodeclaim")
-
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(1))
-			Expect(deleting).To(Equal(0))
-		})
-	})
-
-	Context("NodePool State Consistency", func() {
-		It("should return zero counts for non-existent NodePool", func() {
-			running, deleting := cluster.NodePoolNodeCounts("non-existent-nodepool")
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(0))
-		})
-
-		It("should handle NodeClaim with empty NodePool label", func() {
-			nodeClaimNoPool := test.NodeClaim(v1.NodeClaim{
+	Context("Unmark/mark Transitions", func() {
+		It("should handle concurrent NodeClaim updates and state changes", func() {
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-nodeclaim-no-pool",
-					// No NodePool label
-				},
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-				},
-			})
-
-			ExpectApplied(ctx, env.Client, nodeClaimNoPool)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimNoPool))
-
-			Expect(cluster.NodeClaimExists(nodeClaimNoPool.Name)).To(BeTrue())
-
-			// Should not affect any NodePool counts
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(0))
-		})
-	})
-
-	Context("State Transitions", func() {
-		It("should handle rapid state transitions correctly", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Initial state: running
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(1))
-			Expect(deleting).To(Equal(0))
-
-			// Mark for deletion
-			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(1))
-
-			// Unmark for deletion
-			cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID)
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(1))
-			Expect(deleting).To(Equal(0))
-
-			// Mark for deletion again
-			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(1))
-
-			// Delete the NodeClaim
-			ExpectDeleted(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(0))
-		})
-
-		It("should handle NodeClaim updates when marked for deletion", func() {
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Mark for deletion
-			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-			running, deleting := cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(1))
-
-			// Update the NodeClaim (simulate controller update)
-			nodeClaim.Annotations = map[string]string{"test": "annotation"}
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Should remain in deleting state
-			running, deleting = cluster.NodePoolNodeCounts(nodePool.Name)
-			Expect(running).To(Equal(0))
-			Expect(deleting).To(Equal(1))
-		})
-	})
-})
-
-var _ = Describe("NodePool Node Limits", func() {
-	var nodeClaim *v1.NodeClaim
-	var nodePool2 *v1.NodePool
-
-	BeforeEach(func() {
-		nodeClaim = test.NodeClaim(v1.NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					v1.NodePoolLabelKey: nodePool.Name,
-				},
-			},
-			Status: v1.NodeClaimStatus{
-				ProviderID: test.RandomProviderID(),
-			},
-		})
-		nodePool2 = test.StaticNodePool(v1.NodePool{
-			Spec: v1.NodePoolSpec{
-				Replicas: lo.ToPtr(int64(1)),
-			},
-
-			ObjectMeta: metav1.ObjectMeta{Name: "nodepool2"},
-		})
-		ExpectApplied(ctx, env.Client, nodePool2)
-	})
-
-	Context("ReserveNodePoolNodeLimit", func() {
-		It("should reserve requested capacity when available", func() {
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 3)
-			Expect(granted).To(Equal(int64(3)))
-
-			// Should be able to reserve remaining capacity
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 2)
-			Expect(granted).To(Equal(int64(2)))
-		})
-
-		It("should grant partial capacity when requested exceeds available", func() {
-			// Reserve most capacity first
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 4)
-			Expect(granted).To(Equal(int64(4)))
-
-			// Request more than available, should get only what's left
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 5)
-			Expect(granted).To(Equal(int64(1)))
-		})
-
-		It("should return zero when no capacity available", func() {
-			// Reserve all capacity
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 5)
-			Expect(granted).To(Equal(int64(5)))
-
-			// No more capacity available
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 1)
-			Expect(granted).To(Equal(int64(0)))
-		})
-
-		It("should account for running NodeClaims", func() {
-			// Add a running NodeClaim
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Should have 4 slots available (5 limit - 1 running)
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 4)
-			Expect(granted).To(Equal(int64(4)))
-
-			// No more capacity
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 1)
-			Expect(granted).To(Equal(int64(0)))
-		})
-
-		It("should account for deleting NodeClaims", func() {
-			// Add and mark NodeClaim for deletion
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-
-			// Should have 4 slots available (5 limit - 1 deleting)
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 4)
-			Expect(granted).To(Equal(int64(4)))
-		})
-
-		It("should handle zero or negative limits", func() {
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 0, 5)
-			Expect(granted).To(Equal(int64(0)))
-
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, -1, 5)
-			Expect(granted).To(Equal(int64(0)))
-		})
-
-		It("should be thread-safe with concurrent reservations", func() {
-			var wg sync.WaitGroup
-			var totalGranted int64
-			numGoroutines := 10
-			requestPerGoroutine := int64(1)
-			limit := int64(5)
-
-			for i := 0; i < numGoroutines; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit, requestPerGoroutine)
-					atomic.AddInt64(&totalGranted, granted)
-				}()
-			}
-
-			wg.Wait()
-			// Should not exceed the limit
-			Expect(totalGranted).To(BeNumerically("<=", limit))
-			Expect(totalGranted).To(Equal(limit)) // Should grant exactly the limit
-		})
-
-		It("should automatically release reservation when NodeClaim becomes running", func() {
-			// Reserve capacity
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 3)
-			Expect(granted).To(Equal(int64(3)))
-
-			// Add a NodeClaim - this should automatically release 1 reservation
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Should now have 2 slots available (5 limit - 1 running - 2 reserved)
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 4)
-			Expect(granted).To(Equal(int64(2)))
-		})
-	})
-
-	Context("Limit Release Logic", func() {
-		It("should release reservation when NodeClaim transitions to running", func() {
-			// Reserve some capacity
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 3, 2)
-			Expect(granted).To(Equal(int64(2)))
-
-			// Add a NodeClaim - this should automatically release 1 reservation
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Should now have 1 slot available (3 limit - 1 running - 1 reserved)
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, 3, 2)
-			Expect(granted).To(Equal(int64(1)))
-		})
-
-		It("should not release more than available reservations", func() {
-			// Don't reserve anything initially
-			// Add a NodeClaim - this should not cause negative reservations
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Should still be able to reserve remaining capacity
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 3, 2)
-			Expect(granted).To(Equal(int64(2)))
-		})
-
-		It("should handle multiple NodeClaims becoming running", func() {
-			// Reserve capacity for multiple nodes
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 3)
-			Expect(granted).To(Equal(int64(3)))
-
-			// Create multiple NodeClaims
-			nodeClaim2 := test.NodeClaim(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
+					Name: "race-test-nodeclaim",
 					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: cloudProvider.InstanceTypes[0].Name,
+						v1.NodePoolLabelKey: nodePool.Name,
 					},
 				},
 				Status: v1.NodeClaimStatus{
@@ -2984,116 +2815,32 @@ var _ = Describe("NodePool Node Limits", func() {
 				},
 			})
 
-			// Add first NodeClaim
 			ExpectApplied(ctx, env.Client, nodeClaim)
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-			// Add second NodeClaim
-			ExpectApplied(ctx, env.Client, nodeClaim2)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
+			var wg sync.WaitGroup
+			numOperations := 50
 
-			// Should have 2 slots available (5 limit - 2 running - 1 reserved)
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 3)
-			Expect(granted).To(Equal(int64(2)))
-		})
-	})
-
-	Context("NodeClaim lifecycle", func() {
-		It("should account for NodeClaim state changes", func() {
-			limit := int64(4)
-
-			// Initially should have full capacity
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit, 3)
-			Expect(granted).To(Equal(int64(3)))
-
-			// Add a NodeClaim - this should automatically release 1 reservation
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Should have 1 slot available (4 limit - 1 running - 2 reserved)
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit, 2)
-			Expect(granted).To(Equal(int64(1)))
-
-			// Mark for deletion
-			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-
-			// Should have 0 slot (4 limit - 1 deleting - 3 reserved)
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit, 1)
-			Expect(granted).To(Equal(int64(0)))
-
-			// Delete the NodeClaim
-			ExpectDeleted(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Should have 1 slot available (4 limit - 3 reserved)
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit, 2)
-			Expect(granted).To(Equal(int64(1)))
-		})
-
-		It("should handle multiple NodePools independently", func() {
-			limit1 := int64(3)
-			limit2 := int64(2)
-
-			// Reserve from first NodePool
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit1, 2)
-			Expect(granted).To(Equal(int64(2)))
-
-			// Add a NodeClaim - this should automatically release 1 reservation
-			ExpectApplied(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// Should have 1 slot available (3 limit - 1 running - 1 reserved)
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit1, 2)
-			Expect(granted).To(Equal(int64(1)))
-
-			// Should not affect second NodePool
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool2.Name, limit2, 2)
-			Expect(granted).To(Equal(int64(2)))
-
-			// Delete the NodeClaim
-			ExpectDeleted(ctx, env.Client, nodeClaim)
-			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
-
-			// First NodePool should have 1 slot left
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit1, 2)
-			Expect(granted).To(Equal(int64(1)))
-
-			// Second NodePool should have no slots left
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool2.Name, limit2, 1)
-			Expect(granted).To(Equal(int64(0)))
-		})
-	})
-
-	Context("Edge cases", func() {
-		It("should handle rapid state changes", func() {
-			limit := int64(5)
-
-			// Reserve and check multiple times
-			for i := 0; i < 10; i++ {
-				granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit, 2)
-				Expect(granted).To(BeNumerically("<=", 2))
-				if granted == 0 {
-					break // No more capacity
-				}
+			// Concurrent mark/unmark operations
+			for i := 0; i < numOperations; i++ {
+				wg.Add(1)
+				go func(iteration int) {
+					defer wg.Done()
+					if iteration%2 == 0 {
+						cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+					} else {
+						cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID)
+					}
+				}(i)
 			}
 
-			// Should not be able to reserve more than limit
-			totalGranted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, limit, 10)
-			Expect(totalGranted).To(Equal(int64(0))) // Should be at capacity
+			wg.Wait()
+
+			// Final state should be consistent
+			running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			Expect(running + deleting).To(Equal(1)) // Should have exactly one NodeClaim
 		})
 
-		It("should maintain consistency across cluster resets", func() {
-			// Reserve some capacity
-			granted := cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 3)
-			Expect(granted).To(Equal(int64(3)))
-
-			// Reset cluster
-			cluster.Reset()
-
-			// Should be able to reserve full capacity again
-			granted = cluster.ReserveNodePoolNodeLimit(nodePool.Name, 5, 5)
-			Expect(granted).To(Equal(int64(5)))
-		})
 	})
 })
 

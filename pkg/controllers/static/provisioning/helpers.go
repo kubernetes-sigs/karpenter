@@ -17,8 +17,6 @@ limitations under the License.
 package static
 
 import (
-	"math"
-
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
@@ -67,12 +65,13 @@ func GetStaticNodeClaimTemplate(np *v1.NodePool, instanceTypes []*cloudprovider.
 }
 
 func ComputeNodeClaimsToProvision(c *state.Cluster, np *v1.NodePool, nodes int64) int64 {
-	limit, ok := np.Spec.Limits[resources.Node]
-	nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
-	return c.ReserveNodePoolNodeLimit(np.Name, nodeLimit, lo.FromPtr(np.Spec.Replicas)-nodes)
+	if limit, ok := np.Spec.Limits[resources.Node]; ok {
+		return c.NodePoolState.ReserveNodeCount(np.Name, limit.Value(), lo.FromPtr(np.Spec.Replicas)-nodes)
+	}
+	return lo.FromPtr(np.Spec.Replicas) - nodes
 }
 
 func TotalNodesForNodePool(c *state.Cluster, np *v1.NodePool) int64 {
-	running, deleting := c.NodePoolNodeCounts(np.Name)
+	running, deleting := c.NodePoolState.GetNodeCount(np.Name)
 	return int64(running + deleting)
 }

@@ -64,7 +64,7 @@ type Cluster struct {
 	nodePoolResources         map[string]corev1.ResourceList  // node pool name -> resource list
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
-	npState *NodePoolState
+	NodePoolState *NodePoolState
 
 	podAcks                         sync.Map // pod namespaced name -> time when Karpenter first saw the pod as pending
 	podsSchedulingAttempted         sync.Map // pod namespaced name -> time when Karpenter tried to schedule a pod
@@ -98,7 +98,7 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		nodeClaimNameToProviderID: map[string]string{},
 		nodePoolResources:         map[string]corev1.ResourceList{},
 
-		npState: NewNodePoolState(),
+		NodePoolState: NewNodePoolState(),
 
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
@@ -285,8 +285,8 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 			oldNode := n.ShallowCopy()
 			n.markedForDeletion = false
 			c.updateNodePoolResources(oldNode, n)
-			if n.NodeClaim != nil {
-				c.npState.MarkNodeClaimRunning(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
+			if n.NodeClaim != nil && n.NodeClaim.DeletionTimestamp.IsZero() {
+				c.NodePoolState.MarkNodeClaimRunning(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
 			}
 		}
 	}
@@ -303,7 +303,7 @@ func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 			n.markedForDeletion = true
 			c.updateNodePoolResources(oldNode, n)
 			if n.NodeClaim != nil {
-				c.npState.MarkNodeClaimDeleting(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
+				c.NodePoolState.MarkNodeClaimDeleting(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
 			}
 		}
 	}
@@ -322,8 +322,7 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1.NodeClaim) {
 	}
 
 	// Update nodepool state with NodeClaim
-	c.npState.UpdateNodePoolNodeClaim(nodeClaim,
-		(nodeClaim.Status.ProviderID != "" && c.nodes[nodeClaim.Status.ProviderID].markedForDeletion))
+	c.NodePoolState.UpdateNodeClaim(nodeClaim, c.IsNodeClaimMarkedForDeletion(nodeClaim.Status.ProviderID))
 
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
@@ -575,7 +574,7 @@ func (c *Cluster) Reset() {
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
-	c.npState = NewNodePoolState()
+	c.NodePoolState = NewNodePoolState()
 	c.nodePoolResources = map[string]corev1.ResourceList{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
@@ -670,7 +669,7 @@ func (c *Cluster) cleanupNodeClaim(name string) {
 	delete(c.nodeClaimNameToProviderID, name)
 
 	// Delete the NodeClaim that is tracked in NodePoolState
-	c.npState.CleanupNodeClaim(name)
+	c.NodePoolState.Cleanup(name)
 }
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNode *StateNode) (*StateNode, error) {
@@ -893,19 +892,7 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 	}
 }
 
-// We want to split cluster.go into smaller parts and give the ability to access/modify using helpers to avoid deep-copying
-// Any helpers on NodePoolState need to hold the lock
-
-func (c *Cluster) NodePoolNodeCounts(np string) (int, int) {
-	c.npState.npMutex.RLock()
-	defer c.npState.npMutex.RUnlock()
-
-	return c.npState.NodePoolNodeCounts(np)
-}
-
-func (c *Cluster) ReserveNodePoolNodeLimit(np string, limit, wanted int64) int64 {
-	c.npState.npMutex.Lock()
-	defer c.npState.npMutex.Unlock()
-
-	return c.npState.ReserveNodePoolNodeLimit(np, limit, wanted)
+func (c *Cluster) IsNodeClaimMarkedForDeletion(providerID string) bool {
+	return providerID != "" &&
+		(c.nodes[providerID].markedForDeletion || !c.nodes[providerID].NodeClaim.DeletionTimestamp.IsZero())
 }

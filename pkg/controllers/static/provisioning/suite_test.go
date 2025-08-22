@@ -373,6 +373,48 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(nodeClaims.Items).To(HaveLen(1))
 		})
 
+		It("should reserve nodepool nodecount during provisioning and release after", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
+			nodePool.Spec.Limits = v1.Limits{
+				corev1.ResourceName("nodes"): resource.MustParse("10"),
+			}
+
+			ExpectApplied(ctx, env.Client, nodePool)
+			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(result.RequeueAfter).To(BeZero())
+
+			// Should create 3 NodeClaims
+			nodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(3))
+
+			// Should be tracking running nodeclaims in nodepool state node
+			running, _ := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			Expect(running).To(BeEquivalentTo(3))
+
+			// Should be able to reserve remaining 7 NodeCounts
+			Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 10, 10)).To(BeEquivalentTo(7))
+			// Release the 7 NodeCount we held
+			cluster.NodePoolState.ReleaseNodeCount(nodePool.Name, 7)
+
+			// Size up the replicas to 15 with limit 10
+			nodePool.Spec.Replicas = lo.ToPtr(int64(15))
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			result = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(result.RequeueAfter).To(BeZero())
+
+			// Should have 10 NodeClaims and not go over limits
+			nodeClaims = &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+			Expect(nodeClaims.Items).To(HaveLen(10))
+
+			// Should not be able to Reserve more
+			cluster.NodePoolState.ReleaseNodeCount(nodePool.Name, 10)
+			Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 10, 100)).To(BeEquivalentTo(0))
+		})
+
 		It("should handle zero replicas", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(0))
@@ -550,6 +592,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 			Expect(result.RequeueAfter).To(BeZero())
 		})
+
 	})
 
 	Context("Helper Functions", func() {
