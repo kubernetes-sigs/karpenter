@@ -892,7 +892,7 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 	}
 }
 
-func (c *Cluster) IsNodeClaimMarkedForDeletion(providerId string) bool {
-	return providerId != "" &&
-		(c.nodes[providerId].markedForDeletion || !c.nodes[providerId].NodeClaim.DeletionTimestamp.IsZero())
+func (c *Cluster) IsNodeClaimMarkedForDeletion(providerID string) bool {
+	return providerID != "" &&
+		(c.nodes[providerID].markedForDeletion || !c.nodes[providerID].NodeClaim.DeletionTimestamp.IsZero())
 }
