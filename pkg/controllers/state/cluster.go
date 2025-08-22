@@ -64,6 +64,8 @@ type Cluster struct {
 	nodePoolResources         map[string]corev1.ResourceList  // node pool name -> resource list
 	daemonSetPods             sync.Map                        // daemonSet -> existing pod
 
+	NodePoolState *NodePoolState
+
 	podAcks                         sync.Map // pod namespaced name -> time when Karpenter first saw the pod as pending
 	podsSchedulingAttempted         sync.Map // pod namespaced name -> time when Karpenter tried to schedule a pod
 	podsSchedulableTimes            sync.Map // pod namespaced name -> time when it was first marked as able to fit to a node
@@ -95,6 +97,8 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
 		nodePoolResources:         map[string]corev1.ResourceList{},
+
+		NodePoolState: NewNodePoolState(),
 
 		podAcks:                         sync.Map{},
 		podsSchedulableTimes:            sync.Map{},
@@ -281,6 +285,9 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 			oldNode := n.ShallowCopy()
 			n.markedForDeletion = false
 			c.updateNodePoolResources(oldNode, n)
+			if n.NodeClaim != nil && n.NodeClaim.DeletionTimestamp.IsZero() {
+				c.NodePoolState.MarkNodeClaimRunning(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
+			}
 		}
 	}
 }
@@ -295,6 +302,9 @@ func (c *Cluster) MarkForDeletion(providerIDs ...string) {
 			oldNode := n.ShallowCopy()
 			n.markedForDeletion = true
 			c.updateNodePoolResources(oldNode, n)
+			if n.NodeClaim != nil {
+				c.NodePoolState.MarkNodeClaimDeleting(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
+			}
 		}
 	}
 }
@@ -310,6 +320,10 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1.NodeClaim) {
 		n := c.newStateFromNodeClaim(nodeClaim, c.nodes[nodeClaim.Status.ProviderID])
 		c.nodes[nodeClaim.Status.ProviderID] = n
 	}
+
+	// Update nodepool state with NodeClaim
+	c.NodePoolState.UpdateNodeClaim(nodeClaim, c.IsNodeClaimMarkedForDeletion(nodeClaim.Status.ProviderID))
+
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
 	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
@@ -560,6 +574,7 @@ func (c *Cluster) Reset() {
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
+	c.NodePoolState = NewNodePoolState()
 	c.nodePoolResources = map[string]corev1.ResourceList{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
@@ -652,6 +667,9 @@ func (c *Cluster) cleanupNodeClaim(name string) {
 	// yet. This ensures that if a nodeClaim is created and then deleted before it was able to launch that
 	// this is cleaned up.
 	delete(c.nodeClaimNameToProviderID, name)
+
+	// Delete the NodeClaim that is tracked in NodePoolState
+	c.NodePoolState.Cleanup(name)
 }
 
 func (c *Cluster) newStateFromNode(ctx context.Context, node *corev1.Node, oldNode *StateNode) (*StateNode, error) {
@@ -872,4 +890,9 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
+}
+
+func (c *Cluster) IsNodeClaimMarkedForDeletion(providerId string) bool {
+	return providerId != "" &&
+		(c.nodes[providerId].markedForDeletion || !c.nodes[providerId].NodeClaim.DeletionTimestamp.IsZero())
 }
