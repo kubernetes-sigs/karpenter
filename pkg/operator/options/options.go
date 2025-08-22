@@ -86,6 +86,7 @@ type Options struct {
 	minValuesPolicyRaw      string
 	MinValuesPolicy         MinValuesPolicy
 	FeatureGates            FeatureGates
+	IgnoreDeletingNodePods  bool
 }
 
 type FlagSet struct {
@@ -125,6 +126,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay and StaticCapacity.")
+	fs.BoolVarWithEnv(&o.IgnoreDeletingNodePods, "ignore-deleting-node-pods", "IGNORE_DELETING_NODE_PODS", false, "Ignore pods on deleting nodes when making scheduling decisions. This is useful when using an external eviction controller alongside Karpenter to avoid overprovisioning from pods that will be deleted anyway.")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
