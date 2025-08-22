@@ -26,7 +26,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// Tracks vended limits for a NodePool that are in-flight
+// Currently tracks in-flight NodeClaims for a NodePool
 type NodePooltracker struct {
 	ReservedNodeLimit atomic.Int64
 }
