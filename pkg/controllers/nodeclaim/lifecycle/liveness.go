@@ -32,6 +32,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
 type Liveness struct {
@@ -93,7 +94,8 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	}
 	// If the Registered statusCondition hasn't gone True during the timeout since we first updated it, we should terminate the NodeClaim
 	// NOTE: Timeout has to be stored and checked in the same place since l.clock can advance after the check causing a race
-	if timeUntilTimeout := registrationTimeout - l.clock.Since(registered.LastTransitionTime.Time); timeUntilTimeout > 0 {
+	registrationTimeoutDuration := options.FromContext(ctx).RegistrationTimeout
+	if timeUntilTimeout := registrationTimeoutDuration - l.clock.Since(registered.LastTransitionTime.Time); timeUntilTimeout > 0 {
 		return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
 	}
 	if err := l.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
@@ -103,7 +105,11 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 		return reconcile.Result{}, err
 	}
 	// Delete the NodeClaim if we believe the NodeClaim won't register since we haven't seen the node
-	if err := l.deleteNodeClaimForTimeout(ctx, RegistrationTimeout, nodeClaim); err != nil {
+	registrationTimeout := NodeClaimTimeout{
+		duration: registrationTimeoutDuration,
+		reason:   registrationTimeoutReason,
+	}
+	if err := l.deleteNodeClaimForTimeout(ctx, registrationTimeout, nodeClaim); err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			return reconcile.Result{}, err
 		}
