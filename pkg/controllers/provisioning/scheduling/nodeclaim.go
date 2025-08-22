@@ -428,7 +428,7 @@ func filterInstanceTypesByRequirements(instanceTypes []*cloudprovider.InstanceTy
 		if err.minValuesIncompatibleErr != nil {
 			if !relaxMinValues {
 				// If MinValuesPolicy is set to Strict, return empty InstanceTypeOptions as we cannot launch with the remaining InstanceTypes when min values is violated.
-				remaining = nil
+				remaining = cloudprovider.InstanceTypes{}
 			} else {
 				err.minValuesIncompatibleErr = nil
 			}
