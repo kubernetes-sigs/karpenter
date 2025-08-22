@@ -1241,6 +1241,9 @@ var _ = Describe("Cluster State Sync", func() {
 	})
 	It("should emit cluster_state_unsynced_time_seconds metric when cluster state is unsynced", func() {
 		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey: nodePool.Name,
+			}},
 			Status: v1.NodeClaimStatus{
 				ProviderID: "",
 			},
@@ -1318,6 +1321,9 @@ var _ = Describe("Cluster State Sync", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					}},
 					Status: v1.NodeClaimStatus{
 						ProviderID: test.RandomProviderID(),
 					},
@@ -1341,6 +1347,9 @@ var _ = Describe("Cluster State Sync", func() {
 					ProviderID: test.RandomProviderID(),
 				})
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					}},
 					Status: v1.NodeClaimStatus{
 						ProviderID: node.Spec.ProviderID,
 					},
@@ -1372,6 +1381,9 @@ var _ = Describe("Cluster State Sync", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					}},
 					Status: v1.NodeClaimStatus{
 						ProviderID: test.RandomProviderID(),
 					},
@@ -1392,6 +1404,9 @@ var _ = Describe("Cluster State Sync", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					}},
 					Status: v1.NodeClaimStatus{
 						ProviderID: test.RandomProviderID(),
 					},
@@ -1416,6 +1431,9 @@ var _ = Describe("Cluster State Sync", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					}},
 					Status: v1.NodeClaimStatus{
 						ProviderID: test.RandomProviderID(),
 					},
@@ -1440,6 +1458,9 @@ var _ = Describe("Cluster State Sync", func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					}},
 					Status: v1.NodeClaimStatus{
 						ProviderID: test.RandomProviderID(),
 					},
@@ -1479,14 +1500,22 @@ var _ = Describe("Cluster State Sync", func() {
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 0, nil)
 	})
 	It("shouldn't consider the cluster state synced if a nodeclaim is added manually with UpdateNodeClaim", func() {
-		nodeClaim := test.NodeClaim()
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey: nodePool.Name,
+			}},
+		})
 		nodeClaim.Status.ProviderID = ""
 
 		cluster.UpdateNodeClaim(nodeClaim)
 		Expect(cluster.Synced(ctx)).To(BeFalse())
 	})
 	It("shouldn't consider the cluster state synced if a nodeclaim without a providerID is deleted", func() {
-		nodeClaim := test.NodeClaim()
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				v1.NodePoolLabelKey: nodePool.Name,
+			}},
+		})
 		nodeClaim.Status.ProviderID = ""
 
 		cluster.UpdateNodeClaim(nodeClaim)
@@ -1516,6 +1545,9 @@ var _ = Describe("Cluster State Sync", func() {
 					ProviderID: test.RandomProviderID(),
 				})
 				nodeClaim := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					}},
 					Status: v1.NodeClaimStatus{
 						ProviderID: node.Spec.ProviderID,
 					},
@@ -1777,6 +1809,9 @@ var _ = Describe("Data Races", func() {
 		// Call UpdateNodeClaim on 100 NodeClaims (enough to trigger a DATA RACE)
 		for i := 0; i < 100; i++ {
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				}},
 				Status: v1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 				},
@@ -1795,6 +1830,7 @@ var _ = Describe("Taints", func() {
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				corev1.LabelInstanceTypeStable: instanceType.Name,
+				v1.NodePoolLabelKey:            nodePool.Name,
 			}},
 			Status: v1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
@@ -2427,6 +2463,381 @@ var _ = Describe("NodePool Resources", func() {
 			corev1.ResourceMemory:           resource.MustParse("0Gi"),
 			corev1.ResourceEphemeralStorage: resource.MustParse("0Gi"),
 		}, cluster.NodePoolResourcesFor(nodeClaim1.Labels[v1.NodePoolLabelKey]))
+	})
+})
+
+var _ = Describe("NodeClaim State Tracking", func() {
+	var nodeClaim *v1.NodeClaim
+	var nodeClaim2 *v1.NodeClaim
+	var nodePool2 *v1.NodePool
+
+	BeforeEach(func() {
+		nodePool2 = test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "nodepool2"}})
+		ExpectApplied(ctx, env.Client, nodePool2)
+
+		nodeClaim = test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-nodeclaim",
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
+
+		nodeClaim2 = test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-nodeclaim-2",
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool2.Name,
+				},
+			},
+			Status: v1.NodeClaimStatus{
+				ProviderID: test.RandomProviderID(),
+			},
+		})
+	})
+
+	Context("UpdateNodeClaim", func() {
+		Context("New NodeClaim gets added", func() {
+			It("should track NodeClaim in running state when created with ProviderID", func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+
+				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeTrue())
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+			})
+
+			It("should track NodeClaim without ProviderID", func() {
+				nodeClaimWithoutProvider := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-nodeclaim-no-provider",
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
+					},
+					// No ProviderID set
+				})
+
+				ExpectApplied(ctx, env.Client, nodeClaimWithoutProvider)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimWithoutProvider))
+
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+
+				Expect(cluster.NodeClaimExists(nodeClaimWithoutProvider.Name)).To(BeTrue())
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaimWithoutProvider.Name)).To(BeTrue())
+			})
+
+			It("should track multiple NodeClaims in the same NodePool", func() {
+				nodeClaim3 := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-nodeclaim-2",
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodeClaim, nodeClaim3)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim3))
+
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(2))
+				Expect(deleting).To(Equal(0))
+
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim3.Name)).To(BeTrue())
+			})
+
+			It("should track NodeClaims across different NodePools", func() {
+				ExpectApplied(ctx, env.Client, nodeClaim, nodeClaim2)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
+
+				running1, deleting1 := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running2, deleting2 := cluster.NodePoolState.GetNodeCount(nodePool2.Name)
+
+				Expect(running1).To(Equal(1))
+				Expect(deleting1).To(Equal(0))
+				Expect(running2).To(Equal(1))
+				Expect(deleting2).To(Equal(0))
+
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool2.Name, nodeClaim2.Name)).To(BeTrue())
+			})
+		})
+
+		Context("Updates to existing NodeClaim", func() {
+			BeforeEach(func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			})
+
+			It("should be a no-op when NodeClaim is already tracked and no state change", func() {
+				// Verify initial state
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+
+				// Update NodeClaim with annotation change (no state change)
+				nodeClaim.Annotations = map[string]string{"test": "annotation"}
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				// State should remain the same
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+			})
+
+			It("should handle NodeClaim ProviderID change", func() {
+				// Verify initial state
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+
+				// Change ProviderID
+				originalProviderID := nodeClaim.Status.ProviderID
+				newProviderID := test.RandomProviderID()
+				nodeClaim.Status.ProviderID = newProviderID
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				// Should still track the NodeClaim correctly
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+
+				// Old ProviderID should not be tracked for deletion
+				cluster.MarkForDeletion(originalProviderID)
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1)) // Should not change
+				Expect(deleting).To(Equal(0))
+
+				// New ProviderID should work for deletion
+				cluster.MarkForDeletion(newProviderID)
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(1))
+			})
+
+			It("should move NodeClaim to deleting state when Node is marked for deletion", func() {
+				// Verify initial running state
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+
+				// Mark the node for deletion via cluster state
+				cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+
+				// Update NodeClaim - should detect it's marked for deletion
+				nodeClaim.Annotations = map[string]string{"updated": "true"}
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				// Should be in deleting state
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(1))
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeFalse())
+			})
+
+			It("should handle NodeClaim cleanup correctly", func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeTrue())
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+
+				// Delete the NodeClaim
+				ExpectDeleted(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				Expect(cluster.NodePoolState.IsNodeClaimRunning(nodePool.Name, nodeClaim.Name)).To(BeFalse())
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+			})
+		})
+
+		Context("DeleteNodeClaim", func() {
+			BeforeEach(func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			})
+
+			It("should remove NodeClaim from nodepool state", func() {
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeTrue())
+
+				ExpectDeleted(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeFalse())
+			})
+
+		})
+
+		Context("MarkForDeletion", func() {
+			BeforeEach(func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			})
+
+			It("should handle marking multiple NodeClaims for deletion", func() {
+				nodeClaim2 := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-nodeclaim-2",
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodeClaim2)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
+
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+				Expect(running).To(Equal(2))
+				Expect(deleting).To(Equal(0))
+
+				cluster.MarkForDeletion(nodeClaim.Status.ProviderID, nodeClaim2.Status.ProviderID)
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(2))
+			})
+
+			It("should move NodeClaim from running to deleting state", func() {
+				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+
+				cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(1))
+			})
+		})
+	})
+
+	Context("UnmarkForDeletion", func() {
+		BeforeEach(func() {
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+		})
+
+		It("should move NodeClaim from deleting to running state", func() {
+			running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			Expect(running).To(Equal(0))
+			Expect(deleting).To(Equal(1))
+
+			cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID)
+			running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+			Expect(running).To(Equal(1))
+			Expect(deleting).To(Equal(0))
+		})
+
+		It("should handle unmarking multiple NodeClaims", func() {
+			nodeClaim2 := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-nodeclaim-2",
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, nodeClaim2)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
+
+			cluster.MarkForDeletion(nodeClaim2.Status.ProviderID)
+			running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+			Expect(running).To(Equal(0))
+			Expect(deleting).To(Equal(2))
+
+			cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID, nodeClaim2.Status.ProviderID)
+			running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+			Expect(running).To(Equal(2))
+			Expect(deleting).To(Equal(0))
+		})
+	})
+
+	Context("Unmark/mark Transitions", func() {
+		It("should handle concurrent NodeClaim updates and state changes", func() {
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "race-test-nodeclaim",
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+
+			var wg sync.WaitGroup
+			numOperations := 50
+
+			// Concurrent mark/unmark operations
+			for i := 0; i < numOperations; i++ {
+				wg.Add(1)
+				go func(iteration int) {
+					defer wg.Done()
+					if iteration%2 == 0 {
+						cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
+					} else {
+						cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID)
+					}
+				}(i)
+			}
+
+			wg.Wait()
+
+			// Final state should be consistent
+			running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			Expect(running + deleting).To(Equal(1)) // Should have exactly one NodeClaim
+		})
+
 	})
 })
 
