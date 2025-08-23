@@ -30,11 +30,12 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
-var _ = Describe("NodePool Node Limits", func() {
+var _ = Describe("NodePoolState", func() {
 	var nodeClaim *v1.NodeClaim
-	var nodePool2 *v1.NodePool
+	var nodePool *v1.NodePool
 
 	BeforeEach(func() {
+		nodePool = test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "nodepool-2"}})
 		nodeClaim = test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -45,12 +46,11 @@ var _ = Describe("NodePool Node Limits", func() {
 				ProviderID: test.RandomProviderID(),
 			},
 		})
-		nodePool2 = test.NodePool(v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: "nodepool-2"}})
-		ExpectApplied(ctx, env.Client, nodePool2)
+		ExpectApplied(ctx, env.Client, nodePool)
 	})
 
 	// rsumukha@ todo : Add tests to verify Reserve and Release behavior during NodeClaim Create call
-	Context("NodePoolState.ReserveNodeCount", func() {
+	Context("ReserveNodeCount", func() {
 		It("should reserve requested capacity when available", func() {
 			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 3)
 			Expect(granted).To(Equal(int64(3)))
@@ -126,10 +126,9 @@ var _ = Describe("NodePool Node Limits", func() {
 			Expect(totalGranted).To(BeNumerically("<=", limit))
 			Expect(totalGranted).To(Equal(limit)) // Should grant exactly the limit
 		})
-
 	})
 
-	Context("NodePoolState.ReleaseNodeCount", func() {
+	Context("ReleaseNodeCount", func() {
 		It("should release reserved capacity", func() {
 			// Reserve some capacity
 			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 3)

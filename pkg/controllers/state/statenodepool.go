@@ -26,11 +26,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// Currently tracks in-flight NodeClaims for a NodePool
-type NodePooltracker struct {
-	ReservedNodeLimit atomic.Int64
-}
-
 type NodeClaimState struct {
 	Active   sets.Set[string]
 	Deleting sets.Set[string]
@@ -40,9 +35,9 @@ type NodeClaimState struct {
 type NodePoolState struct {
 	mu sync.RWMutex
 
-	nodePoolNameToNodeClaimState map[string]NodeClaimState   // node pool name -> node claim state (Running and Deleting node claim names)
-	nodeClaimNameToNodePoolName  map[string]string           // node claim name -> node pool name
-	nodePoolNameToNodePoolLimit  map[string]*NodePooltracker // node pool -> nodepool limit
+	nodePoolNameToNodeClaimState map[string]NodeClaimState // node pool name -> node claim state (Active and Deleting node claim names)
+	nodeClaimNameToNodePoolName  map[string]string         // node claim name -> node pool name
+	nodePoolNameToNodePoolLimit  map[string]*atomic.Int64  // node pool -> nodepool limit
 
 }
 
@@ -50,7 +45,7 @@ func NewNodePoolState() *NodePoolState {
 	return &NodePoolState{
 		nodePoolNameToNodeClaimState: map[string]NodeClaimState{},
 		nodeClaimNameToNodePoolName:  map[string]string{},
-		nodePoolNameToNodePoolLimit:  map[string]*NodePooltracker{},
+		nodePoolNameToNodePoolLimit:  map[string]*atomic.Int64{},
 	}
 }
 
@@ -68,8 +63,8 @@ func (n *NodePoolState) SetNodeClaimMapping(npName, ncName string) {
 	n.nodeClaimNameToNodePoolName[ncName] = npName
 }
 
-// Marks the given NodeClaim as running in NodePoolState
-func (n *NodePoolState) MarkNodeClaimRunning(npName, ncName string) {
+// Marks the given NodeClaim as active in NodePoolState
+func (n *NodePoolState) MarkNodeClaimActive(npName, ncName string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.ensureNodePoolEntry(npName)
@@ -108,15 +103,15 @@ func (n *NodePoolState) Cleanup(ncName string) {
 	delete(n.nodeClaimNameToNodePoolName, ncName)
 }
 
-func (n *NodePoolState) IsNodeClaimRunning(npName, ncName string) bool {
+func (n *NodePoolState) IsNodeClaimActive(npName, ncName string) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
 	return n.nodePoolNameToNodeClaimState[npName].Active.Has(ncName)
 }
 
-// Returns the current NodeClaims for a NodePool by its state (running, deleting)
-func (n *NodePoolState) GetNodeCount(npName string) (running, deleting int) {
+// Returns the current NodeClaims for a NodePool by its state (active, deleting)
+func (n *NodePoolState) GetNodeCount(npName string) (active, deleting int) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
@@ -124,18 +119,18 @@ func (n *NodePoolState) GetNodeCount(npName string) (running, deleting int) {
 }
 
 // ReserveNodeCount attempts to reserve nodes against a NodePool's limit.
-// It ensures that the total of running nodes + deleting nodes + reserved nodes doesn't exceed the limit.
+// It ensures that the total of active nodes + deleting nodes + reserved nodes doesn't exceed the limit.
 func (n *NodePoolState) ReserveNodeCount(np string, limit int64, wantedLimit int64) int64 {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
 	n.ensureNodePoolEntry(np)
-	running, deleting := n.nodeCounts(np)
+	active, deleting := n.nodeCounts(np)
 
 	// We retry until CompareAndSwap is successful
 	for {
-		currentlyReserved := n.nodePoolNameToNodePoolLimit[np].ReservedNodeLimit.Load()
-		remainingLimit := limit - int64(running+deleting) - currentlyReserved
+		currentlyReserved := n.nodePoolNameToNodePoolLimit[np].Load()
+		remainingLimit := limit - int64(active+deleting) - currentlyReserved
 		if remainingLimit < 0 {
 			return 0
 		}
@@ -144,7 +139,7 @@ func (n *NodePoolState) ReserveNodeCount(np string, limit int64, wantedLimit int
 			wantedLimit,
 		)
 
-		if n.nodePoolNameToNodePoolLimit[np].ReservedNodeLimit.CompareAndSwap(currentlyReserved, currentlyReserved+grantedLimit) {
+		if n.nodePoolNameToNodePoolLimit[np].CompareAndSwap(currentlyReserved, currentlyReserved+grantedLimit) {
 			return grantedLimit
 		}
 	}
@@ -157,8 +152,8 @@ func (n *NodePoolState) ReleaseNodeCount(npName string, count int64) {
 
 	// We retry until CompareAndSwap is successful
 	for {
-		currentlyReserved := n.nodePoolNameToNodePoolLimit[npName].ReservedNodeLimit.Load()
-		if n.nodePoolNameToNodePoolLimit[npName].ReservedNodeLimit.CompareAndSwap(
+		currentlyReserved := n.nodePoolNameToNodePoolLimit[npName].Load()
+		if n.nodePoolNameToNodePoolLimit[npName].CompareAndSwap(
 			currentlyReserved,
 			lo.Ternary(currentlyReserved-count < 0, 0, currentlyReserved-count)) {
 			return
@@ -168,24 +163,27 @@ func (n *NodePoolState) ReleaseNodeCount(npName string, count int64) {
 
 // Methods that expect the caller to hold the lock
 
-func (n *NodePoolState) nodeCounts(npName string) (running, deleting int) {
+func (n *NodePoolState) nodeCounts(npName string) (active, deleting int) {
 	if st, ok := n.nodePoolNameToNodeClaimState[npName]; ok {
 		return len(st.Active), len(st.Deleting)
 	}
 	return 0, 0
 }
 
-// Updates the NodeClaim state and releases the Limit if NodeClaim transitions from not Running to Running
+// Updates the NodeClaim state and releases the Limit if NodeClaim transitions from not Active to Active
 func (n *NodePoolState) UpdateNodeClaim(nodeClaim *v1.NodeClaim, markedForDeletion bool) {
 	// If we are launching/deleting a NodeClaim we need to track the state of the NodeClaim and its limits
 	npName := nodeClaim.Labels[v1.NodePoolLabelKey]
+	if npName == "" {
+		return
+	}
 	n.SetNodeClaimMapping(npName, nodeClaim.Name)
 
 	// If our node/nodeclaim is marked for deletion, we need to make sure that we delete it
 	if markedForDeletion {
 		n.MarkNodeClaimDeleting(npName, nodeClaim.Name)
 	} else {
-		n.MarkNodeClaimRunning(npName, nodeClaim.Name)
+		n.MarkNodeClaimActive(npName, nodeClaim.Name)
 	}
 }
 
@@ -197,7 +195,6 @@ func (n *NodePoolState) ensureNodePoolEntry(np string) {
 		}
 	}
 	if _, ok := n.nodePoolNameToNodePoolLimit[np]; !ok {
-		nl := &NodePooltracker{}
-		n.nodePoolNameToNodePoolLimit[np] = nl
+		n.nodePoolNameToNodePoolLimit[np] = &atomic.Int64{}
 	}
 }

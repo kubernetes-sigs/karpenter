@@ -286,7 +286,7 @@ func (c *Cluster) UnmarkForDeletion(providerIDs ...string) {
 			n.markedForDeletion = false
 			c.updateNodePoolResources(oldNode, n)
 			if n.NodeClaim != nil && n.NodeClaim.DeletionTimestamp.IsZero() {
-				c.NodePoolState.MarkNodeClaimRunning(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
+				c.NodePoolState.MarkNodeClaimActive(n.NodeClaim.Labels[v1.NodePoolLabelKey], n.NodeClaim.Name)
 			}
 		}
 	}
@@ -322,7 +322,11 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1.NodeClaim) {
 	}
 
 	// Update nodepool state with NodeClaim
-	c.NodePoolState.UpdateNodeClaim(nodeClaim, c.IsNodeClaimMarkedForDeletion(nodeClaim.Status.ProviderID))
+	markedForDel := false
+	if n, ok := c.nodes[nodeClaim.Status.ProviderID]; ok {
+		markedForDel = n.MarkedForDeletion()
+	}
+	c.NodePoolState.UpdateNodeClaim(nodeClaim, markedForDel)
 
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
@@ -890,9 +894,4 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		c.MarkUnconsolidated()
 		return
 	}
-}
-
-func (c *Cluster) IsNodeClaimMarkedForDeletion(providerID string) bool {
-	return providerID != "" &&
-		(c.nodes[providerID].markedForDeletion || !c.nodes[providerID].NodeClaim.DeletionTimestamp.IsZero())
 }
