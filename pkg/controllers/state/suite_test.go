@@ -1479,7 +1479,7 @@ var _ = Describe("Cluster State Sync", func() {
 		ExpectMetricGaugeValue(state.ClusterStateSynced, 0, nil)
 	})
 	It("shouldn't consider the cluster state synced if a nodeclaim is added manually with UpdateNodeClaim", func() {
-		nodeClaim := test.NodeClaim(v1.NodeClaim{})
+		nodeClaim := test.NodeClaim()
 		nodeClaim.Status.ProviderID = ""
 
 		cluster.UpdateNodeClaim(nodeClaim)
@@ -1777,9 +1777,6 @@ var _ = Describe("Data Races", func() {
 		// Call UpdateNodeClaim on 100 NodeClaims (enough to trigger a DATA RACE)
 		for i := 0; i < 100; i++ {
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-					v1.NodePoolLabelKey: nodePool.Name,
-				}},
 				Status: v1.NodeClaimStatus{
 					ProviderID: test.RandomProviderID(),
 				},
@@ -1798,7 +1795,6 @@ var _ = Describe("Taints", func() {
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
 				corev1.LabelInstanceTypeStable: instanceType.Name,
-				v1.NodePoolLabelKey:            nodePool.Name,
 			}},
 			Status: v1.NodeClaimStatus{
 				ProviderID: test.RandomProviderID(),
