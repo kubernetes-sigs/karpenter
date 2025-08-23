@@ -18,8 +18,12 @@ package expiration
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -77,7 +81,21 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		// Use t.Sub(clock.Now()) instead of time.Until() to ensure we're using the injected clock.
 		return reconcile.Result{RequeueAfter: expirationTime.Sub(c.clock.Now())}, nil
 	}
+	statusMessage := fmt.Sprintf("nodeClaim expired after %s (created at %s, expired at %s)",
+		nodeClaim.Spec.ExpireAfter.Duration.String(),
+		nodeClaim.CreationTimestamp.Format(time.RFC3339),
+		expirationTime.Format(time.RFC3339))
 	// 3. Otherwise, if the NodeClaim is expired we can forcefully expire the nodeclaim (by deleting it)
+	stored := nodeClaim.DeepCopy()
+	nodeClaim.StatusConditions().SetTrueWithReason(v1.ConditionTypeDisruptionReason, v1.DisruptionReasonExpired, statusMessage)
+	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+		if err := c.kubeClient.Status().Patch(ctx, nodeClaim, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+	}
 	if err := c.kubeClient.Delete(ctx, nodeClaim); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}

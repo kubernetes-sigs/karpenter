@@ -220,4 +220,102 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
+	It("should set DisruptionReason status condition when NodeClaim is garbage collected", func() {
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+
+		nodeClaim, node, err := ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaim)
+		Expect(err).ToNot(HaveOccurred())
+
+		// Mark the node as NotReady after the launch
+		ExpectMakeNodesNotReady(ctx, env.Client, node)
+
+		// Step forward to move past the cache eventual consistency timeout
+		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+
+		// Delete the nodeClaim from the cloudprovider
+		Expect(cloudProvider.Delete(ctx, nodeClaim)).To(Succeed())
+
+		// Add a finalizer to prevent immediate deletion so we can verify the condition
+		nodeClaim.Finalizers = append(nodeClaim.Finalizers, "test-finalizer")
+		ExpectApplied(ctx, env.Client, nodeClaim)
+
+		// Expect the NodeClaim to be marked for deletion
+		ExpectSingletonReconciled(ctx, garbageCollectionController)
+
+		// Verify that the DisruptionReason condition was set
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		condition := nodeClaim.StatusConditions().Get(v1.ConditionTypeDisruptionReason)
+		Expect(condition).ToNot(BeNil())
+		Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+		Expect(condition.Reason).To(Equal(v1.DisruptionReasonGarbageCollected))
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
+		ExpectNotFound(ctx, env.Client, nodeClaim)
+	})
+	It("should set DisruptionReason status condition for multiple NodeClaims during garbage collection", func() {
+		// Create multiple NodeClaims
+		var nodeClaims []*v1.NodeClaim
+		for i := 0; i < 5; i++ {
+			nodeClaims = append(nodeClaims, test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey: nodePool.Name,
+					},
+				},
+			}))
+		}
+		ExpectApplied(ctx, env.Client, nodePool)
+
+		// Deploy all NodeClaims and their associated nodes
+		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
+			defer GinkgoRecover()
+			ExpectApplied(ctx, env.Client, nodeClaims[i])
+			var node *corev1.Node
+			var err error
+			nodeClaims[i], node, err = ExpectNodeClaimDeployed(ctx, env.Client, cloudProvider, nodeClaims[i])
+			Expect(err).ToNot(HaveOccurred())
+
+			// Mark the node as NotReady after the launch
+			ExpectMakeNodesNotReady(ctx, env.Client, node)
+		})
+
+		// Step forward to move past the cache eventual consistency timeout
+		fakeClock.SetTime(time.Now().Add(time.Second * 20))
+
+		// Delete all NodeClaims from the cloudprovider
+		workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
+			defer GinkgoRecover()
+			Expect(cloudProvider.Delete(ctx, nodeClaims[i])).To(Succeed())
+		})
+
+		// Add finalizers to prevent immediate deletion so we can verify the conditions
+		for i := range nodeClaims {
+			nodeClaims[i].Finalizers = append(nodeClaims[i].Finalizers, "test-finalizer")
+			ExpectApplied(ctx, env.Client, nodeClaims[i])
+		}
+
+		// Expect the NodeClaims to be marked for deletion
+		ExpectSingletonReconciled(ctx, garbageCollectionController)
+
+		// Verify that the DisruptionReason condition was set for each NodeClaim
+		for i := range nodeClaims {
+			nodeClaims[i] = ExpectExists(ctx, env.Client, nodeClaims[i])
+			condition := nodeClaims[i].StatusConditions().Get(v1.ConditionTypeDisruptionReason)
+			Expect(condition).ToNot(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(condition.Reason).To(Equal(v1.DisruptionReasonGarbageCollected))
+		}
+
+		// Remove finalizers and verify all NodeClaims are deleted
+		for i := range nodeClaims {
+			ExpectFinalizersRemoved(ctx, env.Client, nodeClaims[i])
+		}
+		ExpectNotFound(ctx, env.Client, lo.Map(nodeClaims, func(n *v1.NodeClaim, _ int) client.Object { return n })...)
+	})
 })
