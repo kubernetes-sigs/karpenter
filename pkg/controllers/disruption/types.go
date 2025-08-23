@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
+	requirements "sigs.k8s.io/karpenter/pkg/scheduling"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
@@ -82,7 +83,8 @@ type Candidate struct {
 
 //nolint:gocyclo
 func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events.Recorder, clk clock.Clock, node *state.StateNode, pdbs pdb.Limits,
-	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string]*cloudprovider.InstanceType, queue *Queue, disruptionClass string) (*Candidate, error) {
+
+	nodePoolMap map[string]*v1.NodePool, nodePoolToInstanceTypesMap map[string]map[string][]*cloudprovider.InstanceType, queue *Queue, disruptionClass string) (*Candidate, error) {
 	var err error
 	var pods []*corev1.Pod
 	// If the orchestration queue is already considering a candidate we want to disrupt, don't consider it a candidate.
@@ -106,7 +108,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		return nil, serrors.Wrap(fmt.Errorf("nodepool not found"), "NodePool", klog.KRef("", nodePoolName))
 	}
 	// We only care if instanceType in non-empty consolidation to do price-comparison.
-	instanceType := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
+	instanceTypes := instanceTypeMap[node.Labels()[corev1.LabelInstanceTypeStable]]
 	if pods, err = node.ValidatePodsDisruptable(ctx, kubeClient, pdbs); err != nil {
 		// If the NodeClaim has a TerminationGracePeriod set and the disruption class is eventual, the node should be
 		// considered a candidate even if there's a pod that will block eviction. Other error types should still cause
@@ -116,6 +118,26 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 			return nil, err
 		}
+	}
+	var instanceType *cloudprovider.InstanceType
+	if len(instanceTypes) > 0 {
+
+		if len(instanceTypes) == 1 {
+			instanceType = instanceTypes[0]
+		} else {
+			reqs := requirements.NewLabelRequirements(node.Labels())
+
+			it, ok := lo.Find(instanceTypes, func(item *cloudprovider.InstanceType) bool {
+				return item.Offerings.HasCompatible(reqs)
+			})
+
+			if !ok {
+				return nil, fmt.Errorf("cannot find instance type of node %s", node.Name())
+			}
+
+			instanceType = it
+		}
+
 	}
 	return &Candidate{
 		StateNode:         node,

@@ -38,7 +38,7 @@ import (
 var nodePool1, nodePool2, nodePool3 *v1.NodePool
 var consolidation *disruption.SingleNodeConsolidation
 var nodePoolMap map[string]*v1.NodePool
-var nodePoolInstanceTypeMap map[string]map[string]*cloudprovider.InstanceType
+var nodePoolInstanceTypeMap map[string]map[string][]*cloudprovider.InstanceType
 
 var _ = Describe("SingleNodeConsolidation", func() {
 	BeforeEach(func() {
@@ -83,10 +83,10 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			nodePool2.Name: nodePool2,
 			nodePool3.Name: nodePool3,
 		}
-		nodePoolInstanceTypeMap = map[string]map[string]*cloudprovider.InstanceType{
-			nodePool1.Name: {leastExpensiveInstance.Name: leastExpensiveInstance},
-			nodePool2.Name: {leastExpensiveInstance.Name: leastExpensiveInstance},
-			nodePool3.Name: {leastExpensiveInstance.Name: leastExpensiveInstance},
+		nodePoolInstanceTypeMap = map[string]map[string][]*cloudprovider.InstanceType{
+			nodePool1.Name: {leastExpensiveInstance.Name: []*cloudprovider.InstanceType{leastExpensiveInstance}},
+			nodePool2.Name: {leastExpensiveInstance.Name: []*cloudprovider.InstanceType{leastExpensiveInstance}},
+			nodePool3.Name: {leastExpensiveInstance.Name: []*cloudprovider.InstanceType{leastExpensiveInstance}},
 		}
 
 		// Create a single node consolidation controller
