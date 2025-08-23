@@ -103,13 +103,6 @@ func (n *NodePoolState) Cleanup(ncName string) {
 	delete(n.nodeClaimNameToNodePoolName, ncName)
 }
 
-func (n *NodePoolState) IsNodeClaimActive(npName, ncName string) bool {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	return n.nodePoolNameToNodeClaimState[npName].Active.Has(ncName)
-}
-
 // Returns the current NodeClaims for a NodePool by its state (active, deleting)
 func (n *NodePoolState) GetNodeCount(npName string) (active, deleting int) {
 	n.mu.RLock()
