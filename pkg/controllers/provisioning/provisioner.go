@@ -163,6 +163,8 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 		} else {
 			nodeClaimNames[i] = name
 		}
+
+		// During provisioning of static nodes we reserve NodeCounts, we release it here regardless of the outcome
 		if nodeClaims[i].IsStaticNode {
 			p.cluster.NodePoolState.ReleaseNodeCount(nodeClaims[i].NodePoolName, 1)
 		}

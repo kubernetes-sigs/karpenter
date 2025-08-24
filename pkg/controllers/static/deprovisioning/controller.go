@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	helper "sigs.k8s.io/karpenter/pkg/controllers/static"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -74,7 +75,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	currentNodeClaims := RunningNodesForNodePool(c.cluster, np)
+	currentNodeClaims := helper.RunningNodesForNodePool(c.cluster, np)
 	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
 	nodeClaimsToTerminate := currentNodeClaims - desiredReplicas
 
@@ -93,7 +94,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	})
 
 	// Get deprovisioning candidates
-	candidates := GetDeprovisioningCandidates(ctx, c.kubeClient, np, npStateNodes, int(nodeClaimsToTerminate), c.clock)
+	candidates := helper.GetDeprovisioningCandidates(ctx, c.kubeClient, np, npStateNodes, int(nodeClaimsToTerminate), c.clock)
 
 	var scaleDownErrs []error
 	actualTerminatedCount := 0
@@ -108,9 +109,9 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 			continue
 		}
 		actualTerminatedCount++
-		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, TerminationReason)...)
+		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, helper.TerminationReason)...)
 		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-			metrics.ReasonLabel:       pretty.ToSnakeCase(TerminationReason),
+			metrics.ReasonLabel:       pretty.ToSnakeCase(helper.TerminationReason),
 			metrics.NodePoolLabel:     candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
 		})
@@ -123,7 +124,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	if actualTerminatedCount != int(nodeClaimsToTerminate) {
 		return reconcile.Result{RequeueAfter: time.Second}, serrors.Wrap(
 			errors.NewAggregate(scaleDownErrs),
-			"reason", TerminationReason,
+			"reason", helper.TerminationReason,
 		)
 	}
 

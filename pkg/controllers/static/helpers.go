@@ -18,18 +18,23 @@ package static
 
 import (
 	"context"
+	"math"
 	"sort"
 
 	"github.com/samber/lo"
-
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
-	pod "sigs.k8s.io/karpenter/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 const (
@@ -40,6 +45,54 @@ const (
 type NodeDisruptionCost struct {
 	node *state.StateNode
 	cost float64
+}
+
+type LaunchOptions struct {
+	Reason string
+}
+
+func WithReason(reason string) func(*LaunchOptions) {
+	return func(o *LaunchOptions) { o.Reason = reason }
+}
+
+func GetStaticNodeClaimsToProvision(
+	np *v1.NodePool,
+	instanceTypes []*cloudprovider.InstanceType,
+	count int64,
+) []*scheduling.NodeClaim {
+	var nodeClaims []*scheduling.NodeClaim
+	for range count {
+		nct := GetStaticNodeClaimTemplate(np, instanceTypes)
+		nodeClaims = append(nodeClaims, &scheduling.NodeClaim{
+			NodeClaimTemplate: *nct,
+			IsStaticNode:      true,
+		})
+	}
+	return nodeClaims
+}
+
+func GetStaticNodeClaimTemplate(np *v1.NodePool, instanceTypes []*cloudprovider.InstanceType) *scheduling.NodeClaimTemplate {
+	nct := scheduling.NewNodeClaimTemplate(np)
+	nct.InstanceTypeOptions, _, _ = scheduling.FilterInstanceTypesByRequirements(
+		instanceTypes,
+		nct.Requirements,
+		corev1.ResourceList{},
+		corev1.ResourceList{},
+		corev1.ResourceList{},
+		true,
+	)
+	return nct
+}
+
+func ComputeNodeClaimsToProvision(c *state.Cluster, np *v1.NodePool, nodes int64) int64 {
+	limit, ok := np.Spec.Limits[resources.Node]
+	nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
+	return c.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, lo.FromPtr(np.Spec.Replicas)-nodes)
+}
+
+func TotalNodesForNodePool(c *state.Cluster, np *v1.NodePool) int64 {
+	running, deleting := c.NodePoolState.GetNodeCount(np.Name)
+	return int64(running + deleting)
 }
 
 // Returns nodes suitable for deprovisioning, prioritizing:

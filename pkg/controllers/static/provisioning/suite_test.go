@@ -413,6 +413,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			// Should not be able to Reserve more
 			cluster.NodePoolState.ReleaseNodeCount(nodePool.Name, 10)
 			Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 10, 100)).To(BeEquivalentTo(0))
+
 		})
 
 		It("should handle zero replicas", func() {

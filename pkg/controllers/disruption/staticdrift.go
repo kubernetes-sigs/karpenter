@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	static "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
+	statichelper "sigs.k8s.io/karpenter/pkg/controllers/static"
 
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -100,7 +100,7 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 			}
 			// Select candidates up to maxAllowedDrifts
 			for _, c := range npCandidates[:maxAllowedDrifts] {
-				nct := static.GetStaticNodeClaimTemplate(np, its)
+				nct := statichelper.GetStaticNodeClaimTemplate(np, its)
 				result := scheduling.Results{
 					NewNodeClaims: []*scheduling.NodeClaim{{NodeClaimTemplate: *nct, IsStaticNode: true}},
 				}

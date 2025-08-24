@@ -45,6 +45,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	helper "sigs.k8s.io/karpenter/pkg/controllers/static"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
@@ -75,13 +76,13 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	nodes := TotalNodesForNodePool(c.cluster, np)
+	nodes := helper.TotalNodesForNodePool(c.cluster, np)
 	// Size down of replicas will be handled in disruption controller to drain nodes and delete NodeClaims
 	if nodes >= lo.FromPtr(np.Spec.Replicas) {
 		return reconcile.Result{}, nil
 	}
 
-	countNodeClaimsToProvision := ComputeNodeClaimsToProvision(c.cluster, np, nodes)
+	countNodeClaimsToProvision := helper.ComputeNodeClaimsToProvision(c.cluster, np, nodes)
 	if countNodeClaimsToProvision <= 0 {
 		log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("nodepool node limit reached")
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
@@ -96,7 +97,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, fmt.Errorf("failed to resolve instance types: %w", err)
 	}
 
-	nodeClaims := GetStaticNodeClaimsToProvision(np, its, countNodeClaimsToProvision)
+	nodeClaims := helper.GetStaticNodeClaimsToProvision(np, its, countNodeClaimsToProvision)
 
 	_, err = c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
 	if err != nil {
