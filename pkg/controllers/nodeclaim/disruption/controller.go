@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -93,10 +94,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	var results []reconcile.Result
 	var errs error
-	reconcilers := []nodeClaimReconciler{
-		c.drift,
-		c.consolidation,
-	}
+	// Should not Consolidate NodeClaims belonging to Static NodePool
+	reconcilers := []nodeClaimReconciler{c.drift}
+	reconcilers = lo.Ternary(nodePool.Spec.Replicas == nil,
+		append(reconcilers, c.consolidation),
+		reconcilers,
+	)
 	for _, reconciler := range reconcilers {
 		res, err := reconciler.Reconcile(ctx, nodePool, nodeClaim)
 		errs = multierr.Append(errs, err)

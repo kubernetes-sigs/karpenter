@@ -61,8 +61,14 @@ import (
 // LaunchOptions are the set of options that can be used to trigger certain
 // actions and configuration during scheduling
 type LaunchOptions struct {
-	RecordPodNomination bool
-	Reason              string
+	IgnoreStaticNodeClaims bool
+	RecordPodNomination    bool
+	Reason                 string
+}
+
+// IgnoreStaticNodeClaims tells us to ignore creating static nodeClaims during the launch.
+func IgnoreStaticNodeClaims(o *LaunchOptions) {
+	o.IgnoreStaticNodeClaims = true
 }
 
 // RecordPodNomination causes nominate pod events to be recorded against the node.
@@ -136,7 +142,7 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	if len(results.NewNodeClaims) == 0 {
 		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
-	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisionedReason), RecordPodNomination); err != nil {
+	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisionedReason), RecordPodNomination, IgnoreStaticNodeClaims); err != nil {
 		return reconciler.Result{}, err
 	}
 	return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
@@ -149,11 +155,19 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 	errs := make([]error, len(nodeClaims))
 	nodeClaimNames := make([]string, len(nodeClaims))
 	workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
+		if option.Resolve(opts...).IgnoreStaticNodeClaims && nodeClaims[i].IsStaticNode {
+			return
+		}
 		// create a new context to avoid a data race on the ctx variable
 		if name, err := p.Create(ctx, nodeClaims[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("creating node claim, %w", err)
 		} else {
 			nodeClaimNames[i] = name
+		}
+
+		// During provisioning of static nodes we reserve NodeCounts, we release it here regardless of the outcome
+		if nodeClaims[i].IsStaticNode {
+			p.cluster.NodePoolState.ReleaseNodeCount(nodeClaims[i].NodePoolName, 1)
 		}
 	})
 	return nodeClaimNames, multierr.Combine(errs...)

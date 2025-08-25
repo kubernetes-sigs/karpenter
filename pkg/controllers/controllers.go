@@ -55,6 +55,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	staticdeprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
+	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 )
@@ -123,6 +125,11 @@ func NewControllers(
 	// The cloud provider must define status conditions for the node repair controller to use to detect unhealthy nodes
 	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
 		controllers = append(controllers, health.NewController(kubeClient, cloudProvider, clock, recorder))
+	}
+
+	if options.FromContext(ctx).FeatureGates.StaticCapacity {
+		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock))
+		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, clock))
 	}
 
 	return controllers

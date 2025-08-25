@@ -220,9 +220,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType()})
@@ -278,9 +278,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := multiNodeConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := multiNodeConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(multiNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType()})
@@ -321,9 +321,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := singleNodeConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := singleNodeConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(singleNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType()})
@@ -729,9 +729,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -792,10 +792,10 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd.Results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(HaveLen(0))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -817,9 +817,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := multiConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -880,9 +880,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := multiConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -904,9 +904,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := singleConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -967,9 +967,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := singleConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -2368,13 +2368,15 @@ var _ = Describe("Consolidation", func() {
 			Expect(err).To(Succeed())
 
 			// this test validator invalidates the command because it creates pod churn during validaiton
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd.Results).To(Equal(pscheduling.Results{}))
-			Expect(cmd.Candidates).To(HaveLen(1))
-			// the test validator manually binds a pod to nodes[0], causing it to no longer be eligible
-			Expect(cmd.Candidates[0].StateNode.Node.Name).To(Equal(nodes[1].Name))
-			Expect(cmd.Decision()).To(Equal(disruption.DeleteDecision))
+			for _, cmd := range cmds {
+				Expect(cmd.Results).To(Equal(pscheduling.Results{}))
+				Expect(cmd.Candidates).To(HaveLen(1))
+				// the test validator manually binds a pod to nodes[0], causing it to no longer be eligible
+				Expect(cmd.Candidates[0].StateNode.Node.Name).To(Equal(nodes[1].Name))
+				Expect(cmd.Decision()).To(Equal(disruption.DeleteDecision))
+			}
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
