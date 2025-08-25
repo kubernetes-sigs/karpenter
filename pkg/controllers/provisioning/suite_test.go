@@ -1741,7 +1741,10 @@ var _ = Describe("Provisioning", func() {
 	Context("Volume Topology Requirements", func() {
 		var storageClass *storagev1.StorageClass
 		BeforeEach(func() {
-			storageClass = test.StorageClass(test.StorageClassOptions{Zones: []string{"test-zone-2", "test-zone-3"}})
+			storageClass = test.StorageClass(test.StorageClassOptions{
+				Zones:             []string{"test-zone-2", "test-zone-3"},
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+			})
 		})
 		It("should not schedule if invalid pvc", func() {
 			ExpectApplied(ctx, env.Client, test.NodePool())

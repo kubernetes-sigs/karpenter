@@ -54,6 +54,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -63,7 +64,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 const (
@@ -239,8 +240,9 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&corev1.PersistentVolume{},
 		&storagev1.StorageClass{},
 		&v1.NodePool{},
-		&v1alpha1.TestNodeClass{},
+		&testv1alpha1.TestNodeClass{},
 		&v1.NodeClaim{},
+		&v1alpha1.NodeOverlay{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
