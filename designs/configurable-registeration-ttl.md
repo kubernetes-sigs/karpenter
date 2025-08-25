@@ -57,4 +57,4 @@ We will keep a default for all nodes at 15 minute TTL however in the cases that 
 
 #### Evaluation conditions 
 
-1. When evaluating liveness, check if NodeClaim contains a registerationTTL if so utilize that TTL instead of the default. 
+1. When evaluating liveness, check if NodeClaim contains a registrationTTL if so utilize that TTL instead of the default. 
