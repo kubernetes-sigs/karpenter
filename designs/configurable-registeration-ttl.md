@@ -57,4 +57,9 @@ We will keep a default for all nodes at 15 minute TTL however in the cases that 
 
 #### Evaluation conditions 
 
-1. When evaluating liveness, check if NodeClaim contains a registrationTTL if so utilize that TTL instead of the default. 
+1. When evaluating liveness, check if NodeClaim contains a registrationTTL if so utilize that TTL instead of the default.
+
+### Option 3:
+#### Leveraging NodeOverlay 
+
+We could enable this feature via Node Overlay. However the issue is it isn't always the case that a instance type specifically is causing issues but rather a instance type running a specific AMI. This makes it difficult to use NodeOverlay to change the registrationTTL. 
