@@ -39,6 +39,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
@@ -119,11 +120,13 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	return result.Min(results...), nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)
+	log.FromContext(ctx).V(1).Info("nodeclaim.disruption maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.disruption").
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Watches(&v1.NodePool{}, nodeclaimutils.NodePoolEventHandler(c.kubeClient, c.cloudProvider)).
 		Watches(&corev1.Pod{}, nodeclaimutils.PodEventHandler(c.kubeClient, c.cloudProvider))
 

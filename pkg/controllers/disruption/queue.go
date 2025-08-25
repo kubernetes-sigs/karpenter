@@ -54,14 +54,14 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 const (
-	queueBaseDelay          = 1 * time.Second
-	queueMaxDelay           = 10 * time.Second
-	maxRetryDuration        = 10 * time.Minute
-	maxConcurrentReconciles = 100
+	queueBaseDelay   = 1 * time.Second
+	queueMaxDelay    = 10 * time.Second
+	maxRetryDuration = 10 * time.Minute
 )
 
 type UnrecoverableError struct {
@@ -109,7 +109,9 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
-func (q *Queue) Register(_ context.Context, m manager.Manager) error {
+func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 100, 1000)
+	log.FromContext(ctx).V(1).Info("disruption.queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
 		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).
