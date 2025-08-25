@@ -60,7 +60,7 @@ func GetStaticNodeClaimsToProvision(
 	instanceTypes []*cloudprovider.InstanceType,
 	count int64,
 ) []*scheduling.NodeClaim {
-	var nodeClaims []*scheduling.NodeClaim
+	nodeClaims := make([]*scheduling.NodeClaim, 0, count)
 	for range count {
 		nct := GetStaticNodeClaimTemplate(np, instanceTypes)
 		nodeClaims = append(nodeClaims, &scheduling.NodeClaim{
@@ -108,13 +108,14 @@ func GetDeprovisioningCandidates(ctx context.Context, kubeClient client.Client, 
 		}
 		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet)
 	})
-	emptyNodesSet := lo.SliceToMap(emptyNodes, func(n *state.StateNode) (*state.StateNode, struct{}) {
-		return n, struct{}{}
-	})
+
 	candidates := lo.Slice(emptyNodes, 0, count)
 	remaining := count - len(candidates)
 
 	if remaining > 0 {
+		emptyNodesSet := lo.SliceToMap(emptyNodes, func(n *state.StateNode) (*state.StateNode, struct{}) {
+			return n, struct{}{}
+		})
 		nonEmptyNodesWithCost := lo.FilterMap(nodes, func(node *state.StateNode, _ int) (NodeDisruptionCost, bool) {
 			if _, ok := emptyNodesSet[node]; ok {
 				return NodeDisruptionCost{}, false

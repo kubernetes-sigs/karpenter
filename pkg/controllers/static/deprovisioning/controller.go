@@ -18,12 +18,14 @@ package static
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -88,6 +90,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		Info("scaling down static nodepool", "current", currentNodeClaims, "desired", desiredReplicas, "toTerminate", nodeClaimsToTerminate)
 
 	// Get all active NodeClaims for this NodePool
+	// todo : cluster.Nodes() deepcopies all state nodes, we want to optimize to deep copy right nodes
 	allNodes := c.cluster.Nodes().Active()
 	npStateNodes := lo.Filter(allNodes, func(node *state.StateNode, _ int) bool {
 		return node.Labels()[v1.NodePoolLabelKey] == np.Name && node.NodeClaim != nil
@@ -96,32 +99,35 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	// Get deprovisioning candidates
 	candidates := helper.GetDeprovisioningCandidates(ctx, c.kubeClient, np, npStateNodes, int(nodeClaimsToTerminate), c.clock)
 
-	var scaleDownErrs []error
-	actualTerminatedCount := 0
+	scaleDownErrs := make([]error, len(candidates))
+	actualTerminatedCount := int64(0)
 	// Terminate selected NodeClaims
-	for _, candidate := range candidates {
-		nodeClaim := candidate.NodeClaim
+	workqueue.ParallelizeUntil(ctx, len(candidates), len(candidates), func(i int) {
+		candidate := candidates[i]
+
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
-			return c.kubeClient.Delete(ctx, nodeClaim)
+			return c.kubeClient.Delete(ctx, candidate.NodeClaim)
 		}); err != nil && client.IgnoreNotFound(err) != nil {
-			log.FromContext(ctx).Error(err, "failed to delete NodeClaim", "NodeClaim", klog.KObj(nodeClaim))
-			scaleDownErrs = append(scaleDownErrs, err)
-			continue
+			log.FromContext(ctx).Error(err, "failed to delete NodeClaim", "NodeClaim", klog.KObj(candidate.NodeClaim))
+			scaleDownErrs[i] = err
+			return
 		}
-		actualTerminatedCount++
+
+		atomic.AddInt64(&actualTerminatedCount, 1)
+
 		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, helper.TerminationReason)...)
 		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
 			metrics.ReasonLabel:       pretty.ToSnakeCase(helper.TerminationReason),
 			metrics.NodePoolLabel:     candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
 		})
-		c.cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-	}
+		c.cluster.MarkForDeletion(candidate.NodeClaim.Status.ProviderID)
+	})
 
 	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).
 		Info("scaled down static nodepool", "current", currentNodeClaims, "desired", desiredReplicas, "terminated", actualTerminatedCount)
 
-	if actualTerminatedCount != int(nodeClaimsToTerminate) {
+	if actualTerminatedCount != nodeClaimsToTerminate {
 		return reconcile.Result{RequeueAfter: time.Second}, serrors.Wrap(
 			errors.NewAggregate(scaleDownErrs),
 			"reason", helper.TerminationReason,
