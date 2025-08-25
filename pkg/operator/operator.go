@@ -55,6 +55,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -101,6 +102,7 @@ type Operator struct {
 	KubernetesInterface kubernetes.Interface
 	EventRecorder       events.Recorder
 	Clock               clock.Clock
+	InstanceTypeStore   *nodeoverlay.InstanceTypeStore
 }
 
 type Options struct {
@@ -221,12 +223,14 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	}))
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
+	instanceTypeStore := nodeoverlay.NewInstanceTypeStore()
 
 	return ctx, &Operator{
 		Manager:             mgr,
 		KubernetesInterface: kubernetesInterface,
 		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(appName)),
 		Clock:               clock.RealClock{},
+		InstanceTypeStore:   instanceTypeStore,
 	}
 }
 
