@@ -309,7 +309,10 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 		return scheduler.Results{}, err
 	}
 
-	pods := append(pendingPods, deletingNodePods...)
+	pods := pendingPods
+	if !options.FromContext(ctx).IgnoreDeletingNodePods {
+		pods = append(pods, deletingNodePods...)
+	}
 	// nothing to schedule, so just return success
 	if len(pods) == 0 {
 		return scheduler.Results{}, nil
@@ -368,7 +371,10 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	)
 	if len(results.NewNodeClaims) > 0 {
 		log.FromContext(ctx).WithValues(
-			"Pods", pretty.Slice(lo.Map(pods, func(p *corev1.Pod, _ int) string {
+			"PendingPods", pretty.Slice(lo.Map(pendingPods, func(p *corev1.Pod, _ int) string {
+				return klog.KObj(p).String()
+			}), 5),
+			"DeletingNodePods", pretty.Slice(lo.Map(deletingNodePods, func(p *corev1.Pod, _ int) string {
 				return klog.KObj(p).String()
 			}), 5),
 			"duration", time.Since(start),
