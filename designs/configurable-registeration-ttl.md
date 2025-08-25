@@ -51,7 +51,7 @@ spec:
 N/A
 
 ### Option 2:
-#### Introduce a configuration registeration TTL to NodeClass and propagate it to the NodeClaim
+#### Introduce a configuration registration TTL to NodeClass and propagate it to the NodeClaim
 
 We will keep a default for all nodes at 15 minute TTL however in the cases that the NodeClass would be used with GPUs or known to take a longer time to register, we will expose a new configuration registerationTTL. We will allow users to configure their own TTL without presets
 
