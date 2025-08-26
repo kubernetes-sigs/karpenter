@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
@@ -46,6 +47,7 @@ type VolumeTopology struct {
 }
 
 func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
+	// find requirements
 	var requirements []v1.NodeSelectorRequirement
 	for _, volume := range pod.Spec.Volumes {
 		req, err := v.getRequirements(ctx, pod, volume)
@@ -57,6 +59,15 @@ func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
 	if len(requirements) == 0 {
 		return nil
 	}
+
+	// normalize their keys
+	for i, requirement := range requirements {
+		if normalized, ok := karpv1.NormalizedLabels[requirement.Key]; ok {
+			requirements[i].Key = normalized
+		}
+	}
+
+	// add to pod
 	if pod.Spec.Affinity == nil {
 		pod.Spec.Affinity = &v1.Affinity{}
 	}
@@ -79,7 +90,7 @@ func (v *VolumeTopology) Inject(ctx context.Context, pod *v1.Pod) error {
 
 	log.FromContext(ctx).
 		WithValues("Pod", klog.KObj(pod)).
-		V(1).Info(fmt.Sprintf("adding requirements derived from pod volumes, %s", requirements))
+		V(1).Info(fmt.Sprintf("added requirements derived from pod volumes, %s", requirements))
 	return nil
 }
 
