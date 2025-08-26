@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
@@ -30,7 +31,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/awslabs/operatorpkg/object"
-	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
@@ -248,19 +248,25 @@ var _ = Describe("NodeClaim", func() {
 		})
 		It("should delete a NodeClaim if it references a NodeClass that isn't Ready", func() {
 			env.ExpectCreated(nodeClass)
-			nodeClass = env.ExpectNodeClassCondition(nodeClass, []status.Condition{
-				{
-					Type:               "Ready",
-					Status:             metav1.ConditionFalse,
-					LastTransitionTime: metav1.Now(),
-					Reason:             "NotReady",
-					Message:            "NodeClass is not ready",
-				},
+			By("Validating the NodeClass status condition has been reconciled")
+			Eventually(func(g Gomega) {
+				g.Expect(env.Client.Get(env.Context, client.ObjectKeyFromObject(nodeClass), nodeClass)).To(Succeed())
+				_, found, err := unstructured.NestedSlice(nodeClass.Object, "status", "conditions")
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(found).To(BeTrue())
+			}, 5*time.Second).Should(Succeed())
+
+			env.ExpectBlockNodeClassStatus(nodeClass)
+			nodeClass = env.ExpectReplaceNodeClassCondition(nodeClass, metav1.Condition{
+				Type:               "Ready",
+				Status:             metav1.ConditionFalse,
+				LastTransitionTime: metav1.Now(),
+				ObservedGeneration: nodeClass.GetGeneration(),
+				Reason:             "TestingNotReady",
+				Message:            "NodeClass is not ready",
 			})
 			env.ExpectStatusUpdated(nodeClass)
-			env.ExpectBlockNodeClassStatus(nodeClass)
-			// TODO: better not to have this but this suite runs quickly as is and this solves for multiple cloudproviders
-			time.Sleep(10 * time.Second)
+
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				Spec: v1.NodeClaimSpec{
 					Requirements: requirements,

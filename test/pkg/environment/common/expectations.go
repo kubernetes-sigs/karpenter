@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/object"
-	"github.com/awslabs/operatorpkg/status"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -116,29 +115,34 @@ func (env *Environment) ExpectStatusUpdated(objects ...client.Object) {
 	}
 }
 
-func (env *Environment) ExpectNodeClassCondition(nodeclass *unstructured.Unstructured, conditions []status.Condition) *unstructured.Unstructured {
+func (env *Environment) ExpectReplaceNodeClassCondition(nodeclass *unstructured.Unstructured, condition metav1.Condition) *unstructured.Unstructured {
 	result := nodeclass.DeepCopy()
+	updateStatusCondition := []metav1.Condition{condition}
 
-	err := unstructured.SetNestedSlice(result.Object, lo.Map(conditions, func(condition status.Condition, _ int) interface{} {
+	tt, _, _ := unstructured.NestedSlice(result.Object, "status", "conditions")
+	for _, t := range tt {
+		cond := t.(map[string]interface{})
+		if cond["type"].(string) == condition.Type {
+			continue
+		}
+		updateStatusCondition = append(updateStatusCondition, metav1.Condition{
+			Type:               cond["type"].(string),
+			Status:             metav1.ConditionStatus(cond["status"].(string)),
+			LastTransitionTime: metav1.Unix(lo.Must(time.Parse(time.RFC3339, cond["lastTransitionTime"].(string))).Unix(), 0),
+			Reason:             cond["reason"].(string),
+			Message:            cond["message"].(string),
+			ObservedGeneration: cond["observedGeneration"].(int64),
+		})
+	}
+
+	err := unstructured.SetNestedSlice(result.Object, lo.Map(updateStatusCondition, func(condition metav1.Condition, _ int) interface{} {
 		b := map[string]interface{}{}
-		if condition.Type != "" {
-			b["type"] = condition.Type
-		}
-		if condition.Reason != "" {
-			b["reason"] = condition.Reason
-		}
-		if condition.Status != "" {
-			b["status"] = string(condition.Status)
-		}
-		if condition.Message != "" {
-			b["message"] = condition.Message
-		}
-		if !condition.LastTransitionTime.IsZero() {
-			b["lastTransitionTime"] = condition.LastTransitionTime.Format(time.RFC3339)
-		}
-		if condition.ObservedGeneration != 0 {
-			b["observedGeneration"] = condition.ObservedGeneration
-		}
+		b["type"] = condition.Type
+		b["reason"] = condition.Reason
+		b["status"] = string(condition.Status)
+		b["message"] = condition.Message
+		b["lastTransitionTime"] = condition.LastTransitionTime.Format(time.RFC3339)
+		b["observedGeneration"] = condition.ObservedGeneration
 		return b
 	}), "status", "conditions")
 	Expect(err).To(BeNil())
@@ -941,7 +945,7 @@ func (env *Environment) ExpectBlockNodeRegistration() {
 // 3. Creates a binding for the admission policy to enforce the validation
 //
 // Note: Requires Kubernetes version 1.28+ to function properly.
-func (env *Environment) ExpectBlockNodeClassStatus(obj *unstructured.Unstructured) {
+func (env *Environment) ExpectBlockNodeClassStatus(nodeClass *unstructured.Unstructured) {
 	GinkgoHelper()
 
 	version, err := env.KubeClient.Discovery().ServerVersion()
@@ -967,9 +971,9 @@ func (env *Environment) ExpectBlockNodeClassStatus(obj *unstructured.Unstructure
 						RuleWithOperations: admissionregistrationv1.RuleWithOperations{
 							Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
 							Rule: admissionregistrationv1.Rule{
-								APIGroups:   []string{object.GVK(obj).Group},
-								APIVersions: []string{object.GVK(obj).Version},
-								Resources:   []string{strings.ToLower(object.GVK(obj).Kind) + "es/status"},
+								APIGroups:   []string{object.GVK(nodeClass).Group},
+								APIVersions: []string{object.GVK(nodeClass).Version},
+								Resources:   []string{strings.ToLower(object.GVK(nodeClass).Kind) + "es/status"},
 							},
 						},
 					},
@@ -977,7 +981,11 @@ func (env *Environment) ExpectBlockNodeClassStatus(obj *unstructured.Unstructure
 			},
 			Validations: []admissionregistrationv1.Validation{
 				{
-					Expression: "false",
+					// Blocks status condition updates that lack the 'TestingNotReady' reason field.
+					// This prevents the Karpenter controller from modifying status conditions
+					// while allowing our test suite to make updates. This provides a deterministic
+					// mechanism for E2E tests to update NodeClass conditions.
+					Expression: "object.status.conditions.filter(c, c.type == 'Ready').all(c, c.reason == 'TestingNotReady')",
 				},
 			},
 		},
@@ -998,6 +1006,22 @@ func (env *Environment) ExpectBlockNodeClassStatus(obj *unstructured.Unstructure
 	}
 	// Create both the policy and binding in the cluster
 	env.ExpectCreated(admissionspolicy, admissionspolicybinding)
+
+	// Wait for the admission policy to become active
+	// Note: There can be a delay between resource creation and policy enforcement
+	// We use a dry-run nodeclass status update attempt to verify the policy is active
+	nodeClass = env.ExpectReplaceNodeClassCondition(nodeClass, metav1.Condition{
+		Type:               "Ready",
+		Status:             metav1.ConditionFalse,
+		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: nodeClass.GetGeneration(),
+		Reason:             "NotReady",
+		Message:            "NotReady",
+	})
+	By("Validating the admission policy is applied")
+	Eventually(func(g Gomega) {
+		g.Expect(env.Client.Status().Update(env, nodeClass, client.DryRunAll)).ToNot(Succeed())
+	}).Should(Succeed())
 }
 
 func (env *Environment) ConsistentlyExpectNodeClaimsNotDrifted(duration time.Duration, nodeClaims ...*v1.NodeClaim) {
