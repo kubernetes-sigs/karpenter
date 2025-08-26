@@ -19,11 +19,11 @@ package static_test
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	"k8s.io/client-go/tools/record"
@@ -544,41 +544,34 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(nodeClaims.Items).To(HaveLen(5))
 		})
 
-		It("should handle concurrent reconciliation safely", func() {
+		It("handles concurrent reconciliation without exceeding NodePool limits", func() {
 			nodePool := test.StaticNodePool()
-			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
-			nodeClaim1, node1 := test.NodeClaimAndNode(v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:        nodePool.Name,
-						v1.NodeInitializedLabelKey: "true",
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					ProviderID: test.RandomProviderID(),
-					Capacity: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("10"),
-						corev1.ResourceMemory: resource.MustParse("1000Mi"),
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, node1)
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
+			nodePool.Spec.Limits = v1.Limits{
+				corev1.ResourceName("nodes"): resource.MustParse("10"),
+			}
+			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
+			ExpectApplied(ctx, env.Client, nodePool)
 
-			// Run multiple reconciliations concurrently
-			var wg sync.WaitGroup
-			for i := 0; i < 5; i++ {
-				wg.Add(1)
+			// Run many reconciles in parallel
+			n := 50
+			errs := make(chan error, n)
+			for i := 0; i < n; i++ {
 				go func() {
-					defer wg.Done()
-					ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+					defer GinkgoRecover()
+					_, e := controller.Reconcile(ctx, nodePool)
+					errs <- e
 				}()
 			}
-			wg.Wait()
+			for i := 0; i < n; i++ {
+				Expect(<-errs).ToNot(HaveOccurred())
+			}
 
-			nodeClaims := &v1.NodeClaimList{}
-			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
-			Expect(nodeClaims.Items).To(HaveLen(1))
+			// we should never observe > limit NodeClaims.
+			Consistently(func() int {
+				var list v1.NodeClaimList
+				_ = env.Client.List(ctx, &list)
+				return len(list.Items)
+			}).Should(BeNumerically("<=", 10))
 		})
 
 		It("should handle nodepool deletion gracefully", func() {
@@ -597,18 +590,33 @@ var _ = Describe("Static Provisioning Controller", func() {
 	})
 
 	Context("Helper Functions", func() {
-		Describe("hasNodePoolReplicaOrStatusChanged", func() {
-			It("should detect replica changes", func() {
-				old := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(5))}}
-				new := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(10))}}
-				Expect(static.HasNodePoolReplicaOrStatusChanged(old, new)).To(BeTrue())
-			})
+		DescribeTable("should detect replica or status changes",
+			func(oldReplicas, newReplicas *int64, oldReady, newReady bool, expected bool) {
+				old := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: oldReplicas}}
+				new := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: newReplicas}}
 
-			It("should return false for identical replicas", func() {
-				old := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(5))}}
-				new := old
-				Expect(static.HasNodePoolReplicaOrStatusChanged(old, new)).To(BeFalse())
-			})
-		})
+				if oldReady {
+					old.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
+					old.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+				} else {
+					old.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "reason", "old not ready")
+				}
+
+				if newReady {
+					new.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
+					new.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+				} else {
+					new.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "reason", "new not ready")
+				}
+
+				Expect(static.HasNodePoolReplicaOrStatusChanged(old, new)).To(Equal(expected))
+			},
+
+			Entry("replica changed", lo.ToPtr(int64(5)), lo.ToPtr(int64(3)), false, false, true),
+			Entry("replica same, false → true", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), false, true, true),
+			Entry("replica same, true → false", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), true, false, false),
+			Entry("replica same, both true", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), true, true, false),
+			Entry("replica same, both false", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), false, false, false),
+		)
 	})
 })

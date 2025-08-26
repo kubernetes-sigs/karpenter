@@ -2370,6 +2370,7 @@ var _ = Describe("Consolidation", func() {
 			// this test validator invalidates the command because it creates pod churn during validaiton
 			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
+			Expect(len(cmds)).To(Equal(1))
 			for _, cmd := range cmds {
 				Expect(cmd.Results).To(Equal(pscheduling.Results{}))
 				Expect(cmd.Candidates).To(HaveLen(1))

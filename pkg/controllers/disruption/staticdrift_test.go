@@ -555,7 +555,7 @@ var _ = Describe("StaticDrift", func() {
 				},
 			})
 
-			controller := static.NewController(env.Client, cluster, recorder, cloudProvider, fakeClock)
+			controller := static.NewController(env.Client, cluster, cloudProvider, fakeClock)
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {

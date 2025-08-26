@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/samber/lo"
@@ -35,8 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
-
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -45,9 +44,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	helper "sigs.k8s.io/karpenter/pkg/controllers/static"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 type Controller struct {
@@ -55,7 +54,6 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 	provisioner   *provisioning.Provisioner
 	cluster       *state.Cluster
-	recorder      events.Recorder
 }
 
 func NewController(kubeClient client.Client, cluster *state.Cluster, recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, clock clock.Clock) *Controller {
@@ -63,7 +61,6 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, recorder ev
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		cluster:       cluster,
-		recorder:      recorder,
 		provisioner:   provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock),
 	}
 }
@@ -76,13 +73,16 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	nodes := helper.TotalNodesForNodePool(c.cluster, np)
-	// Size down of replicas will be handled in disruption controller to drain nodes and delete NodeClaims
-	if nodes >= lo.FromPtr(np.Spec.Replicas) {
+	runningNodeClaims, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
+	// Size down of replicas will be handled in deprovisioning controller to drain nodes and delete NodeClaims
+	if int64(runningNodeClaims) >= lo.FromPtr(np.Spec.Replicas) {
 		return reconcile.Result{}, nil
 	}
 
-	countNodeClaimsToProvision := helper.ComputeNodeClaimsToProvision(c.cluster, np, nodes)
+	limit, ok := np.Spec.Limits[resources.Node]
+	nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
+	countNodeClaimsToProvision := c.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, lo.FromPtr(np.Spec.Replicas)-int64(runningNodeClaims))
+
 	if countNodeClaimsToProvision <= 0 {
 		log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("nodepool node limit reached")
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
@@ -91,15 +91,16 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	its, err := c.cloudProvider.GetInstanceTypes(ctx, np)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return reconcile.Result{}, fmt.Errorf("timed out while getting instance types: %w", err)
+			return reconcile.Result{}, fmt.Errorf("timed out getting instance types, %w", err)
 		}
-		log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "failed to resolve instance types")
-		return reconcile.Result{}, fmt.Errorf("failed to resolve instance types: %w", err)
+		return reconcile.Result{}, fmt.Errorf("failed resolving instance types, %w", err)
 	}
 
-	nodeClaims := helper.GetStaticNodeClaimsToProvision(np, its, countNodeClaimsToProvision)
+	nodeClaims := GetStaticNodeClaimsToProvision(np, its, countNodeClaimsToProvision)
 
-	_, err = c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
+	nodeClaimNames, err := c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
+	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).
+		Info("scaled up static nodepool", "current", runningNodeClaims, "desired", np.Spec.Replicas, "provisioned", len(nodeClaimNames))
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("creating nodeclaims, %w", err)
 	}
@@ -126,9 +127,9 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				return false
 			},
 		})).
-		Watches(&v1.NodeClaim{}, nodeutils.NodeClaimEventHandler(c.kubeClient), builder.WithPredicates(predicate.Funcs{
+		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(), builder.WithPredicates(predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
-				return true
+				return false
 			},
 			UpdateFunc: func(e event.UpdateEvent) bool {
 				return e.ObjectOld.GetDeletionTimestamp().IsZero() && !e.ObjectNew.GetDeletionTimestamp().IsZero()

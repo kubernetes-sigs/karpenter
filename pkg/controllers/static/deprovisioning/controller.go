@@ -18,12 +18,10 @@ package static
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
-	"time"
 
-	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -40,31 +38,24 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	helper "sigs.k8s.io/karpenter/pkg/controllers/static"
-	"sigs.k8s.io/karpenter/pkg/events"
-	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
-	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
-	recorder      events.Recorder
 	clock         clock.Clock
 }
 
-func NewController(kubeClient client.Client, cluster *state.Cluster, recorder events.Recorder, cloudProvider cloudprovider.CloudProvider, clock clock.Clock) *Controller {
+func NewController(kubeClient client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, clock clock.Clock) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		cluster:       cluster,
-		recorder:      recorder,
 		clock:         clock,
 	}
 }
@@ -77,30 +68,28 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	currentNodeClaims := helper.RunningNodesForNodePool(c.cluster, np)
+	runningNodeClaims, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
 	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
-	nodeClaimsToTerminate := currentNodeClaims - desiredReplicas
+	nodeClaimsToDeprovision := int64(runningNodeClaims) - desiredReplicas
 
 	// Only handle scale down - scale up is handled by provisioning controller
-	if nodeClaimsToTerminate <= 0 {
+	if nodeClaimsToDeprovision <= 0 {
 		return reconcile.Result{}, nil
 	}
 
 	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).
-		Info("scaling down static nodepool", "current", currentNodeClaims, "desired", desiredReplicas, "toTerminate", nodeClaimsToTerminate)
+		Info("scaling down static nodepool", "current", runningNodeClaims, "desired", desiredReplicas, "toDeprovision", nodeClaimsToDeprovision)
 
 	// Get all active NodeClaims for this NodePool
-	// todo : cluster.Nodes() deepcopies all state nodes, we want to optimize to deep copy right nodes
-	allNodes := c.cluster.Nodes().Active()
-	npStateNodes := lo.Filter(allNodes, func(node *state.StateNode, _ int) bool {
-		return node.Labels()[v1.NodePoolLabelKey] == np.Name && node.NodeClaim != nil
+	npStateNodes := helper.GetFilteredNodes(c.cluster, func(node *state.StateNode) bool {
+		return node.Labels()[v1.NodePoolLabelKey] == np.Name && node.NodeClaim != nil && !node.MarkedForDeletion()
 	})
 
 	// Get deprovisioning candidates
-	candidates := helper.GetDeprovisioningCandidates(ctx, c.kubeClient, np, npStateNodes, int(nodeClaimsToTerminate), c.clock)
+	candidates := GetDeprovisioningCandidates(ctx, c.kubeClient, np, npStateNodes, int(nodeClaimsToDeprovision), c.clock)
 
 	scaleDownErrs := make([]error, len(candidates))
-	actualTerminatedCount := int64(0)
+	actualDeprovisionedCount := int64(0)
 	// Terminate selected NodeClaims
 	workqueue.ParallelizeUntil(ctx, len(candidates), len(candidates), func(i int) {
 		candidate := candidates[i]
@@ -113,25 +102,15 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 			return
 		}
 
-		atomic.AddInt64(&actualTerminatedCount, 1)
-
-		c.recorder.Publish(disruptionevents.Terminating(candidate.Node, candidate.NodeClaim, helper.TerminationReason)...)
-		metrics.NodeClaimsDisruptedTotal.Inc(map[string]string{
-			metrics.ReasonLabel:       pretty.ToSnakeCase(helper.TerminationReason),
-			metrics.NodePoolLabel:     candidate.NodeClaim.Labels[v1.NodePoolLabelKey],
-			metrics.CapacityTypeLabel: candidate.NodeClaim.Labels[v1.CapacityTypeLabelKey],
-		})
+		atomic.AddInt64(&actualDeprovisionedCount, 1)
 		c.cluster.MarkForDeletion(candidate.NodeClaim.Status.ProviderID)
 	})
 
 	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).
-		Info("scaled down static nodepool", "current", currentNodeClaims, "desired", desiredReplicas, "terminated", actualTerminatedCount)
+		Info("scaled down static nodepool", "current", runningNodeClaims, "desired", desiredReplicas, "deprovisioned", actualDeprovisionedCount)
 
-	if actualTerminatedCount != nodeClaimsToTerminate {
-		return reconcile.Result{RequeueAfter: time.Second}, serrors.Wrap(
-			errors.NewAggregate(scaleDownErrs),
-			"reason", helper.TerminationReason,
-		)
+	if actualDeprovisionedCount != nodeClaimsToDeprovision {
+		return reconcile.Result{}, fmt.Errorf("failed to deprovision %d nodeclaims", nodeClaimsToDeprovision-actualDeprovisionedCount)
 	}
 
 	return reconcile.Result{}, nil
@@ -147,7 +126,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			UpdateFunc: func(e event.UpdateEvent) bool {
 				oldNP := e.ObjectOld.(*v1.NodePool)
 				newNP := e.ObjectNew.(*v1.NodePool)
-				return HasNodePoolReplicaOrStatusChanged(oldNP, newNP)
+				return HasNodePoolReplicaCountChanged(oldNP, newNP)
 			},
 			DeleteFunc: func(e event.DeleteEvent) bool {
 				return false
@@ -156,7 +135,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				return false
 			},
 		})).
-		Watches(&v1.NodeClaim{}, nodeutils.NodeClaimEventHandler(c.kubeClient), builder.WithPredicates(predicate.Funcs{
+		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(), builder.WithPredicates(predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
 				return true
 			},
@@ -174,6 +153,6 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
-func HasNodePoolReplicaOrStatusChanged(oldNP, newNP *v1.NodePool) bool {
-	return lo.FromPtr(oldNP.Spec.Replicas) != lo.FromPtr(newNP.Spec.Replicas) || (!oldNP.StatusConditions().Root().IsTrue() && newNP.StatusConditions().Root().IsTrue())
+func HasNodePoolReplicaCountChanged(oldNP, newNP *v1.NodePool) bool {
+	return lo.FromPtr(oldNP.Spec.Replicas) != lo.FromPtr(newNP.Spec.Replicas)
 }

@@ -25,7 +25,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
-	"k8s.io/client-go/tools/record"
 	clock "k8s.io/utils/clock/testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -40,7 +39,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	static "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -58,7 +56,6 @@ var (
 	controller               *static.Controller
 	env                      *test.Environment
 	nodeClaimStateController *informer.NodeClaimController
-	recorder                 events.Recorder
 )
 
 type failingClient struct {
@@ -86,8 +83,7 @@ var _ = BeforeSuite(func() {
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
-	recorder = events.NewRecorder(&record.FakeRecorder{})
-	controller = static.NewController(env.Client, cluster, recorder, cloudProvider, fakeClock)
+	controller = static.NewController(env.Client, cluster, cloudProvider, fakeClock)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 })
 
@@ -188,6 +184,48 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 			Expect(existingNodeClaims.Items).To(HaveLen(2))
 		})
 
+		It("should only consider running nodeclaims and not deleting nodeclaims", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+
+			nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						v1.NodeInitializedLabelKey:     "true",
+						corev1.LabelInstanceTypeStable: "stable.instance",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10"),
+						corev1.ResourceMemory: resource.MustParse("1000Mi"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := 0; i < 4; i++ {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			// Update cluster state to track the nodes
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims)
+			Expect(cluster.Nodes()).To(HaveLen(4))
+
+			// If 3 of the nodes are Marked for deletion then do not deprovision any
+			for i := 0; i < 3; i++ {
+				cluster.MarkForDeletion(nodes[i].Spec.ProviderID)
+			}
+
+			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+			Expect(result.RequeueAfter).To(BeZero())
+
+			// Should terminate 0 NodeClaims as 3 NodeClaims are deleting
+			remainingNodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
+			Expect(remainingNodeClaims.Items).To(HaveLen(4))
+		})
+
 		It("should terminate excess nodeclaims when current count exceeds desired replicas", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
@@ -223,118 +261,6 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 			remainingNodeClaims := &v1.NodeClaimList{}
 			Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
 			Expect(remainingNodeClaims.Items).To(HaveLen(2))
-		})
-
-		It("should prioritize empty nodes (with only daemonset pods) for termination", func() {
-			nodePool := test.StaticNodePool()
-			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
-
-			nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePool.Name,
-						v1.NodeInitializedLabelKey:     "true",
-						corev1.LabelInstanceTypeStable: "stable.instance",
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					Capacity: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("10"),
-						corev1.ResourceMemory: resource.MustParse("1000Mi"),
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-
-			// Nodes 0 and 2: Add only DaemonSet pods (reschedulable)
-			for i := range 4 {
-				pod := test.Pod(test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: lo.Ternary(i == 0 || i == 2, "kube-system", "default"),
-						OwnerReferences: lo.Ternary(i == 0 || i == 2,
-							[]metav1.OwnerReference{{
-								APIVersion: "apps/v1",
-								Kind:       "DaemonSet",
-								Name:       "test-daemonset",
-								UID:        "test-uid",
-							}},
-							nil),
-					},
-					NodeName: nodes[i].Name,
-				})
-				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
-				ExpectApplied(ctx, env.Client, pod)
-			}
-
-			// Update cluster state to track the nodes
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims)
-			Expect(cluster.Nodes()).To(HaveLen(4))
-
-			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-
-			Expect(result.RequeueAfter).To(BeZero())
-
-			// Should terminate 2 NodeClaims (4 current - 2 desired = 2 to terminate)
-			remainingNodeClaims := &v1.NodeClaimList{}
-			Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
-
-			activeNodeClaims := lo.Filter(remainingNodeClaims.Items, func(nc v1.NodeClaim, _ int) bool {
-				return nc.DeletionTimestamp.IsZero()
-			})
-			activeNodeClaimNames := lo.Map(activeNodeClaims, func(nc v1.NodeClaim, _ int) string {
-				return nc.Name
-			})
-			Expect(activeNodeClaimNames).To(HaveLen(2))
-			Expect(activeNodeClaimNames).To(ContainElements(nodeClaims[1].Name, nodeClaims[3].Name))
-		})
-
-		It("should terminate non-empty nodes when empty nodes are insufficient", func() {
-			nodePool := test.StaticNodePool()
-			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
-
-			nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						v1.NodePoolLabelKey:            nodePool.Name,
-						v1.NodeInitializedLabelKey:     "true",
-						corev1.LabelInstanceTypeStable: "stable.instance",
-					},
-				},
-				Status: v1.NodeClaimStatus{
-					Capacity: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("10"),
-						corev1.ResourceMemory: resource.MustParse("1000Mi"),
-					},
-				},
-			})
-			ExpectApplied(ctx, env.Client, nodePool)
-			for i := range 4 {
-				ExpectApplied(ctx, env.Client, nodes[i], nodeClaims[i])
-			}
-
-			pod1 := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{},
-				NodeName:   nodes[0].Name,
-			})
-			pod2 := test.Pod(test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{},
-				NodeName:   nodes[2].Name,
-			})
-
-			ExpectApplied(ctx, env.Client, pod1, pod2)
-
-			// Update cluster state to track the nodes
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims)
-			Expect(cluster.Nodes()).To(HaveLen(4))
-
-			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-
-			Expect(result.RequeueAfter).To(BeZero())
-
-			// Should terminate 3 NodeClaims (4 current - 1 desired = 3 to terminate)
-			remainingNodeClaims := &v1.NodeClaimList{}
-			Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
-			Expect(remainingNodeClaims.Items).To(HaveLen(1))
 		})
 
 		It("should handle zero replicas by terminating all nodeclaims", func() {
@@ -376,79 +302,6 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 			Expect(remainingNodeClaims.Items).To(HaveLen(0))
 		})
 
-		It("should handle nodes with mixed pod types correctly", func() {
-			nodePool := test.StaticNodePool()
-			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
-			ExpectApplied(ctx, env.Client, nodePool)
-
-			pods := []*corev1.Pod{}
-			nodes := []*corev1.Node{}
-			nodeClaims := []*v1.NodeClaim{}
-
-			for i := 0; i < 3; i++ {
-				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							v1.NodePoolLabelKey:        nodePool.Name,
-							v1.NodeInitializedLabelKey: "true",
-						},
-					},
-					Status: v1.NodeClaimStatus{
-						ProviderID: test.RandomProviderID(),
-						Capacity: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("10"),
-							corev1.ResourceMemory: resource.MustParse("1000Mi"),
-						},
-					},
-				})
-
-				switch i {
-				case 0:
-					pods = append(pods, test.Pod(test.PodOptions{
-						ObjectMeta: metav1.ObjectMeta{Name: "system-pod-0", Namespace: "kube-system"},
-						NodeName:   node.Name,
-					}))
-				case 1:
-					pods = append(pods,
-						test.Pod(test.PodOptions{
-							ObjectMeta: metav1.ObjectMeta{Name: "system-pod-1", Namespace: "kube-system"},
-							NodeName:   node.Name,
-						}),
-						test.Pod(test.PodOptions{
-							ObjectMeta: metav1.ObjectMeta{Name: "app-pod-1", Namespace: "default"},
-							NodeName:   node.Name,
-						}),
-					)
-				case 2:
-					pods = append(pods, test.Pod(test.PodOptions{
-						ObjectMeta: metav1.ObjectMeta{Name: "app-pod-2", Namespace: "default"},
-						NodeName:   node.Name,
-					}))
-				}
-
-				nodes = append(nodes, node)
-				nodeClaims = append(nodeClaims, nodeClaim)
-				ExpectApplied(ctx, env.Client, nodeClaim, node)
-			}
-
-			for _, pod := range pods {
-				ExpectApplied(ctx, env.Client, pod)
-			}
-
-			// Update cluster state to track the nodes
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims)
-			Expect(cluster.Nodes()).To(HaveLen(3))
-
-			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-
-			Expect(result.RequeueAfter).To(BeZero())
-
-			// Should terminate 2 NodeClaims (3 current - 1 desired = 2 to terminate)
-			remainingNodeClaims := &v1.NodeClaimList{}
-			Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
-			Expect(remainingNodeClaims.Items).To(HaveLen(1))
-		})
-
 		It("should handle no active nodeclaims gracefully", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(0))
@@ -458,17 +311,16 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{}, []*v1.NodeClaim{})
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-
 			Expect(result.RequeueAfter).To(BeZero())
 		})
 
-		Context("Requeue Scenarios", func() {
-			It("should requeue when there is a failure while deleting nodeclaims", func() {
+		Context("Failing Scenarios", func() {
+			It("should return error when nodeclaim deletion fails", func() {
 				nodePool := test.StaticNodePool()
 				nodePool.Spec.Replicas = lo.ToPtr(int64(1))
 				ExpectApplied(ctx, env.Client, nodePool)
 
-				failingController := static.NewController(&failingClient{Client: env.Client}, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, fakeClock)
+				failingController := static.NewController(&failingClient{Client: env.Client}, cluster, cloudProvider, fakeClock)
 
 				// Create 3 nodeclaims, so 2 need to be terminated
 				nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
@@ -497,11 +349,8 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 				Expect(cluster.Nodes()).To(HaveLen(3))
 				ExpectApplied(ctx, env.Client, nodeClaims[0])
 
-				result, err := failingController.Reconcile(ctx, nodePool)
+				_, err := failingController.Reconcile(ctx, nodePool)
 				Expect(err).To(HaveOccurred())
-
-				// Should requeue because not all nodeclaims were successfully deleted
-				Expect(result.RequeueAfter).To(Equal(time.Second))
 
 				// Verify that some nodeclaims still exist (deletion didn't complete as expected)
 				remainingNodeClaims := &v1.NodeClaimList{}
@@ -515,36 +364,273 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 			})
 		})
 
-		Context("Helper Functions", func() {
-			DescribeTable("should detect replica or status changes",
-				func(oldReplicas, newReplicas *int64, oldReady, newReady bool, expected bool) {
-					old := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: oldReplicas}}
-					new := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: newReplicas}}
+		Context("Deprovision Candidate Selection", func() {
+			It("should prioritize empty nodes (with only daemonset pods) for termination", func() {
+				nodePool := test.StaticNodePool()
+				nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 
-					if oldReady {
-						old.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
-						old.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
-					} else {
-						old.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "reason", "old not ready")
+				nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							v1.NodeInitializedLabelKey:     "true",
+							corev1.LabelInstanceTypeStable: "stable.instance",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Capacity: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("10"),
+							corev1.ResourceMemory: resource.MustParse("1000Mi"),
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool)
+
+				// Nodes 0 and 2: Add only DaemonSet pods (reschedulable)
+				for i := range 4 {
+					pod := test.Pod(test.PodOptions{
+						ObjectMeta: metav1.ObjectMeta{
+							Namespace: lo.Ternary(i == 0 || i == 2, "kube-system", "default"),
+							OwnerReferences: lo.Ternary(i == 0 || i == 2,
+								[]metav1.OwnerReference{{
+									APIVersion: "apps/v1",
+									Kind:       "DaemonSet",
+									Name:       "test-daemonset",
+									UID:        "test-uid",
+								}},
+								nil),
+						},
+						NodeName: nodes[i].Name,
+					})
+					ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+					ExpectApplied(ctx, env.Client, pod)
+				}
+
+				// Update cluster state to track the nodes
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims)
+				Expect(cluster.Nodes()).To(HaveLen(4))
+
+				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+
+				Expect(result.RequeueAfter).To(BeZero())
+
+				// Should terminate 2 NodeClaims (4 current - 2 desired = 2 to terminate)
+				remainingNodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
+
+				activeNodeClaims := lo.Filter(remainingNodeClaims.Items, func(nc v1.NodeClaim, _ int) bool {
+					return nc.DeletionTimestamp.IsZero()
+				})
+				activeNodeClaimNames := lo.Map(activeNodeClaims, func(nc v1.NodeClaim, _ int) string {
+					return nc.Name
+				})
+				Expect(activeNodeClaimNames).To(HaveLen(2))
+				Expect(activeNodeClaimNames).To(ContainElements(nodeClaims[1].Name, nodeClaims[3].Name))
+			})
+
+			It("should terminate non-empty nodes when empty nodes are insufficient", func() {
+				nodePool := test.StaticNodePool()
+				nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+
+				nodeClaims, nodes := test.NodeClaimsAndNodes(4, v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							v1.NodeInitializedLabelKey:     "true",
+							corev1.LabelInstanceTypeStable: "stable.instance",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Capacity: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("10"),
+							corev1.ResourceMemory: resource.MustParse("1000Mi"),
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool)
+				for i := range 4 {
+					ExpectApplied(ctx, env.Client, nodes[i], nodeClaims[i])
+				}
+
+				pod1 := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{},
+					NodeName:   nodes[0].Name,
+				})
+				pod2 := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{},
+					NodeName:   nodes[2].Name,
+				})
+
+				ExpectApplied(ctx, env.Client, pod1, pod2)
+
+				// Update cluster state to track the nodes
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims)
+				Expect(cluster.Nodes()).To(HaveLen(4))
+
+				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+
+				Expect(result.RequeueAfter).To(BeZero())
+
+				// Should terminate 3 NodeClaims (4 current - 1 desired = 3 to terminate)
+				remainingNodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, remainingNodeClaims)).To(Succeed())
+				Expect(remainingNodeClaims.Items).To(HaveLen(1))
+			})
+			Describe("disruption cost ordering", func() {
+				var (
+					nodePool   *v1.NodePool
+					nodes      []*corev1.Node
+					nodeClaims []*v1.NodeClaim
+					pods       []*corev1.Pod
+				)
+
+				remainingNames := func() []string {
+					var ncl v1.NodeClaimList
+					Expect(env.Client.List(ctx, &ncl, client.MatchingLabels{
+						v1.NodePoolLabelKey: nodePool.Name,
+					})).To(Succeed())
+					out := make([]string, 0, len(ncl.Items))
+					for i := range ncl.Items {
+						out = append(out, ncl.Items[i].Name)
+					}
+					return out
+				}
+				name := func(i int) string { return nodeClaims[i].Name }
+
+				BeforeEach(func() {
+					nodePool = test.StaticNodePool()
+					nodePool.Spec.Replicas = lo.ToPtr(int64(8))
+					ExpectApplied(ctx, env.Client, nodePool)
+
+					nodes = nil
+					nodeClaims = nil
+					pods = nil
+
+					// create two of each: low, high, dnd, ds (order matters only for indices)
+					priority := []string{"low", "high", "dnd", "ds"}
+					for i := 0; i < 2; i++ {
+						for _, p := range priority {
+							nc, n := test.NodeClaimAndNode(v1.NodeClaim{
+								ObjectMeta: metav1.ObjectMeta{
+									Labels: map[string]string{
+										v1.NodePoolLabelKey:        nodePool.Name,
+										v1.NodeInitializedLabelKey: "true",
+									},
+								},
+								Status: v1.NodeClaimStatus{
+									ProviderID: test.RandomProviderID(),
+									Capacity: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("10"),
+										corev1.ResourceMemory: resource.MustParse("1000Mi"),
+									},
+								},
+							})
+
+							switch p {
+							case "low":
+								pods = append(pods, test.Pod(test.PodOptions{
+									ObjectMeta: metav1.ObjectMeta{
+										Name:      fmt.Sprintf("system-pod-low-%d", i),
+										Namespace: "kube-system",
+									},
+									NodeName: n.Name,
+								}))
+							case "high":
+								pods = append(pods,
+									test.Pod(test.PodOptions{
+										ObjectMeta: metav1.ObjectMeta{
+											Name:      fmt.Sprintf("system-pod-high-%d", i),
+											Namespace: "kube-system",
+										},
+										NodeName: n.Name,
+									}),
+									test.Pod(test.PodOptions{
+										ObjectMeta: metav1.ObjectMeta{
+											Name:      fmt.Sprintf("app-pod-high-%d", i),
+											Namespace: "default",
+										},
+										NodeName: n.Name,
+									}),
+								)
+							case "dnd":
+								pods = append(pods, test.Pod(test.PodOptions{
+									ObjectMeta: metav1.ObjectMeta{
+										Name:      fmt.Sprintf("app-pod-dnd-%d", i),
+										Namespace: "default",
+										Annotations: map[string]string{
+											v1.DoNotDisruptAnnotationKey: "true",
+										},
+									},
+									NodeName: n.Name,
+								}))
+							case "ds":
+								pods = append(pods, test.Pod(test.PodOptions{
+									ObjectMeta: metav1.ObjectMeta{
+										Name:      fmt.Sprintf("dmn-pod-%d", i),
+										Namespace: "kube-system",
+										OwnerReferences: []metav1.OwnerReference{{
+											APIVersion: "apps/v1",
+											Kind:       "DaemonSet",
+											Name:       "test-daemonset",
+											UID:        "test-uid",
+										}},
+									},
+									NodeName: n.Name,
+								}))
+							}
+
+							nodes = append(nodes, n)
+							nodeClaims = append(nodeClaims, nc)
+							ExpectApplied(ctx, env.Client, nc, n)
+						}
+					}
+					for _, p := range pods {
+						ExpectApplied(ctx, env.Client, p)
 					}
 
-					if newReady {
-						new.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
-						new.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
-					} else {
-						new.StatusConditions().SetFalse(v1.ConditionTypeValidationSucceeded, "reason", "new not ready")
-					}
+					ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(
+						ctx, env.Client, nodeController, nodeClaimStateController, nodes, nodeClaims,
+					)
+					Expect(cluster.Nodes()).To(HaveLen(8))
+				})
 
-					Expect(static.HasNodePoolReplicaOrStatusChanged(old, new)).To(Equal(expected))
-				},
+				DescribeTable("scales down in disruption cost order",
+					func(replicas int64, expectIdx []int) {
+						nodePool.Spec.Replicas = lo.ToPtr(replicas)
+						ExpectApplied(ctx, env.Client, nodePool)
 
-				Entry("replica changed", lo.ToPtr(int64(5)), lo.ToPtr(int64(3)), false, false, true),
-				Entry("replica same, false → true", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), false, true, true),
-				Entry("replica same, true → false", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), true, false, false),
-				Entry("replica same, both true", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), true, true, false),
-				Entry("replica same, both false", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), false, false, false),
-			)
+						res := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
+						Expect(res.RequeueAfter).To(BeZero())
+
+						want := make([]string, 0, len(expectIdx))
+						for _, i := range expectIdx {
+							want = append(want, name(i))
+						}
+						Eventually(remainingNames).Should(ConsistOf(want))
+					},
+
+					Entry("to 6 (drops DS-only first)", int64(6), []int{0, 1, 2, 4, 5, 6}),
+					Entry("to 4 (drops low next)", int64(4), []int{1, 2, 5, 6}),
+					Entry("to 2 (drops high next)", int64(2), []int{2, 6}),
+					Entry("to 0 (drops do-not-disrupt last)", int64(0), []int{}),
+				)
+			})
 		})
-		// @rsumukha todo : Add tests to consider disruption cost
+
+		Context("Helper Functions", func() {
+			Describe("hasNodePoolReplicaOrStatusChanged", func() {
+				It("should detect replica changes", func() {
+					old := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(5))}}
+					new := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(10))}}
+					Expect(static.HasNodePoolReplicaCountChanged(old, new)).To(BeTrue())
+				})
+
+				It("should return false for identical replicas", func() {
+					old := &v1.NodePool{Spec: v1.NodePoolSpec{Replicas: lo.ToPtr(int64(5))}}
+					new := old
+					Expect(static.HasNodePoolReplicaCountChanged(old, new)).To(BeFalse())
+				})
+			})
+		})
 	})
 })

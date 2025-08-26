@@ -101,7 +101,7 @@ func NewMethods(clk clock.Clock, cluster *state.Cluster, kubeClient client.Clien
 		// Delete any empty NodeClaims as there is zero cost in terms of disruption.
 		NewEmptiness(c),
 		// Terminate and create replacement for drifted NodeClaims in Static NodePool
-		NewStaticDrift(kubeClient, cluster, provisioner, cp, recorder),
+		NewStaticDrift(cluster, provisioner, cp),
 		// Terminate any NodeClaims that have drifted from provisioning specifications, allowing the pods to reschedule.
 		NewDrift(kubeClient, cluster, provisioner, recorder),
 		// Attempt to identify multiple NodeClaims that we can consolidate simultaneously to reduce pod churn

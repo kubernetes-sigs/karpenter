@@ -22,7 +22,6 @@ import (
 
 	"github.com/samber/lo"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -30,34 +29,29 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	statichelper "sigs.k8s.io/karpenter/pkg/controllers/static"
+	statichelper "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 
-	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // StaticDrift is a subreconciler that deletes drifted static candidates.
 type StaticDrift struct {
-	kubeClient    client.Client
 	cluster       *state.Cluster
 	provisioner   *provisioning.Provisioner
 	cloudprovider cloudprovider.CloudProvider
-	recorder      events.Recorder
 }
 
-func NewStaticDrift(kubeClient client.Client, cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider, recorder events.Recorder) *StaticDrift {
+func NewStaticDrift(cluster *state.Cluster, provisioner *provisioning.Provisioner, cloudprovider cloudprovider.CloudProvider) *StaticDrift {
 	return &StaticDrift{
-		kubeClient:    kubeClient,
 		cluster:       cluster,
 		provisioner:   provisioner,
 		cloudprovider: cloudprovider,
-		recorder:      recorder,
 	}
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (d *StaticDrift) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	return isCandidatePartOfStaticNodePool(c) && c.NodeClaim.StatusConditions().Get(string(d.Reason())).IsTrue()
+	return OwnedByStaticNodePool(c) && c.NodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()
 }
 
 func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {

@@ -40,7 +40,7 @@ func NewEmptiness(c consolidation, opts ...option.Function[MethodOptions]) *Empt
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
-	if isCandidatePartOfStaticNodePool(c) {
+	if OwnedByStaticNodePool(c) {
 		return false
 	}
 	// If consolidation is disabled, don't do anything. This emptiness should run for both WhenEmpty and WhenEmptyOrUnderutilized

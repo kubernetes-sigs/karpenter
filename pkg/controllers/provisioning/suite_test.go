@@ -2561,6 +2561,7 @@ var _ = Describe("Provisioning", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels[v1.NodePoolLabelKey]).ToNot(Equal(nodePool.Name))
 		})
+
 		Context("Weighted NodePools", func() {
 			It("should schedule to the nodepool with the highest priority always", func() {
 				nodePools := []client.Object{
@@ -2591,6 +2592,51 @@ var _ = Describe("Provisioning", func() {
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
 			})
+		})
+	})
+
+	Context("StaticNodePool", func() {
+		It("should not create NodeClaims for StaticNodePool", func() {
+			ExpectApplied(ctx, env.Client, test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(2)),
+				}},
+			))
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+
+		It("should always create dynamic NodeClaims when both Dynamic and Static NodePools are present", func() {
+			// Should contain both static and dynamic node pool
+			targetedNodePool := test.NodePool()
+			staticNodePool := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(1)),
+				}})
+			ExpectApplied(ctx, env.Client, targetedNodePool, staticNodePool)
+
+			for range 100 {
+				pod := test.UnschedulablePod()
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels[v1.NodePoolLabelKey]).ToNot(Equal(staticNodePool.Name))
+				Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
+			}
+		})
+
+		It("should never create static NodeClaims when only Static NodePool is present", func() {
+			staticNodePool := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(1)),
+				}})
+			ExpectApplied(ctx, env.Client, staticNodePool)
+
+			for range 100 {
+				pod := test.UnschedulablePod()
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				ExpectNotScheduled(ctx, env.Client, pod)
+			}
 		})
 	})
 

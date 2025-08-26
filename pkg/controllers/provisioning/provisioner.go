@@ -42,7 +42,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 
@@ -50,6 +49,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	statichelper "sigs.k8s.io/karpenter/pkg/controllers/static"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -62,14 +62,8 @@ import (
 // LaunchOptions are the set of options that can be used to trigger certain
 // actions and configuration during scheduling
 type LaunchOptions struct {
-	IgnoreStaticNodeClaims bool
-	RecordPodNomination    bool
-	Reason                 string
-}
-
-// IgnoreStaticNodeClaims tells us to ignore creating static nodeClaims during the launch.
-func IgnoreStaticNodeClaims(o *LaunchOptions) {
-	o.IgnoreStaticNodeClaims = true
+	RecordPodNomination bool
+	Reason              string
 }
 
 // RecordPodNomination causes nominate pod events to be recorded against the node.
@@ -143,8 +137,8 @@ func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, 
 	if len(results.NewNodeClaims) == 0 {
 		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
-	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisionedReason), RecordPodNomination, IgnoreStaticNodeClaims); err != nil {
-		return reconcile.Result{}, err
+	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisionedReason), RecordPodNomination); err != nil {
+		return reconciler.Result{}, err
 	}
 	return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
@@ -156,9 +150,6 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 	errs := make([]error, len(nodeClaims))
 	nodeClaimNames := make([]string, len(nodeClaims))
 	workqueue.ParallelizeUntil(ctx, len(nodeClaims), len(nodeClaims), func(i int) {
-		if option.Resolve(opts...).IgnoreStaticNodeClaims && nodeClaims[i].IsStaticNode {
-			return
-		}
 		// create a new context to avoid a data race on the ctx variable
 		if name, err := p.Create(ctx, nodeClaims[i], opts...); err != nil {
 			errs[i] = fmt.Errorf("creating node claim, %w", err)
@@ -244,6 +235,10 @@ func (p *Provisioner) NewScheduler(
 		return nil, fmt.Errorf("listing nodepools, %w", err)
 	}
 	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
+		if statichelper.IsStaticNodePool(np) {
+			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring static nodepool")
+			return false
+		}
 		if !np.StatusConditions().IsTrue(status.ConditionReady) {
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring nodepool, not ready")
 			return false

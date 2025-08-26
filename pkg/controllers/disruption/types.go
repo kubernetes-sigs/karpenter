@@ -80,7 +80,7 @@ type Candidate struct {
 	reschedulablePods []*corev1.Pod
 }
 
-func isCandidatePartOfStaticNodePool(c *Candidate) bool {
+func OwnedByStaticNodePool(c *Candidate) bool {
 	return c.NodePool.Spec.Replicas != nil
 }
 

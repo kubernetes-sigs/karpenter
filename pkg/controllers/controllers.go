@@ -129,7 +129,7 @@ func NewControllers(
 
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
 		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock))
-		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, clock))
+		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock))
 	}
 
 	return controllers
