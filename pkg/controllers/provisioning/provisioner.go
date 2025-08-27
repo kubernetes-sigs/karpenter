@@ -25,9 +25,11 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
+	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
+
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -40,7 +42,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 
@@ -113,32 +114,32 @@ func (p *Provisioner) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(p))
 }
 
-func (p *Provisioner) Reconcile(ctx context.Context) (result reconcile.Result, err error) {
+func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, err error) {
 	ctx = injection.WithControllerName(ctx, "provisioner")
 
 	// Batch pods
 	if triggered := p.batcher.Wait(ctx); !triggered {
-		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !p.cluster.Synced(ctx) {
-		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
 	results, err := p.Schedule(ctx)
 	if err != nil {
-		return reconcile.Result{}, err
+		return reconciler.Result{}, err
 	}
 	if len(results.NewNodeClaims) == 0 {
-		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisionedReason), RecordPodNomination); err != nil {
-		return reconcile.Result{}, err
+		return reconciler.Result{}, err
 	}
-	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+	return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
 // CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node

@@ -19,8 +19,10 @@ package disruption
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 
+	"github.com/samber/lo"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -61,14 +63,14 @@ func (d *Drift) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[
 			candidates[j].NodeClaim.StatusConditions().Get(string(d.Reason())).LastTransitionTime.Time)
 	})
 
-	for _, candidate := range candidates {
-		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
-		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
-		// can find their nodes disrupted here, which while that in itself isn't an issue for empty nodes, it could
-		// constrain the `drift` budget.
-		if len(candidate.reschedulablePods) == 0 {
-			continue
-		}
+	emptyCandidates, nonEmptyCandidates := lo.FilterReject(candidates, func(c *Candidate, _ int) bool {
+		return len(c.reschedulablePods) == 0
+	})
+
+	// Prioritize empty candidates since we want them to get priority over non-empty candidates if the budget is constrained.
+	// Disrupting empty candidates first also helps reduce the overall churn because if a non-empty candidate is disrupted first,
+	// the pods from that node can reschedule on the empty nodes and will need to move again when those nodes get disrupted.
+	for _, candidate := range slices.Concat(emptyCandidates, nonEmptyCandidates) {
 		// If the disruption budget doesn't allow this candidate to be disrupted,
 		// continue to the next candidate. We don't need to decrement any budget
 		// counter since drift commands can only have one candidate.
