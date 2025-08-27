@@ -52,13 +52,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
 
-const (
-	// higher concurrency limit since we want fast reaction to node syncing and launch
-	minReconciles = 1000
-	maxReconciles = 5000
-	minQPS        = 10
-)
-
 // Controller is a NodeClaim Lifecycle controller that manages the lifecycle of the NodeClaim up until its termination
 // The controller is responsible for ensuring that new Nodes get launched, that they have properly registered with
 // the cluster as nodes and that they are properly initialized, ensuring that nodeclaims that do not have matching nodes
@@ -88,10 +81,10 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	cpuCount := utilscontroller.CPUCount(ctx)
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(cpuCount, minReconciles, maxReconciles)
-	log.FromContext(ctx).Info("nodeclaim.lifecycle maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
-	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(minQPS, minReconciles, maxConcurrentReconciles)
+	// higher concurrency limit since we want fast reaction to node syncing and launch
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 1000, 5000)
+	log.FromContext(ctx).V(1).Info("nodeclaim.lifecycle maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+  qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
