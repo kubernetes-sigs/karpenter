@@ -423,7 +423,7 @@ var _ = Describe("Queue", func() {
 						q.ProviderIDToCommand[strconv.Itoa(i)] = &disruption.Command{}
 					}
 					q.Unlock()
-					actualDuration := disruption.GetMaxRetryDuration(q)
+					actualDuration := q.GetMaxRetryDuration()
 					Expect(actualDuration).To(Equal(expectedDuration))
 				},
 				Entry("very small queue - 100 commands", 100, 10*time.Minute),                  // max(100*80ms, 10min) = 10min

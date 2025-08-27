@@ -82,7 +82,7 @@ func IsUnrecoverableError(err error) bool {
 	return stderrors.As(err, &unrecoverableError)
 }
 
-func GetMaxRetryDuration(q *Queue) time.Duration {
+func (q *Queue) GetMaxRetryDuration() time.Duration {
 	q.RLock()
 	numCommands := len(q.ProviderIDToCommand)
 	q.RUnlock()
@@ -180,7 +180,7 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	// We use the number of commands in the queue as a proxy for cloud provider traffic.
 	// As the number of commands increase, we expect more delays and scale the retry duration accordingly.
-	retryDuration := GetMaxRetryDuration(q)
+	retryDuration := q.GetMaxRetryDuration()
 	// Wrap an error in an unrecoverable error if it timed out
 	defer func() {
 		if q.clock.Since(cmd.CreationTimestamp) > retryDuration {
