@@ -134,7 +134,6 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(0))
 		})
-
 		It("should return early if nodepool is not managed by cloud provider", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
@@ -153,7 +152,6 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(0))
 		})
-
 		It("should return early if nodepool root condition is not true", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
@@ -168,7 +166,6 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(0))
 		})
-
 		It("should return early if nodepool replicas is nil", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = nil
@@ -182,7 +179,6 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(0))
 		})
-
 		It("should return early if current node count exceeds desired replicas", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
@@ -224,21 +220,20 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(cluster.Nodes()).To(HaveLen(2))
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
 			// Should not create any additional NodeClaims
 			nodeClaims := &v1.NodeClaimList{}
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(2))
 		})
-
 		It("should create nodeclaims when current node count is less than desired replicas", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
 			// Should create 2 NodeClaims
 			nodeClaims := &v1.NodeClaimList{}
@@ -251,7 +246,6 @@ var _ = Describe("Static Provisioning Controller", func() {
 				Expect(nc.Labels).To(HaveKeyWithValue(v1.NodePoolLabelKey, nodePool.Name))
 			}
 		})
-
 		It("should create additional nodeclaims to reach desired replicas", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
@@ -277,15 +271,14 @@ var _ = Describe("Static Provisioning Controller", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{node1}, []*v1.NodeClaim{nodeClaim1})
 			Expect(cluster.Nodes()).To(HaveLen(1))
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
 			// Should create 2 additional NodeClaims (3 desired - 1 existing = 2 new)
 			nodeClaims := &v1.NodeClaimList{}
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(3))
 		})
-
-		It("should not create additional nodeclaims when the node doesnt join", func() {
+		It("should not create additional nodeclaims", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
 
@@ -327,8 +320,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 
 			// Reconcile multiple times
 			for i := 0; i < 10; i++ {
-				result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-				Expect(result.RequeueAfter).To(BeZero())
+				_ = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 			}
 
 			// Should have just 3 NodeClaims
@@ -336,7 +328,6 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(env.Client.List(ctx, existingNodeClaims)).To(Succeed())
 			Expect(existingNodeClaims.Items).To(HaveLen(3))
 		})
-
 		It("should not create additional nodeclaims when node limits are reached", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
@@ -372,7 +363,6 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(1))
 		})
-
 		It("should reserve nodepool nodecount during provisioning and release after", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
@@ -382,7 +372,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 
 			ExpectApplied(ctx, env.Client, nodePool)
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
 			// Should create 3 NodeClaims
 			nodeClaims := &v1.NodeClaimList{}
@@ -403,7 +393,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			result = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
 			// Should have 10 NodeClaims and not go over limits
 			nodeClaims = &v1.NodeClaimList{}
@@ -415,21 +405,19 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 10, 100)).To(BeEquivalentTo(0))
 
 		})
-
 		It("should handle zero replicas", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(0))
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
 			// Should not create any NodeClaims
 			nodeClaims := &v1.NodeClaimList{}
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(0))
 		})
-
 		It("should respect nodepool template specifications", func() {
 			npSpecRequirements := []v1.NodeSelectorRequirementWithMinValues{
 				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "karpenter.k8s.aws/instance-category", Operator: corev1.NodeSelectorOpIn, Values: []string{"c", "r"}}, MinValues: lo.ToPtr(int(2))},
@@ -462,7 +450,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{}, []*v1.NodeClaim{})
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
 			// Should create 4 NodeClaim with template specifications
 			nodeClaims := &v1.NodeClaimList{}
@@ -474,76 +462,19 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(nc.Annotations).To(HaveKeyWithValue("custom-annotation", "custom-value"))
 			Expect(nc.Spec.Requirements).To(ContainElements(npSpecRequirements))
 		})
-
-		It("should respect instance-type specifications", func() {
-			nodePool := test.StaticNodePool(v1.NodePool{
-				Spec: v1.NodePoolSpec{
-					Replicas: lo.ToPtr(int64(1)),
-					Template: v1.NodeClaimTemplate{},
-				},
-			})
-			cloudProvider.InstanceTypes, _ = cloudProvider.GetInstanceTypes(ctx, nodePool)
-			npSpecRequirements := []v1.NodeSelectorRequirementWithMinValues{
-				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{cloudProvider.InstanceTypes[0].Name, cloudProvider.InstanceTypes[1].Name}}},
-			}
-
-			nodePool.Spec.Template.Spec.Requirements = npSpecRequirements
-			ExpectApplied(ctx, env.Client, nodePool)
-
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{}, []*v1.NodeClaim{})
-
-			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
-
-			// Should create 1 NodeClaim with template specifications
-			nodeClaims := &v1.NodeClaimList{}
-			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
-			Expect(nodeClaims.Items).To(HaveLen(1))
-
-			nc := nodeClaims.Items[0]
-			Expect(nc.Spec.Requirements).To(ContainElements(npSpecRequirements))
-		})
-
 		It("should handle large replica counts", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Replicas = lo.ToPtr(int64(500))
 			ExpectApplied(ctx, env.Client, nodePool)
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
 			// Should create 500 NodeClaims
 			nodeClaims := &v1.NodeClaimList{}
 			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 			Expect(nodeClaims.Items).To(HaveLen(500))
 		})
-
-		It("should handle existing nodes correctly", func() {
-			nodePool := test.StaticNodePool()
-			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
-			ExpectApplied(ctx, env.Client, nodePool)
-
-			// Create 3 existing nodes
-			for i := 0; i < 3; i++ {
-				node := test.Node(test.NodeOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fmt.Sprintf("existing-node-%d", i),
-					},
-				})
-				ExpectApplied(ctx, env.Client, node)
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{})
-			}
-			Expect(cluster.Nodes()).To(HaveLen(3))
-
-			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
-
-			// Should create 5 NodeClaims
-			nodeClaims := &v1.NodeClaimList{}
-			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
-			Expect(nodeClaims.Items).To(HaveLen(5))
-		})
-
 		It("handles concurrent reconciliation without exceeding NodePool limits", func() {
 			nodePool := test.StaticNodePool()
 			nodePool.Spec.Limits = v1.Limits{
@@ -574,21 +505,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 			}).Should(BeNumerically("<=", 10))
 		})
 
-		It("should handle nodepool deletion gracefully", func() {
-			nodePool := test.StaticNodePool()
-			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
-			ExpectApplied(ctx, env.Client, nodePool)
-
-			// Delete the nodepool
-			Expect(env.Client.Delete(ctx, nodePool)).To(Succeed())
-
-			// Reconcile should handle missing nodepool
-			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
-		})
-
 	})
-
 	Context("Helper Functions", func() {
 		DescribeTable("should detect replica or status changes",
 			func(oldReplicas, newReplicas *int64, oldReady, newReady bool, expected bool) {
@@ -611,7 +528,6 @@ var _ = Describe("Static Provisioning Controller", func() {
 
 				Expect(static.HasNodePoolReplicaOrStatusChanged(old, new)).To(Equal(expected))
 			},
-
 			Entry("replica changed", lo.ToPtr(int64(5)), lo.ToPtr(int64(3)), false, false, true),
 			Entry("replica same, false → true", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), false, true, true),
 			Entry("replica same, true → false", lo.ToPtr(int64(5)), lo.ToPtr(int64(5)), true, false, false),

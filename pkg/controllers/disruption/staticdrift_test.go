@@ -18,6 +18,7 @@ package disruption_test
 
 import (
 	"strconv"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -134,7 +135,6 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel: "drifted",
 			})
 		})
-
 		It("should respect disruption budgets (Nodes Percentage) for static drift", func() {
 			nodeClaims, nodes = test.NodeClaimsAndNodes(numNodes, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -187,7 +187,6 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel: "drifted",
 			})
 		})
-
 		It("should respect budgets for multiple static nodepools", func() {
 			// Create 3 static NodePools with different configurations
 			nodePool1 := test.StaticNodePool(v1.NodePool{
@@ -336,7 +335,6 @@ var _ = Describe("StaticDrift", func() {
 			})
 		})
 	})
-
 	Context("Limits and Scaling", func() {
 		var numNodes = 3
 		var nodeClaims []*v1.NodeClaim
@@ -377,7 +375,6 @@ var _ = Describe("StaticDrift", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
 		})
-
 		It("should drift nodes when we can acquire limits", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
 			nodePool.Spec.Limits = v1.Limits{
@@ -429,7 +426,6 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel: "drifted",
 			})
 		})
-
 		It("should drift partially when we can acquire some limits", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
 			nodePool.Spec.Limits = v1.Limits{
@@ -481,7 +477,6 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel: "drifted",
 			})
 		})
-
 		It("should keep drifting partially when we can acquire some limits for each reconcile", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
 			nodePool.Spec.Limits = v1.Limits{
@@ -533,7 +528,6 @@ var _ = Describe("StaticDrift", func() {
 				})
 			}
 		})
-
 		It("should wait until nodes are deprovisioned when we are overscaled", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1)) // Target 1, but have 2
 			numNodes = 2
@@ -586,7 +580,7 @@ var _ = Describe("StaticDrift", func() {
 
 			// Deprovision nodes
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
 			// reconcile
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
@@ -618,7 +612,6 @@ var _ = Describe("StaticDrift", func() {
 			})
 		})
 	})
-
 	Context("Multiple NodePools", func() {
 		It("should handle drift for multiple static NodePools independently", func() {
 			// Create two static NodePools
@@ -729,7 +722,6 @@ var _ = Describe("StaticDrift", func() {
 			})
 		})
 	})
-
 	Context("Edge Cases", func() {
 		It("should handle zero replicas", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(0))
@@ -743,7 +735,6 @@ var _ = Describe("StaticDrift", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
 		})
-
 		It("should handle missing node limits gracefully", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
 			nodePool.Spec.Limits = nil // No limits set
@@ -758,7 +749,6 @@ var _ = Describe("StaticDrift", func() {
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
 		})
-
 		It("should ignore nodes without the drifted status condition", func() {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeDrifted)
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))

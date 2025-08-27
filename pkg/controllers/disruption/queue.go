@@ -310,6 +310,14 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		// we don't want to disrupt workloads with no way to provision new nodes for them.
 		return serrors.Wrap(fmt.Errorf("launching replacement nodeclaim, %w", err), "command-id", cmd.ID)
 	}
+	// todo : Solve the race bw queue and deprovisioning controller for Static NodePool
+	// IMPORTANT
+	// We must MarkForDeletion AFTER we launch the replacements and not before
+	// The reason for this is to avoid producing double-launches
+	// If we MarkForDeletion before we create replacements, it's possible for the provisioner
+	// to recognize that it needs to launch capacity for terminating pods, causing us to launch
+	// capacity for these pods twice instead of just once
+	q.cluster.MarkForDeletion(lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.ProviderID() })...)
 
 	// Nominate each node for scheduling and emit pod nomination events
 	// We emit all nominations before we exit the disruption loop as
@@ -332,13 +340,6 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	q.source <- event.TypedGenericEvent[*v1.NodeClaim]{Object: cmd.Candidates[0].NodeClaim}
 	q.Unlock()
 
-	// IMPORTANT
-	// We must MarkForDeletion AFTER we launch the replacements and not before
-	// The reason for this is to avoid producing double-launches
-	// If we MarkForDeletion before we create replacements, it's possible for the provisioner
-	// to recognize that it needs to launch capacity for terminating pods, causing us to launch
-	// capacity for these pods twice instead of just once
-	q.cluster.MarkForDeletion(lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.ProviderID() })...)
 	// An action is only performed and pods/nodes are only disrupted after a successful add to the queue
 	DecisionsPerformedTotal.Inc(map[string]string{
 		decisionLabel:          string(cmd.Decision()),

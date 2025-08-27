@@ -66,6 +66,7 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, recorder ev
 }
 
 // Reconcile the resource
+// Requeue after computing Static NodePool to ensure we don't miss any events
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "provisioning.static")
 
@@ -77,7 +78,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
 	// Size down of replicas will be handled in deprovisioning controller to drain nodes and delete NodeClaims
 	if int64(runningNodeClaims) >= desiredReplicas {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	limit, ok := np.Spec.Limits[resources.Node]
@@ -105,7 +106,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, fmt.Errorf("creating nodeclaims, %w", err)
 	}
 
-	return reconcile.Result{}, nil
+	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
@@ -127,6 +128,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				return false
 			},
 		})).
+		// For now we wanna reconcile
 		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(), builder.WithPredicates(predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
 				return false

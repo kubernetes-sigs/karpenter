@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/samber/lo"
 	"k8s.io/client-go/util/retry"
@@ -60,6 +61,9 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, cloudProvid
 }
 
 // Reconcile the resource
+// Requeue after computing Static NodePool to ensure we don't miss any events
+// Note/todo : We have race bw queue and deprovisioning controller, while handling drift we create new replacements and then mark old as deleting
+// Although the delta is small, we need to track replacing NodeClaims to solve it the right way
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "deprovisioning.static")
 
@@ -73,7 +77,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 	// Only handle scale down - scale up is handled by provisioning controller
 	if nodeClaimsToDeprovision <= 0 {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "deprovisionCount", nodeClaimsToDeprovision).
@@ -113,7 +117,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, fmt.Errorf("failed to deprovision %d nodeclaims", nodeClaimsToDeprovision-actualDeprovisionedCount)
 	}
 
-	return reconcile.Result{}, nil
+	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
@@ -140,7 +144,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				return true
 			},
 			UpdateFunc: func(e event.UpdateEvent) bool {
-				return !e.ObjectOld.GetDeletionTimestamp().IsZero() && e.ObjectNew.GetDeletionTimestamp().IsZero()
+				return false
 			},
 			DeleteFunc: func(e event.DeleteEvent) bool {
 				return false
