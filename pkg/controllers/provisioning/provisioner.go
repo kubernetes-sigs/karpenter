@@ -49,7 +49,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	statichelper "sigs.k8s.io/karpenter/pkg/controllers/static"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -158,7 +157,7 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 		}
 
 		// During provisioning of static nodes we reserve NodeCounts, we release it here regardless of the outcome
-		if nodeClaims[i].IsStaticNode {
+		if nodeClaims[i].IsStaticNodeClaim {
 			p.cluster.NodePoolState.ReleaseNodeCount(nodeClaims[i].NodePoolName, 1)
 		}
 	})
@@ -235,8 +234,7 @@ func (p *Provisioner) NewScheduler(
 		return nil, fmt.Errorf("listing nodepools, %w", err)
 	}
 	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
-		if statichelper.IsStaticNodePool(np) {
-			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring static nodepool")
+		if nodepoolutils.IsStaticNodePool(np) {
 			return false
 		}
 		if !np.StatusConditions().IsTrue(status.ConditionReady) {

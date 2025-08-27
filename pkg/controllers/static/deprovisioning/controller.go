@@ -39,7 +39,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	helper "sigs.k8s.io/karpenter/pkg/controllers/static"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
@@ -77,12 +76,16 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).
-		Info("scaling down static nodepool", "current", runningNodeClaims, "desired", desiredReplicas, "toDeprovision", nodeClaimsToDeprovision)
+	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "deprovisionCount", nodeClaimsToDeprovision).
+		Info("deprovisioning nodeclaims to satisfy replica count")
 
 	// Get all active NodeClaims for this NodePool
-	npStateNodes := helper.GetFilteredNodes(c.cluster, func(node *state.StateNode) bool {
-		return node.Labels()[v1.NodePoolLabelKey] == np.Name && node.NodeClaim != nil && !node.MarkedForDeletion()
+	var npStateNodes []*state.StateNode
+	c.cluster.ForEachNode(func(n *state.StateNode) bool {
+		if n.Labels()[v1.NodePoolLabelKey] == np.Name && n.NodeClaim != nil && !n.MarkedForDeletion() {
+			npStateNodes = append(npStateNodes, n) // not deepCopying nodes as we are not changing the state nodes
+		}
+		return true
 	})
 
 	// Get deprovisioning candidates
@@ -97,17 +100,14 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
 			return c.kubeClient.Delete(ctx, candidate.NodeClaim)
 		}); err != nil && client.IgnoreNotFound(err) != nil {
-			log.FromContext(ctx).Error(err, "failed to delete NodeClaim", "NodeClaim", klog.KObj(candidate.NodeClaim))
+			log.FromContext(ctx).Error(err, "failed to delete nodeClaim", "NodeClaim", klog.KObj(candidate.NodeClaim))
 			scaleDownErrs[i] = err
 			return
 		}
-
+		log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(candidate.NodeClaim)).V(1).Info("deleting nodeclaim")
 		atomic.AddInt64(&actualDeprovisionedCount, 1)
 		c.cluster.MarkForDeletion(candidate.NodeClaim.Status.ProviderID)
 	})
-
-	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).
-		Info("scaled down static nodepool", "current", runningNodeClaims, "desired", desiredReplicas, "deprovisioned", actualDeprovisionedCount)
 
 	if actualDeprovisionedCount != nodeClaimsToDeprovision {
 		return reconcile.Result{}, fmt.Errorf("failed to deprovision %d nodeclaims", nodeClaimsToDeprovision-actualDeprovisionedCount)
@@ -140,10 +140,10 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				return true
 			},
 			UpdateFunc: func(e event.UpdateEvent) bool {
-				return e.ObjectOld.GetDeletionTimestamp().IsZero() && !e.ObjectNew.GetDeletionTimestamp().IsZero()
+				return !e.ObjectOld.GetDeletionTimestamp().IsZero() && e.ObjectNew.GetDeletionTimestamp().IsZero()
 			},
 			DeleteFunc: func(e event.DeleteEvent) bool {
-				return true
+				return false
 			},
 			GenericFunc: func(e event.GenericEvent) bool {
 				return false

@@ -39,8 +39,6 @@ import (
 // will be turned into one or more actual node instances within the cluster after bin packing.
 type NodeClaim struct {
 	NodeClaimTemplate
-	// rsumukha@ todo : remove IsStaticNode and move StaticNodeClaims out of scheduling.NodeClaims
-	IsStaticNode bool
 
 	Pods               []*corev1.Pod
 	reservationManager *ReservationManager

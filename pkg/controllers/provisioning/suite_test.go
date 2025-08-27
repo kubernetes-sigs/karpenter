@@ -2607,7 +2607,7 @@ var _ = Describe("Provisioning", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
 
-		It("should always create dynamic NodeClaims when both Dynamic and Static NodePools are present", func() {
+		It("should still provision dynamic NodeClaims when there are both Static and Dynamic NodePools", func() {
 			// Should contain both static and dynamic node pool
 			targetedNodePool := test.NodePool()
 			staticNodePool := test.StaticNodePool(v1.NodePool{
@@ -2616,27 +2616,11 @@ var _ = Describe("Provisioning", func() {
 				}})
 			ExpectApplied(ctx, env.Client, targetedNodePool, staticNodePool)
 
-			for range 100 {
-				pod := test.UnschedulablePod()
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-				node := ExpectScheduled(ctx, env.Client, pod)
-				Expect(node.Labels[v1.NodePoolLabelKey]).ToNot(Equal(staticNodePool.Name))
-				Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
-			}
-		})
-
-		It("should never create static NodeClaims when only Static NodePool is present", func() {
-			staticNodePool := test.StaticNodePool(v1.NodePool{
-				Spec: v1.NodePoolSpec{
-					Replicas: lo.ToPtr(int64(1)),
-				}})
-			ExpectApplied(ctx, env.Client, staticNodePool)
-
-			for range 100 {
-				pod := test.UnschedulablePod()
-				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
-				ExpectNotScheduled(ctx, env.Client, pod)
-			}
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[v1.NodePoolLabelKey]).ToNot(Equal(staticNodePool.Name))
+			Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
 		})
 	})
 

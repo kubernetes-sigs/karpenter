@@ -18,7 +18,6 @@ package static
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -37,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
+	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -74,33 +74,33 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	}
 
 	runningNodeClaims, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
+	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
 	// Size down of replicas will be handled in deprovisioning controller to drain nodes and delete NodeClaims
-	if int64(runningNodeClaims) >= lo.FromPtr(np.Spec.Replicas) {
+	if int64(runningNodeClaims) >= desiredReplicas {
 		return reconcile.Result{}, nil
 	}
 
 	limit, ok := np.Spec.Limits[resources.Node]
 	nodeLimit := lo.Ternary(ok, limit.Value(), int64(math.MaxInt64))
-	countNodeClaimsToProvision := c.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, lo.FromPtr(np.Spec.Replicas)-int64(runningNodeClaims))
+	countNodeClaimsToProvision := c.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, desiredReplicas-int64(runningNodeClaims))
 
 	if countNodeClaimsToProvision <= 0 {
 		log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("nodepool node limit reached")
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 	}
 
-	its, err := c.cloudProvider.GetInstanceTypes(ctx, np)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return reconcile.Result{}, fmt.Errorf("timed out getting instance types, %w", err)
-		}
-		return reconcile.Result{}, fmt.Errorf("failed resolving instance types, %w", err)
+	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "provisionCount", countNodeClaimsToProvision).
+		Info("provisioning nodeclaims to satisfy replica count")
+
+	nodeClaims := make([]*scheduling.NodeClaim, 0, countNodeClaimsToProvision)
+	for range countNodeClaimsToProvision {
+		nct := scheduling.NewNodeClaimTemplate(np)
+		nodeClaims = append(nodeClaims, &scheduling.NodeClaim{
+			NodeClaimTemplate: *nct,
+		})
 	}
 
-	nodeClaims := GetStaticNodeClaimsToProvision(np, its, countNodeClaimsToProvision)
-
-	nodeClaimNames, err := c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
-	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).
-		Info("scaled up static nodepool", "current", runningNodeClaims, "desired", np.Spec.Replicas, "provisioned", len(nodeClaimNames))
+	_, err := c.provisioner.CreateNodeClaims(ctx, nodeClaims, provisioning.WithReason(metrics.ProvisionedReason))
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("creating nodeclaims, %w", err)
 	}

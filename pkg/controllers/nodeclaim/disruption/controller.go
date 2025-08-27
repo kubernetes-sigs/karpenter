@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/patrickmn/go-cache"
-	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -76,10 +75,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("Node", klog.KRef("", nodeClaim.Status.NodeName)))
 	}
 
-	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
-		return reconcile.Result{}, nil
-	}
-	if !nodeClaim.DeletionTimestamp.IsZero() {
+	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) || !nodeClaim.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, nil
 	}
 
@@ -92,19 +88,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	var results []reconcile.Result
-	var errs error
-	// Should not Consolidate NodeClaims belonging to Static NodePool
-	reconcilers := []nodeClaimReconciler{c.drift}
-	reconcilers = lo.Ternary(nodePool.Spec.Replicas == nil,
-		append(reconcilers, c.consolidation),
-		reconcilers,
-	)
-	for _, reconciler := range reconcilers {
-		res, err := reconciler.Reconcile(ctx, nodePool, nodeClaim)
-		errs = multierr.Append(errs, err)
-		results = append(results, res)
-	}
+	results, errs := c.runReconcilers(ctx, nodePool, nodeClaim)
 	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
@@ -138,4 +122,24 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 func (c *Controller) Reset() {
 	c.drift.instanceTypeNotFoundCheckCache.Flush()
+}
+
+func (c *Controller) runReconcilers(
+	ctx context.Context,
+	np *v1.NodePool,
+	nc *v1.NodeClaim,
+) ([]reconcile.Result, error) {
+	reconcilers := []nodeClaimReconciler{c.drift}
+	// NodeClaims belonging to static NodePools are never eligible for consolidation, so we shouldn't mark them as consolidatable
+	if np.Spec.Replicas == nil {
+		reconcilers = append(reconcilers, c.consolidation)
+	}
+	results := make([]reconcile.Result, 0, len(reconcilers))
+	var errs error
+	for _, r := range reconcilers {
+		res, err := r.Reconcile(ctx, np, nc)
+		errs = multierr.Append(errs, err)
+		results = append(results, res)
+	}
+	return results, errs
 }

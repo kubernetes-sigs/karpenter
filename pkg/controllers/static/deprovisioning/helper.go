@@ -19,7 +19,6 @@ package static
 import (
 	"cmp"
 	"context"
-	"math"
 	"slices"
 
 	"github.com/samber/lo"
@@ -27,6 +26,8 @@ import (
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -60,41 +61,44 @@ func GetDeprovisioningCandidates(ctx context.Context, kubeClient client.Client, 
 	}
 
 	// Get non-empty nodes with their costs
-	type NodeDisruptionCost struct {
-		node *state.StateNode
-		cost float64
+	type NonEmptyNodes struct {
+		node            *state.StateNode
+		pods            []*corev1.Pod
+		hasDoNotDisrupt bool
 	}
 
 	emptyNodesSet := sets.New(emptyNodes...)
-	nonEmptyNodesWithCost := lo.FilterMap(nodes, func(node *state.StateNode, _ int) (NodeDisruptionCost, bool) {
+	nonEmptyNodes := lo.FilterMap(nodes, func(node *state.StateNode, _ int) (NonEmptyNodes, bool) {
 		if _, ok := emptyNodesSet[node]; ok {
-			return NodeDisruptionCost{}, false
+			return NonEmptyNodes{}, false
 		}
 
 		pods, err := node.Pods(ctx, kubeClient)
 		if err != nil {
 			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, skipping node")
-			return NodeDisruptionCost{}, false
+			return NonEmptyNodes{}, false
 		}
 
-		// Nodes that run pods with do-not-disrupt annotation will receive max disruption cost
-		cost := lo.Ternary(lo.SomeBy(pods, pod.HasDoNotDisrupt), math.MaxFloat64,
-			disruptionutils.ReschedulingCost(ctx, pods)*
-				disruptionutils.LifetimeRemaining(clk, np, node.NodeClaim))
-
-		return NodeDisruptionCost{
-			node: node,
-			cost: cost,
+		return NonEmptyNodes{
+			node:            node,
+			pods:            pods,
+			hasDoNotDisrupt: lo.SomeBy(pods, pod.HasDoNotDisrupt),
 		}, true
 	})
 
-	slices.SortFunc(nonEmptyNodesWithCost, func(i, j NodeDisruptionCost) int {
-		return cmp.Compare(i.cost, j.cost)
+	slices.SortFunc(nonEmptyNodes, func(i, j NonEmptyNodes) int {
+		// If one node has do-not-disrupt pods and the other doesn't, the one without should come first
+		if i.hasDoNotDisrupt != j.hasDoNotDisrupt {
+			return lo.Ternary(i.hasDoNotDisrupt, 1, -1)
+		}
+		// If neither has do-not-disrupt pods, compare their costs
+		return cmp.Compare(disruptionutils.ReschedulingCost(ctx, i.pods)*disruptionutils.LifetimeRemaining(clk, np, i.node.NodeClaim),
+			disruptionutils.ReschedulingCost(ctx, j.pods)*disruptionutils.LifetimeRemaining(clk, np, j.node.NodeClaim))
 	})
 
 	// Take the remaining needed nodes with lowest cost
 	lowestCostNodes := make([]*state.StateNode, 0, remaining)
-	for _, nwc := range nonEmptyNodesWithCost[:remaining] {
+	for _, nwc := range nonEmptyNodes[:remaining] {
 		lowestCostNodes = append(lowestCostNodes, nwc.node)
 	}
 

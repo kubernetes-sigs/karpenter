@@ -21,15 +21,12 @@ import (
 	"math"
 
 	"github.com/samber/lo"
-	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	statichelper "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -86,24 +83,21 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		// Acquire limits from cluster state without bursting over
 		maxAllowedDrifts := d.cluster.NodePoolState.ReserveNodeCount(npName, nodeLimit, maxDrifts)
 
-		if maxAllowedDrifts > 0 {
-			its, err := d.cloudprovider.GetInstanceTypes(ctx, np)
-			if err != nil {
-				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "failed to resolve instance types")
-				continue
+		if maxAllowedDrifts <= 0 {
+			return []Command{}, nil
+		}
+
+		// Select candidates up to maxAllowedDrifts
+		for _, c := range npCandidates[:maxAllowedDrifts] {
+			nct := scheduling.NewNodeClaimTemplate(np)
+			result := scheduling.Results{
+				NewNodeClaims: []*scheduling.NodeClaim{{NodeClaimTemplate: *nct}},
 			}
-			// Select candidates up to maxAllowedDrifts
-			for _, c := range npCandidates[:maxAllowedDrifts] {
-				nct := statichelper.GetStaticNodeClaimTemplate(np, its)
-				result := scheduling.Results{
-					NewNodeClaims: []*scheduling.NodeClaim{{NodeClaimTemplate: *nct, IsStaticNode: true}},
-				}
-				cmds = append(cmds, Command{
-					Candidates:   []*Candidate{c},
-					Replacements: replacementsFromNodeClaims(result.NewNodeClaims...),
-					Results:      result,
-				})
-			}
+			cmds = append(cmds, Command{
+				Candidates:   []*Candidate{c},
+				Replacements: replacementsFromNodeClaims(result.NewNodeClaims...),
+				Results:      result,
+			})
 		}
 	}
 	return cmds, nil
