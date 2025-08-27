@@ -389,7 +389,7 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 100, 5000)
 	log.FromContext(ctx).V(1).Info("node.termination maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
-	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, 100, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).

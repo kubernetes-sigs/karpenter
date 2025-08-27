@@ -84,7 +84,7 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	// higher concurrency limit since we want fast reaction to node syncing and launch
 	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 1000, 5000)
 	log.FromContext(ctx).V(1).Info("nodeclaim.lifecycle maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
-  qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, 1000, 5000)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
