@@ -25,6 +25,7 @@ import (
 )
 
 var Node = v1.ResourceName("nodes")
+var DriftedNodeClaim = v1.ResourceName("driftedNodeClaims")
 
 // RequestsForPods returns the total resources of a variadic list of podspecs.
 func RequestsForPods(pods ...*v1.Pod) v1.ResourceList {

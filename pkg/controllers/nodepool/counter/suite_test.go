@@ -263,4 +263,124 @@ var _ = Describe("Counter", func() {
 		expected = counter.BaseResources.DeepCopy()
 		Expect(nodePool.Status.Resources).To(BeComparableTo(expected))
 	})
+
+	Context("NodeClaims Drift Tracking", func() {
+		BeforeEach(func() {
+			nodePool = test.NodePool()
+			_ = nodePool.StatusConditions().Clear(v1.ConditionTypeNodeClaimsDrifted)
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectObjectReconciled(ctx, env.Client, nodePoolInformerController, nodePool)
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+		})
+
+		It("should not set Drifted if there are no owned nodeclaims", func() {
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			driftedNodeClaimCount := nodePool.Status.Resources[resources.DriftedNodeClaim]
+			Expect(driftedNodeClaimCount.IsZero()).To(BeTrue())
+			Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeClaimsDrifted).IsFalse()).To(BeTrue())
+		})
+
+		It("should not set Drifted if the drifted condition of nodeclaim is nil", func() {
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				}},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
+
+			driftedNodeClaimCount := nodePool.Status.Resources[resources.DriftedNodeClaim]
+			Expect(driftedNodeClaimCount.IsZero()).To(BeTrue())
+			Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeClaimsDrifted).IsFalse()).To(BeTrue())
+		})
+
+		It("should set Drifted to false if all NodeClaims are not drifted", func() {
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				}},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			nodeClaim.StatusConditions().SetFalse(v1.ConditionTypeDrifted, "NotDrifted", "NotDrifted")
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsFalse()).To(BeTrue())
+
+			ExpectApplied(ctx, env.Client, nodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+			driftedNodeClaimCount := nodePool.Status.Resources[resources.DriftedNodeClaim]
+			Expect(driftedNodeClaimCount.IsZero()).To(BeTrue())
+			Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeClaimsDrifted).IsFalse()).To(BeTrue())
+		})
+
+		It("should set Drifted to true if there are drifted NodeClaims", func() {
+			nodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				}},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+
+			unknownNodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				}},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			unknownNodeClaim.StatusConditions().SetUnknown(v1.ConditionTypeDrifted)
+
+			notDriftedNodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				}},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			notDriftedNodeClaim.StatusConditions().SetFalse(v1.ConditionTypeDrifted, "NotDrifted", "NotDrifted")
+
+			driftedNodeClaim := test.NodeClaim(v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				}},
+				Status: v1.NodeClaimStatus{
+					ProviderID: test.RandomProviderID(),
+				},
+			})
+			driftedNodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
+			Expect(unknownNodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsUnknown()).To(BeTrue())
+			Expect(notDriftedNodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsFalse()).To(BeTrue())
+			Expect(driftedNodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+
+			ExpectApplied(ctx, env.Client, nodeClaim, unknownNodeClaim, driftedNodeClaim, notDriftedNodeClaim)
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(unknownNodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(driftedNodeClaim))
+			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(notDriftedNodeClaim))
+
+			ExpectObjectReconciled(ctx, env.Client, nodePoolController, nodePool)
+			nodePool = ExpectExists(ctx, env.Client, nodePool)
+
+			driftedNodeClaimCount := nodePool.Status.Resources[resources.DriftedNodeClaim]
+			Expect(driftedNodeClaimCount.Value()).To(Equal(int64(1)))
+			Expect(nodePool.StatusConditions().Get(v1.ConditionTypeNodeClaimsDrifted).IsTrue()).To(BeTrue())
+		})
+	})
 })
