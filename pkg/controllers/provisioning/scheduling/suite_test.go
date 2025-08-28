@@ -4626,6 +4626,202 @@ var _ = Context("Scheduling", func() {
 			}
 		})
 	})
+
+	Describe("Dynamic Resource Allocation (DRA)", func() {
+		DescribeTable("should handle DRA pods correctly",
+			func(testCase string, podOptions test.PodOptions, expectNodeClaims bool, expectDRAError bool) {
+				nodePool := test.NodePool()
+				ExpectApplied(ctx, env.Client, nodePool)
+
+				// Create the test pod with specified options
+				pod := test.Pod(podOptions)
+
+				scheduler, err := prov.NewScheduler(ctx, []*corev1.Pod{pod}, nil)
+				Expect(err).ToNot(HaveOccurred())
+				results, err := scheduler.Solve(ctx, []*corev1.Pod{pod})
+				Expect(err).ToNot(HaveOccurred())
+
+				if expectNodeClaims {
+					// Should create NodeClaims for non-DRA pods
+					Expect(results.NewNodeClaims).To(HaveLen(1))
+					Expect(results.PodErrors).To(BeEmpty())
+				} else {
+					// Should not create NodeClaims for DRA pods
+					Expect(results.NewNodeClaims).To(BeEmpty())
+				}
+
+				if expectDRAError {
+					// Verify DRA errors are correctly identified and filtered
+					draErrors := results.DRAErrors()
+					Expect(draErrors).To(HaveLen(1))
+					Expect(draErrors).To(HaveKey(pod))
+				} else {
+					// Verify no DRA errors for non-DRA pods
+					Expect(results.DRAErrors()).To(BeEmpty())
+				}
+			},
+			Entry("container with resource claims", "container-dra", test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dra-container-pod",
+					Namespace: "default",
+					UID:       "dra-container-pod-uid",
+				},
+				Image: "nvidia/cuda:latest",
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				},
+				ContainerResourceClaims: []corev1.ResourceClaim{
+					{Name: "gpu-claim"},
+				},
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
+				},
+				Phase: corev1.PodPending,
+			}, false, true),
+			Entry("init container with resource claims", "init-container-dra", test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dra-init-container-pod",
+					Namespace: "default",
+					UID:       "dra-init-container-pod-uid",
+				},
+				Image: "nginx:latest",
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				},
+				InitContainers: []corev1.Container{
+					{
+						Image: "nvidia/cuda:latest",
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("500m"),
+								corev1.ResourceMemory: resource.MustParse("512Mi"),
+							},
+						},
+					},
+				},
+				InitContainerResourceClaims: []corev1.ResourceClaim{
+					{Name: "gpu-init-claim"},
+				},
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
+				},
+				Phase: corev1.PodPending,
+			}, false, true),
+			Entry("pod with both container and init container resource claims", "both-dra", test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dra-both-pod",
+					Namespace: "default",
+					UID:       "dra-both-pod-uid",
+				},
+				Image: "nvidia/cuda:latest",
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				},
+				ContainerResourceClaims: []corev1.ResourceClaim{
+					{Name: "gpu-claim"},
+				},
+				InitContainers: []corev1.Container{
+					{
+						Image: "busybox:latest",
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("250m"),
+								corev1.ResourceMemory: resource.MustParse("256Mi"),
+							},
+						},
+					},
+				},
+				InitContainerResourceClaims: []corev1.ResourceClaim{
+					{Name: "storage-init-claim"},
+				},
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
+				},
+				Phase: corev1.PodPending,
+			}, false, true),
+			Entry("non-DRA pod without resource claims", "non-dra", test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "non-dra-pod",
+					Namespace: "default",
+					UID:       "non-dra-pod-uid",
+				},
+				Image: "nginx:latest",
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("1"),
+						corev1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+				},
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
+				},
+				Phase: corev1.PodPending,
+			}, true, false),
+		)
+
+		It("should handle DaemonSet pods with DRA requirements based on IgnoreDRARequests flag value", func() {
+			nodePool := test.NodePool()
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// DRA daemon pod with larger CPU requirements
+			draDaemonPod := test.Pod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3")},
+				},
+				ContainerResourceClaims: []corev1.ResourceClaim{{Name: "gpu-claim"}}, // DRA requirement
+			})
+			draDaemonPod.OwnerReferences = []metav1.OwnerReference{{
+				APIVersion: "apps/v1",
+				Kind:       "DaemonSet",
+				Name:       "dra-daemon",
+			}}
+
+			// application pod to be scheduled
+			appPod := test.UnschedulablePod(test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+				},
+			})
+
+			// When IgnoreDRARequests = true (default): only appPod counts (1 CPU total)
+			ctx1 := options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(true)}))
+			topology1, err := scheduling.NewTopology(ctx1, env.Client, cluster, nil, []*v1.NodePool{nodePool},
+				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes}, []*corev1.Pod{appPod})
+			Expect(err).ToNot(HaveOccurred())
+			scheduler1 := scheduling.NewScheduler(ctx1, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology1,
+				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock)
+			results1, err := scheduler1.Solve(ctx1, []*corev1.Pod{appPod})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results1.NewNodeClaims).To(HaveLen(1))
+			allocatedCPU1 := results1.NewNodeClaims[0].InstanceTypeOptions[0].Capacity[corev1.ResourceCPU]
+
+			// When IgnoreDRARequests = false: both draDaemonPod + appPod count (3+1=4 CPU total)
+			ctx2 := options.ToContext(ctx, test.Options(test.OptionsFields{IgnoreDRARequests: lo.ToPtr(false)}))
+			topology2, err := scheduling.NewTopology(ctx2, env.Client, cluster, nil, []*v1.NodePool{nodePool},
+				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes}, []*corev1.Pod{appPod})
+			Expect(err).ToNot(HaveOccurred())
+			scheduler2 := scheduling.NewScheduler(ctx2, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology2,
+				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock)
+			results2, err := scheduler2.Solve(ctx2, []*corev1.Pod{appPod})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(results2.NewNodeClaims).To(HaveLen(1))
+			allocatedCPU2 := results2.NewNodeClaims[0].InstanceTypeOptions[0].Capacity[corev1.ResourceCPU]
+
+			// Verify that when DRA is ignored, less CPU is allocated (smaller instance selected) than when DRA is counted
+			Expect(allocatedCPU1.Cmp(allocatedCPU2)).To(BeNumerically("<", 0))
+		})
+	})
 })
 
 // nolint:gocyclo
