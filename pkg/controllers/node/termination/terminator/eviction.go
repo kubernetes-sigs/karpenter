@@ -56,6 +56,8 @@ import (
 const (
 	evictionQueueBaseDelay = 100 * time.Millisecond
 	evictionQueueMaxDelay  = 10 * time.Second
+	minReconciles          = 100
+	maxReconciles          = 5000
 
 	multiplePodDisruptionBudgetsError = "This pod has more than one PodDisruptionBudget, which the eviction subresource does not support."
 )
@@ -112,8 +114,9 @@ func (q *Queue) Name() string {
 }
 
 func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 100, 5000)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
 	log.FromContext(ctx).V(1).Info("eviction-queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(100, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(q.Name()).
 		WatchesRawSource(source.Channel(q.source, handler.TypedFuncs[*corev1.Pod, reconcile.Request]{
@@ -126,7 +129,8 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
 				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](evictionQueueBaseDelay, evictionQueueMaxDelay),
-				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
+				// qps scales linearly with concurrentReconciles, bucket size is 10 * qps
+				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(qps), bucketSize)},
 			),
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).

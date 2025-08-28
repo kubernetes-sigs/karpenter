@@ -38,3 +38,10 @@ func LinearScaleReconciles(cpuCount float64, minReconciles int, maxReconciles in
 	// Clamp to ensure we stay within bounds
 	return lo.Clamp(result, minReconciles, maxReconciles)
 }
+
+func GetTypedBucketConfigs(minQPS int, minReconciles int, concurrentReconciles int) (int, int) {
+	qpsScaleFactor := float64(minQPS) / float64(minReconciles)
+	qps := int(math.Ceil(float64(concurrentReconciles) * qpsScaleFactor))
+	bucketSize := qps * 10
+	return qps, bucketSize
+}
