@@ -207,3 +207,18 @@ func HasPodAntiAffinity(pod *corev1.Pod) bool {
 		(len(pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 0 ||
 			len(pod.Spec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 0)
 }
+
+// HasDRARequirements returns true if any pod containers consume ResourceClaims
+func HasDRARequirements(pod *corev1.Pod) bool {
+	for _, container := range pod.Spec.InitContainers {
+		if len(container.Resources.Claims) > 0 {
+			return true
+		}
+	}
+	for _, container := range pod.Spec.Containers {
+		if len(container.Resources.Claims) > 0 {
+			return true
+		}
+	}
+	return false
+}
