@@ -55,6 +55,11 @@ import (
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
+const (
+	minReconciles = 100
+	maxReconciles = 5000
+)
+
 // Controller for the resource
 type Controller struct {
 	clock         clock.Clock
@@ -387,9 +392,9 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 100, 5000)
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
 	log.FromContext(ctx).V(1).Info("node.termination maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
-	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, 100, 5000)
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("node.termination").
 		For(&corev1.Node{}, builder.WithPredicates(nodeutils.IsManagedPredicateFuncs(c.cloudProvider))).
