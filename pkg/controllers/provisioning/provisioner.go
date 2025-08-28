@@ -155,6 +155,11 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 		} else {
 			nodeClaimNames[i] = name
 		}
+
+		// During provisioning of static nodes we reserve NodeCounts, we release it here regardless of the outcome
+		if nodeClaims[i].IsStaticNodeClaim {
+			p.cluster.NodePoolState.ReleaseNodeCount(nodeClaims[i].NodePoolName, 1)
+		}
 	})
 	return nodeClaimNames, multierr.Combine(errs...)
 }
@@ -229,6 +234,9 @@ func (p *Provisioner) NewScheduler(
 		return nil, fmt.Errorf("listing nodepools, %w", err)
 	}
 	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
+		if nodepoolutils.IsStaticNodePool(np) {
+			return false
+		}
 		if !np.StatusConditions().IsTrue(status.ConditionReady) {
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring nodepool, not ready")
 			return false
