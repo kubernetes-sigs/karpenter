@@ -113,6 +113,13 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	go vet ./...
 	cd kwok/charts && helm-docs
 	golangci-lint run
+	@if [ -f ./.custom-gcl.yml ]; then \
+		echo "Running kube-api-linter..."; \
+		golangci-lint custom; \
+		./bin/golangci-kube-api-linter run pkg/apis/v1/ --config .golangci-kal.yml; \
+		./bin/golangci-kube-api-linter run pkg/apis/v1alpha1/ --config .golangci-kal.yml; \
+		./bin/golangci-kube-api-linter run kwok/apis/v1alpha1/ --config .golangci-kal.yml; \
+	fi
 	@git diff --quiet ||\
 		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
 		if [ "${CI}" = true ]; then\
