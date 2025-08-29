@@ -19,19 +19,21 @@ package lifecycle_test
 import (
 	"time"
 
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	"github.com/awslabs/operatorpkg/status"
 
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Liveness", func() {
@@ -84,7 +86,7 @@ var _ = Describe("Liveness", func() {
 			ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 			if isManagedNodeClaim {
 				ExpectNotFound(ctx, env.Client, nodeClaim)
-				operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
+				ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
 					Type:    v1.ConditionTypeNodeRegistrationHealthy,
 					Status:  metav1.ConditionFalse,
 					Reason:  "RegistrationFailed",
@@ -181,7 +183,7 @@ var _ = Describe("Liveness", func() {
 
 		// try again a minute later but before the launch timeout
 		fakeClock.Step(time.Minute * 1)
-		_ = operatorpkg.ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 		// expect that the nodeclaim was not deleted
 		ExpectExists(ctx, env.Client, nodeClaim)
 	})
@@ -258,8 +260,8 @@ var _ = Describe("Liveness", func() {
 		// advance the clock to show that the timeout is not based on creation timestamp when considering registration timeout
 		fakeClock.Step(16 * time.Minute)
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
-		Expect(result.RequeueAfter).To(Not(Equal(0 * time.Second)))
-		Expect(result.RequeueAfter > 0*time.Second && result.RequeueAfter < 15*time.Minute).To(BeTrue())
+		result.To(HaveField("RequeueAfter", Not(Equal(0*time.Second))))
+		result.To(HaveField("RequeueAfter", And(BeNumerically(">", 0*time.Second), BeNumerically("<", 15*time.Minute))))
 
 		// expect that the nodeclaim was not deleted after the timeout
 		ExpectExists(ctx, env.Client, nodeClaim)
@@ -294,7 +296,7 @@ var _ = Describe("Liveness", func() {
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)
 
 		// NodeClaim registration failed, but we should not update the NodeRegistrationHealthy status condition if it is already True
-		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{Type: v1.ConditionTypeNodeRegistrationHealthy, Status: metav1.ConditionTrue})
+		ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{Type: v1.ConditionTypeNodeRegistrationHealthy, Status: metav1.ConditionTrue})
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim)
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})

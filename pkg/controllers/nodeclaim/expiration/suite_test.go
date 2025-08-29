@@ -27,6 +27,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -69,7 +71,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 })
 
 var _ = Describe("Expiration", func() {
@@ -176,7 +178,7 @@ var _ = Describe("Expiration", func() {
 		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))
 
 		result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
-		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))
+		result.To(HaveField("RequeueAfter", BeNumerically("~", time.Second*100, time.Second)))
 	})
 	It("shouldn't expire the same NodeClaim multiple times", func() {
 		nodeClaim.ObjectMeta.Finalizers = append(nodeClaim.ObjectMeta.Finalizers, "test-finalizer")

@@ -29,6 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	clock "k8s.io/utils/clock/testing"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -104,7 +106,7 @@ var _ = BeforeEach(func() {
 var _ = AfterEach(func() {
 	cp.Reset()
 	nodeClaimDisruptionController.Reset()
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 })
 
 var _ = Describe("Disruption", func() {
