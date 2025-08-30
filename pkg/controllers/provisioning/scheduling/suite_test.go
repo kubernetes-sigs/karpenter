@@ -99,7 +99,7 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+	prov = provisioning.NewProvisioner(env.Client, env.KubernetesVersionProvider(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
 })
 
@@ -2046,7 +2046,7 @@ var _ = Context("Scheduling", func() {
 						return []string{o.(*corev1.Pod).Spec.NodeName}
 					},
 				).Build()
-				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+				provisioner := provisioning.NewProvisioner(kubeClient, env.KubernetesVersionProvider(), events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
 				controller := informer.NewNodeController(kubeClient, cluster)
 				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings
 				ExpectApplied(ctx, kubeClient, nodePool)

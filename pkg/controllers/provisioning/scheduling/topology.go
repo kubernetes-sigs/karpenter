@@ -18,6 +18,7 @@ package scheduling
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -39,14 +40,16 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/operator"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 type Topology struct {
-	kubeClient       client.Client
-	preferencePolicy PreferencePolicy
+	kubeClient          client.Client
+	kubeVersionProvider operator.KubernetesVersionProvider
+	preferencePolicy    PreferencePolicy
 	// Both the topologyGroups and inverseTopologies are maps of the hash from TopologyGroup.Hash() to the topology group
 	// itself. This is used to allow us to store one topology group that tracks the topology of many pods instead of
 	// having a 1<->1 mapping between topology groups and pods owned/selected by that group.
@@ -68,6 +71,7 @@ type Topology struct {
 func NewTopology(
 	ctx context.Context,
 	kubeClient client.Client,
+	kubeVersionProvider operator.KubernetesVersionProvider,
 	cluster *state.Cluster,
 	stateNodes []*state.StateNode,
 	nodePools []*v1.NodePool,
@@ -77,6 +81,7 @@ func NewTopology(
 ) (*Topology, error) {
 	t := &Topology{
 		kubeClient:            kubeClient,
+		kubeVersionProvider:   kubeVersionProvider,
 		preferencePolicy:      option.Resolve(opts...).preferencePolicy,
 		cluster:               cluster,
 		stateNodes:            stateNodes,
@@ -431,15 +436,20 @@ func (t *Topology) newForTopologies(p *corev1.Pod) []*TopologyGroup {
 		if t.preferencePolicy == PreferencePolicyIgnore && tsc.WhenUnsatisfiable != corev1.DoNotSchedule {
 			continue
 		}
-		for _, key := range tsc.MatchLabelKeys {
-			if value, ok := p.Labels[key]; ok {
-				tsc.LabelSelector.MatchExpressions = append(tsc.LabelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
-					Key:      key,
-					Operator: metav1.LabelSelectorOpIn,
-					Values:   []string{value},
-				})
+		// MatchExpressions are injected by the API server starting in k8s 1.34
+		if t.kubeVersionProvider.Version().Minor() < 34 {
+			for _, key := range tsc.MatchLabelKeys {
+				if value, ok := p.Labels[key]; ok {
+					tsc.LabelSelector.MatchExpressions = append(tsc.LabelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+						Key:      key,
+						Operator: metav1.LabelSelectorOpIn,
+						Values:   []string{value},
+					})
+				}
 			}
 		}
+		marshaled := string(lo.Must(json.Marshal(tsc.LabelSelector.MatchExpressions)))
+		fmt.Printf("%s\n", marshaled)
 		topologyGroups = append(topologyGroups, NewTopologyGroup(
 			TopologyTypeSpread,
 			tsc.TopologyKey,
