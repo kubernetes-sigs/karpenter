@@ -38,6 +38,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -61,6 +62,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/logging"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
+	versionprovider "sigs.k8s.io/karpenter/pkg/version"
 )
 
 const (
@@ -95,22 +97,34 @@ func init() {
 	})
 }
 
+type KubernetesVersionProvider interface {
+	Version() *version.Version
+}
+
 type Operator struct {
 	manager.Manager
 
-	KubernetesInterface kubernetes.Interface
-	EventRecorder       events.Recorder
-	Clock               clock.Clock
+	KubernetesVersionProvider KubernetesVersionProvider
+	KubernetesInterface       kubernetes.Interface
+	EventRecorder             events.Recorder
+	Clock                     clock.Clock
 }
 
 type Options struct {
-	LeaderElectionLabels map[string]string
+	LeaderElectionLabels      map[string]string
+	KubernetesVersionProvider KubernetesVersionProvider
 }
 
 // Adds LeaderElectionLabels to the underlying manager's LeaderElectionOptions
 func WithLeaderElectionLabels(labels map[string]string) option.Function[Options] {
 	return func(opts *Options) {
 		opts.LeaderElectionLabels = labels
+	}
+}
+
+func WithKubernetesVersionProvider(provider KubernetesVersionProvider) option.Function[Options] {
+	return func(opts *Options) {
+		opts.KubernetesVersionProvider = provider
 	}
 }
 
@@ -151,6 +165,12 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
+
+	kubernetesVersionProvider := opts.KubernetesVersionProvider
+	if kubernetesVersionProvider == nil {
+		kubernetesVersionProvider = versionprovider.NewProvider(kubernetesInterface)
+		lo.Must0(kubernetesVersionProvider.(*versionprovider.Provider).Update(ctx))
+	}
 
 	log.FromContext(ctx).WithValues("version", Version).V(1).Info("discovered karpenter version")
 
@@ -223,10 +243,11 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
 
 	return ctx, &Operator{
-		Manager:             mgr,
-		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(appName)),
-		Clock:               clock.RealClock{},
+		Manager:                   mgr,
+		KubernetesInterface:       kubernetesInterface,
+		KubernetesVersionProvider: kubernetesVersionProvider,
+		EventRecorder:             events.NewRecorder(mgr.GetEventRecorderFor(appName)),
+		Clock:                     clock.RealClock{},
 	}
 }
 

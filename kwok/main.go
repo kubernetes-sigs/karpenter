@@ -39,6 +39,7 @@ func main() {
 			ctx,
 			op.Manager,
 			op.Clock,
+			op.KubernetesVersionProvider,
 			op.GetClient(),
 			op.EventRecorder,
 			cloudProvider,

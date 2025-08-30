@@ -43,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"sigs.k8s.io/karpenter/pkg/operator"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -76,29 +77,35 @@ func WithReason(reason string) func(*LaunchOptions) {
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
-	cloudProvider  cloudprovider.CloudProvider
-	kubeClient     client.Client
-	batcher        *Batcher[types.UID]
-	volumeTopology *scheduler.VolumeTopology
-	cluster        *state.Cluster
-	recorder       events.Recorder
-	cm             *pretty.ChangeMonitor
-	clock          clock.Clock
+	cloudProvider       cloudprovider.CloudProvider
+	kubeClient          client.Client
+	kubeVersionProvider operator.KubernetesVersionProvider
+	batcher             *Batcher[types.UID]
+	volumeTopology      *scheduler.VolumeTopology
+	cluster             *state.Cluster
+	recorder            events.Recorder
+	cm                  *pretty.ChangeMonitor
+	clock               clock.Clock
 }
 
-func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
-	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+func NewProvisioner(
+	kubeClient client.Client,
+	kubeVersionProvider operator.KubernetesVersionProvider,
+	recorder events.Recorder,
+	cloudProvider cloudprovider.CloudProvider,
+	cluster *state.Cluster,
 	clock clock.Clock,
 ) *Provisioner {
 	p := &Provisioner{
-		batcher:        NewBatcher[types.UID](clock),
-		cloudProvider:  cloudProvider,
-		kubeClient:     kubeClient,
-		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
-		cluster:        cluster,
-		recorder:       recorder,
-		cm:             pretty.NewChangeMonitor(),
-		clock:          clock,
+		batcher:             NewBatcher[types.UID](clock),
+		cloudProvider:       cloudProvider,
+		kubeClient:          kubeClient,
+		kubeVersionProvider: kubeVersionProvider,
+		volumeTopology:      scheduler.NewVolumeTopology(kubeClient),
+		cluster:             cluster,
+		recorder:            recorder,
+		cm:                  pretty.NewChangeMonitor(),
+		clock:               clock,
 	}
 	return p
 }
@@ -268,7 +275,7 @@ func (p *Provisioner) NewScheduler(
 	}
 
 	// Calculate cluster topology, if a context error occurs, it is wrapped and returned
-	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
+	topology, err := scheduler.NewTopology(ctx, p.kubeClient, p.kubeVersionProvider, p.cluster, stateNodes, nodePools, instanceTypes, pods, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tracking topology counts, %w", err)
 	}

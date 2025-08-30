@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
@@ -200,4 +201,16 @@ func (e *Environment) Stop() error {
 	close(e.Done)
 	e.Cancel()
 	return e.Environment.Stop()
+}
+
+func (e *Environment) KubernetesVersionProvider() operator.KubernetesVersionProvider {
+	return &versionProviderAdapater{e}
+}
+
+type versionProviderAdapater struct {
+	*Environment
+}
+
+func (vpa versionProviderAdapater) Version() *version.Version {
+	return vpa.Environment.Version
 }

@@ -39,6 +39,8 @@ import (
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"k8s.io/apimachinery/pkg/util/version"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
@@ -232,7 +234,7 @@ func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.
 	client := fakecr.NewFakeClient()
 	clock := &clock.RealClock{}
 	cluster = state.NewCluster(clock, client, cloudProvider)
-	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, []*v1.NodePool{nodePool}, map[string][]*cloudprovider.InstanceType{
+	topology, err := scheduling.NewTopology(ctx, client, &staticVersionProvider{version: version.MustParseMajorMinor("1.34")}, cluster, nil, []*v1.NodePool{nodePool}, map[string][]*cloudprovider.InstanceType{
 		nodePool.Name: instanceTypes,
 	}, pods, opts...)
 	if err != nil {
@@ -450,4 +452,12 @@ func randomMemory() resource.Quantity {
 func randomCPU() resource.Quantity {
 	cpu := []int{100, 250, 500, 1000, 1500}
 	return resource.MustParse(fmt.Sprintf("%dm", cpu[r.Intn(len(cpu))]))
+}
+
+type staticVersionProvider struct {
+	version *version.Version
+}
+
+func (p *staticVersionProvider) Version() *version.Version {
+	return p.version
 }

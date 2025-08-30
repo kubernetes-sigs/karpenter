@@ -56,19 +56,22 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/operator"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/version"
 )
 
 func NewControllers(
 	ctx context.Context,
 	mgr manager.Manager,
 	clock clock.Clock,
+	kubeVersionProvider operator.KubernetesVersionProvider,
 	kubeClient client.Client,
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
 ) []controller.Controller {
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
+	p := provisioning.NewProvisioner(kubeClient, kubeVersionProvider, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 
@@ -96,6 +99,10 @@ func NewControllers(
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
 		nodehydration.NewController(kubeClient, cloudProvider),
+	}
+
+	if p, ok := kubeVersionProvider.(*version.Provider); ok {
+		controllers = append(controllers, version.NewController(p))
 	}
 
 	if !options.FromContext(ctx).DisableClusterStateObservability {
