@@ -2,10 +2,6 @@ module sigs.k8s.io/karpenter
 
 go 1.24.6
 
-//replace (
-//	github.com/awslabs/operatorpkg => ../operatorpkg
-//)
-
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
