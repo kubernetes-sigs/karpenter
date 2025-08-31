@@ -635,7 +635,7 @@ func ExpectForceCleanedUpAll(ctx context.Context, c client.Client) {
 	ExpectForceCleanedUp(ctx, c, CleanupResourceList...)
 }
 
-// ExpectAppliedKeepSourceStatus will apply the object lists while keeping the status subresource from the source object, regardless of new status set by k8s
+// ExpectAppliedKeepSourceStatus will apply the object lists while keeping the status subresource from the source object
 func ExpectAppliedKeepSourceStatus(ctx context.Context, c client.Client, objects ...client.Object) {
 	for _, object := range objects {
 		statusCopy := object.DeepCopyObject().(client.Object)
