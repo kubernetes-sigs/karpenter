@@ -640,8 +640,6 @@ func ExpectAppliedKeepSourceStatus(ctx context.Context, c client.Client, objects
 	for _, object := range objects {
 		statusCopy := object.DeepCopyObject().(client.Object)
 		ExpectApplied(ctx, c, object)
-
-		// we need to update status POD to old one to avoid pending state
 		statusCopy.SetResourceVersion(object.GetResourceVersion())
 		Expect(c.Status().Update(ctx, statusCopy)).To(Succeed())
 		Expect(c.Get(ctx, client.ObjectKeyFromObject(object), object)).To(Succeed())
