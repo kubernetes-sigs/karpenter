@@ -136,7 +136,7 @@ var _ = Describe("Eviction/Queue", func() {
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
-			ExpectApplied(ctx, env.Client, pdb, pod, node)
+			ExpectAppliedKeepSourceStatus(ctx, env.Client, pdb, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
 			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
@@ -152,7 +152,8 @@ var _ = Describe("Eviction/Queue", func() {
 				Labels:         testLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
 			})
-			ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
+
+			ExpectAppliedKeepSourceStatus(ctx, env.Client, pdb, pdb2, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
 			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
