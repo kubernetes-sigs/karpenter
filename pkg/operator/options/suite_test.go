@@ -125,6 +125,7 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             lo.ToPtr(false),
 					StaticCapacity:          lo.ToPtr(false),
 				},
+				IgnoreDRARequests: lo.ToPtr(true),
 			}))
 		})
 
@@ -180,6 +181,7 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             lo.ToPtr(true),
 					StaticCapacity:          lo.ToPtr(true),
 				},
+				IgnoreDRARequests: lo.ToPtr(true),
 			}))
 		})
 
@@ -235,6 +237,7 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             lo.ToPtr(true),
 					StaticCapacity:          lo.ToPtr(true),
 				},
+				IgnoreDRARequests: lo.ToPtr(true),
 			}))
 		})
 
@@ -292,6 +295,7 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             lo.ToPtr(true),
 					StaticCapacity:          lo.ToPtr(true),
 				},
+				IgnoreDRARequests: lo.ToPtr(true),
 			}))
 		})
 
@@ -382,4 +386,5 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.NodeOverlay).To(Equal(optsB.FeatureGates.NodeOverlay))
 	Expect(optsA.FeatureGates.StaticCapacity).To(Equal(optsB.FeatureGates.StaticCapacity))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
+	Expect(optsA.IgnoreDRARequests).To(Equal(optsB.IgnoreDRARequests))
 }
