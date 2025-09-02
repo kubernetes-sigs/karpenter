@@ -96,10 +96,10 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 		if err != nil {
 			return "", err
 		}
-		d.instanceTypeNotFoundCheckCache.SetDefault(string(nodeClaim.UID), nil)
 		if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
 			return reason, nil
 		}
+		d.instanceTypeNotFoundCheckCache.SetDefault(string(nodeClaim.UID), nil)
 	}
 	// Then check if it's drifted from the cloud provider side.
 	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
