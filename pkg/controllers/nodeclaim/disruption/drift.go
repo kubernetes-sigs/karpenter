@@ -99,6 +99,8 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 		if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
 			return reason, nil
 		}
+		// Only add a cache entry once we've validated that an instance type exists. We only cache a successful check rather
+		// that the result to ensure we respond quickly to transient abnormalities in the GetInstanceTypes response.
 		d.instanceTypeNotFoundCheckCache.SetDefault(string(nodeClaim.UID), nil)
 	}
 	// Then check if it's drifted from the cloud provider side.
