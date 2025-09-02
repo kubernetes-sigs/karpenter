@@ -135,7 +135,9 @@ func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeC
 	// reason we don't compare against the reservation ID and leave that to the provider to implement.
 	if nodeClaim.Labels[v1.CapacityTypeLabelKey] == v1.CapacityTypeReserved {
 		reqs[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
-		delete(reqs, cloudprovider.ReservationIDLabel)
+		for label := range cloudprovider.ReservedCapacityLabels {
+			delete(reqs, label)
+		}
 	}
 	if !it.Offerings.HasCompatible(reqs) {
 		return InstanceTypeNotFound
