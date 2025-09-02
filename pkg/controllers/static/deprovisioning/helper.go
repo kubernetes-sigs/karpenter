@@ -19,6 +19,7 @@ package static
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/samber/lo"
@@ -52,6 +53,10 @@ func GetDeprovisioningCandidates(ctx context.Context, kubeClient client.Client, 
 		}
 		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, pod.HasDoNotDisrupt)
 	})
+
+	for _, n := range emptyNodes {
+		fmt.Printf("uniqq : empty nodes %+v\n", n.Node)
+	}
 
 	candidates := lo.Slice(emptyNodes, 0, count)
 	remaining := count - len(candidates)
