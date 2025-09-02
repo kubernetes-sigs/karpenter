@@ -1373,7 +1373,7 @@ var _ = Describe("Instance Type Selection", func() {
 			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts2))
 			// We have the required InstanceTypes that meet the minValues requirement.
 			cloudProvider.InstanceTypes = instanceTypes
-			// The truncation is changed from the default 100 to 1 for the ease of testing.
+			// The truncation is changed from the default to 1 for the ease of testing.
 			// This will truncate the 2 InstanceTypes to 1 resulting in breaking the minValue requirement and hence should fail the scheduling.
 			scheduling.MaxInstanceTypes = 1
 

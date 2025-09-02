@@ -65,27 +65,28 @@ type FeatureGates struct {
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
 type Options struct {
-	ServiceName             string
-	MetricsPort             int
-	HealthProbePort         int
-	KubeClientQPS           int
-	KubeClientBurst         int
-	EnableProfiling         bool
-	DisableLeaderElection   bool
-	LeaderElectionName      string
-	LeaderElectionNamespace string
-	MemoryLimit             int64
-	CPURequests             int64
-	LogLevel                string
-	LogOutputPaths          string
-	LogErrorOutputPaths     string
-	BatchMaxDuration        time.Duration
-	BatchIdleDuration       time.Duration
-	preferencePolicyRaw     string
-	PreferencePolicy        PreferencePolicy
-	minValuesPolicyRaw      string
-	MinValuesPolicy         MinValuesPolicy
-	FeatureGates            FeatureGates
+	ServiceName                      string
+	MetricsPort                      int
+	HealthProbePort                  int
+	KubeClientQPS                    int
+	KubeClientBurst                  int
+	EnableProfiling                  bool
+	DisableLeaderElection            bool
+	DisableClusterStateObservability bool
+	LeaderElectionName               string
+	LeaderElectionNamespace          string
+	MemoryLimit                      int64
+	CPURequests                      int64
+	LogLevel                         string
+	LogOutputPaths                   string
+	LogErrorOutputPaths              string
+	BatchMaxDuration                 time.Duration
+	BatchIdleDuration                time.Duration
+	preferencePolicyRaw              string
+	PreferencePolicy                 PreferencePolicy
+	minValuesPolicyRaw               string
+	MinValuesPolicy                  MinValuesPolicy
+	FeatureGates                     FeatureGates
 }
 
 type FlagSet struct {
@@ -113,6 +114,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.IntVar(&o.KubeClientBurst, "kube-client-burst", env.WithDefaultInt("KUBE_CLIENT_BURST", 300), "The maximum allowed burst of queries to the kube-apiserver")
 	fs.BoolVarWithEnv(&o.EnableProfiling, "enable-profiling", "ENABLE_PROFILING", false, "Enable the profiling on the metric endpoint")
 	fs.BoolVarWithEnv(&o.DisableLeaderElection, "disable-leader-election", "DISABLE_LEADER_ELECTION", false, "Disable the leader election client before executing the main loop. Disable when running replicated components for high availability is not desired.")
+	fs.BoolVarWithEnv(&o.DisableClusterStateObservability, "disable-cluster-state-observability", "DISABLE_CLUSTER_STATE_OBSERVABILITY", false, "Disable cluster state metrics and events")
 	fs.StringVar(&o.LeaderElectionName, "leader-election-name", env.WithDefaultString("LEADER_ELECTION_NAME", "karpenter-leader-election"), "Leader election name to create and monitor the lease if running outside the cluster")
 	fs.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", env.WithDefaultString("LEADER_ELECTION_NAMESPACE", ""), "Leader election namespace to create and monitor the lease if running outside the cluster")
 	fs.Int64Var(&o.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
