@@ -157,37 +157,50 @@ var _ = Describe("StaticCapacity", func() {
 			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
 		})
 
-		It("should prioritize empty nodes for termination", func() {
-			// Initially should have 3 nodes
-			nodes := env.EventuallyExpectInitializedNodeCount("==", 3)
-			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 3)
+		It("should terminate empty nodes first, then nodes with least cost, then respect do-not-disrupt", func() {
+			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
+			env.ExpectUpdated(nodeClass, nodePool)
+			nodes := env.EventuallyExpectInitializedNodeCount("==", 5)
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 5)
 			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
 
-			// Create a pod on one node to make it non-empty
-			pods := test.Pods(2, test.PodOptions{
-				ResourceRequirements: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("100m"),
-						corev1.ResourceMemory: resource.MustParse("100Mi"),
-					},
-				},
-			})
-			var nodesWithPods []*corev1.Node
+			pods := test.Pods(2, test.PodOptions{})
+
 			for i, pod := range pods {
 				pod.Spec.NodeName = nodes[i].Name
 				env.ExpectCreated(pod)
-				nodesWithPods = append(nodesWithPods, nodes[i])
 			}
 
-			// Scale down to 2
-			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
+			doNotDisruptPod := test.Pod(test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+				},
+			})
+			doNotDisruptPod.Spec.NodeName = nodes[2].Name
+			env.ExpectCreated(doNotDisruptPod)
+
+			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
 			env.ExpectUpdated(nodePool)
-			remainingNodes := env.EventuallyExpectInitializedNodeCount("==", 2)
-			nodeClaims = env.EventuallyExpectCreatedNodeClaimCount("==", 2)
-			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
+
+			remainingNodes := env.EventuallyExpectInitializedNodeCount("==", 3)
+			env.EventuallyExpectCreatedNodeClaimCount("==", 3)
+
+			// The nodes with pods and do-not-disrupt should remain
+			nodeNames := lo.Map(remainingNodes, func(n *corev1.Node, _ int) string { return n.Name })
+			Expect(nodeNames).To(ContainElement(nodes[0].Name)) // node with regular pod
+			Expect(nodeNames).To(ContainElement(nodes[1].Name)) // node with regular pod
+			Expect(nodeNames).To(ContainElement(nodes[2].Name)) // node with do-not-disrupt pod
+
+			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+			env.ExpectUpdated(nodePool)
+
+			finalNodes := env.EventuallyExpectInitializedNodeCount("==", 1)
+			env.EventuallyExpectCreatedNodeClaimCount("==", 1)
 
 			// The node with the pod should still exist
-			Expect(remainingNodes).To(ContainElements(nodesWithPods))
+			Expect(finalNodes[0].Name).To(Equal(nodes[2].Name))
 		})
 
 		It("should handle graceful pod eviction during scale down", func() {
@@ -215,12 +228,6 @@ var _ = Describe("StaticCapacity", func() {
 							Containers: []corev1.Container{{
 								Name:  "test",
 								Image: "nginx",
-								Resources: corev1.ResourceRequirements{
-									Requests: corev1.ResourceList{
-										corev1.ResourceCPU:    resource.MustParse("100m"),
-										corev1.ResourceMemory: resource.MustParse("100Mi"),
-									},
-								},
 							}},
 						},
 					},
@@ -331,8 +338,105 @@ var _ = Describe("StaticCapacity", func() {
 			env.EventuallyExpectCreatedNodeClaimCount("==", 0)
 		})
 	})
-})
 
-// Add tests where
-// Presence of static Nodepool should not affect dyanmic NodeClaim Creation
-// Should add termination test and expiration test.
+	Context("Dynamic NodeClaim Interaction", func() {
+		var dynamicNodePool *v1.NodePool
+		var label map[string]string
+		BeforeEach(func() {
+			// Create a static NodePool
+			nodePool.Spec.Replicas = lo.ToPtr(int64(2))
+			if env.IsDefaultNodeClassKWOK() {
+				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values: []string{
+							"c-16x-amd64-linux",
+							"c-16x-arm64-linux",
+						},
+					},
+				})
+			}
+			nodePool.Spec.Template.Spec.Taints = []corev1.Taint{
+				{
+					Key:    "static",
+					Effect: corev1.TaintEffectNoExecute,
+				},
+			}
+			// Create a dynamic NodePool
+			dynamicNodePool = test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "dynamic-nodepool",
+				},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: nodePool.Spec.Template.Spec.Requirements,
+							NodeClassRef: nodePool.Spec.Template.Spec.NodeClassRef,
+						},
+					},
+				},
+			})
+			label = map[string]string{"app": "large-app"}
+		})
+
+		It("should not affect dynamic NodeClaim creation when static NodePool is present", func() {
+			env.ExpectCreated(nodeClass, nodePool, dynamicNodePool)
+
+			env.EventuallyExpectInitializedNodeCount("==", 2)
+			staticNodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 2)
+			env.EventuallyExpectNodeClaimsReady(staticNodeClaims...)
+
+			for _, nc := range staticNodeClaims {
+				Expect(nc.Labels).To(HaveKeyWithValue(v1.NodePoolLabelKey, nodePool.Name))
+			}
+
+			// Create pods that require dynamic provisioning
+			pods := test.Pods(3, test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.DoNotDisruptAnnotationKey: "true",
+					},
+					Labels: label,
+				},
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+					{
+						MaxSkew:           1,
+						TopologyKey:       corev1.LabelHostname,
+						WhenUnsatisfiable: corev1.DoNotSchedule,
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: label,
+						},
+					},
+				},
+				PodAntiRequirements: []corev1.PodAffinityTerm{{
+					TopologyKey: corev1.LabelHostname,
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: label,
+					},
+				}},
+			})
+
+			for _, pod := range pods {
+				env.ExpectCreated(pod)
+			}
+
+			env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(label), 3)
+
+			// Should create dynamic nodes for the pods
+			env.EventuallyExpectInitializedNodeCount("==", 5) // At least 3 nodes (2 static + 1+ dynamic)
+			allNodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 5)
+
+			dynamicNodeClaims := lo.Filter(allNodeClaims, func(nc *v1.NodeClaim, _ int) bool {
+				return nc.Labels[v1.NodePoolLabelKey] == dynamicNodePool.Name
+			})
+			Expect(len(dynamicNodeClaims)).To(BeNumerically("==", 3))
+
+			// Verify static NodePool still has exactly 2 nodes
+			staticNodeClaimsAfter := lo.Filter(allNodeClaims, func(nc *v1.NodeClaim, _ int) bool {
+				return nc.Labels[v1.NodePoolLabelKey] == nodePool.Name
+			})
+			Expect(len(staticNodeClaimsAfter)).To(Equal(2))
+		})
+	})
+})
