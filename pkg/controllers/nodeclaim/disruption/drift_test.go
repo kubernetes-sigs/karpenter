@@ -522,4 +522,60 @@ var _ = Describe("Drift", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
 	})
+	Context("Reserved Capacity", func() {
+		const labelCapacityReservationType = "karpenter.test.sh/capacity-reservation-type"
+		BeforeEach(func() {
+			cloudprovider.ReservedCapacityLabels.Insert(labelCapacityReservationType)
+			v1.WellKnownLabels.Insert(labelCapacityReservationType)
+			for _, o := range it.Offerings {
+				for label := range cloudprovider.ReservedCapacityLabels {
+					o.Requirements.Add(scheduling.NewRequirement(label, corev1.NodeSelectorOpDoesNotExist))
+				}
+			}
+			reservedOffering := &cloudprovider.Offering{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeReserved,
+					corev1.LabelTopologyZone: "test-zone-1a",
+				}),
+				ReservationCapacity: 1,
+			}
+			for label := range cloudprovider.ReservedCapacityLabels {
+				value := test.RandomName()
+				reservedOffering.Requirements.Add(scheduling.NewRequirement(label, corev1.NodeSelectorOpIn, value))
+				nodeClaim.Labels[label] = value
+			}
+			it.Offerings = append(it.Offerings, reservedOffering)
+			nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeReserved
+		})
+		AfterEach(func() {
+			cloudprovider.ReservedCapacityLabels.Delete(labelCapacityReservationType)
+			v1.WellKnownLabels.Delete(labelCapacityReservationType)
+		})
+		DescribeTable(
+			"InstanceTypeNotFound",
+			func(expectDrifted bool, includedCapacityTypes ...string) {
+				it.Offerings = lo.Filter(it.Offerings, func(o *cloudprovider.Offering, _ int) bool {
+					ct := o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
+					for _, ict := range includedCapacityTypes {
+						if ct == ict {
+							return true
+						}
+					}
+					return false
+				})
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+				fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+				ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(Equal(expectDrifted))
+			},
+			Entry("shouldn't drift when a matching instance type exists with reserved and on-demand offerings", false, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand),
+			Entry("shouldn't drift when a matching instance type exists with reserved offerings", false, v1.CapacityTypeReserved),
+			Entry("shouldn't drift when a matching instance type exists with on-demand offerings", false, v1.CapacityTypeOnDemand),
+			Entry("should drift when a matching instance type exists but the only offering is spot", true, v1.CapacityTypeSpot),
+			Entry("should drift when a matching instance type exists but there are no compatible offerings", true),
+		)
+	})
 })
