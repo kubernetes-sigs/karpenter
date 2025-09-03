@@ -46,6 +46,10 @@ var (
 	// reservation. For example, a reservation could be shared across multiple NodePools, and the value encoded in this
 	// requirement is used to inform the scheduler that a reservation for one should affect the other.
 	ReservationIDLabel string
+
+	// ReservedCapacityLabels is the set of additional labels that are associated with reserved offerings. Each reserved
+	// offering should define a requirement for these labels, and all other offerings should define a DoesNotExist requirement.
+	ReservedCapacityLabels = sets.New[string]()
 )
 
 type DriftReason string
