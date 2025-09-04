@@ -17,8 +17,6 @@ limitations under the License.
 package nodeoverlay
 
 import (
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/samber/lo"
@@ -36,8 +34,9 @@ type PriceUpdate struct {
 }
 
 type CapacityUpdate struct {
-	OverlayUpdate corev1.ResourceList
-	lowestWeight  *int32
+	OverlayUpdate                 corev1.ResourceList
+	lowestWeightCapacityResources corev1.ResourceList
+	lowestWeight                  *int32
 }
 
 type InstanceTypeUpdate struct {
@@ -45,9 +44,18 @@ type InstanceTypeUpdate struct {
 	Capacity *CapacityUpdate
 }
 
+// InstanceTypeStore manages instance type updates for node pools in a thread-safe manner.
+// It maintains a nested mapping structure where:
+//   - First level:  nodePoolName -> map of instance updates
+//   - Second level: instanceName -> specific update configurations
+//
+// The store is used to:
+//   - Track instance type modifications per node pool
+//   - Validate instance configurations
+//   - Update instance properties for scheduling decisions
 type InstanceTypeStore struct {
-	updates map[string]map[string]*InstanceTypeUpdate
-	mu      sync.RWMutex
+	updates map[string]map[string]*InstanceTypeUpdate // nodePoolName -> (instanceName -> updates)
+	mu      sync.RWMutex                              // protects concurrent access to updates
 }
 
 func NewInstanceTypeStore() *InstanceTypeStore {
@@ -63,12 +71,13 @@ func (s *InstanceTypeStore) UpdateStore(updatedStore map[string]map[string]*Inst
 	s.updates = map[string]map[string]*InstanceTypeUpdate{}
 	for nodePoolName, v := range updatedStore {
 		s.updates[nodePoolName] = map[string]*InstanceTypeUpdate{}
-		for overlayName, itUpdate := range v {
-			s.updates[nodePoolName][overlayName] = &InstanceTypeUpdate{
+		for instanceTypeName, itUpdate := range v {
+			s.updates[nodePoolName][instanceTypeName] = &InstanceTypeUpdate{
 				Price: lo.Assign(map[string]*PriceUpdate{}, itUpdate.Price),
 				Capacity: &CapacityUpdate{
-					OverlayUpdate: lo.Assign(corev1.ResourceList{}, itUpdate.Capacity.OverlayUpdate),
-					lowestWeight:  itUpdate.Capacity.lowestWeight,
+					OverlayUpdate:                 lo.Assign(corev1.ResourceList{}, itUpdate.Capacity.OverlayUpdate),
+					lowestWeightCapacityResources: itUpdate.Capacity.lowestWeightCapacityResources,
+					lowestWeight:                  itUpdate.Capacity.lowestWeight,
 				},
 			}
 		}
@@ -96,16 +105,17 @@ func (s *InstanceTypeStore) updateInstanceTypeCapacity(nodePoolName string, inst
 
 	if s.updates[nodePoolName][instanceTypeName].Capacity == nil {
 		s.updates[nodePoolName][instanceTypeName].Capacity = &CapacityUpdate{
-			OverlayUpdate: nodeOverlay.Spec.Capacity,
-			lowestWeight:  nodeOverlay.Spec.Weight,
+			OverlayUpdate:                 nodeOverlay.Spec.Capacity,
+			lowestWeightCapacityResources: nodeOverlay.Spec.Capacity,
+			lowestWeight:                  nodeOverlay.Spec.Weight,
 		}
 	} else {
-		for resource, qun := range nodeOverlay.Spec.Capacity {
-			s.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource] = qun
+		for resource, quantity := range nodeOverlay.Spec.Capacity {
+			s.updates[nodePoolName][instanceTypeName].Capacity.OverlayUpdate[resource] = quantity
 		}
+		s.updates[nodePoolName][instanceTypeName].Capacity.lowestWeightCapacityResources = nodeOverlay.Spec.Capacity
 		s.updates[nodePoolName][instanceTypeName].Capacity.lowestWeight = nodeOverlay.Spec.Weight
 	}
-
 }
 
 func (s *InstanceTypeStore) isCapacityUpdateConflicting(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay) bool {
@@ -128,7 +138,7 @@ func (s *InstanceTypeStore) isCapacityUpdateConflicting(nodePoolName string, ins
 	}
 
 	for resource := range nodeOverlay.Spec.Capacity {
-		if _, found := instanceTypeUpdate.Capacity.OverlayUpdate[resource]; found {
+		if _, found := instanceTypeUpdate.Capacity.lowestWeightCapacityResources[resource]; found {
 			return true
 		}
 	}
@@ -153,7 +163,7 @@ func (s *InstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, inst
 	}
 	_, ok = s.updates[nodePoolName][instanceTypeName]
 	if !ok {
-		s.updates[nodePoolName][instanceTypeName] = &InstanceTypeUpdate{Price: map[string]*PriceUpdate{}, Capacity: &CapacityUpdate{OverlayUpdate: corev1.ResourceList{}}}
+		s.updates[nodePoolName][instanceTypeName] = &InstanceTypeUpdate{Price: map[string]*PriceUpdate{}, Capacity: &CapacityUpdate{}}
 	}
 
 	for _, of := range offerings {
@@ -191,7 +201,7 @@ func (s *InstanceTypeStore) isOfferingUpdateConflicting(nodePoolName string, ins
 	return true
 }
 
-func (s *InstanceTypeStore) ApplyOverlayOnInstanceTypes(nodePoolName string, its []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
+func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
 	result := []*cloudprovider.InstanceType{}
 
 	_, ok := s.updates[nodePoolName]
@@ -200,12 +210,17 @@ func (s *InstanceTypeStore) ApplyOverlayOnInstanceTypes(nodePoolName string, its
 	}
 
 	for _, it := range its {
-		result = append(result, s.ApplyOverlay(nodePoolName, it))
+		result = append(result, s.Apply(nodePoolName, it))
 	}
 	return result
 }
 
-func (s *InstanceTypeStore) ApplyOverlay(nodePoolName string, it *cloudprovider.InstanceType) *cloudprovider.InstanceType {
+// Apply takes a node pool name and instance type, and returns a modified copy of the instance type
+// with any stored updates applied. It checks for price and capacity updates specific to the given
+// node pool and instance type, creating a deep copy of the original instance type before applying
+// any overrides. If no updates exist for the node pool or instance type, returns the original
+// instance type unchanged. Thread-safe through read lock usage.
+func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.InstanceType) *cloudprovider.InstanceType {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -231,15 +246,13 @@ func (s *InstanceTypeStore) ApplyOverlay(nodePoolName string, it *cloudprovider.
 	}
 	if instanceTypeUpdate.Price != nil {
 		for _, of := range overriddenInstanceType.Offerings {
-			if overlay, found := instanceTypeUpdate.Price[of.Requirements.String()]; found {
-				of.Price = AdjustedPrice(of.Price, overlay.OverlayUpdate)
-				of.ApplyOverlay()
+			if overlay, ok := instanceTypeUpdate.Price[of.Requirements.String()]; ok {
+				of.ApplyPriceOverlay(lo.FromPtr(overlay.OverlayUpdate))
 			}
 		}
 	}
 	if instanceTypeUpdate.Capacity != nil {
-		overriddenInstanceType.Capacity = lo.Assign(overriddenInstanceType.Capacity, instanceTypeUpdate.Capacity.OverlayUpdate)
-		overriddenInstanceType.ApplyCapacityOverlay()
+		overriddenInstanceType.ApplyCapacityOverlay(instanceTypeUpdate.Capacity.OverlayUpdate)
 	}
 
 	return overriddenInstanceType
@@ -247,38 +260,4 @@ func (s *InstanceTypeStore) ApplyOverlay(nodePoolName string, it *cloudprovider.
 
 func (s *InstanceTypeStore) Reset() {
 	s.updates = map[string]map[string]*InstanceTypeUpdate{}
-}
-
-func AdjustedPrice(instanceTypePrice float64, change *string) float64 {
-	// if price or price adjustment is not defined, then we will return the same price
-	if lo.FromPtr(change) == "" {
-		return instanceTypePrice
-	}
-
-	// if price is defined, then we will return the value given in the overlay
-	if !strings.HasPrefix(lo.FromPtr(change), "+") && !strings.HasPrefix(lo.FromPtr(change), "-") {
-		return lo.Must(strconv.ParseFloat(lo.FromPtr(change), 64))
-	}
-
-	// Check if adjustment is a percentage
-	isPercentage := strings.HasSuffix(lo.FromPtr(change), "%")
-	adjustment := lo.FromPtr(change)
-
-	var adjustedPrice float64
-	if isPercentage {
-		adjustment = strings.TrimSuffix(lo.FromPtr(change), "%")
-		// Parse the adjustment value
-		// Due to the CEL validation we can assume that
-		// there will always be a valid float provided into the spec
-		adjustedPrice = instanceTypePrice * (1 + (lo.Must(strconv.ParseFloat(adjustment, 64)) / 100))
-	} else {
-		adjustedPrice = instanceTypePrice + lo.Must(strconv.ParseFloat(adjustment, 64))
-	}
-
-	// Parse the adjustment value
-	// Due to the CEL validation we can assume that
-	// there will always be a valid float provided into the spec
-
-	// Apply the adjustment
-	return lo.Ternary(adjustedPrice >= 0, adjustedPrice, 0)
 }

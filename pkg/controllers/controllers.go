@@ -32,7 +32,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
@@ -71,18 +70,17 @@ func NewControllers(
 	cluster *state.Cluster,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
 ) []controller.Controller {
-	overlayCloudProvider := overlay.Decorate(cloudProvider, kubeClient, instanceTypeStore)
-	p := provisioning.NewProvisioner(kubeClient, recorder, overlayCloudProvider, cluster, clock)
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
-		disruption.NewController(clock, kubeClient, p, overlayCloudProvider, recorder, cluster, disruptionQueue),
+		disruption.NewController(clock, kubeClient, p, cloudProvider, recorder, cluster, disruptionQueue),
 		provisioning.NewPodController(kubeClient, p, cluster),
 		provisioning.NewNodeController(kubeClient, p),
-		nodepoolhash.NewController(kubeClient, overlayCloudProvider),
-		expiration.NewController(clock, kubeClient, overlayCloudProvider),
+		nodepoolhash.NewController(kubeClient, cloudProvider),
+		expiration.NewController(clock, kubeClient, cloudProvider),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
@@ -129,8 +127,8 @@ func NewControllers(
 	}
 
 	// The cloud provider must define status conditions for the node repair controller to use to detect unhealthy nodes
-	if len(overlayCloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
-		controllers = append(controllers, health.NewController(kubeClient, overlayCloudProvider, clock, recorder))
+	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
+		controllers = append(controllers, health.NewController(kubeClient, cloudProvider, clock, recorder))
 	}
 
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
