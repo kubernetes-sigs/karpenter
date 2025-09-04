@@ -74,7 +74,7 @@ func GetDeprovisioningCandidates(ctx context.Context, kubeClient client.Client, 
 
 	emptyNodesSet := sets.New(emptyNodes...)
 	nonEmptyNodes := lo.FilterMap(nodes, func(node *state.StateNode, _ int) (NonEmptyNodes, bool) {
-		if _, ok := emptyNodesSet[node]; ok {
+		if emptyNodesSet.Has(node) {
 			return NonEmptyNodes{}, false
 		}
 

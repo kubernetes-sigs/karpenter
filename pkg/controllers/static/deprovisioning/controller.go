@@ -87,7 +87,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	var npStateNodes []*state.StateNode
 	c.cluster.ForEachNode(func(n *state.StateNode) bool {
 		if n.Labels()[v1.NodePoolLabelKey] == np.Name && n.NodeClaim != nil && !n.MarkedForDeletion() {
-			npStateNodes = append(npStateNodes, n) // not deepCopying nodes as we are not changing the state nodes
+			npStateNodes = append(npStateNodes, n.DeepCopy()) // we dont mutuate state nodes here but others might so deepcopying nodes
 		}
 		return true
 	})

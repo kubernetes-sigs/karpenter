@@ -18,7 +18,6 @@ package disruption_test
 
 import (
 	"strconv"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -31,7 +30,6 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
-	static "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -429,9 +427,9 @@ var _ = Describe("StaticDrift", func() {
 		It("should drift partially when we can acquire some limits", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
 			nodePool.Spec.Limits = v1.Limits{
-				resources.Node: resource.MustParse(strconv.Itoa(5)),
+				resources.Node: resource.MustParse(strconv.Itoa(7)),
 			}
-			nodeClaims, nodes = test.NodeClaimsAndNodes(3, v1.NodeClaim{
+			nodeClaims, nodes = test.NodeClaimsAndNodes(5, v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1.NodePoolLabelKey:            nodePool.Name,
@@ -449,7 +447,7 @@ var _ = Describe("StaticDrift", func() {
 			})
 
 			ExpectApplied(ctx, env.Client, nodePool)
-			for i := 0; i < 3; i++ {
+			for i := 0; i < 5; i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
@@ -457,7 +455,7 @@ var _ = Describe("StaticDrift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 3, map[string]string{
+			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 5, map[string]string{
 				metrics.NodePoolLabel: nodePool.Name,
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
@@ -472,7 +470,7 @@ var _ = Describe("StaticDrift", func() {
 				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
 			}
 
-			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(3))
+			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(5))
 			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 2, map[string]string{
 				metrics.ReasonLabel: "drifted",
 			})
@@ -549,8 +547,6 @@ var _ = Describe("StaticDrift", func() {
 				},
 			})
 
-			controller := static.NewController(env.Client, cluster, cloudProvider, fakeClock)
-
 			ExpectApplied(ctx, env.Client, nodePool)
 			for i := 0; i < numNodes; i++ {
 				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
@@ -579,8 +575,7 @@ var _ = Describe("StaticDrift", func() {
 			Expect(cmds).To(HaveLen(0))
 
 			// Deprovision nodes
-			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
+			ExpectDeleted(ctx, env.Client, nodeClaims[1], nodes[1])
 
 			// reconcile
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[1])
@@ -695,7 +690,7 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
 
-			// Execute commands, should drift 5 nodes total
+			// Execute commands, should drift 4 nodes total
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(4))
 
@@ -738,16 +733,37 @@ var _ = Describe("StaticDrift", func() {
 		It("should handle missing node limits gracefully", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
 			nodePool.Spec.Limits = nil // No limits set
-			nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 
-			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(5, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, nodePool)
 
-			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+			for i, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
 			// Should drift the node since no limits are constraining it
 			cmds := queue.GetCommands()
-			Expect(cmds).To(HaveLen(1))
+			Expect(cmds).To(HaveLen(5))
 		})
 		It("should ignore nodes without the drifted status condition", func() {
 			_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeDrifted)
@@ -758,9 +774,9 @@ var _ = Describe("StaticDrift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			// Expect to not create or delete more nodeclaims
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, nodeClaim)
+			// Should not drift any nodes
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 		})
 		It("should ignore nodes with the drifted status condition set to false", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
@@ -771,9 +787,9 @@ var _ = Describe("StaticDrift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			// Expect to not create or delete more nodeclaims
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, nodeClaim)
+			// Should not drift any nodes
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 		})
 		It("should ignore nodes with the karpenter.sh/do-not-disrupt annotation", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
@@ -785,10 +801,9 @@ var _ = Describe("StaticDrift", func() {
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
-			// Expect to not create or delete more nodeclaims
-			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(1))
-			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
-			ExpectExists(ctx, env.Client, nodeClaim)
+			// Should not drift any nodes
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 		})
 	})
 })

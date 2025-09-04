@@ -119,11 +119,31 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 				Kind:  "UnmanagedNodeClass",
 				Name:  "test",
 			}
-			ExpectApplied(ctx, env.Client, nodePool)
+			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						v1.NodeInitializedLabelKey:     "true",
+						corev1.LabelInstanceTypeStable: "stable.instance",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10"),
+						corev1.ResourceMemory: resource.MustParse("1000Mi"),
+					},
+				},
+			})
+
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaims[0], nodes[0])
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-
 			Expect(result.RequeueAfter).To(BeZero())
+
+			// Should not delete any NodeClaims
+			existingNodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, existingNodeClaims)).To(Succeed())
+			Expect(existingNodeClaims.Items).To(HaveLen(1))
 		})
 		It("should return early if nodepool replicas is nil", func() {
 			nodePool := test.StaticNodePool()
@@ -292,6 +312,10 @@ var _ = Describe("Static Deprovisioning Controller", func() {
 
 			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
+
+			existingNodeClaims := &v1.NodeClaimList{}
+			Expect(env.Client.List(ctx, existingNodeClaims)).To(Succeed())
+			Expect(existingNodeClaims.Items).To(HaveLen(0))
 		})
 		Context("Failing Scenarios", func() {
 			It("should return error when nodeclaim deletion fails", func() {
