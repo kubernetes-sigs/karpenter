@@ -129,3 +129,7 @@ func OrderByWeight(nps []*v1.NodePool) {
 		return weightA > weightB
 	})
 }
+
+func IsStaticNodePool(np *v1.NodePool) bool {
+	return np.Spec.Replicas != nil
+}
