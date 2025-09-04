@@ -26,6 +26,7 @@ import (
 const (
 	DisruptedTaintKey    = apis.Group + "/disrupted"
 	UnregisteredTaintKey = apis.Group + "/unregistered"
+	FinalShutdownTaintKey = apis.Group + "/final-shutdown"
 )
 
 var (
@@ -38,5 +39,11 @@ var (
 	UnregisteredNoExecuteTaint = v1.Taint{
 		Key:    UnregisteredTaintKey,
 		Effect: v1.TaintEffectNoExecute,
+	}
+	// FinalShutdownNoScheduleTaint is applied after regular pods are drained to signal that the
+	// node is entering final shutdown and DaemonSet pods that do not tolerate this taint should be drained.
+	FinalShutdownNoScheduleTaint = v1.Taint{
+		Key:    FinalShutdownTaintKey,
+		Effect: v1.TaintEffectNoSchedule,
 	}
 )

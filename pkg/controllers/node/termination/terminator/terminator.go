@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -98,18 +99,53 @@ func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeri
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
+
+	// Determine if the node is in the final shutdown phase
+	hasFinalShutdown := lo.ContainsBy(node.Spec.Taints, func(taint corev1.Taint) bool {
+		return taint.MatchTaint(&v1.FinalShutdownNoScheduleTaint)
+	})
+
+	// Node-aware drainability checks
+	isWaitingEvictionForNode := func(p *corev1.Pod) bool {
+		if hasFinalShutdown {
+			return !podutil.IsTerminal(p) && !podutil.ToleratesFinalShutdownNoScheduleTaint(p) && !podutil.IsOwnedByNode(p) && !podutil.IsStuckTerminating(p, t.clock)
+		}
+		return podutil.IsWaitingEviction(p, t.clock)
+	}
+	isEvictableForNode := func(p *corev1.Pod) bool {
+		if hasFinalShutdown {
+			return podutil.IsActive(p) && !podutil.ToleratesFinalShutdownNoScheduleTaint(p) && !podutil.IsOwnedByNode(p) && !podutil.HasDoNotDisrupt(p)
+		}
+		return podutil.IsEvictable(p)
+	}
+
+	// Proactively delete expiring pods
 	podsToDelete := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return podutil.IsWaitingEviction(p, t.clock) && (!podutil.IsTerminating(p) || podutil.IsPodEligibleForForcedEviction(p, nodeGracePeriodExpirationTime))
+		return isWaitingEvictionForNode(p) && (!podutil.IsTerminating(p) || podutil.IsPodEligibleForForcedEviction(p, nodeGracePeriodExpirationTime))
 	})
 	if err := t.DeleteExpiringPods(ctx, podsToDelete, nodeGracePeriodExpirationTime); err != nil {
 		return fmt.Errorf("deleting expiring pods, %w", err)
 	}
+
+	// If we're not yet in final shutdown and all regular (non-daemonset) pods are drained, enter final shutdown
+	if !hasFinalShutdown {
+		regularWaiting := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
+			return isWaitingEvictionForNode(p) && !podutil.IsOwnedByDaemonSet(p)
+		})
+		if len(regularWaiting) == 0 {
+			if err := t.Taint(ctx, node, v1.FinalShutdownNoScheduleTaint); err != nil {
+				return fmt.Errorf("tainting node with final-shutdown, %w", err)
+			}
+			hasFinalShutdown = true
+		}
+	}
+
 	// Monitor pods in pod groups that either haven't been evicted or are actively evicting
-	podGroups := t.groupPodsByPriority(lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return podutil.IsWaitingEviction(p, t.clock) }))
+	podGroups := t.groupPodsByPriority(lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return isWaitingEvictionForNode(p) }))
 	for _, group := range podGroups {
 		if len(group) > 0 {
 			// Only add pods to the eviction queue that haven't been evicted yet
-			t.evictionQueue.Add(lo.Filter(group, func(p *corev1.Pod, _ int) bool { return podutil.IsEvictable(p) })...)
+			t.evictionQueue.Add(lo.Filter(group, func(p *corev1.Pod, _ int) bool { return isEvictableForNode(p) })...)
 			return NewNodeDrainError(fmt.Errorf("%d pods are waiting to be evicted", lo.SumBy(podGroups, func(pods []*corev1.Pod) int { return len(pods) })))
 		}
 	}

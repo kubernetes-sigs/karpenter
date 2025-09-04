@@ -194,6 +194,11 @@ func ToleratesDisruptedNoScheduleTaint(pod *corev1.Pod) bool {
 	return scheduling.Taints([]corev1.Taint{v1.DisruptedNoScheduleTaint}).ToleratesPod(pod) == nil
 }
 
+// ToleratesFinalShutdownNoScheduleTaint returns true if the pod tolerates karpenter.sh/final-shutdown:NoSchedule taint
+func ToleratesFinalShutdownNoScheduleTaint(pod *corev1.Pod) bool {
+	return scheduling.Taints([]corev1.Taint{v1.FinalShutdownNoScheduleTaint}).ToleratesPod(pod) == nil
+}
+
 // HasRequiredPodAntiAffinity returns true if a non-empty PodAntiAffinity/RequiredDuringSchedulingIgnoredDuringExecution
 // is defined in the pod spec
 func HasRequiredPodAntiAffinity(pod *corev1.Pod) bool {
