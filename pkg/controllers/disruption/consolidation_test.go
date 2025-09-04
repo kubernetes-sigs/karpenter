@@ -4726,4 +4726,43 @@ var _ = Describe("Consolidation", func() {
 			})).To(HaveLen(2))
 		})
 	})
+	Context("Static NodePool", func() {
+		It("should not consolidate static NodePool nodes", func() {
+			staticNp := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas:   lo.ToPtr(int64(2)), // Static nodepool with 2 desired replica
+					Disruption: v1.Disruption{},
+				},
+			})
+
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:        staticNp.Name,
+						v1.NodeInitializedLabelKey: "true",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10"),
+						corev1.ResourceMemory: resource.MustParse("1000Mi"),
+						corev1.ResourcePods:   resource.MustParse("2"),
+					},
+				},
+			})
+			// This is not possible as we dont set ConditionTypeConsolidatable on static NodeClaims, incase user sets it
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
+
+			ExpectApplied(ctx, env.Client, staticNp, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1])
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Should not consolidate static NodeClaims
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
+		})
+	})
 })
