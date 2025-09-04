@@ -51,7 +51,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	candidates ...*Candidate,
 ) (scheduling.Results, error) {
 	candidateNames := sets.NewString(lo.Map(candidates, func(t *Candidate, i int) string { return t.Name() })...)
-	nodes := cluster.Nodes()
+	nodes := cluster.DeepCopyNodes()
 	deletingNodes := nodes.Deleting()
 	stateNodes := lo.Filter(nodes.Active(), func(n *state.StateNode, _ int) bool {
 		return !candidateNames.Has(n.Name())
@@ -180,7 +180,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 	if err != nil {
 		return nil, fmt.Errorf("tracking PodDisruptionBudgets, %w", err)
 	}
-	candidates := lo.FilterMap(cluster.Nodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
+	candidates := lo.FilterMap(cluster.DeepCopyNodes(), func(n *state.StateNode, _ int) (*Candidate, bool) {
 		cn, e := NewCandidate(ctx, kubeClient, recorder, clk, n, pdbs, nodePoolMap, nodePoolToInstanceTypesMap, queue, disruptionClass)
 		return cn, e == nil
 	})
@@ -226,7 +226,7 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	disruptionBudgetMapping := map[string]int{}
 	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
 	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
-	for _, node := range cluster.Nodes() {
+	for _, node := range cluster.DeepCopyNodes() {
 		// We only consider nodes that we own and are initialized towards the total.
 		// If a node is launched/registered, but not initialized, pods aren't scheduled
 		// to the node, and these are treated as unhealthy until they're cleaned up.

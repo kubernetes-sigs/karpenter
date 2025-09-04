@@ -667,13 +667,12 @@ func ExpectNodeClaims(ctx context.Context, c client.Client) []*v1.NodeClaim {
 func ExpectStateNodeExists(cluster *state.Cluster, node *corev1.Node) *state.StateNode {
 	GinkgoHelper()
 	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.Node.Name != node.Name {
-			return true
+	for n := range cluster.Nodes() {
+		if n.Node.Name == node.Name {
+			ret = n.DeepCopy()
+			break
 		}
-		ret = n.DeepCopy()
-		return false
-	})
+	}
 	Expect(ret).ToNot(BeNil())
 	return ret
 }
@@ -681,13 +680,12 @@ func ExpectStateNodeExists(cluster *state.Cluster, node *corev1.Node) *state.Sta
 func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1.NodeClaim) *state.StateNode {
 	GinkgoHelper()
 	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.NodeClaim.Status.ProviderID != nodeClaim.Status.ProviderID {
-			return true
+	for n := range cluster.Nodes() {
+		if n.NodeClaim.Status.ProviderID == nodeClaim.Status.ProviderID {
+			ret = n.DeepCopy()
+			break
 		}
-		ret = n.DeepCopy()
-		return false
-	})
+	}
 	Expect(ret).ToNot(BeNil())
 	return ret
 }

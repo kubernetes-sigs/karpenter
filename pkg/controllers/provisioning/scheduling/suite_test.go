@@ -2243,25 +2243,23 @@ var _ = Context("Scheduling", func() {
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 				ExpectApplied(ctx, env.Client, nodePool, dsPod)
-				cluster.ForEachNode(func(f *state.StateNode) bool {
-					dsRequests := f.DaemonSetRequests()
-					available := f.Available()
+				for n := range cluster.Nodes() {
+					dsRequests := n.DaemonSetRequests()
+					available := n.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
 					// no pods so we have the full (16 cpu - 100m overhead)
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
-					return true
-				})
+				}
 				ExpectManualBinding(ctx, env.Client, dsPod, node1)
 				ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(dsPod))
 
-				cluster.ForEachNode(func(f *state.StateNode) bool {
+				for f := range cluster.Nodes() {
 					dsRequests := f.DaemonSetRequests()
 					available := f.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
 					// only the DS pod is bound, so available is reduced by one and the DS requested is incremented by one
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 14.9))
-					return true
-				})
+				}
 
 				opts = test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
 					Limits: map[corev1.ResourceName]resource.Quantity{
@@ -2331,25 +2329,23 @@ var _ = Context("Scheduling", func() {
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 				ExpectApplied(ctx, env.Client, nodePool, dsPod)
-				cluster.ForEachNode(func(f *state.StateNode) bool {
-					dsRequests := f.DaemonSetRequests()
-					available := f.Available()
+				for n := range cluster.Nodes() {
+					dsRequests := n.DaemonSetRequests()
+					available := n.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
 					// no pods, so we have the full (16 CPU - 100m overhead)
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
-					return true
-				})
+				}
 				ExpectManualBinding(ctx, env.Client, dsPod, node1)
 				ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(dsPod))
 
-				cluster.ForEachNode(func(f *state.StateNode) bool {
-					dsRequests := f.DaemonSetRequests()
-					available := f.Available()
+				for n := range cluster.Nodes() {
+					dsRequests := n.DaemonSetRequests()
+					available := n.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
 					// only the DS pod is bound, so available is reduced by one and the DS requested is incremented by one
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 14.9))
-					return true
-				})
+				}
 
 				opts = test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
 					Limits: map[corev1.ResourceName]resource.Quantity{
@@ -2401,13 +2397,12 @@ var _ = Context("Scheduling", func() {
 			// due to the in-flight node support, we should pack existing nodes before launching new node. The end result
 			// is that we should only have some spare capacity on our final node
 			nodesWithCPUFree := 0
-			cluster.ForEachNode(func(n *state.StateNode) bool {
+			for n := range cluster.Nodes() {
 				available := n.Available()
 				if available.Cpu().AsApproximateFloat64() >= 1 {
 					nodesWithCPUFree++
 				}
-				return true
-			})
+			}
 			Expect(nodesWithCPUFree).To(BeNumerically("<=", 1))
 		})
 		It("should not launch a second node if there is an in-flight node that can support the pod (#2011)", func() {

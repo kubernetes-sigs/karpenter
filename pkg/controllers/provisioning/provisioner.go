@@ -292,7 +292,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	// We don't consider the nodes that are MarkedForDeletion since this capacity shouldn't be considered
 	// as persistent capacity for the cluster (since it will soon be removed). Additionally, we are scheduling for
 	// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
-	nodes := p.cluster.Nodes()
+	nodes := p.cluster.DeepCopyNodes()
 
 	// Get pods, exit if nothing to do
 	pendingPods, err := p.GetPendingPods(ctx)
