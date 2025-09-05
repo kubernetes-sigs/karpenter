@@ -163,7 +163,7 @@ func (s *InstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, inst
 	}
 	_, ok = s.updates[nodePoolName][instanceTypeName]
 	if !ok {
-		s.updates[nodePoolName][instanceTypeName] = &InstanceTypeUpdate{Price: map[string]*PriceUpdate{}, Capacity: &CapacityUpdate{}}
+		s.updates[nodePoolName][instanceTypeName] = &InstanceTypeUpdate{Price: map[string]*PriceUpdate{}, Capacity: &CapacityUpdate{OverlayUpdate: corev1.ResourceList{}}}
 	}
 
 	for _, of := range offerings {
