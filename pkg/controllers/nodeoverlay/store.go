@@ -163,7 +163,7 @@ func (s *InstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, inst
 	}
 	_, ok = s.updates[nodePoolName][instanceTypeName]
 	if !ok {
-		s.updates[nodePoolName][instanceTypeName] = &InstanceTypeUpdate{Price: map[string]*PriceUpdate{}, Capacity: &CapacityUpdate{}}
+		s.updates[nodePoolName][instanceTypeName] = &InstanceTypeUpdate{Price: map[string]*PriceUpdate{}, Capacity: &CapacityUpdate{OverlayUpdate: corev1.ResourceList{}}}
 	}
 
 	for _, of := range offerings {
@@ -251,7 +251,7 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 			}
 		}
 	}
-	if instanceTypeUpdate.Capacity != nil {
+	if len(lo.Keys(instanceTypeUpdate.Capacity.OverlayUpdate)) != 0 {
 		overriddenInstanceType.ApplyCapacityOverlay(instanceTypeUpdate.Capacity.OverlayUpdate)
 	}
 

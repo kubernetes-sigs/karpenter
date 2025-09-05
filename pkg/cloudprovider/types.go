@@ -142,10 +142,9 @@ func (i *InstanceType) precompute() {
 }
 
 func (i *InstanceType) IsPricingOverlayApplied() bool {
-	_, found := lo.Find(i.Offerings, func(of *Offering) bool {
+	return lo.ContainsBy(i.Offerings, func(of *Offering) bool {
 		return of.IsPriceOverlaid()
 	})
-	return found
 }
 
 func (i *InstanceType) ApplyCapacityOverlay(updatedCapacity corev1.ResourceList) {
