@@ -168,6 +168,14 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 		if pvc == nil {
 			continue
 		}
+		// Handle cases specifically rejected by kube-scheduler
+		// https://github.com/kubernetes/kubernetes/blob/56f6358c11b78e8e3d39e8cd8ff016ff7c70c56b/pkg/scheduler/framework/plugins/volumebinding/volume_binding.go#L333
+		if !pvc.DeletionTimestamp.IsZero() {
+			return serrors.Wrap(fmt.Errorf("persistentvolumeclaim is being deleted"), "PersistentVolumeClaim", klog.KObj(pvc))
+		}
+		if pvc.Status.Phase == v1.ClaimLost {
+			return serrors.Wrap(fmt.Errorf("persistentvolumeclaim bound to non-existent persistentvolume"), "PersistentVolumeClaim", klog.KObj(pvc), "PersistentVolume", klog.KRef("", pvc.Spec.VolumeName))
+		}
 		storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
 		if pvc.Spec.VolumeName != "" {
 			if err = v.validateVolume(ctx, pvc.Spec.VolumeName); err != nil {
