@@ -171,6 +171,10 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 			// Mark in memory that this pod is unschedulable
 			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, nil, nil)
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
+			// Don't create pod events for pods that are specifically avoiding scheduling to Karpenter-managed capacity
+			if !errors.Is(err, KarpenterManagedLabelDoesNotExistError) {
+				p.recorder.Publish(scheduler.PodFailedToScheduleEvent(po, err))
+			}
 			return true
 		}
 		return false
@@ -489,12 +493,14 @@ func (p *Provisioner) Validate(ctx context.Context, pod *corev1.Pod) error {
 	)
 }
 
+var KarpenterManagedLabelDoesNotExistError = serrors.Wrap(fmt.Errorf("configured to not run on a Karpenter provisioned node"), "requirement", fmt.Sprintf("%s %s", v1.NodePoolLabelKey, corev1.NodeSelectorOpDoesNotExist))
+
 // validateKarpenterManagedLabelCanExist provides a more clear error message in the event of scheduling a pod that specifically doesn't
 // want to run on a Karpenter node (e.g. a Karpenter controller replica).
 func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 	for _, req := range scheduling.NewPodRequirements(p) {
 		if req.Key == v1.NodePoolLabelKey && req.Operator() == corev1.NodeSelectorOpDoesNotExist {
-			return serrors.Wrap(fmt.Errorf("configured to not run on a Karpenter provisioned node"), "requirement", fmt.Sprintf("%s %s", v1.NodePoolLabelKey, corev1.NodeSelectorOpDoesNotExist))
+			return KarpenterManagedLabelDoesNotExistError
 		}
 	}
 	return nil
