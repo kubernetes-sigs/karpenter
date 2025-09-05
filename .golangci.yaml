@@ -3,6 +3,7 @@ run:
   build-tags:
     - test_performance
   tests: true
+  timeout: 5m
 linters:
   enable:
     - asciicheck
