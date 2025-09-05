@@ -668,19 +668,17 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectManualBinding(ctx, env.Client, pod1, node)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
-		cluster.ForEachNode(func(n *state.StateNode) bool {
+		for n := range cluster.Nodes() {
 			ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2.5")}, n.Available())
 			ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1.5")}, n.PodRequests())
-			return true
-		})
+		}
 
 		// delete the node and the internal state should disappear as well
 		ExpectDeleted(ctx, env.Client, node)
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
-		cluster.ForEachNode(func(n *state.StateNode) bool {
+		for range cluster.Nodes() {
 			Fail("shouldn't be called as the node was deleted")
-			return true
-		})
+		}
 	})
 	It("should track pods correctly if we miss events or they are consolidated", func() {
 		pod1 := test.UnschedulablePod(test.PodOptions{
@@ -708,11 +706,10 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectManualBinding(ctx, env.Client, pod1, node1)
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod1))
 
-		cluster.ForEachNode(func(n *state.StateNode) bool {
+		for n := range cluster.Nodes() {
 			ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2.5")}, n.Available())
 			ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1.5")}, n.PodRequests())
-			return true
-		})
+		}
 
 		ExpectDeleted(ctx, env.Client, pod1)
 
@@ -744,7 +741,7 @@ var _ = Describe("Node Resource Level", func() {
 		ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node2))
 		ExpectReconcileSucceeded(ctx, podController, client.ObjectKeyFromObject(pod2))
 
-		cluster.ForEachNode(func(n *state.StateNode) bool {
+		for n := range cluster.Nodes() {
 			if n.Node.Name == node1.Name {
 				// not on node1 any longer, so it should be fully free
 				ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4")}, n.Available())
@@ -753,8 +750,7 @@ var _ = Describe("Node Resource Level", func() {
 				ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3")}, n.Available())
 				ExpectResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5")}, n.PodRequests())
 			}
-			return true
-		})
+		}
 
 	})
 	// nolint:gosec
@@ -2812,10 +2808,9 @@ var _ = Describe("NodePoolState Tracking", func() {
 func ExpectStateNodeCount(comparator string, count int) int {
 	GinkgoHelper()
 	c := 0
-	cluster.ForEachNode(func(n *state.StateNode) bool {
+	for range cluster.Nodes() {
 		c++
-		return true
-	})
+	}
 	Expect(c).To(BeNumerically(comparator, count))
 	return c
 }

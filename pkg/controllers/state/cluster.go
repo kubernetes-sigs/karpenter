@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"iter"
 	"maps"
 	"sync"
 	"sync/atomic"
@@ -229,22 +230,23 @@ func (c *Cluster) ForPodsWithAntiAffinity(fn func(p *corev1.Pod, n *corev1.Node)
 	})
 }
 
-// ForEachNode calls the supplied function once per node object that is being tracked. It is not safe to store the
-// state.StateNode object, it should be only accessed from within the function provided to this method.
-func (c *Cluster) ForEachNode(f func(n *StateNode) bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	for _, node := range c.nodes {
-		if !f(node) {
-			return
+// Nodes returns an iterator which iterates over the state nodes in the cluster under a read-lock. It is not safe to
+// store the state.StateNode object and it should only be accessed while the iterator is active.
+func (c *Cluster) Nodes() iter.Seq[*StateNode] {
+	return func(yield func(*StateNode) bool) {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		for _, node := range c.nodes {
+			if !yield(node) {
+				return
+			}
 		}
 	}
 }
 
-// Nodes creates a DeepCopy of all state nodes.
+// DeepCopyNodes creates a DeepCopy of all state nodes.
 // NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
-func (c *Cluster) Nodes() StateNodes {
+func (c *Cluster) DeepCopyNodes() StateNodes {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
