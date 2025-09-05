@@ -50,15 +50,17 @@ type NodeClaimTemplate struct {
 	NodePoolWeight      int32
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Requirements        scheduling.Requirements
+	IsStaticNodeClaim   bool
 }
 
 func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 	nct := &NodeClaimTemplate{
-		NodeClaim:      *nodePool.Spec.Template.ToNodeClaim(),
-		NodePoolName:   nodePool.Name,
-		NodePoolUUID:   nodePool.UID,
-		NodePoolWeight: lo.FromPtr(nodePool.Spec.Weight),
-		Requirements:   scheduling.NewRequirements(),
+		NodeClaim:         *nodePool.Spec.Template.ToNodeClaim(),
+		NodePoolName:      nodePool.Name,
+		NodePoolUUID:      nodePool.UID,
+		NodePoolWeight:    lo.FromPtr(nodePool.Spec.Weight),
+		Requirements:      scheduling.NewRequirements(),
+		IsStaticNodeClaim: nodePool.Spec.Replicas != nil,
 	}
 	nct.Annotations = lo.Assign(nct.Annotations, map[string]string{
 		v1.NodePoolHashAnnotationKey:        nodePool.Hash(),
@@ -74,11 +76,15 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 }
 
 func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
-	// Order the instance types by price and only take up to MaxInstanceTypes of them to decrease the instance type size in the requirements
-	instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
-	i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
-		return i.Name
-	})...))
+	// Inject instanceType requirements for NodeClaims belonging to dynamic NodePool
+	// For static we let cloudprovider.Create()
+	if !i.IsStaticNodeClaim {
+		// Order the instance types by price and only take up to MaxInstanceTypes of them to decrease the instance type size in the requirements
+		instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
+		i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
+			return i.Name
+		})...))
+	}
 
 	nc := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
