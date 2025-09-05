@@ -30,6 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/karpenter/pkg/operator/logging"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
@@ -155,6 +157,7 @@ func (v *VolumeTopology) getPersistentVolumeRequirements(ctx context.Context, po
 
 // ValidatePersistentVolumeClaims returns an error if the pod doesn't appear to be valid with respect to
 // PVCs (e.g. the PVC is not found or references an unknown storage class).
+// nolint:gocyclo
 func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod *v1.Pod) error {
 	for _, volume := range pod.Spec.Volumes {
 		pvc, err := volumeutil.GetPersistentVolumeClaim(ctx, v.kubeClient, pod, volume)
@@ -165,29 +168,32 @@ func (v *VolumeTopology) ValidatePersistentVolumeClaims(ctx context.Context, pod
 		if pvc == nil {
 			continue
 		}
-
-		if pvc.Spec.VolumeName != "" {
-			if err := v.validateVolume(ctx, pvc.Spec.VolumeName); err != nil {
-				return serrors.Wrap(fmt.Errorf("failed to validate pvc, %w", err), "PersistentVolumeClaim", klog.KRef("", pvc.Name), "PersistentVolume", klog.KRef("", pvc.Spec.VolumeName))
-			}
-			continue
-		}
-
-		// PVC is unbound, we can't schedule unless the pod defines a valid storage class
 		storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
-		if storageClassName == "" {
-			return serrors.Wrap(fmt.Errorf("unbound pvc must define a storage class"), "PersistentVolumeClaim", klog.KRef("", pvc.Name))
+		if pvc.Spec.VolumeName != "" {
+			if err = v.validateVolume(ctx, pvc.Spec.VolumeName); err != nil {
+				return serrors.Wrap(fmt.Errorf("failed to validate pvc, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "PersistentVolume", klog.KRef("", pvc.Spec.VolumeName), "StorageClass", klog.KRef("", storageClassName))
+			}
+		} else {
+			// PVC is unbound, we can't schedule unless the pod defines a valid storage class
+			if storageClassName == "" {
+				return serrors.Wrap(fmt.Errorf("unbound pvc must define a storage class"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+			}
+			storageClass := &storagev1.StorageClass{}
+			if err = v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
+				return serrors.Wrap(fmt.Errorf("failed to validate pvc, failed to get storage class, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+			}
+			// Ignore pods than have unbound pvc for volumeBindingMode immediate
+			if storageClass.VolumeBindingMode != nil && *storageClass.VolumeBindingMode == storagev1.VolumeBindingImmediate {
+				return serrors.Wrap(fmt.Errorf("failed to validate pvc, pvc with immediate volume binding mode must be bound"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+			}
 		}
-		storageClass := &storagev1.StorageClass{}
-		if err := v.kubeClient.Get(ctx, types.NamespacedName{Name: storageClassName}, storageClass); err != nil {
-			return serrors.Wrap(fmt.Errorf("failed to validate pvc, failed to get storage class, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
+		// Finally, validate that the driver is in the set of supported drivers
+		driver, err := scheduling.ResolveDriver(log.IntoContext(ctx, logging.NopLogger), v.kubeClient, pod, volume.Name, pvc, lo.FromPtr(pvc.Spec.StorageClassName))
+		if err != nil {
+			return serrors.Wrap(fmt.Errorf("failed to validate pvc, %w", err), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName))
 		}
-		if UnsupportedProvisioners.Has(storageClass.Provisioner) {
-			return serrors.Wrap(fmt.Errorf("failed to validate pvc, provisioner is not supported"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KObj(storageClass), "Provisioner", storageClass.Provisioner)
-		}
-		// Ignore pods than have unbound pvc for voluemBindingMode immediate
-		if storageClass.VolumeBindingMode != nil && *storageClass.VolumeBindingMode == storagev1.VolumeBindingImmediate {
-			return serrors.Wrap(fmt.Errorf("failed to validate pvc, pvc with immediate volume binding mode must be bound"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KObj(storageClass))
+		if UnsupportedProvisioners.Has(driver) {
+			return serrors.Wrap(fmt.Errorf("failed to validate pvc, provisioner is not supported"), "PersistentVolumeClaim", klog.KObj(pvc), "StorageClass", klog.KRef("", storageClassName), "Provisioner", driver)
 		}
 	}
 	return nil
