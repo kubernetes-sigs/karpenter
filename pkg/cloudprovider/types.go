@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -109,10 +111,10 @@ type InstanceType struct {
 	Capacity corev1.ResourceList
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
-	Overhead *InstanceTypeOverhead
-
-	once        sync.Once
-	allocatable corev1.ResourceList
+	Overhead               *InstanceTypeOverhead
+	once                   sync.Once
+	allocatable            corev1.ResourceList
+	capacityOverlayApplied bool
 }
 
 type InstanceTypes []*InstanceType
@@ -121,6 +123,38 @@ type InstanceTypes []*InstanceType
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {
 	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
+
+	// Adjust allocatable memory to account for hugepage reservations. Hugepages are a
+	// special memory resource that is reserved directly from the system, reducing the
+	// amount of memory available for general application use. Since hugepages are a
+	// Kubernetes well-known resource, we implement first-class accounting for their
+	// allocation impact.
+	for name, quantity := range i.Capacity {
+		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
+			current := i.allocatable.Memory()
+			current.Sub(quantity)
+			if current.Sign() == -1 {
+				current.Set(0)
+			}
+			i.allocatable[corev1.ResourceMemory] = lo.FromPtr(current)
+		}
+	}
+}
+
+func (i *InstanceType) IsPricingOverlayApplied() bool {
+	_, found := lo.Find(i.Offerings, func(of *Offering) bool {
+		return of.IsPriceOverlaid()
+	})
+	return found
+}
+
+func (i *InstanceType) ApplyCapacityOverlay(updatedCapacity corev1.ResourceList) {
+	i.Capacity = lo.Assign(i.Capacity, updatedCapacity)
+	i.capacityOverlayApplied = true
+}
+
+func (i *InstanceType) IsCapacityOverlayApplied() bool {
+	return i.capacityOverlayApplied
 }
 
 func (i *InstanceType) Allocatable() corev1.ResourceList {
@@ -265,6 +299,51 @@ type Offering struct {
 	Price               float64
 	Available           bool
 	ReservationCapacity int
+
+	priceOverlayApplied bool
+}
+
+func (o *Offering) ApplyPriceOverlay(UpdatedPrice string) {
+	o.Price = AdjustedPrice(o.Price, UpdatedPrice)
+	o.priceOverlayApplied = true
+}
+
+func AdjustedPrice(instanceTypePrice float64, change string) float64 {
+	// if price or price adjustment is not defined, then we will return the same price
+	if change == "" {
+		return instanceTypePrice
+	}
+
+	// if price is defined, then we will return the value given in the overlay
+	if !strings.HasPrefix(change, "+") && !strings.HasPrefix(change, "-") {
+		return lo.Must(strconv.ParseFloat(change, 64))
+	}
+
+	// Check if adjustment is a percentage
+	isPercentage := strings.HasSuffix(change, "%")
+	adjustment := change
+
+	var adjustedPrice float64
+	if isPercentage {
+		adjustment = strings.TrimSuffix(change, "%")
+		// Parse the adjustment value
+		// Due to the CEL validation we can assume that
+		// there will always be a valid float provided into the spec
+		adjustedPrice = instanceTypePrice * (1 + (lo.Must(strconv.ParseFloat(adjustment, 64)) / 100))
+	} else {
+		adjustedPrice = instanceTypePrice + lo.Must(strconv.ParseFloat(adjustment, 64))
+	}
+
+	// Parse the adjustment value
+	// Due to the CEL validation we can assume that
+	// there will always be a valid float provided into the spec
+
+	// Apply the adjustment
+	return lo.Ternary(adjustedPrice >= 0, adjustedPrice, 0)
+}
+
+func (o *Offering) IsPriceOverlaid() bool {
+	return o.priceOverlayApplied
 }
 
 func (o *Offering) CapacityType() string {
