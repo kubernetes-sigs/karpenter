@@ -63,10 +63,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
-const (
-	appName   = "karpenter"
-	component = "controller"
-)
+var AppName = "karpenter"
 
 var (
 	BuildInfo = opmetrics.NewPrometheusGauge(
@@ -132,7 +129,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	}
 
 	// Logging
-	logger := serrors.NewLogger(zapr.NewLogger(logging.NewLogger(ctx, component)))
+	logger := serrors.NewLogger(zapr.NewLogger(logging.NewLogger(ctx, "controller")))
 	log.SetLogger(logger)
 	klog.SetLogger(logger)
 
@@ -147,7 +144,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	leaderConfig := rest.CopyConfig(config)
 	config.QPS = float32(options.FromContext(ctx).KubeClientQPS)
 	config.Burst = options.FromContext(ctx).KubeClientBurst
-	config.UserAgent = fmt.Sprintf("%s/%s", appName, Version)
+	config.UserAgent = fmt.Sprintf("%s/%s", AppName, Version)
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
@@ -225,7 +222,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	return ctx, &Operator{
 		Manager:             mgr,
 		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(appName)),
+		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)),
 		Clock:               clock.RealClock{},
 	}
 }
