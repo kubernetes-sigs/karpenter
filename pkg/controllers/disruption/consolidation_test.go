@@ -1965,7 +1965,7 @@ var _ = Describe("Consolidation", func() {
 				namespace := test.Namespace()
 				pdb := test.PodDisruptionBudget(test.PDBOptions{
 					ObjectMeta: metav1.ObjectMeta{
-						Namespace: namespace.ObjectMeta.Name,
+						Namespace: namespace.Name,
 					},
 					Labels:         labels,
 					MaxUnavailable: fromInt(0),

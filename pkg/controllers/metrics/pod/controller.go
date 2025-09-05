@@ -212,7 +212,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	pod := &corev1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
-			c.pendingPods.Delete(req.NamespacedName.String())
+			c.pendingPods.Delete(req.String())
 			// Delete the unstarted metric since the pod is deleted
 			PodUnstartedTimeSeconds.Delete(map[string]string{
 				podName:      req.Name,
@@ -222,7 +222,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				podName:      req.Name,
 				podNamespace: req.Namespace,
 			})
-			c.unscheduledPods.Delete(req.NamespacedName.String())
+			c.unscheduledPods.Delete(req.String())
 			// Delete the unbound metric since the pod is deleted
 			PodUnboundTimeSeconds.Delete(map[string]string{
 				podName:      req.Name,
@@ -236,7 +236,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				podName:      req.Name,
 				podNamespace: req.Namespace,
 			})
-			c.metricStore.Delete(req.NamespacedName.String())
+			c.metricStore.Delete(req.String())
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}

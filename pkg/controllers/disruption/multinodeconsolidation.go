@@ -190,7 +190,7 @@ func filterOutSameType(replacement *Replacement, consolidate []*Candidate) ([]*c
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, c := range consolidate {
 		existingInstanceTypes.Insert(c.instanceType.Name)
-		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduler.NewLabelRequirements(c.StateNode.Labels()))
+		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduler.NewLabelRequirements(c.Labels()))
 		if len(compatibleOfferings) == 0 {
 			continue
 		}
@@ -216,7 +216,7 @@ func filterOutSameType(replacement *Replacement, consolidate []*Candidate) ([]*c
 	}
 	// swallow the error since we don't allow min values to impact reschedulability in multi node claim
 	var err error
-	replacement.NodeClaim, err = replacement.NodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(replacement.Requirements, maxPrice)
+	replacement.NodeClaim, err = replacement.RemoveInstanceTypeOptionsByPriceAndMinValues(replacement.Requirements, maxPrice)
 	if err != nil {
 		return nil, err
 	}

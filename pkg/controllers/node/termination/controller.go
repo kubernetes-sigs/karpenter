@@ -373,7 +373,7 @@ func (c *Controller) nodeTerminationTime(node *corev1.Node, nodeClaim *v1.NodeCl
 	if nodeClaim == nil {
 		return nil, nil
 	}
-	expirationTimeString, exists := nodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]
+	expirationTimeString, exists := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]
 	if !exists {
 		return nil, nil
 	}
