@@ -364,7 +364,7 @@ func (r Results) TruncateInstanceTypes(ctx context.Context, maxInstanceTypes int
 			// Check if the truncated InstanceTypeOptions in each NewNodeClaim from the results still satisfy the minimum requirements
 			// If number of InstanceTypes in the NodeClaim cannot satisfy the minimum requirements, add its Pods to error map with reason.
 			for _, pod := range newNodeClaim.Pods {
-				r.PodErrors[pod] = serrors.Wrap(fmt.Errorf("pod didn’t schedule because NodePool couldn’t meet minValues requirements, %w", err), "NodePool", klog.KRef("", newNodeClaim.NodeClaimTemplate.NodePoolName))
+				r.PodErrors[pod] = serrors.Wrap(fmt.Errorf("pod didn’t schedule because NodePool couldn’t meet minValues requirements, %w", err), "NodePool", klog.KRef("", newNodeClaim.NodePoolName))
 			}
 		} else {
 			validNewNodeClaims = append(validNewNodeClaims, newNodeClaim)
