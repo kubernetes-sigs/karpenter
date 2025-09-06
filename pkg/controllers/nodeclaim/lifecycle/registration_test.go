@@ -19,9 +19,11 @@ package lifecycle_test
 import (
 	"time"
 
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
-	operatorpkg "github.com/awslabs/operatorpkg/test/expectations"
+	. "github.com/awslabs/operatorpkg/test/expectations"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -31,7 +33,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Registration", func() {
@@ -100,7 +101,7 @@ var _ = Describe("Registration", func() {
 			if isManagedNodeClaim {
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 				Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
-				operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
+				ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
 					Type:   v1.ConditionTypeNodeRegistrationHealthy,
 					Status: metav1.ConditionTrue,
 				})
@@ -486,7 +487,7 @@ var _ = Describe("Registration", func() {
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 		Expect(nodeClaim.Status.NodeName).To(Equal(node.Name))
-		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
+		ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
 			Type:   v1.ConditionTypeNodeRegistrationHealthy,
 			Status: metav1.ConditionTrue,
 		})

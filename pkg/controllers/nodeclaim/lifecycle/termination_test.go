@@ -20,6 +20,8 @@ import (
 	"errors"
 	"time"
 
+	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+
 	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -31,12 +33,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
 
 var _ = Describe("Termination", func() {
@@ -104,7 +107,7 @@ var _ = Describe("Termination", func() {
 			if isNodeClaimManaged {
 				ExpectNotFound(ctx, env.Client, node)
 				result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now all the nodes are gone so nodeClaim deletion continues
-				Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+				result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
@@ -186,8 +189,7 @@ var _ = Describe("Termination", func() {
 		// Expect the node and the nodeClaim to both be gone
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // triggers the nodeclaim deletion
-
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 
@@ -203,13 +205,13 @@ var _ = Describe("Termination", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(env.Client.Delete(ctx, nodeClaim)).To(Succeed())
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will set the nodeClaim status as terminating
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 		cloudProvider.NextDeleteErr = errors.New("fake error")
 		// trigger nodeClaim Deletion that will make cloudProvider Delete and requeue reconciliation due to error
-		Expect(ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim)).To(HaveOccurred())
+		ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim).To(HaveOccurred())
 		result = ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // trigger nodeClaim Deletion that will succeed
 		//nolint:staticcheck
-		Expect(result.Requeue).To(BeFalse())
+		result.To(HaveField("Requeue", BeFalse()))
 		ExpectNotFound(ctx, env.Client, nodeClaim)
 	})
 	It("should not remove the finalizer and terminate the NodeClaim if the cloudProvider instance is still around", func() {
@@ -225,7 +227,7 @@ var _ = Describe("Termination", func() {
 		// To model the behavior of having cloudProvider instance not terminated, we add it back here.
 		cloudProvider.CreatedNodeClaims[nodeClaim.Status.ProviderID] = nodeClaim
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will ensure that we call cloudProvider Get to check if the instance is still around
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
 	})
@@ -255,7 +257,7 @@ var _ = Describe("Termination", func() {
 		ExpectNotFound(ctx, env.Client, node1, node2, node3)
 
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now all nodes are gone so nodeClaim deletion continues
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
 		ExpectMetricHistogramSampleCountValue("karpenter_nodeclaims_instance_termination_duration_seconds", 1, map[string]string{"nodepool": nodePool.Name})
@@ -288,7 +290,7 @@ var _ = Describe("Termination", func() {
 		ExpectNotFound(ctx, env.Client, node)
 
 		result := ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // now the nodeClaim should be gone
-		Expect(result.RequeueAfter).To(BeEquivalentTo(5 * time.Second))
+		result.To(HaveField("RequeueAfter", BeEquivalentTo(5*time.Second)))
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim) // this will call cloudProvider Get to check if the instance is still around
 
 		ExpectNotFound(ctx, env.Client, nodeClaim)

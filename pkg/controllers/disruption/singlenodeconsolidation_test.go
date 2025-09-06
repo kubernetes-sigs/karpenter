@@ -27,6 +27,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
@@ -97,7 +99,7 @@ var _ = Describe("SingleNodeConsolidation", func() {
 	AfterEach(func() {
 		disruption.SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 		fakeClock.SetTime(time.Now())
-		ExpectCleanedUp(ctx, env.Client)
+		ExpectForceCleanedUpAll(ctx, env.Client)
 	})
 
 	Context("Candidate Shuffling", func() {
