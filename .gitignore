@@ -12,3 +12,4 @@ report.json
 .idea
 .vscode
 .DS_Store
+bin/
