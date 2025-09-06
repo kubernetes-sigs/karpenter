@@ -70,6 +70,12 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 	})
 	nct.Requirements.Add(scheduling.NewNodeSelectorRequirementsWithMinValues(nct.Spec.Requirements...).Values()...)
 	nct.Requirements.Add(scheduling.NewLabelRequirements(nct.Labels).Values()...)
+
+	// Add requirements for DaemonSet scheduling calculations
+	// These ensure DaemonSets with nodeAffinity for these labels are considered
+	nct.Requirements.Add(scheduling.NewRequirement(v1.NodeRegisteredLabelKey, corev1.NodeSelectorOpIn, "true"))
+	nct.Requirements.Add(scheduling.NewRequirement(v1.NodeInitializedLabelKey, corev1.NodeSelectorOpIn, "true"))
+
 	return nct
 }
 
@@ -79,6 +85,14 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 	i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
 		return i.Name
 	})...))
+
+	// Filter out DaemonSet scheduling-only requirements for the actual NodeClaim
+	requirements := scheduling.NewRequirements()
+	for key, req := range i.Requirements {
+		if key != v1.NodeRegisteredLabelKey && key != v1.NodeInitializedLabelKey {
+			requirements.Add(req)
+		}
+	}
 
 	nc := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -97,7 +111,7 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 		},
 		Spec: i.Spec,
 	}
-	nc.Spec.Requirements = i.Requirements.NodeSelectorRequirements()
+	nc.Spec.Requirements = requirements.NodeSelectorRequirements()
 	if nc.Spec.TerminationGracePeriod == nil {
 		nc.Spec.TerminationGracePeriod = DefaultTerminationGracePeriod
 	}
