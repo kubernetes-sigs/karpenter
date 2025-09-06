@@ -865,8 +865,13 @@ var _ = Context("Scheduling", func() {
 						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 							{Key: label, Operator: corev1.NodeSelectorOpIn, Values: []string{"test"}},
 						}})
+					nn := client.ObjectKeyFromObject(pod)
+					cluster.AckPods(pod)
 					ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 					ExpectNotScheduled(ctx, env.Client, pod)
+					Expect(cluster.PodSchedulingSuccessTime(nn).IsZero()).To(BeTrue())
+					Expect(cluster.PodSchedulingDecisionTime(nn).IsZero()).To(BeFalse())
+					ExpectMetricHistogramSampleCountValue("karpenter_pods_scheduling_decision_duration_seconds", 1, nil)
 				}
 			})
 			It("should not schedule pods that have node selectors with restricted domains", func() {
@@ -1075,10 +1080,9 @@ var _ = Context("Scheduling", func() {
 						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
 							{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"test-value"}},
 						}}),
-					test.UnschedulablePod(
-						test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
-							{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"another-value"}},
-						}}),
+					test.UnschedulablePod(test.PodOptions{NodeRequirements: []corev1.NodeSelectorRequirement{
+						{Key: "test-key", Operator: corev1.NodeSelectorOpIn, Values: []string{"another-value"}},
+					}}),
 				}
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
 				node1 := ExpectScheduled(ctx, env.Client, pods[0])
@@ -1094,8 +1098,7 @@ var _ = Context("Scheduling", func() {
 						NodeRequirements: []corev1.NodeSelectorRequirement{
 							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"non-existent-zone"}},
 							{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpExists},
-						}},
-				)
+						}})
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectNotScheduled(ctx, env.Client, pod)
 			})
@@ -1219,6 +1222,72 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, nodePool)
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 				ExpectScheduled(ctx, env.Client, pod)
+			})
+			It("should relax pod affinity to use lighter weights", func() {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &corev1.Affinity{PodAffinity: &corev1.PodAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+					{
+						Weight: 100, PodAffinityTerm: corev1.PodAffinityTerm{LabelSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+							{Key: "non-existent", Operator: metav1.LabelSelectorOpIn, Values: []string{"value"}},
+						}}, TopologyKey: corev1.LabelTopologyZone},
+					},
+					{
+						Weight: 50, PodAffinityTerm: corev1.PodAffinityTerm{LabelSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+							{Key: "app", Operator: metav1.LabelSelectorOpIn, Values: []string{"test"}},
+						}}, TopologyKey: corev1.LabelTopologyZone},
+					},
+				}}}
+				// Success
+				existingPod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}}})
+				existingNode := test.Node(test.NodeOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app":                    "test",
+							corev1.LabelTopologyZone: "test-zone-2",
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool, existingPod, existingNode)
+				ExpectManualBinding(ctx, env.Client, existingPod, existingNode)
+
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-2"))
+			})
+			It("should relax pod anti-affinity to use lighter weights", func() {
+				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOpIn, Values: []string{"test-zone-1", "test-zone-2"}}}}
+				pod := test.UnschedulablePod()
+				pod.Spec.Affinity = &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+					{
+						Weight: 100, PodAffinityTerm: corev1.PodAffinityTerm{LabelSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+							{Key: "app", Operator: metav1.LabelSelectorOpIn, Values: []string{"test"}},
+						}}, TopologyKey: corev1.LabelTopologyZone},
+					},
+					{
+						Weight: 50, PodAffinityTerm: corev1.PodAffinityTerm{LabelSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+							{Key: "non-existent", Operator: metav1.LabelSelectorOpIn, Values: []string{"value"}},
+						}}, TopologyKey: corev1.LabelTopologyZone},
+					},
+				}}}
+				// Success
+				existingPod := test.Pod(test.PodOptions{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}}})
+				existingNode := test.Node(test.NodeOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app":                    "test",
+							corev1.LabelTopologyZone: "test-zone-2",
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, nodePool, existingPod, existingNode)
+				ExpectManualBinding(ctx, env.Client, existingPod, existingNode)
+
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels).To(HaveKeyWithValue(corev1.LabelTopologyZone, "test-zone-1"))
 			})
 		})
 	})
