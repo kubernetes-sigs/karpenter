@@ -57,6 +57,7 @@ var _ = Describe("Options", func() {
 		"LEADER_ELECTION_NAMESPACE",
 		"MEMORY_LIMIT",
 		"LOG_LEVEL",
+		"LOG_ENCODING",
 		"LOG_OUTPUT_PATHS",
 		"LOG_ERROR_OUTPUT_PATHS",
 		"BATCH_MAX_DURATION",
@@ -112,6 +113,7 @@ var _ = Describe("Options", func() {
 				LeaderElectionNamespace:          lo.ToPtr(""),
 				MemoryLimit:                      lo.ToPtr[int64](-1),
 				LogLevel:                         lo.ToPtr("info"),
+				LogEncoding:                      lo.ToPtr("json"),
 				LogOutputPaths:                   lo.ToPtr("stdout"),
 				LogErrorOutputPaths:              lo.ToPtr("stderr"),
 				BatchMaxDuration:                 lo.ToPtr(10 * time.Second),
@@ -146,6 +148,7 @@ var _ = Describe("Options", func() {
 				"--leader-election-namespace=karpenter",
 				"--memory-limit", "0",
 				"--log-level", "debug",
+				"--log-encoding", "console",
 				"--log-output-paths", "/etc/k8s/test",
 				"--log-error-output-paths", "/etc/k8s/testerror",
 				"--batch-max-duration", "5s",
@@ -168,6 +171,7 @@ var _ = Describe("Options", func() {
 				LeaderElectionNamespace:          lo.ToPtr("karpenter"),
 				MemoryLimit:                      lo.ToPtr[int64](0),
 				LogLevel:                         lo.ToPtr("debug"),
+				LogEncoding:                      lo.ToPtr("console"),
 				LogOutputPaths:                   lo.ToPtr("/etc/k8s/test"),
 				LogErrorOutputPaths:              lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:                 lo.ToPtr(5 * time.Second),
@@ -198,6 +202,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("LEADER_ELECTION_NAMESPACE", "karpenter")
 			os.Setenv("MEMORY_LIMIT", "0")
 			os.Setenv("LOG_LEVEL", "debug")
+			os.Setenv("LOG_ENCODING", "console")
 			os.Setenv("LOG_OUTPUT_PATHS", "/etc/k8s/test")
 			os.Setenv("LOG_ERROR_OUTPUT_PATHS", "/etc/k8s/testerror")
 			os.Setenv("BATCH_MAX_DURATION", "5s")
@@ -224,6 +229,7 @@ var _ = Describe("Options", func() {
 				LeaderElectionNamespace:          lo.ToPtr("karpenter"),
 				MemoryLimit:                      lo.ToPtr[int64](0),
 				LogLevel:                         lo.ToPtr("debug"),
+				LogEncoding:                      lo.ToPtr("console"),
 				LogOutputPaths:                   lo.ToPtr("/etc/k8s/test"),
 				LogErrorOutputPaths:              lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:                 lo.ToPtr(5 * time.Second),
@@ -282,6 +288,7 @@ var _ = Describe("Options", func() {
 				LeaderElectionNamespace:          lo.ToPtr(""),
 				MemoryLimit:                      lo.ToPtr[int64](0),
 				LogLevel:                         lo.ToPtr("debug"),
+				LogEncoding:                      lo.ToPtr("json"),
 				LogOutputPaths:                   lo.ToPtr("/etc/k8s/test"),
 				LogErrorOutputPaths:              lo.ToPtr("/etc/k8s/testerror"),
 				BatchMaxDuration:                 lo.ToPtr(5 * time.Second),
@@ -355,6 +362,20 @@ var _ = Describe("Options", func() {
 			err := opts.Parse(fs, "--log-level", "hello")
 			Expect(err).ToNot(BeNil())
 		})
+
+		DescribeTable(
+			"should parse valid log encoding successfully",
+			func(encoding string) {
+				err := opts.Parse(fs, "--log-encoding", encoding)
+				Expect(err).To(BeNil())
+			},
+			Entry("json", "json"),
+			Entry("console", "console"),
+		)
+		It("should error with an invalid log encoding", func() {
+			err := opts.Parse(fs, "--log-encoding", "hello")
+			Expect(err).ToNot(BeNil())
+		})
 	})
 })
 
@@ -375,6 +396,7 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.DisableClusterStateObservability).To(Equal(optsB.DisableClusterStateObservability))
 	Expect(optsA.MemoryLimit).To(Equal(optsB.MemoryLimit))
 	Expect(optsA.LogLevel).To(Equal(optsB.LogLevel))
+	Expect(optsA.LogEncoding).To(Equal(optsB.LogEncoding))
 	Expect(optsA.LogOutputPaths).To(Equal(optsB.LogOutputPaths))
 	Expect(optsA.LogErrorOutputPaths).To(Equal(optsB.LogErrorOutputPaths))
 	Expect(optsA.BatchMaxDuration).To(Equal(optsB.BatchMaxDuration))
