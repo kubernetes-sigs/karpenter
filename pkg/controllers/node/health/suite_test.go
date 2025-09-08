@@ -173,7 +173,7 @@ var _ = Describe("Node Health", func() {
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, fakeClock.Now().Format(time.RFC3339)))
 		})
 		It("should not respect termination grace period if set on the nodepool", func() {
-			nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: fakeClock.Now().Add(120 * time.Minute).Format(time.RFC3339)})
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: fakeClock.Now().Add(120 * time.Minute).Format(time.RFC3339)})
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
@@ -190,7 +190,7 @@ var _ = Describe("Node Health", func() {
 		})
 		It("should not update termination grace period if set before the current time", func() {
 			terminationTime := fakeClock.Now().Add(-3 * time.Minute).Format(time.RFC3339)
-			nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,

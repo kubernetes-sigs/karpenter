@@ -117,6 +117,7 @@ var _ = BeforeEach(func() {
 	cloudProvider.CreateCalls = nil
 	scheduling.MaxInstanceTypes = 60
 	state.PodSchedulingDecisionSeconds.Reset()
+	scheduling.UnsupportedProvisioners = sets.New[string]()
 })
 
 var _ = AfterEach(func() {
@@ -2246,25 +2247,23 @@ var _ = Context("Scheduling", func() {
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 				ExpectApplied(ctx, env.Client, nodePool, dsPod)
-				cluster.ForEachNode(func(f *state.StateNode) bool {
-					dsRequests := f.DaemonSetRequests()
-					available := f.Available()
+				for n := range cluster.Nodes() {
+					dsRequests := n.DaemonSetRequests()
+					available := n.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
 					// no pods so we have the full (16 cpu - 100m overhead)
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
-					return true
-				})
+				}
 				ExpectManualBinding(ctx, env.Client, dsPod, node1)
 				ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(dsPod))
 
-				cluster.ForEachNode(func(f *state.StateNode) bool {
+				for f := range cluster.Nodes() {
 					dsRequests := f.DaemonSetRequests()
 					available := f.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
 					// only the DS pod is bound, so available is reduced by one and the DS requested is incremented by one
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 14.9))
-					return true
-				})
+				}
 
 				opts = test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
 					Limits: map[corev1.ResourceName]resource.Quantity{
@@ -2334,25 +2333,23 @@ var _ = Context("Scheduling", func() {
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
 				ExpectApplied(ctx, env.Client, nodePool, dsPod)
-				cluster.ForEachNode(func(f *state.StateNode) bool {
-					dsRequests := f.DaemonSetRequests()
-					available := f.Available()
+				for n := range cluster.Nodes() {
+					dsRequests := n.DaemonSetRequests()
+					available := n.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
 					// no pods, so we have the full (16 CPU - 100m overhead)
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
-					return true
-				})
+				}
 				ExpectManualBinding(ctx, env.Client, dsPod, node1)
 				ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(dsPod))
 
-				cluster.ForEachNode(func(f *state.StateNode) bool {
-					dsRequests := f.DaemonSetRequests()
-					available := f.Available()
+				for n := range cluster.Nodes() {
+					dsRequests := n.DaemonSetRequests()
+					available := n.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 1))
 					// only the DS pod is bound, so available is reduced by one and the DS requested is incremented by one
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 14.9))
-					return true
-				})
+				}
 
 				opts = test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
 					Limits: map[corev1.ResourceName]resource.Quantity{
@@ -2404,13 +2401,12 @@ var _ = Context("Scheduling", func() {
 			// due to the in-flight node support, we should pack existing nodes before launching new node. The end result
 			// is that we should only have some spare capacity on our final node
 			nodesWithCPUFree := 0
-			cluster.ForEachNode(func(n *state.StateNode) bool {
+			for n := range cluster.Nodes() {
 				available := n.Available()
 				if available.Cpu().AsApproximateFloat64() >= 1 {
 					nodesWithCPUFree++
 				}
-				return true
-			})
+			}
 			Expect(nodesWithCPUFree).To(BeNumerically("<=", 1))
 		})
 		It("should not launch a second node if there is an in-flight node that can support the pod (#2011)", func() {
@@ -2941,7 +2937,7 @@ var _ = Context("Scheduling", func() {
 				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
 				Zones:             []string{"test-zone-1"}})
 
-			initialPod := test.UnschedulablePod(test.PodOptions{})
+			initialPod := test.UnschedulablePod()
 			// Pod has an ephemeral volume claim that has a specified storage class, so it should use the one specified
 			volumeName := "tmp-ephemeral"
 			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, corev1.Volume{
@@ -3000,7 +2996,7 @@ var _ = Context("Scheduling", func() {
 			ExpectApplied(ctx, env.Client, csiNode)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
-			pod := test.UnschedulablePod(test.PodOptions{})
+			pod := test.UnschedulablePod()
 			// Pod has an ephemeral volume claim that has a specified storage class, so it should use the one specified
 			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
@@ -3047,7 +3043,7 @@ var _ = Context("Scheduling", func() {
 				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
 				Zones:             []string{"test-zone-1"}})
 
-			initialPod := test.UnschedulablePod(test.PodOptions{})
+			initialPod := test.UnschedulablePod()
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
 			volumeName := "tmp-ephemeral"
 			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, corev1.Volume{
@@ -3097,7 +3093,7 @@ var _ = Context("Scheduling", func() {
 			ExpectApplied(ctx, env.Client, csiNode)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
-			pod := test.UnschedulablePod(test.PodOptions{})
+			pod := test.UnschedulablePod()
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
 			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
@@ -3162,7 +3158,7 @@ var _ = Context("Scheduling", func() {
 			ExpectApplied(ctx, env.Client, sc2)
 
 			volumeName := "tmp-ephemeral"
-			initialPod := test.UnschedulablePod(test.PodOptions{})
+			initialPod := test.UnschedulablePod()
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
 			initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
@@ -3218,7 +3214,7 @@ var _ = Context("Scheduling", func() {
 			ExpectApplied(ctx, env.Client, csiNode)
 			ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
-			pod := test.UnschedulablePod(test.PodOptions{})
+			pod := test.UnschedulablePod()
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
 			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
@@ -3252,6 +3248,7 @@ var _ = Context("Scheduling", func() {
 		})
 		It("should not launch nodes for pod with storageClass that uses an unsupported provisioner", func() {
 			scheduling.UnsupportedProvisioners = lo.Assign(scheduling.UnsupportedProvisioners, sets.New("other-provider"))
+
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "default-storage-class",
@@ -3264,7 +3261,7 @@ var _ = Context("Scheduling", func() {
 
 			ExpectApplied(ctx, env.Client, sc)
 			volumeName := "tmp-ephemeral"
-			pod := test.UnschedulablePod(test.PodOptions{})
+			pod := test.UnschedulablePod()
 			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
 			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 				Name: volumeName,
@@ -3301,6 +3298,49 @@ var _ = Context("Scheduling", func() {
 			// no nodes should be created as the storage class is using an unsupported provisioner
 			Expect(nodeList.Items).To(HaveLen(0))
 		})
+		It("should not launch nodes for pod with bound persistentVolume that uses an unsupported provisioner", func() {
+			scheduling.UnsupportedProvisioners = lo.Assign(scheduling.UnsupportedProvisioners, sets.New("other-provider"))
+
+			volumeName := "tmp-ephemeral"
+			pod := test.UnschedulablePod()
+			// Pod has an ephemeral volume claim that has NO storage class, so it should use the default one
+			pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+				Name: volumeName,
+				VolumeSource: corev1.VolumeSource{
+					Ephemeral: &corev1.EphemeralVolumeSource{
+						VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+							Spec: corev1.PersistentVolumeClaimSpec{
+								AccessModes: []corev1.PersistentVolumeAccessMode{
+									corev1.ReadWriteOnce,
+								},
+								Resources: corev1.VolumeResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceStorage: resource.MustParse("1Gi"),
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			pv := test.PersistentVolume(test.PersistentVolumeOptions{
+				Driver: "other-provider",
+			})
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: pod.Namespace,
+					Name:      fmt.Sprintf("%s-%s", pod.Name, volumeName),
+				},
+				VolumeName: pv.Name,
+			})
+			ExpectApplied(ctx, env.Client, nodePool, pvc, pv, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+
+			var nodeList corev1.NodeList
+			Expect(env.Client.List(ctx, &nodeList)).To(Succeed())
+			// no nodes should be created as the persistent volume is using an unsupported provisioner
+			Expect(nodeList.Items).To(HaveLen(0))
+		})
 		It("should not launch nodes for pod with unbound volume for volumeBindingMode immediate", func() {
 			sc := test.StorageClass(test.StorageClassOptions{
 				ObjectMeta: metav1.ObjectMeta{
@@ -3323,12 +3363,58 @@ var _ = Context("Scheduling", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
+		It("should not launch nodes for pod with deleting persistentVolumeClaim", func() {
+			sc := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "default-storage-class",
+				},
+				Provisioner:       lo.ToPtr("other-provider"),
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				Zones:             []string{"test-zone-1"}},
+			)
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tmp-ephemeral",
+				},
+				StorageClassName: lo.ToPtr(sc.Name),
+			})
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc.Name},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, sc, pvc, pod)
+			ExpectDeletionTimestampSet(ctx, env.Client, pvc)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+		It("should not launch nodes for pod with Lost persistentVolumeClaim", func() {
+			sc := test.StorageClass(test.StorageClassOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "default-storage-class",
+				},
+				Provisioner:       lo.ToPtr("other-provider"),
+				VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+				Zones:             []string{"test-zone-1"}},
+			)
+			pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tmp-ephemeral",
+				},
+				StorageClassName: lo.ToPtr(sc.Name),
+			})
+			pvc.Status.Phase = corev1.ClaimLost
+			pod := test.UnschedulablePod(test.PodOptions{
+				PersistentVolumeClaims: []string{pvc.Name},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, sc, pvc, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
 		DescribeTable(
 			"should launch nodes for pods with ephemeral volume without a storage class when the PVC is bound",
 			func(storageClassName string) {
 				ExpectApplied(ctx, env.Client, nodePool)
 				volumeName := "tmp-ephemeral"
-				pod := test.UnschedulablePod(test.PodOptions{})
+				pod := test.UnschedulablePod()
 				pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 					Name: volumeName,
 					VolumeSource: corev1.VolumeSource{
@@ -3379,7 +3465,7 @@ var _ = Context("Scheduling", func() {
 			"should not launch nodes for pods with ephemeral volume without a storage class when the PVC is unbound",
 			func(storageClassName string) {
 				ExpectApplied(ctx, env.Client, nodePool)
-				pod := test.UnschedulablePod(test.PodOptions{})
+				pod := test.UnschedulablePod()
 				pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 					Name: "tmp-ephemeral",
 					VolumeSource: corev1.VolumeSource{
@@ -3485,7 +3571,7 @@ var _ = Context("Scheduling", func() {
 					VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
 					Zones:             []string{"test-zone-1"}})
 
-				initialPod := test.UnschedulablePod(test.PodOptions{})
+				initialPod := test.UnschedulablePod()
 				// Pod has an ephemeral volume claim that references the in-tree storage provider
 				volumeName := "tmp-ephemeral"
 				initialPod.Spec.Volumes = append(initialPod.Spec.Volumes, corev1.Volume{
@@ -3536,7 +3622,7 @@ var _ = Context("Scheduling", func() {
 				ExpectApplied(ctx, env.Client, csiNode)
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node))
 
-				pod := test.UnschedulablePod(test.PodOptions{})
+				pod := test.UnschedulablePod()
 				// Pod has an ephemeral volume claim that reference the in-tree storage provider
 				pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
 					Name: volumeName,

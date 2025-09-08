@@ -175,13 +175,13 @@ var _ = Describe("Expiration", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
 
-		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))
+		fakeClock.SetTime(nodeClaim.CreationTimestamp.Add(time.Second * 100))
 
 		result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		result.To(HaveField("RequeueAfter", BeNumerically("~", time.Second*100, time.Second)))
 	})
 	It("shouldn't expire the same NodeClaim multiple times", func() {
-		nodeClaim.ObjectMeta.Finalizers = append(nodeClaim.ObjectMeta.Finalizers, "test-finalizer")
+		nodeClaim.Finalizers = append(nodeClaim.Finalizers, "test-finalizer")
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
 		// step forward to make the node expired
