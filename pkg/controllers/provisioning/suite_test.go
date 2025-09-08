@@ -1980,7 +1980,10 @@ var _ = Describe("Provisioning", func() {
 						},
 					},
 				}
-				persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
+				persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					VolumeName:       persistentVolume.Name,
+					StorageClassName: &storageClass.Name,
+				})
 				ExpectApplied(ctx, env.Client, test.NodePool(), storageClass, persistentVolumeClaim, persistentVolume)
 				pod := test.UnschedulablePod(test.PodOptions{
 					PersistentVolumeClaims: []string{persistentVolumeClaim.Name},

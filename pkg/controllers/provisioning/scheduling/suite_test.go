@@ -3406,6 +3406,44 @@ var _ = Context("Scheduling", func() {
 			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
 			ExpectNotScheduled(ctx, env.Client, pod)
 		})
+		DescribeTable("should handle pods with PVCs with defined volumeName",
+			func(isAnnotationPresent bool) {
+				sc := test.StorageClass(test.StorageClassOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "default-storage-class",
+					},
+					Provisioner: lo.ToPtr("other-provider"),
+					// VolumeBindingMode doesn't actually matter when volumeName is defined
+					VolumeBindingMode: lo.ToPtr(storagev1.VolumeBindingWaitForFirstConsumer),
+					Zones:             []string{"test-zone-1"}},
+				)
+				pv := test.PersistentVolume(test.PersistentVolumeOptions{
+					Driver: "other-provider",
+				})
+				pvc := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "tmp-ephemeral",
+					},
+					VolumeName:       pv.Name,
+					StorageClassName: lo.ToPtr(sc.Name),
+				})
+				if !isAnnotationPresent {
+					delete(pvc.Annotations, "pv.kubernetes.io/bind-completed")
+				}
+				pod := test.UnschedulablePod(test.PodOptions{
+					PersistentVolumeClaims: []string{pvc.Name},
+				})
+				ExpectApplied(ctx, env.Client, nodePool, sc, pvc, pv, pod)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				if isAnnotationPresent {
+					ExpectScheduled(ctx, env.Client, pod)
+				} else {
+					ExpectNotScheduled(ctx, env.Client, pod)
+				}
+			},
+			Entry("when pv.kubernetes.io/bind-completed is missing", false),
+			Entry("when pv.kubernetes.io/bind-completed is present", true),
+		)
 		DescribeTable(
 			"should launch nodes for pods with ephemeral volume without a storage class when the PVC is bound",
 			func(storageClassName string) {
