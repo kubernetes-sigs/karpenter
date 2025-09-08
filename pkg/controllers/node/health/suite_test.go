@@ -28,6 +28,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clock "k8s.io/utils/clock/testing"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -91,7 +93,7 @@ var _ = Describe("Node Health", func() {
 	})
 
 	AfterEach(func() {
-		ExpectCleanedUp(ctx, env.Client)
+		ExpectForceCleanedUpAll(ctx, env.Client)
 
 		// Reset the metrics collectors
 		metrics.NodeClaimsDisruptedTotal.Reset()
@@ -232,7 +234,7 @@ var _ = Describe("Node Health", func() {
 			fakeClock.Step(27 * time.Minute)
 
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
-			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
+			result.To(HaveField("RequeueAfter", BeNumerically("~", time.Minute*3, time.Second)))
 		})
 		It("should return the requeue interval for the time between now and when the nodeClaim termination time", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
@@ -246,7 +248,7 @@ var _ = Describe("Node Health", func() {
 			fakeClock.Step(27 * time.Minute)
 
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
-			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
+			result.To(HaveField("RequeueAfter", BeNumerically("~", time.Minute*3, time.Second)))
 		})
 	})
 

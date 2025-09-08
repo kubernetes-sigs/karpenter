@@ -32,6 +32,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	clock "k8s.io/utils/clock/testing"
 
+	. "github.com/awslabs/operatorpkg/test/expectations"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
@@ -83,7 +85,7 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
-	ExpectCleanedUp(ctx, env.Client)
+	ExpectForceCleanedUpAll(ctx, env.Client)
 })
 
 var testLabels = map[string]string{"test": "label"}
@@ -134,12 +136,11 @@ var _ = Describe("Eviction/Queue", func() {
 			Expect(recorder.Calls(events.Evicted)).To(Equal(1))
 		})
 		It("should return a NodeDrainError event when a PDB is blocking", func() {
-			ExpectApplied(ctx, env.Client, pdb, pod, node)
+			ExpectAppliedKeepSourceStatus(ctx, env.Client, pdb, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
 			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			//nolint:staticcheck
-			Expect(result.Requeue).To(BeTrue())
+			result.To(HaveField("Requeue", BeTrue()))
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "429"})
 			e := recorder.Events()
 			Expect(e).To(HaveLen(1))
@@ -151,12 +152,12 @@ var _ = Describe("Eviction/Queue", func() {
 				Labels:         testLabels,
 				MaxUnavailable: &intstr.IntOrString{IntVal: 0},
 			})
-			ExpectApplied(ctx, env.Client, pdb, pdb2, pod, node)
+
+			ExpectAppliedKeepSourceStatus(ctx, env.Client, pdb, pdb2, pod, node)
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
 			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			//nolint:staticcheck
-			Expect(result.Requeue).To(BeTrue())
+			result.To(HaveField("Requeue", BeTrue()))
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "500"})
 			e := recorder.Events()
 			Expect(e).To(HaveLen(1))
