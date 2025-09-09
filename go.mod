@@ -24,13 +24,13 @@ require (
 	k8s.io/apiextensions-apiserver v0.35.0-alpha.0
 	k8s.io/apimachinery v0.35.0-alpha.0
 	k8s.io/client-go v0.35.0-alpha.0
-	k8s.io/cloud-provider v0.33.4
+	k8s.io/cloud-provider v0.34.0
 	k8s.io/component-base v0.35.0-alpha.0
-	k8s.io/component-helpers v0.33.4
-	k8s.io/csi-translation-lib v0.33.4
+	k8s.io/component-helpers v0.34.0
+	k8s.io/csi-translation-lib v0.34.0
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
-	sigs.k8s.io/controller-runtime v0.21.1-0.20250620151452-b9a9ca01fd37
+	sigs.k8s.io/controller-runtime v0.22.1
 )
 
 require (
@@ -81,7 +81,6 @@ require (
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
-	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
