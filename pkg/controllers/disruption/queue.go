@@ -121,8 +121,6 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 }
 
 func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 100, 1000)
-	log.FromContext(ctx).V(1).Info("disruption.queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
 		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).
@@ -131,7 +129,7 @@ func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](queueBaseDelay, queueMaxDelay),
 				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
 			),
-			MaxConcurrentReconciles: maxConcurrentReconciles,
+			MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 100, 1000),
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }
