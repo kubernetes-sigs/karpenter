@@ -87,6 +87,10 @@ func (c *consolidation) markConsolidated() {
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (c *consolidation) ShouldDisrupt(_ context.Context, cn *Candidate) bool {
+	// Disable consolidation for static NodePool
+	if cn.OwnedByStaticNodePool() {
+		return false
+	}
 	// We need the following to know what the price of the instance for price comparison. If one of these doesn't exist, we can't
 	// compute consolidation decisions for this candidate.
 	// 1. Instance Type
