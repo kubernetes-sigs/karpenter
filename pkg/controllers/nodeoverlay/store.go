@@ -17,15 +17,16 @@ limitations under the License.
 package nodeoverlay
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
-	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 type PriceUpdate struct {
@@ -54,42 +55,29 @@ type InstanceTypeUpdate struct {
 //   - Validate instance configurations
 //   - Update instance properties for scheduling decisions
 type InstanceTypeStore struct {
-	updates map[string]map[string]*InstanceTypeUpdate // nodePoolName -> (instanceName -> updates)
-	mu      sync.RWMutex                              // protects concurrent access to updates
+	updates            map[string]map[string]*InstanceTypeUpdate // nodePoolName -> (instanceName -> updates)
+	evaluatedNodePools sets.Set[string]                          // The set of NodePools that were evaluated to construct this InstanceTypeStore instance
+	mu                 sync.RWMutex                              // protects concurrent access to updates
 }
 
 func NewInstanceTypeStore() *InstanceTypeStore {
 	return &InstanceTypeStore{
-		updates: map[string]map[string]*InstanceTypeUpdate{},
+		updates:            map[string]map[string]*InstanceTypeUpdate{},
+		evaluatedNodePools: sets.Set[string]{},
 	}
 }
 
-func (s *InstanceTypeStore) UpdateStore(updatedStore map[string]map[string]*InstanceTypeUpdate) {
+func (s *InstanceTypeStore) UpdateStore(updatedStore *InstanceTypeStore) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.updates = map[string]map[string]*InstanceTypeUpdate{}
-	for nodePoolName, v := range updatedStore {
-		s.updates[nodePoolName] = map[string]*InstanceTypeUpdate{}
-		for instanceTypeName, itUpdate := range v {
-			s.updates[nodePoolName][instanceTypeName] = &InstanceTypeUpdate{
-				Price: lo.Assign(map[string]*PriceUpdate{}, itUpdate.Price),
-				Capacity: &CapacityUpdate{
-					OverlayUpdate:                 lo.Assign(corev1.ResourceList{}, itUpdate.Capacity.OverlayUpdate),
-					lowestWeightCapacityResources: itUpdate.Capacity.lowestWeightCapacityResources,
-					lowestWeight:                  itUpdate.Capacity.lowestWeight,
-				},
-			}
-		}
-	}
+	s.updates = updatedStore.updates
+	s.evaluatedNodePools = updatedStore.evaluatedNodePools
 }
 
 // updateInstanceTypeCapacity add a new Capacity overlay update to the associated instance type.
-// This add an Capacity update to the store once after it has been validated.
+// NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
 func (s *InstanceTypeStore) updateInstanceTypeCapacity(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if nodeOverlay.Spec.Capacity == nil {
 		return
 	}
@@ -119,9 +107,6 @@ func (s *InstanceTypeStore) updateInstanceTypeCapacity(nodePoolName string, inst
 }
 
 func (s *InstanceTypeStore) isCapacityUpdateConflicting(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	_, ok := s.updates[nodePoolName]
 	if !ok {
 		return false
@@ -133,6 +118,7 @@ func (s *InstanceTypeStore) isCapacityUpdateConflicting(nodePoolName string, ins
 	if instanceTypeUpdate.Capacity == nil {
 		return false
 	}
+	// IMPORTANT: This logic assumes NodeOverlays are processed in descending order by weight.
 	if lo.FromPtr(instanceTypeUpdate.Capacity.lowestWeight) != lo.FromPtr(nodeOverlay.Spec.Weight) {
 		return false
 	}
@@ -147,11 +133,8 @@ func (s *InstanceTypeStore) isCapacityUpdateConflicting(nodePoolName string, ins
 }
 
 // updateInstanceTypeOffering add a new Price overlay update to the associated instance type.
-// This add an Price update to the store once after it has been validated.
+// NOTE: This method does not perform conflict validation. The callee must check for conflicts first.
 func (s *InstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, instanceTypeName string, nodeOverlay v1alpha1.NodeOverlay, offerings cloudprovider.Offerings) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	price := lo.Ternary(nodeOverlay.Spec.Price == nil, nodeOverlay.Spec.PriceAdjustment, nodeOverlay.Spec.Price)
 	if price == nil {
 		return
@@ -179,9 +162,6 @@ func (s *InstanceTypeStore) updateInstanceTypeOffering(nodePoolName string, inst
 }
 
 func (s *InstanceTypeStore) isOfferingUpdateConflicting(nodePoolName string, instanceTypeName string, of *cloudprovider.Offering, nodeOverlay v1alpha1.NodeOverlay) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	_, ok := s.updates[nodePoolName]
 	if !ok {
 		return false
@@ -194,6 +174,7 @@ func (s *InstanceTypeStore) isOfferingUpdateConflicting(nodePoolName string, ins
 	if !ok {
 		return false
 	}
+	// IMPORTANT: This logic assumes NodeOverlays are processed in descending order by weight.
 	if lo.FromPtr(nodeOverlay.Spec.Weight) != lo.FromPtr(updatedOffering.lowestWeight) {
 		return false
 	}
@@ -201,18 +182,26 @@ func (s *InstanceTypeStore) isOfferingUpdateConflicting(nodePoolName string, ins
 	return true
 }
 
-func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.InstanceType) []*cloudprovider.InstanceType {
-	result := []*cloudprovider.InstanceType{}
+func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.InstanceType) ([]*cloudprovider.InstanceType, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
+		return []*cloudprovider.InstanceType{}, NewUnevaluatedNodePoolError(nodePoolName)
+	}
+
+	result := make([]*cloudprovider.InstanceType, 0, len(its))
 
 	_, ok := s.updates[nodePoolName]
 	if !ok {
-		return its
+		return its, nil
 	}
 
 	for _, it := range its {
-		result = append(result, s.Apply(nodePoolName, it))
+		if updatedIt, err := s.Apply(nodePoolName, it); err == nil {
+			result = append(result, updatedIt)
+		}
 	}
-	return result
+	return result, nil
 }
 
 // Apply takes a node pool name and instance type, and returns a modified copy of the instance type
@@ -220,30 +209,24 @@ func (s *InstanceTypeStore) ApplyAll(nodePoolName string, its []*cloudprovider.I
 // node pool and instance type, creating a deep copy of the original instance type before applying
 // any overrides. If no updates exist for the node pool or instance type, returns the original
 // instance type unchanged. Thread-safe through read lock usage.
-func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.InstanceType) *cloudprovider.InstanceType {
+func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
+		return &cloudprovider.InstanceType{}, NewUnevaluatedNodePoolError(nodePoolName)
+	}
+
 	instanceTypeList, ok := s.updates[nodePoolName]
 	if !ok {
-		return it
+		return it, nil
 	}
 	instanceTypeUpdate, ok := instanceTypeList[it.Name]
 	if !ok {
-		return it
+		return it, nil
 	}
 
-	overriddenInstanceType := &cloudprovider.InstanceType{
-		Name:         it.Name,
-		Requirements: scheduling.NewRequirements(it.Requirements.Values()...),
-		Offerings:    nodepoolutils.CopyOfferings(it.Offerings),
-		Capacity:     it.Capacity.DeepCopy(),
-		Overhead: &cloudprovider.InstanceTypeOverhead{
-			KubeReserved:      it.Overhead.KubeReserved.DeepCopy(),
-			SystemReserved:    it.Overhead.SystemReserved.DeepCopy(),
-			EvictionThreshold: it.Overhead.EvictionThreshold.DeepCopy(),
-		},
-	}
+	overriddenInstanceType := it.DeepCopy()
 	if instanceTypeUpdate.Price != nil {
 		for _, of := range overriddenInstanceType.Offerings {
 			if overlay, ok := instanceTypeUpdate.Price[of.Requirements.String()]; ok {
@@ -255,9 +238,33 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 		overriddenInstanceType.ApplyCapacityOverlay(instanceTypeUpdate.Capacity.OverlayUpdate)
 	}
 
-	return overriddenInstanceType
+	return overriddenInstanceType, nil
 }
 
 func (s *InstanceTypeStore) Reset() {
 	s.updates = map[string]map[string]*InstanceTypeUpdate{}
+}
+
+// UnevaluatedNodePoolError is an error when the node overlay controller has not updated the instance
+// store based on the overlay in the cluster.
+type UnevaluatedNodePoolError struct {
+	nodePoolName string
+}
+
+func NewUnevaluatedNodePoolError(nodePoolName string) *UnevaluatedNodePoolError {
+	return &UnevaluatedNodePoolError{
+		nodePoolName: nodePoolName,
+	}
+}
+
+func (e *UnevaluatedNodePoolError) Error() string {
+	return fmt.Sprintf("awaiting nodeoverlay evaluation, nodepool %s", e.nodePoolName)
+}
+
+func IsUnevaluatedNodePoolError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var onatnpErr *UnevaluatedNodePoolError
+	return errors.As(err, &onatnpErr)
 }

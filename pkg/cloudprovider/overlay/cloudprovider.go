@@ -45,7 +45,10 @@ func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool)
 		return []*cloudprovider.InstanceType{}, err
 	}
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
-		its = d.store.ApplyAll(nodePool.Name, its)
+		its, err = d.store.ApplyAll(nodePool.Name, its)
+		if err != nil {
+			return []*cloudprovider.InstanceType{}, err
+		}
 	}
 	return its, nil
 }

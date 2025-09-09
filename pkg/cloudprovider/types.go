@@ -39,6 +39,8 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
+
 var (
 	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
 	OnDemandRequirement = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand))
@@ -99,6 +101,7 @@ type CloudProvider interface {
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
+// +k8s:deepcopy-gen=true
 type InstanceType struct {
 	// Name of the instance type, must correspond to corev1.LabelInstanceTypeStable
 	Name string
@@ -118,6 +121,60 @@ type InstanceType struct {
 }
 
 type InstanceTypes []*InstanceType
+
+// Since we have a no copy the sync.Once field, we need to maintain a custom
+// DeepCopyInto function.
+//
+//nolint:gocyclo
+func (in *InstanceType) DeepCopyInto(out *InstanceType) {
+	out.Name = in.Name
+	if in.Requirements != nil {
+		in, out := &in.Requirements, &out.Requirements
+		*out = make(scheduling.Requirements, len(*in))
+		for key, val := range *in {
+			var outVal *scheduling.Requirement
+			if val == nil {
+				(*out)[key] = nil
+			} else {
+				inVal := (*in)[key]
+				in, out := &inVal, &outVal
+				*out = new(scheduling.Requirement)
+				(*in).DeepCopyInto(*out)
+			}
+			(*out)[key] = outVal
+		}
+	}
+	if in.Offerings != nil {
+		in, out := &in.Offerings, &out.Offerings
+		*out = make(Offerings, len(*in))
+		for i := range *in {
+			if (*in)[i] != nil {
+				in, out := &(*in)[i], &(*out)[i]
+				*out = new(Offering)
+				(*in).DeepCopyInto(*out)
+			}
+		}
+	}
+	if in.Capacity != nil {
+		in, out := &in.Capacity, &out.Capacity
+		*out = make(corev1.ResourceList, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val.DeepCopy()
+		}
+	}
+	if in.Overhead != nil {
+		in, out := &in.Overhead, &out.Overhead
+		*out = new(InstanceTypeOverhead)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.allocatable != nil {
+		in, out := &in.allocatable, &out.allocatable
+		*out = make(corev1.ResourceList, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val.DeepCopy()
+		}
+	}
+}
 
 // precompute is used to ensure we only compute the allocatable resources onces as its called many times
 // and the operation is fairly expensive.
@@ -276,6 +333,7 @@ func (its InstanceTypes) Truncate(ctx context.Context, requirements scheduling.R
 	return truncatedInstanceTypes, nil
 }
 
+// +k8s:deepcopy-gen=true
 type InstanceTypeOverhead struct {
 	// KubeReserved returns the default resources allocated to kubernetes system daemons by default
 	KubeReserved corev1.ResourceList
@@ -293,6 +351,7 @@ func (i InstanceTypeOverhead) Total() corev1.ResourceList {
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
 // these properties are captured with labels in Requirements.
 // Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone.
+// +k8s:deepcopy-gen=true
 type Offering struct {
 	Requirements        scheduling.Requirements
 	Price               float64
@@ -357,6 +416,7 @@ func (o *Offering) ReservationID() string {
 	return o.Requirements.Get(ReservationIDLabel).Any()
 }
 
+// +k8s:deepcopy-gen=true
 type Offerings []*Offering
 
 // Available filters the available offerings from the returned offerings

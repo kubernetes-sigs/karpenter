@@ -57,7 +57,7 @@ var _ = Describe("CloudProvider", func() {
 })
 
 var _ = Describe("Instance Type", func() {
-	It("should reserve additional allocatable memory for when HugePages is defined resources", func() {
+	It("should reserve additional capacity memory for when HugePages is defined resources", func() {
 		it := cloudprovider.InstanceType{
 			Capacity: v1.ResourceList{
 				v1.ResourceCPU:                   resource.MustParse("5"),

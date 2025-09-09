@@ -33,7 +33,8 @@ func main() {
 		log.FromContext(ctx).Error(err, "failed constructing instance types")
 	}
 
-	cloudProvider := overlay.Decorate(kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes), op.GetClient(), op.InstanceTypeStore)
+	overlayUndecoratedCloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
+	cloudProvider := overlay.Decorate(overlayUndecoratedCloudProvider, op.GetClient(), op.InstanceTypeStore)
 	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
 	op.
 		WithControllers(ctx, controllers.NewControllers(
@@ -43,6 +44,7 @@ func main() {
 			op.GetClient(),
 			op.EventRecorder,
 			cloudProvider,
+			overlayUndecoratedCloudProvider,
 			clusterState,
 			op.InstanceTypeStore,
 		)...).Start(ctx)

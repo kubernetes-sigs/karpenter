@@ -129,14 +129,3 @@ func OrderByWeight(nps []*v1.NodePool) {
 		return weightA > weightB
 	})
 }
-
-func CopyOfferings(offerings cloudprovider.Offerings) []*cloudprovider.Offering {
-	return lo.Map(offerings, func(of *cloudprovider.Offering, _ int) *cloudprovider.Offering {
-		return &cloudprovider.Offering{
-			Requirements:        of.Requirements,
-			Price:               of.Price,
-			Available:           of.Available,
-			ReservationCapacity: of.ReservationCapacity,
-		}
-	})
-}
