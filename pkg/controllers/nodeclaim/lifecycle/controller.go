@@ -88,7 +88,6 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	// higher concurrency limit since we want fast reaction to node syncing and launch
 	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
-	log.FromContext(ctx).V(1).Info("nodeclaim.lifecycle maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
