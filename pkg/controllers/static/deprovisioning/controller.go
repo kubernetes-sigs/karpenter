@@ -17,12 +17,16 @@ limitations under the License.
 package static
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sync/atomic"
+	"slices"
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -41,7 +45,13 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
+	"sigs.k8s.io/karpenter/pkg/utils/pod"
+)
+
+const (
+	TerminationReason = "deprovisioned"
 )
 
 type Controller struct {
@@ -84,19 +94,17 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		Info("deprovisioning nodeclaims to satisfy replica count")
 
 	// Get all active NodeClaims for this NodePool
-	var npStateNodes []*state.StateNode
-	c.cluster.ForEachNode(func(n *state.StateNode) bool {
+	npStateNodes := make([]*state.StateNode, 0)
+	for n := range c.cluster.Nodes() {
 		if n.Labels()[v1.NodePoolLabelKey] == np.Name && n.NodeClaim != nil && !n.MarkedForDeletion() {
-			npStateNodes = append(npStateNodes, n.DeepCopy()) // we dont mutuate state nodes here but others might so deepcopying nodes
+			npStateNodes = append(npStateNodes, n.DeepCopy()) // deepcopy to avoid external mutation
 		}
-		return true
-	})
+	}
 
 	// Get deprovisioning candidates
-	candidates := GetDeprovisioningCandidates(ctx, c.kubeClient, np, npStateNodes, int(nodeClaimsToDeprovision), c.clock)
+	candidates := c.getDeprovisioningCandidates(ctx, np, npStateNodes, int(nodeClaimsToDeprovision))
 
 	scaleDownErrs := make([]error, len(candidates))
-	actualDeprovisionedCount := int64(0)
 	// Terminate selected NodeClaims
 	workqueue.ParallelizeUntil(ctx, len(candidates), len(candidates), func(i int) {
 		candidate := candidates[i]
@@ -104,17 +112,15 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
 			return c.kubeClient.Delete(ctx, candidate.NodeClaim)
 		}); err != nil && client.IgnoreNotFound(err) != nil {
-			log.FromContext(ctx).Error(err, "failed to delete nodeClaim", "NodeClaim", klog.KObj(candidate.NodeClaim))
 			scaleDownErrs[i] = err
 			return
 		}
 		log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(candidate.NodeClaim)).V(1).Info("deleting nodeclaim")
-		atomic.AddInt64(&actualDeprovisionedCount, 1)
 		c.cluster.MarkForDeletion(candidate.NodeClaim.Status.ProviderID)
 	})
 
-	if actualDeprovisionedCount != nodeClaimsToDeprovision {
-		return reconcile.Result{}, fmt.Errorf("failed to deprovision %d nodeclaims", nodeClaimsToDeprovision-actualDeprovisionedCount)
+	if scaleDownErr := multierr.Combine(scaleDownErrs...); scaleDownErr != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to deprovision nodeclaims, %w", scaleDownErr)
 	}
 
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
@@ -123,23 +129,26 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("static.deprovisioning").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
-			CreateFunc: func(e event.CreateEvent) bool {
-				return true
-			},
-			UpdateFunc: func(e event.UpdateEvent) bool {
-				oldNP := e.ObjectOld.(*v1.NodePool)
-				newNP := e.ObjectNew.(*v1.NodePool)
-				return HasNodePoolReplicaCountChanged(oldNP, newNP)
-			},
-			DeleteFunc: func(e event.DeleteEvent) bool {
-				return false
-			},
-			GenericFunc: func(e event.GenericEvent) bool {
-				return false
-			},
-		})).
-		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(), builder.WithPredicates(predicate.Funcs{
+		// Reoncile on NodePool Create and Update (when replicas change)
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), nodepoolutils.IsStaticPredicateFuncs(),
+			predicate.Funcs{
+				CreateFunc: func(e event.CreateEvent) bool {
+					return true
+				},
+				UpdateFunc: func(e event.UpdateEvent) bool {
+					oldNP := e.ObjectOld.(*v1.NodePool)
+					newNP := e.ObjectNew.(*v1.NodePool)
+					return HasNodePoolReplicaCountChanged(oldNP, newNP)
+				},
+				DeleteFunc: func(e event.DeleteEvent) bool {
+					return false
+				},
+				GenericFunc: func(e event.GenericEvent) bool {
+					return false
+				},
+			})).
+		// We care about Static NodeClaims creating as we might have over provisioned and need to deprovision
+		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(c.kubeClient, true), builder.WithPredicates(predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
 				return true
 			},
@@ -159,4 +168,70 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 func HasNodePoolReplicaCountChanged(oldNP, newNP *v1.NodePool) bool {
 	return lo.FromPtr(oldNP.Spec.Replicas) != lo.FromPtr(newNP.Spec.Replicas)
+}
+
+// Returns nodes suitable for deprovisioning, prioritizing:
+// 1. Empty nodes (nodes with no pods or only DaemonSet pods without do-not-disrupt annotation)
+// 2. If more nodes needed, nodes with lowest disruption cost (nodes with pods that have do-not-disrupt will have highest cost)
+func (c *Controller) getDeprovisioningCandidates(ctx context.Context, np *v1.NodePool, nodes []*state.StateNode, count int) []*state.StateNode {
+	// First get empty nodes
+	emptyNodes := lo.Filter(nodes, func(node *state.StateNode, _ int) bool {
+		pods, err := node.Pods(ctx, c.kubeClient)
+		if err != nil {
+			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, treating as non-empty")
+			return false
+		}
+		return len(pods) == 0 || lo.EveryBy(pods, pod.IsOwnedByDaemonSet) && lo.NoneBy(pods, pod.HasDoNotDisrupt)
+	})
+
+	candidates := lo.Slice(emptyNodes, 0, count)
+	remaining := count - len(candidates)
+
+	if remaining == 0 {
+		return candidates
+	}
+
+	// Get non-empty nodes with their costs
+	type NonEmptyNodes struct {
+		node            *state.StateNode
+		pods            []*corev1.Pod
+		hasDoNotDisrupt bool
+	}
+
+	emptyNodesSet := sets.New(emptyNodes...)
+	nonEmptyNodes := lo.FilterMap(nodes, func(node *state.StateNode, _ int) (NonEmptyNodes, bool) {
+		if emptyNodesSet.Has(node) {
+			return NonEmptyNodes{}, false
+		}
+
+		pods, err := node.Pods(ctx, c.kubeClient)
+		if err != nil {
+			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, skipping node")
+			return NonEmptyNodes{}, false
+		}
+
+		return NonEmptyNodes{
+			node:            node,
+			pods:            pods,
+			hasDoNotDisrupt: lo.SomeBy(pods, pod.HasDoNotDisrupt),
+		}, true
+	})
+
+	slices.SortFunc(nonEmptyNodes, func(i, j NonEmptyNodes) int {
+		// If one node has do-not-disrupt pods and the other doesn't, the one without should come first
+		if i.hasDoNotDisrupt != j.hasDoNotDisrupt {
+			return lo.Ternary(i.hasDoNotDisrupt, 1, -1)
+		}
+		// If neither has do-not-disrupt pods, compare their costs
+		return cmp.Compare(disruptionutils.ReschedulingCost(ctx, i.pods)*disruptionutils.LifetimeRemaining(c.clock, np, i.node.NodeClaim),
+			disruptionutils.ReschedulingCost(ctx, j.pods)*disruptionutils.LifetimeRemaining(c.clock, np, j.node.NodeClaim))
+	})
+
+	// Take the remaining needed nodes with lowest cost
+	lowestCostNodes := make([]*state.StateNode, 0, remaining)
+	for _, nwc := range nonEmptyNodes[:remaining] {
+		lowestCostNodes = append(lowestCostNodes, nwc.node)
+	}
+
+	return append(candidates, lowestCostNodes...)
 }

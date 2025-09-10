@@ -241,7 +241,7 @@ func (p *Provisioner) NewScheduler(
 		return nil, fmt.Errorf("listing nodepools, %w", err)
 	}
 	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
-		if nodepoolutils.IsStaticNodePool(np) {
+		if nodepoolutils.IsStatic(np) {
 			return false
 		}
 		if !np.StatusConditions().IsTrue(status.ConditionReady) {
