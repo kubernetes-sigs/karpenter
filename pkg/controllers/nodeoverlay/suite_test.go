@@ -1237,42 +1237,6 @@ var _ = Describe("Instance Type Controller", func() {
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
 			})
-			It("should only apply price adjustments for nodeclass that defined in the overlay requirements", func() {
-				nodePoolTwo.Spec.Template.Spec.NodeClassRef.Name = "unique-nodeclass"
-				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
-					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
-							{
-								Key:      v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind()),
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{nodePool.Spec.Template.Spec.NodeClassRef.Name},
-							},
-						},
-						PriceAdjustment: lo.ToPtr("+1000.0"),
-						Weight:          lo.ToPtr(int32(10)),
-					},
-				})
-				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
-				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
-
-				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
-				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
-				Expect(err).To(BeNil())
-
-				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1001.020))
-
-				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
-				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
-				Expect(err).To(BeNil())
-
-				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
-			})
 			It("should only apply price adjustments for nodeclaim spec labels that defined in the overlay requirements", func() {
 				nodePoolTwo.Spec.Template.Labels = lo.Assign(nodePoolTwo.Spec.Template.Labels, map[string]string{
 					"test-label": "test-value",
@@ -1874,42 +1838,6 @@ var _ = Describe("Instance Type Controller", func() {
 								Key:      v1.NodePoolLabelKey,
 								Operator: corev1.NodeSelectorOpIn,
 								Values:   []string{nodePool.Name},
-							},
-						},
-						Price:  lo.ToPtr("13234.223"),
-						Weight: lo.ToPtr(int32(10)),
-					},
-				})
-				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
-				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
-
-				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
-				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
-				Expect(err).To(BeNil())
-
-				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 13234.223))
-
-				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
-				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
-				Expect(err).To(BeNil())
-
-				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-				Expect(instanceTypeList[0].Offerings[0].Price).To(BeNumerically("==", 1.020))
-			})
-			It("should only apply price adjustments for nodeclass that defined in the overlay requirements", func() {
-				nodePoolTwo.Spec.Template.Spec.NodeClassRef.Name = "unique-nodeclass"
-				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
-					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
-							{
-								Key:      v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind()),
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{nodePool.Spec.Template.Spec.NodeClassRef.Name},
 							},
 						},
 						Price:  lo.ToPtr("13234.223"),
@@ -2554,46 +2482,6 @@ var _ = Describe("Instance Type Controller", func() {
 
 				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
 				Expect(err).To(BeNil())
-				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-				Expect(lo.Keys(instanceTypeList[0].Capacity)).ToNot(ContainElement("smarter-devices/fuse"))
-			})
-			It("should only apply price adjustments for nodeclass that defined in the overlay requirements", func() {
-				nodePoolTwo.Spec.Template.Spec.NodeClassRef.Name = "unique-nodeclass"
-				overlay := test.NodeOverlay(v1alpha1.NodeOverlay{
-					Spec: v1alpha1.NodeOverlaySpec{
-						Requirements: []corev1.NodeSelectorRequirement{
-							{
-								Key:      v1.NodeClassLabelKey(nodePool.Spec.Template.Spec.NodeClassRef.GroupKind()),
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{nodePool.Spec.Template.Spec.NodeClassRef.Name},
-							},
-						},
-						Capacity: corev1.ResourceList{
-							corev1.ResourceName("smarter-devices/fuse"): resource.MustParse("1"),
-						},
-						Weight: lo.ToPtr(int32(10)),
-					},
-				})
-				ExpectApplied(ctx, env.Client, nodePool, nodePoolTwo, overlay)
-				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
-
-				instanceTypeList, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
-				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePool.Name, instanceTypeList)
-				Expect(err).ToNot(HaveOccurred())
-
-				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
-				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
-				resource, exist := instanceTypeList[0].Capacity.Name(corev1.ResourceName("smarter-devices/fuse"), resource.DecimalSI).AsInt64()
-				Expect(exist).To(BeTrue())
-				Expect(resource).To(BeNumerically("==", 1))
-
-				instanceTypeList, err = cloudProvider.GetInstanceTypes(ctx, nodePoolTwo)
-				Expect(err).To(BeNil())
-				instanceTypeList, err = store.ApplyAll(nodePoolTwo.Name, instanceTypeList)
-				Expect(err).ToNot(HaveOccurred())
-
 				Expect(len(instanceTypeList)).To(BeNumerically("==", 1))
 				Expect(len(instanceTypeList[0].Offerings)).To(BeNumerically("==", 1))
 				Expect(lo.Keys(instanceTypeList[0].Capacity)).ToNot(ContainElement("smarter-devices/fuse"))
