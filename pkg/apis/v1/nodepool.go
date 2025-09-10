@@ -237,8 +237,8 @@ type NodeClaimTemplateSpec struct {
 func (in *NodeClaimTemplate) ToNodeClaim() *NodeClaim {
 	return &NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels:      in.ObjectMeta.Labels,
-			Annotations: in.ObjectMeta.Annotations,
+			Labels:      in.Labels,
+			Annotations: in.Annotations,
 		},
 		Spec: NodeClaimSpec{
 			Taints:                 in.Spec.Taints,

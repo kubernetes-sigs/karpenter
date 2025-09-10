@@ -98,8 +98,7 @@ func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Vol
 		if pvc == nil {
 			continue
 		}
-		storageClassName := lo.FromPtr(pvc.Spec.StorageClassName)
-		driverName, err := resolveDriver(ctx, kubeClient, pod, volume.Name, pvc, storageClassName)
+		driverName, err := ResolveDriver(ctx, kubeClient, pod, volume.Name, pvc, lo.FromPtr(pvc.Spec.StorageClassName))
 		if err != nil {
 			return nil, err
 		}
@@ -111,10 +110,10 @@ func GetVolumes(ctx context.Context, kubeClient client.Client, pod *v1.Pod) (Vol
 	return podPVCs, nil
 }
 
-// resolveDriver resolves the storage driver name in the following order:
+// ResolveDriver resolves the storage driver name in the following order:
 //  1. If the PV associated with the pod volume is using CSI.driver in its spec, then use that name
 //  2. If the StorageClass associated with the PV has a Provisioner
-func resolveDriver(ctx context.Context, kubeClient client.Client, pod *v1.Pod, volumeName string, pvc *v1.PersistentVolumeClaim, storageClassName string) (string, error) {
+func ResolveDriver(ctx context.Context, kubeClient client.Client, pod *v1.Pod, volumeName string, pvc *v1.PersistentVolumeClaim, storageClassName string) (string, error) {
 	// We can track the volume usage by the CSI Driver name which is pulled from the storage class for dynamic
 	// volumes, or if it's bound/static we can pull the volume name
 	if pvc.Spec.VolumeName != "" {
