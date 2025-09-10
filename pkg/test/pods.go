@@ -161,7 +161,7 @@ func Pod(overrides ...PodOptions) *v1.Pod {
 	// Can't use v1.LifecycleHandler == v1.SleepAction as that's a feature gate in Alpha 1.29.
 	// https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-implementations
 	if options.PreStopSleep != nil {
-		p.ObjectMeta.Annotations = lo.Assign(p.Annotations, map[string]string{
+		p.Annotations = lo.Assign(p.Annotations, map[string]string{
 			KWOKDelayAnnotation: fmt.Sprintf("%ds", lo.FromPtr(options.PreStopSleep)),
 		})
 		p.Spec.Containers[0].Lifecycle = &v1.Lifecycle{
