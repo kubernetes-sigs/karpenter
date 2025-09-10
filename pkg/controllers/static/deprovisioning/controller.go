@@ -84,13 +84,12 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		Info("deprovisioning nodeclaims to satisfy replica count")
 
 	// Get all active NodeClaims for this NodePool
-	var npStateNodes []*state.StateNode
-	c.cluster.ForEachNode(func(n *state.StateNode) bool {
+	npStateNodes := make([]*state.StateNode, 0)
+	for n := range c.cluster.Nodes() {
 		if n.Labels()[v1.NodePoolLabelKey] == np.Name && n.NodeClaim != nil && !n.MarkedForDeletion() {
-			npStateNodes = append(npStateNodes, n.DeepCopy()) // we dont mutuate state nodes here but others might so deepcopying nodes
+			npStateNodes = append(npStateNodes, n.DeepCopy()) // deepcopy to avoid external mutation
 		}
-		return true
-	})
+	}
 
 	// Get deprovisioning candidates
 	candidates := GetDeprovisioningCandidates(ctx, c.kubeClient, np, npStateNodes, int(nodeClaimsToDeprovision), c.clock)
