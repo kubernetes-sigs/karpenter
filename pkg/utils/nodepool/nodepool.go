@@ -106,6 +106,7 @@ func NodeClaimEventHandler(c client.Client, staticOnly bool) handler.EventHandle
 		if !IsStatic(&np) {
 			return nil
 		}
+
 		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
 	})
 }
