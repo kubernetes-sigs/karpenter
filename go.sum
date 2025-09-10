@@ -4,8 +4,8 @@ github.com/Pallinder/go-randomdata v1.2.0 h1:DZ41wBchNRb/0GfsePLiSwb0PHZmT67XY00
 github.com/Pallinder/go-randomdata v1.2.0/go.mod h1:yHmJgulpD2Nfrm0cR9tI/+oAgRqCQQixsA8HyRZfV9Y=
 github.com/avast/retry-go v3.0.0+incompatible h1:4SOWQ7Qs+oroOTQOYnAHqelpCO0biHSxpiH9JdtuBj0=
 github.com/avast/retry-go v3.0.0+incompatible/go.mod h1:XtSnn+n/sHqQIpZ10K1qAevBhOOCWBLXXy3hyiqqBrY=
-github.com/awslabs/operatorpkg v0.0.0-20250822220536-d4fbec42f646 h1:SxGaJkjgM0sxd6EhstWZtZOp28xVO/QUrA2VaYsfdKA=
-github.com/awslabs/operatorpkg v0.0.0-20250822220536-d4fbec42f646/go.mod h1:rtCSGVNNyH7+iViNoog35SKWiIuHxlQLRojBa8H37sg=
+github.com/awslabs/operatorpkg v0.0.0-20250909182303-e8e550b6f339 h1:p4oSlQ9IaT7/DHfgcrs9zdNhdIp37VIMujZLuxSgECk=
+github.com/awslabs/operatorpkg v0.0.0-20250909182303-e8e550b6f339/go.mod h1:tNmCf0qIjaGbODGbm3DM8GIKBUvvxM7iW3KHbpSnVgw=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
