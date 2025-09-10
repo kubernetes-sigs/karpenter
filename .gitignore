@@ -7,7 +7,7 @@ coverage.html
 go.work
 go.work.sum
 report.json
-*__debug_bin*
+*__debug_*
 
 # Common in OSs and IDEs
 .idea
