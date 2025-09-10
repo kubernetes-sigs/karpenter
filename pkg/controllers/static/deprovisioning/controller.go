@@ -65,7 +65,7 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, cloudProvid
 // Note/todo : We have race bw queue and deprovisioning controller, while handling drift we create new replacements and then mark old as deleting
 // Although the delta is small, we need to track replacing NodeClaims to solve it the right way
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "deprovisioning.static")
+	ctx = injection.WithControllerName(ctx, "static.deprovisioning")
 
 	if !nodepoolutils.IsManaged(np, c.cloudProvider) || np.Spec.Replicas == nil {
 		return reconcile.Result{}, nil
@@ -80,7 +80,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 
-	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "deprovisionCount", nodeClaimsToDeprovision).
+	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "deprovision-count", nodeClaimsToDeprovision).
 		Info("deprovisioning nodeclaims to satisfy replica count")
 
 	// Get all active NodeClaims for this NodePool
@@ -122,7 +122,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("deprovisioning.static").
+		Named("static.deprovisioning").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
 				return true

@@ -68,7 +68,7 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, recorder ev
 // Reconcile the resource
 // Requeue after computing Static NodePool to ensure we don't miss any events
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "provisioning.static")
+	ctx = injection.WithControllerName(ctx, "static.provisioning")
 
 	if !nodepoolutils.IsManaged(np, c.cloudProvider) || !np.StatusConditions().Root().IsTrue() || np.Spec.Replicas == nil {
 		return reconcile.Result{}, nil
@@ -90,7 +90,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 	}
 
-	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "provisionCount", countNodeClaimsToProvision).
+	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "provision-count", countNodeClaimsToProvision).
 		Info("provisioning nodeclaims to satisfy replica count")
 
 	nodeClaims := make([]*scheduling.NodeClaim, 0, countNodeClaimsToProvision)
@@ -111,7 +111,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("provisioning.static").
+		Named("static.provisioning").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
 				return true
