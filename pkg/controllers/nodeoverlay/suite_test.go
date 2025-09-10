@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Pallinder/go-randomdata"
 	. "github.com/onsi/ginkgo/v2"
@@ -33,12 +34,15 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	clock "k8s.io/utils/clock/testing"
+
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -52,6 +56,8 @@ var (
 	cloudProvider         *fake.CloudProvider
 	nodePool              *v1.NodePool
 	nodePoolTwo           *v1.NodePool
+	cluster               *state.Cluster
+	fakeClock             *clock.FakeClock
 	nodeOverlayController *nodeoverlay.Controller
 	store                 *nodeoverlay.InstanceTypeStore
 )
@@ -66,6 +72,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...))
 	cloudProvider = fake.NewCloudProvider()
 	store = nodeoverlay.NewInstanceTypeStore()
+	fakeClock = clock.NewFakeClock(time.Now())
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, store)
 })
 
