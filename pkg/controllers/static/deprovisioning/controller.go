@@ -51,7 +51,7 @@ import (
 )
 
 const (
-	TerminationReason = "deprovisioned"
+	TerminationReason = "overprovisioned"
 )
 
 type Controller struct {
@@ -90,7 +90,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 
-	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "deprovision-count", nodeClaimsToDeprovision).
+	log.FromContext(ctx).WithValues("current", runningNodeClaims, "desired", desiredReplicas, "deprovision-count", nodeClaimsToDeprovision).
 		Info("deprovisioning nodeclaims to satisfy replica count")
 
 	// Get all active NodeClaims for this NodePool
@@ -148,7 +148,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				},
 			})).
 		// We care about Static NodeClaims creating as we might have over provisioned and need to deprovision
-		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(c.kubeClient, true), builder.WithPredicates(predicate.Funcs{
+		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(nodepoolutils.WithClient(c.kubeClient), nodepoolutils.WithStaticOnly), builder.WithPredicates(predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
 				return true
 			},

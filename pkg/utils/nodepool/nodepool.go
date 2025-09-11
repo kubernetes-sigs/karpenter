@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/types"
@@ -87,19 +88,34 @@ func ListManaged(ctx context.Context, c client.Client, cloudProvider cloudprovid
 	}), nil
 }
 
-func NodeClaimEventHandler(c client.Client, staticOnly bool) handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-		name, ok := o.GetLabels()[v1.NodePoolLabelKey]
+type NodeClaimHandlerOption struct {
+	staticOnly bool
+	client     client.Client // used only if staticOnly && nameFilter == nil
+}
+
+func WithStaticOnly(o *NodeClaimHandlerOption) {
+	o.staticOnly = true
+}
+
+func WithClient(c client.Client) func(*NodeClaimHandlerOption) {
+	return func(o *NodeClaimHandlerOption) { o.client = c }
+}
+
+func NodeClaimEventHandler(opts ...option.Function[NodeClaimHandlerOption]) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		o := option.Resolve(opts...)
+
+		name, ok := obj.GetLabels()[v1.NodePoolLabelKey]
 		if !ok {
 			return nil
 		}
 
-		if !staticOnly {
+		if !o.staticOnly {
 			return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: name}}}
 		}
 
 		var np v1.NodePool
-		if err := c.Get(ctx, types.NamespacedName{Name: name}, &np); err != nil {
+		if err := o.client.Get(ctx, types.NamespacedName{Name: name}, &np); err != nil {
 			return nil
 		}
 
