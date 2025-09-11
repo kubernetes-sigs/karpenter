@@ -84,7 +84,7 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		maxAllowedDrifts := d.cluster.NodePoolState.ReserveNodeCount(npName, nodeLimit, maxDrifts)
 
 		if maxAllowedDrifts <= 0 {
-			return []Command{}, nil
+			continue
 		}
 
 		// Select candidates up to maxAllowedDrifts
