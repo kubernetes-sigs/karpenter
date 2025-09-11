@@ -92,7 +92,7 @@ func (s *InstanceTypeStore) Apply(nodePoolName string, it *cloudprovider.Instanc
 	return updatedIt, nil
 }
 
-// InstanceTypeStore manages instance type updates for node pools in a thread-safe manner.
+// InstanceTypeStore manages instance type updates for node pools.
 // It maintains a nested mapping structure where:
 //   - First level:  nodePoolName -> map of instance updates
 //   - Second level: instanceName -> specific update configurations
@@ -117,7 +117,7 @@ func newInternalInstanceTypeStore() *internalInstanceTypeStore {
 // with any stored updates applied. It checks for price and capacity updates specific to the given
 // node pool and instance type, creating a deep copy of the original instance type before applying
 // any overrides. If no updates exist for the node pool or instance type, returns the original
-// instance type unchanged. Thread-safe through read lock usage.
+// instance type unchanged.
 func (s *internalInstanceTypeStore) apply(nodePoolName string, it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, error) {
 	if !lo.Contains(s.evaluatedNodePools.UnsortedList(), nodePoolName) {
 		return &cloudprovider.InstanceType{}, NewUnevaluatedNodePoolError(nodePoolName)

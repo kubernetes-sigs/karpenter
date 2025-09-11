@@ -75,7 +75,7 @@ var _ = BeforeSuite(func() {
 	store = nodeoverlay.NewInstanceTypeStore()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, store)
+	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, store, cluster)
 })
 
 var _ = BeforeEach(func() {

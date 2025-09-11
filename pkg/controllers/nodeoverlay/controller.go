@@ -38,6 +38,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
@@ -46,6 +47,7 @@ import (
 type Controller struct {
 	kubeClient        client.Client
 	cloudProvider     cloudprovider.CloudProvider
+	clusterState      *state.Cluster
 	instanceTypeStore *InstanceTypeStore
 }
 
@@ -54,11 +56,12 @@ func (c *Controller) Name() string {
 }
 
 // NewController constructs a controller for node overlay validation
-func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeStore *InstanceTypeStore) *Controller {
+func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeStore *InstanceTypeStore, clusterState *state.Cluster) *Controller {
 	return &Controller{
 		kubeClient:        kubeClient,
 		cloudProvider:     cp,
 		instanceTypeStore: instanceTypeStore,
+		clusterState:      clusterState,
 	}
 }
 
@@ -111,6 +114,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	}
 
 	c.instanceTypeStore.UpdateStore(temporaryStore)
+	c.clusterState.MarkUnconsolidated()
 	return reconcile.Result{RequeueAfter: 6 * time.Hour}, nil
 }
 
