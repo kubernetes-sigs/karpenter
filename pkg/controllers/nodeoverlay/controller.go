@@ -76,7 +76,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	}
 	overlayWithRuntimeValidationFailure := map[string]error{}
 	overlaysWithConflict := []string{}
-	temporaryStore := NewInstanceTypeStore()
+	temporaryStore := newInternalInstanceTypeStore()
 	nodePoolToInstanceTypes := map[string][]*cloudprovider.InstanceType{}
 
 	for i := range nodePoolList.Items {
@@ -134,7 +134,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return b.Complete(c)
 }
 
-func (c *Controller) validateAndUpdateInstanceTypeOverrides(temporaryStore *InstanceTypeStore, nodePoolList []v1.NodePool, nodePoolToInstanceTypes map[string][]*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
+func (c *Controller) validateAndUpdateInstanceTypeOverrides(temporaryStore *internalInstanceTypeStore, nodePoolList []v1.NodePool, nodePoolToInstanceTypes map[string][]*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
 	// Due to reserved capacity type offering being dynamically injected as part of the GetInstanceTypes call
 	// We will need to make sure we are validating against each nodepool to make sure. This will ensure that
 	// overlays that are targeting reserved instance offerings will be able to apply the offering.
@@ -154,7 +154,7 @@ func (c *Controller) validateAndUpdateInstanceTypeOverrides(temporaryStore *Inst
 	return true
 }
 
-func (c *Controller) validateInstanceTypesOverride(store *InstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
+func (c *Controller) validateInstanceTypesOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) bool {
 	overlayRequirements := scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...)
 
 	for _, it := range its {
@@ -177,7 +177,7 @@ func (c *Controller) validateInstanceTypesOverride(store *InstanceTypeStore, nod
 	return true
 }
 
-func (c *Controller) storeUpdatesForInstanceTypeOverride(store *InstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) {
+func (c *Controller) storeUpdatesForInstanceTypeOverride(store *internalInstanceTypeStore, nodePool v1.NodePool, its []*cloudprovider.InstanceType, overlay v1alpha1.NodeOverlay) {
 	overlayRequirements := scheduling.NewNodeSelectorRequirements(overlay.Spec.Requirements...)
 
 	for _, it := range its {
@@ -214,7 +214,7 @@ func getOverlaidOfferings(nodePool v1.NodePool, it *cloudprovider.InstanceType, 
 	return it.Offerings.Compatible(overlayReq)
 }
 
-func (c *Controller) isPriceUpdatesConflicting(store *InstanceTypeStore, nodePoolName string, instanceTypeName string, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay) bool {
+func (c *Controller) isPriceUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, offerings cloudprovider.Offerings, overlay v1alpha1.NodeOverlay) bool {
 	if overlay.Spec.Price == nil && overlay.Spec.PriceAdjustment == nil {
 		return false
 	}
@@ -227,7 +227,7 @@ func (c *Controller) isPriceUpdatesConflicting(store *InstanceTypeStore, nodePoo
 	return false
 }
 
-func (c *Controller) isCapacityUpdatesConflicting(store *InstanceTypeStore, nodePoolName string, instanceTypeName string, overlay v1alpha1.NodeOverlay) bool {
+func (c *Controller) isCapacityUpdatesConflicting(store *internalInstanceTypeStore, nodePoolName string, instanceTypeName string, overlay v1alpha1.NodeOverlay) bool {
 	if overlay.Spec.Capacity == nil {
 		return false
 	}
