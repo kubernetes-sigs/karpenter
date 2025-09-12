@@ -47,6 +47,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -252,6 +253,10 @@ func (p *Provisioner) NewScheduler(
 	for _, np := range nodePools {
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
+			if nodeoverlay.IsUnevaluatedNodePoolError(err) {
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).V(1).Info("skipping, awaiting nodeoverlay evaluation")
+				continue
+			}
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, fmt.Errorf("getting instance types, %w", err)
 			}
