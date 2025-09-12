@@ -1,0 +1,91 @@
+name: kube-api-linter
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'pkg/apis/**/*.go'
+      - 'kwok/apis/**/*.go'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kube-api-linter:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+    
+    - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+      with:
+        go-version-file: go.mod
+        check-latest: true
+        cache-dependency-path: |
+          go.sum
+          .custom-gcl.yml
+    
+    - name: Create kube-api-linter configuration
+      run: |
+        cat > .custom-gcl.yml << 'EOF'
+        version: v1.61.0
+        name: golangci-kube-api-linter
+        destination: ./bin
+        plugins:
+          - module: 'sigs.k8s.io/kube-api-linter'
+            version: 'v0.0.0-20250808120943-48643eb2563d'
+        EOF
+        
+        cat > .golangci-kal.yml << 'EOF'
+        linters-settings:
+          custom:
+            kubeapilinter:
+              type: "module"
+              description: "Kube API Linter lints Kube like APIs based on API conventions"
+              settings:
+                linters:
+                  enable:
+                    - requiredfields
+                    - statusoptional
+                    - statussubresource
+                    - commentstart
+                    - conditions
+                    - nomaps
+                    - optionalorrequired
+                    - ssatags
+        
+        linters:
+          disable-all: true
+          enable:
+            - kubeapilinter
+        
+        run:
+          timeout: 5m
+          go: '1.24'
+        EOF
+    
+    - name: Install golangci-lint
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+    
+    - name: Build custom golangci-lint with kube-api-linter
+      run: golangci-lint custom
+      
+    - name: Run kube-api-linter on v1 APIs
+      run: |
+        echo "::group::Linting pkg/apis/v1/"
+        ./bin/golangci-kube-api-linter run pkg/apis/v1/ --config .golangci-kal.yml --out-format github-actions
+        echo "::endgroup::"
+    
+    - name: Run kube-api-linter on v1alpha1 APIs
+      run: |
+        echo "::group::Linting pkg/apis/v1alpha1/"
+        ./bin/golangci-kube-api-linter run pkg/apis/v1alpha1/ --config .golangci-kal.yml --out-format github-actions
+        echo "::endgroup::"
+    
+    - name: Run kube-api-linter on kwok APIs
+      run: |
+        echo "::group::Linting kwok/apis/v1alpha1/"
+        ./bin/golangci-kube-api-linter run kwok/apis/v1alpha1/ --config .golangci-kal.yml --out-format github-actions
+        echo "::endgroup::"
