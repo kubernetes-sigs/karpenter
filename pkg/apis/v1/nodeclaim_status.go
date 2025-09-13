@@ -23,10 +23,11 @@ import (
 )
 
 const (
-	ConditionTypeLaunched             = "Launched"
-	ConditionTypeRegistered           = "Registered"
-	ConditionTypeInitialized          = "Initialized"
-	ConditionTypeConsolidatable       = "Consolidatable"
+	ConditionTypeLaunched       = "Launched"
+	ConditionTypeRegistered     = "Registered"
+	ConditionTypeInitialized    = "Initialized"
+	ConditionTypeConsolidatable = "Consolidatable"
+	// There is another condition for NodePool with same name.
 	ConditionTypeDrifted              = "Drifted"
 	ConditionTypeDrained              = "Drained"
 	ConditionTypeVolumesDetached      = "VolumesDetached"
