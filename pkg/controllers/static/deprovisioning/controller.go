@@ -81,8 +81,10 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	runningNodeClaims, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
+	runningNodeClaims, _, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
 	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
+	// We dont wanna run into deprovisioning and drift controller races so we
+	// Only count running NodeClaims for deprovisioning as drifting NodeClaims will have replacements
 	nodeClaimsToDeprovision := int64(runningNodeClaims) - desiredReplicas
 
 	// Only handle scale down - scale up is handled by provisioning controller

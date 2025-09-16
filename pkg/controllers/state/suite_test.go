@@ -2466,9 +2466,10 @@ var _ = Describe("NodePoolState Tracking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaim)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeTrue())
 			})
@@ -2487,9 +2488,10 @@ var _ = Describe("NodePoolState Tracking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaimWithoutProvider)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimWithoutProvider))
 
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				Expect(cluster.NodeClaimExists(nodeClaimWithoutProvider.Name)).To(BeTrue())
 			})
@@ -2506,9 +2508,10 @@ var _ = Describe("NodePoolState Tracking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaimWithoutNodePool)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaimWithoutNodePool))
 
-				running, deleting := cluster.NodePoolState.GetNodeCount("")
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount("")
 				Expect(running).To(Equal(0))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				Expect(cluster.NodeClaimExists(nodeClaimWithoutNodePool.Name)).To(BeTrue())
 			})
@@ -2530,9 +2533,10 @@ var _ = Describe("NodePoolState Tracking", func() {
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim3))
 
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(2))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 			})
 
 			It("should track NodeClaims across different NodePools", func() {
@@ -2540,13 +2544,17 @@ var _ = Describe("NodePoolState Tracking", func() {
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
 
-				running1, deleting1 := cluster.NodePoolState.GetNodeCount(nodePool.Name)
-				running2, deleting2 := cluster.NodePoolState.GetNodeCount(nodePool2.Name)
+				running1, deleting1, drifting1 := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running2, deleting2, drifting2 := cluster.NodePoolState.GetNodeCount(nodePool2.Name)
 
 				Expect(running1).To(Equal(1))
 				Expect(deleting1).To(Equal(0))
+				Expect(drifting1).To(Equal(0))
+
 				Expect(running2).To(Equal(1))
 				Expect(deleting2).To(Equal(0))
+				Expect(drifting2).To(Equal(0))
+
 			})
 		})
 
@@ -2558,9 +2566,10 @@ var _ = Describe("NodePoolState Tracking", func() {
 
 			It("should be a no-op when NodeClaim is already tracked and no state change", func() {
 				// Verify initial state
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				// Update NodeClaim with annotation change (no state change)
 				nodeClaim.Annotations = map[string]string{"test": "annotation"}
@@ -2568,16 +2577,18 @@ var _ = Describe("NodePoolState Tracking", func() {
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 				// State should remain the same
-				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 			})
 
 			It("should handle NodeClaim ProviderID change", func() {
 				// Verify initial state
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				// Change ProviderID
 				originalProviderID := nodeClaim.Status.ProviderID
@@ -2587,28 +2598,32 @@ var _ = Describe("NodePoolState Tracking", func() {
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 				// Should still track the NodeClaim correctly
-				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				// Old ProviderID should not be tracked for deletion
 				cluster.MarkForDeletion(originalProviderID)
-				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1)) // Should not change
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				// New ProviderID should work for deletion
 				cluster.MarkForDeletion(newProviderID)
-				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(0))
 				Expect(deleting).To(Equal(1))
+				Expect(drifting).To(Equal(0))
 			})
 
 			It("should move NodeClaim to deleting state when Node is marked for deletion", func() {
 				// Verify initial running state
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				// Mark the node for deletion via cluster state
 				cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
@@ -2619,26 +2634,73 @@ var _ = Describe("NodePoolState Tracking", func() {
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
 				// Should be in deleting state
-				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(0))
 				Expect(deleting).To(Equal(1))
+				Expect(drifting).To(Equal(0))
 			})
 
 			It("should handle NodeClaim cleanup correctly", func() {
 				ExpectApplied(ctx, env.Client, nodeClaim)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				// Delete the NodeClaim
 				ExpectDeleted(ctx, env.Client, nodeClaim)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(0))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
+			})
+		})
+
+		Context("Mark NodeClaims Drifting", func() {
+			BeforeEach(func() {
+				ExpectApplied(ctx, env.Client, nodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
+			})
+
+			It("should handle marking multiple NodeClaims", func() {
+				nodeClaim2 := test.NodeClaim(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-nodeclaim-2",
+						Labels: map[string]string{
+							v1.NodePoolLabelKey: nodePool.Name,
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						ProviderID: test.RandomProviderID(),
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodeClaim2)
+				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
+
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+				Expect(running).To(Equal(2))
+				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
+
+				cluster.NodePoolState.MarkNodeClaimDrifting(nodePool.Name, nodeClaim.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+				Expect(running).To(Equal(1))
+				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(1))
+
+				cluster.NodePoolState.MarkNodeClaimDrifting(nodePool.Name, nodeClaim2.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+
+				Expect(running).To(Equal(0))
+				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(2))
 			})
 		})
 
@@ -2649,17 +2711,19 @@ var _ = Describe("NodePoolState Tracking", func() {
 			})
 
 			It("should remove NodeClaim from nodepool state", func() {
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeTrue())
 
 				ExpectDeleted(ctx, env.Client, nodeClaim)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim))
 
-				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(0))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 				Expect(cluster.NodeClaimExists(nodeClaim.Name)).To(BeFalse())
 			})
 
@@ -2687,28 +2751,33 @@ var _ = Describe("NodePoolState Tracking", func() {
 				ExpectApplied(ctx, env.Client, nodeClaim2)
 				ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
 
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 
 				Expect(running).To(Equal(2))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				cluster.MarkForDeletion(nodeClaim.Status.ProviderID, nodeClaim2.Status.ProviderID)
-				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 
 				Expect(running).To(Equal(0))
 				Expect(deleting).To(Equal(2))
+				Expect(drifting).To(Equal(0))
+
 			})
 
 			It("should move NodeClaim from running to deleting state", func() {
-				running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 				Expect(running).To(Equal(1))
 				Expect(deleting).To(Equal(0))
+				Expect(drifting).To(Equal(0))
 
 				cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-				running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+				running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 
 				Expect(running).To(Equal(0))
 				Expect(deleting).To(Equal(1))
+				Expect(drifting).To(Equal(0))
 			})
 		})
 	})
@@ -2721,15 +2790,18 @@ var _ = Describe("NodePoolState Tracking", func() {
 		})
 
 		It("should move NodeClaim from deleting to running state", func() {
-			running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 			Expect(running).To(Equal(0))
 			Expect(deleting).To(Equal(1))
+			Expect(drifting).To(Equal(0))
 
 			cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID)
-			running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 
 			Expect(running).To(Equal(1))
 			Expect(deleting).To(Equal(0))
+			Expect(drifting).To(Equal(0))
+
 		})
 
 		It("should handle unmarking multiple NodeClaims", func() {
@@ -2749,20 +2821,22 @@ var _ = Describe("NodePoolState Tracking", func() {
 			ExpectReconcileSucceeded(ctx, nodeClaimController, client.ObjectKeyFromObject(nodeClaim2))
 
 			cluster.MarkForDeletion(nodeClaim2.Status.ProviderID)
-			running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
 
 			Expect(running).To(Equal(0))
 			Expect(deleting).To(Equal(2))
+			Expect(drifting).To(Equal(0))
 
 			cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID, nodeClaim2.Status.ProviderID)
-			running, deleting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			running, deleting, drifting = cluster.NodePoolState.GetNodeCount(nodePool.Name)
 
 			Expect(running).To(Equal(2))
 			Expect(deleting).To(Equal(0))
+			Expect(drifting).To(Equal(0))
 		})
 	})
 
-	Context("Unmark/mark Transitions", func() {
+	Context("Transitions", func() {
 		It("should handle concurrent NodeClaim updates and state changes", func() {
 			nodeClaim := test.NodeClaim(v1.NodeClaim{
 				ObjectMeta: metav1.ObjectMeta{
@@ -2787,9 +2861,13 @@ var _ = Describe("NodePoolState Tracking", func() {
 				wg.Add(1)
 				go func(iteration int) {
 					defer wg.Done()
-					if iteration%2 == 0 {
+
+					switch iteration % 3 {
+					case 0:
 						cluster.MarkForDeletion(nodeClaim.Status.ProviderID)
-					} else {
+					case 1:
+						cluster.NodePoolState.MarkNodeClaimDrifting(nodePool.Name, nodeClaim.Name)
+					case 2:
 						cluster.UnmarkForDeletion(nodeClaim.Status.ProviderID)
 					}
 				}(i)
@@ -2798,10 +2876,9 @@ var _ = Describe("NodePoolState Tracking", func() {
 			wg.Wait()
 
 			// Final state should be consistent
-			running, deleting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
-			Expect(running + deleting).To(Equal(1)) // Should have exactly one NodeClaim
+			running, deleting, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			Expect(running + deleting + drifting).To(Equal(1)) // Should have exactly one NodeClaim
 		})
-
 	})
 })
 

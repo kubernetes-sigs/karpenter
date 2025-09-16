@@ -74,10 +74,11 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	runningNodeClaims, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
+	runningNodeClaims, _, driftingNodeClaims := c.cluster.NodePoolState.GetNodeCount(np.Name)
 	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
 	// Size down of replicas will be handled in deprovisioning controller to drain nodes and delete NodeClaims
-	if int64(runningNodeClaims) >= desiredReplicas {
+	// If there are drifting NodeClaims we need to count them as Active as drift controller is in the process of creating replacements
+	if int64(runningNodeClaims)+int64(driftingNodeClaims) >= desiredReplicas {
 		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 

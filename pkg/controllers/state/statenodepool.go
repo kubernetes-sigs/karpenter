@@ -26,8 +26,13 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
+// Currently NodeClaims be in one of these states
 type NodeClaimState struct {
-	Active   sets.Set[string]
+	// NodeClaims that have been launched
+	Active sets.Set[string]
+	// NodeClaims that are actively drifting
+	Drifting sets.Set[string]
+	// NodeClaims are marked for Deletion
 	Deleting sets.Set[string]
 }
 
@@ -38,7 +43,6 @@ type NodePoolState struct {
 	nodePoolNameToNodeClaimState map[string]NodeClaimState // node pool name -> node claim state (Active and Deleting node claim names)
 	nodeClaimNameToNodePoolName  map[string]string         // node claim name -> node pool name
 	nodePoolNameToNodePoolLimit  map[string]*atomic.Int64  // node pool -> nodepool limit
-
 }
 
 func NewNodePoolState() *NodePoolState {
@@ -69,6 +73,7 @@ func (n *NodePoolState) MarkNodeClaimActive(npName, ncName string) {
 	defer n.mu.Unlock()
 	n.ensureNodePoolEntry(npName)
 
+	n.nodePoolNameToNodeClaimState[npName].Drifting.Delete(ncName)
 	n.nodePoolNameToNodeClaimState[npName].Deleting.Delete(ncName)
 	n.nodePoolNameToNodeClaimState[npName].Active.Insert(ncName)
 }
@@ -79,8 +84,20 @@ func (n *NodePoolState) MarkNodeClaimDeleting(npName, ncName string) {
 	defer n.mu.Unlock()
 	n.ensureNodePoolEntry(npName)
 
+	n.nodePoolNameToNodeClaimState[npName].Drifting.Delete(ncName)
 	n.nodePoolNameToNodeClaimState[npName].Deleting.Insert(ncName)
 	n.nodePoolNameToNodeClaimState[npName].Active.Delete(ncName)
+}
+
+// Marks the given NodeClaim as Deleting in NodePoolState
+func (n *NodePoolState) MarkNodeClaimDrifting(npName, ncName string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.ensureNodePoolEntry(npName)
+
+	n.nodePoolNameToNodeClaimState[npName].Active.Delete(ncName)
+	n.nodePoolNameToNodeClaimState[npName].Deleting.Delete(ncName)
+	n.nodePoolNameToNodeClaimState[npName].Drifting.Insert(ncName)
 }
 
 // Cleans up the NodeClaim in NodePoolState and NodePool keys if NodePool is deleted or its sized down to 0
@@ -93,6 +110,7 @@ func (n *NodePoolState) Cleanup(ncName string) {
 	if npState, exists := n.nodePoolNameToNodeClaimState[npName]; exists {
 		npState.Deleting.Delete(ncName)
 		npState.Active.Delete(ncName)
+		npState.Drifting.Delete(ncName)
 
 		if npState.Active.Len() == 0 && npState.Deleting.Len() == 0 {
 			delete(n.nodePoolNameToNodeClaimState, npName)
@@ -104,7 +122,7 @@ func (n *NodePoolState) Cleanup(ncName string) {
 }
 
 // Returns the current NodeClaims for a NodePool by its state (active, deleting)
-func (n *NodePoolState) GetNodeCount(npName string) (active, deleting int) {
+func (n *NodePoolState) GetNodeCount(npName string) (active, deleting, drifting int) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
@@ -118,12 +136,12 @@ func (n *NodePoolState) ReserveNodeCount(np string, limit int64, wantedLimit int
 	defer n.mu.Unlock()
 
 	n.ensureNodePoolEntry(np)
-	active, deleting := n.nodeCounts(np)
+	active, deleting, drifting := n.nodeCounts(np)
 
 	// We retry until CompareAndSwap is successful
 	for {
 		currentlyReserved := n.nodePoolNameToNodePoolLimit[np].Load()
-		remainingLimit := limit - int64(active+deleting) - currentlyReserved
+		remainingLimit := limit - int64(active+deleting+drifting) - currentlyReserved
 		if remainingLimit < 0 {
 			return 0
 		}
@@ -156,11 +174,11 @@ func (n *NodePoolState) ReleaseNodeCount(npName string, count int64) {
 
 // Methods that expect the caller to hold the lock
 
-func (n *NodePoolState) nodeCounts(npName string) (active, deleting int) {
+func (n *NodePoolState) nodeCounts(npName string) (active, deleting, drifting int) {
 	if st, ok := n.nodePoolNameToNodeClaimState[npName]; ok {
-		return len(st.Active), len(st.Deleting)
+		return len(st.Active), len(st.Deleting), len(st.Drifting)
 	}
-	return 0, 0
+	return 0, 0, 0
 }
 
 // Updates the NodeClaim state and releases the Limit if NodeClaim transitions from not Active to Active
@@ -185,6 +203,7 @@ func (n *NodePoolState) ensureNodePoolEntry(np string) {
 		n.nodePoolNameToNodeClaimState[np] = NodeClaimState{
 			Active:   sets.New[string](),
 			Deleting: sets.New[string](),
+			Drifting: sets.New[string](),
 		}
 	}
 	if _, ok := n.nodePoolNameToNodePoolLimit[np]; !ok {

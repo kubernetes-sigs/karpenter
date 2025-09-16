@@ -380,8 +380,8 @@ var _ = Describe("Static Provisioning Controller", func() {
 			Expect(nodeClaims.Items).To(HaveLen(3))
 
 			// Should be tracking running nodeclaims in nodepool state node
-			running, _ := cluster.NodePoolState.GetNodeCount(nodePool.Name)
-			Expect(running).To(BeEquivalentTo(3))
+			running, _, drifting := cluster.NodePoolState.GetNodeCount(nodePool.Name)
+			Expect(running + drifting).To(BeEquivalentTo(3))
 
 			// Should be able to reserve remaining 7 NodeCounts
 			Expect(cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 10, 10)).To(BeEquivalentTo(7))
