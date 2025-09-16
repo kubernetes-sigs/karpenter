@@ -323,6 +323,12 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if len(pods) == 0 {
 		return scheduler.Results{}, nil
 	}
+	// If max batch size is configured, limit the number of pods we schedule at once
+	if maxBatchSize := options.FromContext(ctx).MaxBatchSize; maxBatchSize != nil && *maxBatchSize > 0 && len(pods) > *maxBatchSize {
+		log.FromContext(ctx).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods), "max-batch-size", *maxBatchSize).Info("large batch of pods to schedule, limiting batch size")
+		pods = pods[:*maxBatchSize]
+	}
+
 	log.FromContext(ctx).V(1).WithValues("pending-pods", len(pendingPods), "deleting-pods", len(deletingNodePods)).Info("computing scheduling decision for provisionable pod(s)")
 
 	opts := []scheduler.Options{
