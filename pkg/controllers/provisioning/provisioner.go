@@ -25,9 +25,11 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
+	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/awslabs/operatorpkg/status"
+
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -40,12 +42,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -113,32 +115,32 @@ func (p *Provisioner) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(p))
 }
 
-func (p *Provisioner) Reconcile(ctx context.Context) (result reconcile.Result, err error) {
+func (p *Provisioner) Reconcile(ctx context.Context) (result reconciler.Result, err error) {
 	ctx = injection.WithControllerName(ctx, "provisioner")
 
 	// Batch pods
 	if triggered := p.batcher.Wait(ctx); !triggered {
-		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 	// We need to ensure that our internal cluster state mechanism is synced before we proceed
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !p.cluster.Synced(ctx) {
-		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 
 	// Schedule pods to potential nodes, exit if nothing to do
 	results, err := p.Schedule(ctx)
 	if err != nil {
-		return reconcile.Result{}, err
+		return reconciler.Result{}, err
 	}
 	if len(results.NewNodeClaims) == 0 {
-		return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+		return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 	}
 	if _, err = p.CreateNodeClaims(ctx, results.NewNodeClaims, WithReason(metrics.ProvisionedReason), RecordPodNomination); err != nil {
-		return reconcile.Result{}, err
+		return reconciler.Result{}, err
 	}
-	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+	return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
 // CreateNodeClaims launches nodes passed into the function in parallel. It returns a slice of the successfully created node
@@ -170,6 +172,10 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 			// Mark in memory that this pod is unschedulable
 			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, nil, nil)
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
+			// Don't create pod events for pods that are specifically avoiding scheduling to Karpenter-managed capacity
+			if !errors.Is(err, KarpenterManagedLabelDoesNotExistError) {
+				p.recorder.Publish(scheduler.PodFailedToScheduleEvent(po, err))
+			}
 			return true
 		}
 		return false
@@ -247,6 +253,10 @@ func (p *Provisioner) NewScheduler(
 	for _, np := range nodePools {
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
+			if nodeoverlay.IsUnevaluatedNodePoolError(err) {
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).V(1).Info("skipping, awaiting nodeoverlay evaluation")
+				continue
+			}
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, fmt.Errorf("getting instance types, %w", err)
 			}
@@ -291,7 +301,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	// We don't consider the nodes that are MarkedForDeletion since this capacity shouldn't be considered
 	// as persistent capacity for the cluster (since it will soon be removed). Additionally, we are scheduling for
 	// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
-	nodes := p.cluster.Nodes()
+	nodes := p.cluster.DeepCopyNodes()
 
 	// Get pods, exit if nothing to do
 	pendingPods, err := p.GetPendingPods(ctx)
@@ -488,12 +498,14 @@ func (p *Provisioner) Validate(ctx context.Context, pod *corev1.Pod) error {
 	)
 }
 
+var KarpenterManagedLabelDoesNotExistError = serrors.Wrap(fmt.Errorf("configured to not run on a Karpenter provisioned node"), "requirement", fmt.Sprintf("%s %s", v1.NodePoolLabelKey, corev1.NodeSelectorOpDoesNotExist))
+
 // validateKarpenterManagedLabelCanExist provides a more clear error message in the event of scheduling a pod that specifically doesn't
 // want to run on a Karpenter node (e.g. a Karpenter controller replica).
 func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 	for _, req := range scheduling.NewPodRequirements(p) {
 		if req.Key == v1.NodePoolLabelKey && req.Operator() == corev1.NodeSelectorOpDoesNotExist {
-			return serrors.Wrap(fmt.Errorf("configured to not run on a Karpenter provisioned node"), "requirement", fmt.Sprintf("%s %s", v1.NodePoolLabelKey, corev1.NodeSelectorOpDoesNotExist))
+			return KarpenterManagedLabelDoesNotExistError
 		}
 	}
 	return nil

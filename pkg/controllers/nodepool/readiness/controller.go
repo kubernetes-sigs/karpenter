@@ -32,6 +32,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
@@ -95,11 +96,11 @@ func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.O
 	}
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.readiness").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)})
 	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
 		b.Watches(nodeClass, nodepoolutils.NodeClassEventHandler(c.kubeClient))
 	}

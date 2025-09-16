@@ -132,7 +132,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	nodeClaimRequirements.Add(podData.Requirements.Values()...)
 
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(pod, n.NodeClaimTemplate.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
+	topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -173,7 +173,7 @@ func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements
 	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
 	n.Requirements = nodeClaimRequirements
 	n.topology.Register(corev1.LabelHostname, n.hostname)
-	n.topology.Record(pod, n.NodeClaim.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
+	n.topology.Record(pod, n.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
 	n.reservationManager.Reserve(n.hostname, offeringsToReserve...)
 	n.releaseReservedOfferings(n.reservedOfferings, offeringsToReserve)

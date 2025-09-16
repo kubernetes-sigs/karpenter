@@ -26,8 +26,10 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/option"
+	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/singleton"
+
 	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -36,7 +38,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -113,10 +114,10 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(singleton.AsReconciler(c))
 }
 
-func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, "disruption")
 
-	// this won't catch if the reconcile loop hangs forever, but it will catch other issues
+	// this won't catch if the reconciler loop hangs forever, but it will catch other issues
 	c.logAbnormalRuns(ctx)
 	defer c.logAbnormalRuns(ctx)
 	c.recordRun("disruption-loop")
@@ -129,26 +130,26 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	// with making any scheduling decision off of our state nodes. Otherwise, we have the potential to make
 	// a scheduling decision based on a smaller subset of nodes in our cluster state than actually exist.
 	if !c.cluster.Synced(ctx) {
-		return reconcile.Result{RequeueAfter: time.Second}, nil
+		return reconciler.Result{RequeueAfter: time.Second}, nil
 	}
 
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process while it progresses in memory.
 	// If Karpenter restarts or fails with an error during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates that are not in the orchestration queue before continuing.
-	outdatedNodes := lo.Reject(c.cluster.Nodes(), func(s *state.StateNode, _ int) bool {
+	outdatedNodes := lo.Reject(c.cluster.DeepCopyNodes(), func(s *state.StateNode, _ int) bool {
 		return c.queue.HasAny(s.ProviderID()) || s.MarkedForDeletion()
 	})
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {
 		if errors.IsConflict(err) {
-			return reconcile.Result{Requeue: true}, nil
+			return reconciler.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("removing taint from nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
+		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing taint from nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
 	}
 	if err := state.ClearNodeClaimsCondition(ctx, c.kubeClient, v1.ConditionTypeDisruptionReason, outdatedNodes...); err != nil {
 		if errors.IsConflict(err) {
-			return reconcile.Result{Requeue: true}, nil
+			return reconciler.Result{Requeue: true}, nil
 		}
-		return reconcile.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
+		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
@@ -157,17 +158,17 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		success, err := c.disrupt(ctx, m)
 		if err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconciler.Result{Requeue: true}, nil
 			}
-			return reconcile.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), strings.ToLower(string(m.Reason())), "reason")
+			return reconciler.Result{}, serrors.Wrap(fmt.Errorf("disrupting, %w", err), strings.ToLower(string(m.Reason())), "reason")
 		}
 		if success {
-			return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
+			return reconciler.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 		}
 	}
 
 	// All methods did nothing, so return nothing to do
-	return reconcile.Result{RequeueAfter: pollingPeriod}, nil
+	return reconciler.Result{RequeueAfter: pollingPeriod}, nil
 }
 
 func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, error) {

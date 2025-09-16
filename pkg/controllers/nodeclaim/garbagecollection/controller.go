@@ -20,6 +20,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/awslabs/operatorpkg/reconciler"
+
 	"github.com/awslabs/operatorpkg/singleton"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
@@ -32,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -56,16 +57,16 @@ func NewController(c clock.Clock, kubeClient client.Client, cloudProvider cloudp
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclaim.garbagecollection")
 
 	nodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
-		return reconcile.Result{}, err
+		return reconciler.Result{}, err
 	}
 	cloudProviderNodeClaims, err := c.cloudProvider.List(ctx)
 	if err != nil {
-		return reconcile.Result{}, err
+		return reconciler.Result{}, err
 	}
 	cloudProviderNodeClaims = lo.Filter(cloudProviderNodeClaims, func(nc *v1.NodeClaim, _ int) bool {
 		return nc.DeletionTimestamp.IsZero()
@@ -111,9 +112,9 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		})
 	})
 	if err = multierr.Combine(errs...); err != nil {
-		return reconcile.Result{}, err
+		return reconciler.Result{}, err
 	}
-	return reconcile.Result{RequeueAfter: time.Minute * 2}, nil
+	return reconciler.Result{RequeueAfter: time.Minute * 2}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

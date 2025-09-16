@@ -32,6 +32,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 )
 
 type DaemonSetController struct {
@@ -63,7 +64,7 @@ func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Reque
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }
 
-func (c *DaemonSetController) Register(_ context.Context, m manager.Manager) error {
+func (c *DaemonSetController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.daemonset").
 		For(&appsv1.DaemonSet{}).
@@ -82,6 +83,6 @@ func (c *DaemonSetController) Register(_ context.Context, m manager.Manager) err
 				return false
 			},
 		}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(c)
 }

@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -148,17 +147,17 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			}
 			return Command{}, err
 		}
-
 		// ensure that the action is sensical for replacements, see explanation on filterOutSameType for why this is
 		// required
-		replacementHasValidInstanceTypes := false
+		validDecision := cmd.Decision() == DeleteDecision
 		if cmd.Decision() == ReplaceDecision {
-			cmd.Replacements[0].InstanceTypeOptions, err = filterOutSameType(cmd.Replacements[0], candidatesToConsolidate)
-			replacementHasValidInstanceTypes = len(cmd.Replacements[0].InstanceTypeOptions) > 0 && err == nil
+			cmd.Replacements[0], err = filterOutSameInstanceType(cmd.Replacements[0], candidatesToConsolidate)
+			// we check the error before the replacement instanceTypeOptions since we return nil for the replacement if we get an error
+			if err == nil && len(cmd.Replacements[0].InstanceTypeOptions) > 0 {
+				validDecision = true
+			}
 		}
-
-		// replacementHasValidInstanceTypes will be false if the replacement action has valid instance types remaining after filtering.
-		if replacementHasValidInstanceTypes || cmd.Decision() == DeleteDecision {
+		if validDecision {
 			// We can consolidate NodeClaims [0,mid]
 			lastSavedCommand = cmd
 			min = mid + 1
@@ -169,7 +168,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	return lastSavedCommand, nil
 }
 
-// filterOutSameType filters out instance types that are more expensive than the cheapest instance type that is being
+// filterOutSameInstanceType filters out instance types that are more expensive than the cheapest instance type that is being
 // consolidated if the list of replacement instance types include one of the instance types that is being removed
 //
 // This handles the following potential consolidation result:
@@ -185,14 +184,14 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 // This code sees that t3a.small is the cheapest type in both lists and filters it and anything more expensive out
 // leaving the valid consolidation:
 // NodeClaims=[t3a.2xlarge, t3a.2xlarge, t3a.small] -> 1 of t3a.nano
-func filterOutSameType(replacement *Replacement, consolidate []*Candidate) ([]*cloudprovider.InstanceType, error) {
+func filterOutSameInstanceType(replacement *Replacement, consolidate []*Candidate) (*Replacement, error) {
 	existingInstanceTypes := sets.New[string]()
 	pricesByInstanceType := map[string]float64{}
 
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, c := range consolidate {
 		existingInstanceTypes.Insert(c.instanceType.Name)
-		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduler.NewLabelRequirements(c.StateNode.Labels()))
+		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduler.NewLabelRequirements(c.Labels()))
 		if len(compatibleOfferings) == 0 {
 			continue
 		}
@@ -216,13 +215,12 @@ func filterOutSameType(replacement *Replacement, consolidate []*Candidate) ([]*c
 			}
 		}
 	}
-	// swallow the error since we don't allow min values to impact reschedulability in multi node claim
 	var err error
-	replacement.NodeClaim, err = replacement.NodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(replacement.Requirements, maxPrice)
+	replacement.NodeClaim, err = replacement.RemoveInstanceTypeOptionsByPriceAndMinValues(replacement.Requirements, maxPrice)
 	if err != nil {
 		return nil, err
 	}
-	return replacement.InstanceTypeOptions, nil
+	return replacement, nil
 }
 
 func (m *MultiNodeConsolidation) Reason() v1.DisruptionReason {
