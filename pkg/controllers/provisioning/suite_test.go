@@ -1016,7 +1016,7 @@ var _ = Describe("Provisioning", func() {
 				test.DaemonSetOptions{PodOptions: test.PodOptions{
 					ResourceRequirements: corev1.ResourceRequirements{
 						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10000"), corev1.ResourceMemory: resource.MustParse("10000Gi")},
-						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("10000Gi")}, // simulate the API server’s defaulting from limits
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
 					},
 				}},
 			))
@@ -1063,7 +1063,7 @@ var _ = Describe("Provisioning", func() {
 						{
 							Resources: corev1.ResourceRequirements{
 								Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10000"), corev1.ResourceMemory: resource.MustParse("10000Gi")},
-								Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("10000Gi")}, // simulate the API server’s defaulting from limits
+								Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
 							},
 						},
 					},
