@@ -83,12 +83,8 @@ func (d *StaticDrift) ComputeCommands(ctx context.Context, disruptionBudgetMappi
 		// Acquire limits from cluster state without bursting over
 		maxAllowedDrifts := d.cluster.NodePoolState.ReserveNodeCount(npName, nodeLimit, maxDrifts)
 
-<<<<<<< HEAD
-		if maxAllowedDrifts <= 0 {
-=======
 		// We will not get a negative value here
 		if maxAllowedDrifts == 0 {
->>>>>>> feat/static-capacity
 			continue
 		}
 
