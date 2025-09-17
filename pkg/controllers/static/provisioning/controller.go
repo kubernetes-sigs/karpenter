@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -68,7 +67,7 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, recorder ev
 // Reconcile the resource
 // Requeue after computing Static NodePool to ensure we don't miss any events
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "provisioning.static")
+	ctx = injection.WithControllerName(ctx, "static.provisioning")
 
 	if !nodepoolutils.IsManaged(np, c.cloudProvider) || !np.StatusConditions().Root().IsTrue() || np.Spec.Replicas == nil {
 		return reconcile.Result{}, nil
@@ -86,11 +85,11 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 	countNodeClaimsToProvision := c.cluster.NodePoolState.ReserveNodeCount(np.Name, nodeLimit, desiredReplicas-int64(runningNodeClaims))
 
 	if countNodeClaimsToProvision <= 0 {
-		log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Info("nodepool node limit reached")
+		log.FromContext(ctx).Info("nodepool node limit reached")
 		return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 	}
 
-	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "provisionCount", countNodeClaimsToProvision).
+	log.FromContext(ctx).WithValues("current", runningNodeClaims, "desired", desiredReplicas, "provision-count", countNodeClaimsToProvision).
 		Info("provisioning nodeclaims to satisfy replica count")
 
 	nodeClaims := make([]*scheduling.NodeClaim, 0, countNodeClaimsToProvision)
@@ -111,25 +110,27 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("provisioning.static").
-		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
-			CreateFunc: func(e event.CreateEvent) bool {
-				return true
-			},
-			UpdateFunc: func(e event.UpdateEvent) bool {
-				oldNP := e.ObjectOld.(*v1.NodePool)
-				newNP := e.ObjectNew.(*v1.NodePool)
-				return HasNodePoolReplicaOrStatusChanged(oldNP, newNP)
-			},
-			DeleteFunc: func(e event.DeleteEvent) bool {
-				return false
-			},
-			GenericFunc: func(e event.GenericEvent) bool {
-				return false
-			},
-		})).
-		// For now we wanna reconcile
-		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(), builder.WithPredicates(predicate.Funcs{
+		Named("static.provisioning").
+		// Reoncile on NodePool Create and Update (when replicas change or when NodePool status moves from NotReady to Ready)
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), nodepoolutils.IsStaticPredicateFuncs(),
+			predicate.Funcs{
+				CreateFunc: func(e event.CreateEvent) bool {
+					return true
+				},
+				UpdateFunc: func(e event.UpdateEvent) bool {
+					oldNP := e.ObjectOld.(*v1.NodePool)
+					newNP := e.ObjectNew.(*v1.NodePool)
+					return HasNodePoolReplicaOrStatusChanged(oldNP, newNP)
+				},
+				DeleteFunc: func(e event.DeleteEvent) bool {
+					return false
+				},
+				GenericFunc: func(e event.GenericEvent) bool {
+					return false
+				},
+			})).
+		// We care about Static NodeClaims Deleting (Delete and Update event that has DeletionTimeStamp newly set) as we might have to provision
+		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(nodepoolutils.WithClient(c.kubeClient), nodepoolutils.WithStaticOnly), builder.WithPredicates(predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
 				return false
 			},
