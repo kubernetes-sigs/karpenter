@@ -31,7 +31,13 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
+)
+
+const (
+	minReconciles = 10
+	maxReconciles = 1000
 )
 
 // PodController for the resource
@@ -67,11 +73,11 @@ func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *PodController) Register(_ context.Context, m manager.Manager) error {
+func (c *PodController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.pod").
 		For(&corev1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
@@ -110,10 +116,10 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
+func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.node").
 		For(&corev1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

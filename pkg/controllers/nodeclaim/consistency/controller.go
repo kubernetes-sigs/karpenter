@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
@@ -148,7 +149,7 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 	return nil
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.consistency").
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -156,6 +157,6 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			&corev1.Node{},
 			nodeclaimutils.NodeEventHandler(c.kubeClient, c.cloudProvider),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

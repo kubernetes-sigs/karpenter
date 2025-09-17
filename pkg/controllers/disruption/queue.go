@@ -54,14 +54,17 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 const (
 	queueBaseDelay          = 1 * time.Second
 	queueMaxDelay           = 10 * time.Second
-	maxRetryDuration        = 10 * time.Minute
+	minRetryDuration        = 10 * time.Minute
+	maxRetryDuration        = 1 * time.Hour
 	maxConcurrentReconciles = 100
+	retryDurationScale      = 80 * time.Millisecond
 )
 
 type UnrecoverableError struct {
@@ -80,9 +83,17 @@ func IsUnrecoverableError(err error) bool {
 	return stderrors.As(err, &unrecoverableError)
 }
 
+func (q *Queue) GetMaxRetryDuration() time.Duration {
+	q.RLock()
+	numCommands := len(q.ProviderIDToCommand)
+	q.RUnlock()
+	retryDuration := retryDurationScale * time.Duration(numCommands)
+	return lo.Clamp(retryDuration, minRetryDuration, maxRetryDuration)
+}
+
 type Queue struct {
 	sync.RWMutex
-	providerIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
+	ProviderIDToCommand map[string]*Command // providerID -> command, maps a candidate to its command
 	source              chan event.TypedGenericEvent[*v1.NodeClaim]
 	kubeClient          client.Client
 	recorder            events.Recorder
@@ -99,7 +110,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		// nolint:staticcheck
 		// We need to implement a deprecated interface since Command currently doesn't implement "comparable"
 		source:              make(chan event.TypedGenericEvent[*v1.NodeClaim], 10000),
-		providerIDToCommand: map[string]*Command{},
+		ProviderIDToCommand: map[string]*Command{},
 		kubeClient:          kubeClient,
 		recorder:            recorder,
 		cluster:             cluster,
@@ -109,7 +120,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 	return queue
 }
 
-func (q *Queue) Register(_ context.Context, m manager.Manager) error {
+func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("disruption.queue").
 		WatchesRawSource(source.Channel(q.source, &handler.TypedEnqueueRequestForObject[*v1.NodeClaim]{})).
@@ -118,7 +129,7 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](queueBaseDelay, queueMaxDelay),
 				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
 			),
-			MaxConcurrentReconciles: maxConcurrentReconciles,
+			MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 100, 1000),
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }
@@ -126,7 +137,7 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "disruption.queue")
 	q.RLock()
-	cmd, exists := q.providerIDToCommand[nodeClaim.Status.ProviderID]
+	cmd, exists := q.ProviderIDToCommand[nodeClaim.Status.ProviderID]
 	q.RUnlock()
 	if !exists {
 		log.FromContext(ctx).Error(fmt.Errorf("no command found"), "")
@@ -168,9 +179,12 @@ func (q *Queue) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconci
 // Once the replacements are ready, it will terminate the candidates.
 // nolint:gocyclo
 func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
+	// We use the number of commands in the queue as a proxy for cloud provider traffic.
+	// As the number of commands increase, we expect more delays and scale the retry duration accordingly.
+	retryDuration := q.GetMaxRetryDuration()
 	// Wrap an error in an unrecoverable error if it timed out
 	defer func() {
-		if q.clock.Since(cmd.CreationTimestamp) > maxRetryDuration {
+		if q.clock.Since(cmd.CreationTimestamp) > retryDuration {
 			err = NewUnrecoverableError(serrors.Wrap(fmt.Errorf("command reached timeout, %w", err), "duration", q.clock.Since(cmd.CreationTimestamp)))
 		}
 	}()
@@ -324,7 +338,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 
 	q.Lock()
 	for _, c := range cmd.Candidates {
-		q.providerIDToCommand[c.ProviderID()] = cmd
+		q.ProviderIDToCommand[c.ProviderID()] = cmd
 	}
 	// IMPORTANT
 	// We are adding the first nodeclaim in the list of candidates into the reconciliation queue
@@ -355,7 +369,7 @@ func (q *Queue) HasAny(ids ...string) bool {
 
 	// If the mapping has at least one of the candidates' providerIDs, return true.
 	for _, id := range ids {
-		if _, exists := q.providerIDToCommand[id]; exists {
+		if _, exists := q.ProviderIDToCommand[id]; exists {
 			return true
 		}
 	}
@@ -369,7 +383,7 @@ func (q *Queue) GetCommands() []*Command {
 	q.RLock()
 	defer q.RUnlock()
 
-	return lo.UniqValues(q.providerIDToCommand)
+	return lo.UniqValues(q.ProviderIDToCommand)
 }
 
 // CompleteCommand fully clears the queue of all references of a hash/command
@@ -381,12 +395,12 @@ func (q *Queue) CompleteCommand(cmd *Command) {
 	q.Lock()
 	defer q.Unlock()
 	for _, c := range cmd.Candidates {
-		delete(q.providerIDToCommand, c.ProviderID())
+		delete(q.ProviderIDToCommand, c.ProviderID())
 	}
 }
 
 func (q *Queue) IsEmpty() bool {
 	q.RLock()
 	defer q.RUnlock()
-	return len(q.providerIDToCommand) == 0
+	return len(q.ProviderIDToCommand) == 0
 }
