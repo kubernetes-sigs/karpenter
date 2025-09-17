@@ -51,7 +51,7 @@ import (
 )
 
 const (
-	TerminationReason = "deprovisioned"
+	TerminationReason = "overprovisioned"
 )
 
 type Controller struct {
@@ -92,7 +92,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{RequeueAfter: time.Minute}, nil
 	}
 
-	log.FromContext(ctx).WithValues("NodePool", klog.KObj(np), "current", runningNodeClaims, "desired", desiredReplicas, "deprovision-count", nodeClaimsToDeprovision).
+	log.FromContext(ctx).WithValues("current", runningNodeClaims, "desired", desiredReplicas, "deprovision-count", nodeClaimsToDeprovision).
 		Info("deprovisioning nodeclaims to satisfy replica count")
 
 	// Get all active NodeClaims for this NodePool
@@ -150,7 +150,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 				},
 			})).
 		// We care about Static NodeClaims creating as we might have over provisioned and need to deprovision
-		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(c.kubeClient, true), builder.WithPredicates(predicate.Funcs{
+		Watches(&v1.NodeClaim{}, nodepoolutils.NodeClaimEventHandler(nodepoolutils.WithClient(c.kubeClient), nodepoolutils.WithStaticOnly), builder.WithPredicates(predicate.Funcs{
 			CreateFunc: func(e event.CreateEvent) bool {
 				return true
 			},
@@ -194,32 +194,32 @@ func (c *Controller) getDeprovisioningCandidates(ctx context.Context, np *v1.Nod
 	}
 
 	// Get non-empty nodes with their costs
-	type NonEmptyNodes struct {
+	type NonEmptyNode struct {
 		node            *state.StateNode
 		pods            []*corev1.Pod
 		hasDoNotDisrupt bool
 	}
 
 	emptyNodesSet := sets.New(emptyNodes...)
-	nonEmptyNodes := lo.FilterMap(nodes, func(node *state.StateNode, _ int) (NonEmptyNodes, bool) {
+	nonEmptyNodes := lo.FilterMap(nodes, func(node *state.StateNode, _ int) (NonEmptyNode, bool) {
 		if emptyNodesSet.Has(node) {
-			return NonEmptyNodes{}, false
+			return NonEmptyNode{}, false
 		}
 
 		pods, err := node.Pods(ctx, c.kubeClient)
 		if err != nil {
 			log.FromContext(ctx).WithValues("node", node.Name()).Error(err, "unable to list pods, skipping node")
-			return NonEmptyNodes{}, false
+			return NonEmptyNode{}, false
 		}
 
-		return NonEmptyNodes{
+		return NonEmptyNode{
 			node:            node,
 			pods:            pods,
 			hasDoNotDisrupt: lo.SomeBy(pods, pod.HasDoNotDisrupt),
 		}, true
 	})
 
-	slices.SortFunc(nonEmptyNodes, func(i, j NonEmptyNodes) int {
+	slices.SortFunc(nonEmptyNodes, func(i, j NonEmptyNode) int {
 		// If one node has do-not-disrupt pods and the other doesn't, the one without should come first
 		if i.hasDoNotDisrupt != j.hasDoNotDisrupt {
 			return lo.Ternary(i.hasDoNotDisrupt, 1, -1)

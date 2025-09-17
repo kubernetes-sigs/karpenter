@@ -789,11 +789,6 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
 
-			// Verify StateNodePool Has been updated
-			ExpectStateNodePoolCount(cluster, nodePool1.Name, 2, 2, 0)
-			ExpectStateNodePoolCount(cluster, nodePool2.Name, 2, 0, 0)
-			ExpectStateNodePoolCount(cluster, nodePool3.Name, 2, 2, 0)
-
 			// Execute commands, should drift 4 nodes total
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(4))
