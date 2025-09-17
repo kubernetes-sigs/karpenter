@@ -609,7 +609,7 @@ var _ = Describe("StaticDrift", func() {
 	})
 	Context("Multiple NodePools", func() {
 		It("should handle drift for multiple static NodePools independently", func() {
-			// Create two static NodePools
+			// Create three static NodePools
 			nodePool1 := test.StaticNodePool(v1.NodePool{
 				ObjectMeta: metav1.ObjectMeta{Name: "nodepool-1"},
 				Spec: v1.NodePoolSpec{
@@ -626,10 +626,22 @@ var _ = Describe("StaticDrift", func() {
 					Disruption: v1.Disruption{
 						Budgets: []v1.Budget{{Nodes: "100%"}},
 					},
+					Limits: v1.Limits{
+						resources.Node: resource.MustParse(strconv.Itoa(2)), // no allowed drifts
+					},
+				},
+			})
+			nodePool3 := test.StaticNodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "nodepool-3"},
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(2)),
+					Disruption: v1.Disruption{
+						Budgets: []v1.Budget{{Nodes: "100%"}},
+					},
 				},
 			})
 
-			ExpectApplied(ctx, env.Client, nodePool1, nodePool2)
+			ExpectApplied(ctx, env.Client, nodePool1, nodePool2, nodePool3)
 
 			// Create nodes for each NodePool
 			nodeClaims1, nodes1 := test.NodeClaimsAndNodes(2, v1.NodeClaim{
@@ -666,6 +678,23 @@ var _ = Describe("StaticDrift", func() {
 				},
 			})
 
+			nodeClaims3, nodes3 := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool3.Name,
+						corev1.LabelInstanceTypeStable: mostExpensiveInstance.Name,
+						v1.CapacityTypeLabelKey:        mostExpensiveOffering.Requirements.Get(v1.CapacityTypeLabelKey).Any(),
+						corev1.LabelTopologyZone:       mostExpensiveOffering.Requirements.Get(corev1.LabelTopologyZone).Any(),
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("32"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+
 			// Mark all as drifted
 			for i := range nodeClaims1 {
 				nodeClaims1[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
@@ -675,9 +704,16 @@ var _ = Describe("StaticDrift", func() {
 				nodeClaims2[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 				ExpectApplied(ctx, env.Client, nodeClaims2[i], nodes2[i])
 			}
+			for i := range nodeClaims3 {
+				nodeClaims3[i].StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+				ExpectApplied(ctx, env.Client, nodeClaims3[i], nodes3[i])
+			}
 
 			allNodes := append(nodes1, nodes2...)
+			allNodes = append(allNodes, nodes3...)
 			allNodeClaims := append(nodeClaims1, nodeClaims2...)
+			allNodeClaims = append(allNodeClaims, nodeClaims3...)
+
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, allNodes, allNodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
@@ -687,6 +723,10 @@ var _ = Describe("StaticDrift", func() {
 			})
 			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 2, map[string]string{
 				metrics.NodePoolLabel: nodePool2.Name,
+				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
+			})
+			ExpectMetricGaugeValue(disruption.NodePoolAllowedDisruptions, 2, map[string]string{
+				metrics.NodePoolLabel: nodePool3.Name,
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
 
@@ -700,7 +740,7 @@ var _ = Describe("StaticDrift", func() {
 				nodePoolNames[cmd.Candidates[0].NodePool.Name]++
 			}
 			Expect(nodePoolNames[nodePool1.Name]).To(Equal(2))
-			Expect(nodePoolNames[nodePool2.Name]).To(Equal(2))
+			Expect(nodePoolNames[nodePool3.Name]).To(Equal(2))
 
 			// Execute the commands
 			for _, cmd := range cmds {
