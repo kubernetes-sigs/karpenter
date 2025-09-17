@@ -753,3 +753,12 @@ func ExpectParallelized(fs ...func()) {
 	}
 	wg.Wait()
 }
+
+func ExpectStateNodePoolCount(cluster *state.Cluster, npName string, exrunning, exdeleting, exdrifting int) {
+	GinkgoHelper()
+
+	running, deleting, drifting := cluster.NodePoolState.GetNodeCount(npName)
+	Expect(running).To(Equal(exrunning))
+	Expect(deleting).To(Equal(exdeleting))
+	Expect(drifting).To(Equal(exdrifting))
+}

@@ -118,15 +118,22 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, numNodes, 2, 0)
+
 			// Execute commands, should only delete 2 nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(2))
 			for _, cmd := range cmds {
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmd)
 				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
+				// Cascade any deletion of the nodeClaims to the nodes
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(cmd.Candidates[0].NodeClaim))
 			}
-			// Cascade any deletion of the nodeClaims to the nodes
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0], nodeClaims[1])
+
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, numNodes, 0, 0)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
 			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 2, map[string]string{
@@ -170,15 +177,23 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, numNodes, 1, 0)
+
 			// Execute commands, should only delete 1 nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
 			for _, cmd := range cmds {
 				ExpectMakeNewNodeClaimsReady(ctx, env.Client, cluster, cloudProvider, cmd)
 				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
+
+				// Cascade any deletion of the nodeClaims to the nodes
+				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(cmd.Candidates[0].NodeClaim))
 			}
-			// Cascade any deletion of the nodeClaims to the nodes
-			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims[0])
+
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, numNodes, 0, 0)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(numNodes))
 			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
@@ -305,6 +320,11 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool1.Name, 2, 1, 0)
+			ExpectStateNodePoolCount(cluster, nodePool2.Name, 2, 2, 0)
+			ExpectStateNodePoolCount(cluster, nodePool3.Name, 2, 2, 0)
+
 			// Execute commands, should drift 5 nodes total
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(5))
@@ -324,7 +344,13 @@ var _ = Describe("StaticDrift", func() {
 				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 				// Cascade any deletion of the nodeClaims to the nodes
 				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(cmd.Candidates[0].NodeClaim))
 			}
+
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool1.Name, 2, 0, 0)
+			ExpectStateNodePoolCount(cluster, nodePool2.Name, 2, 0, 0)
+			ExpectStateNodePoolCount(cluster, nodePool3.Name, 2, 0, 0)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(len(allNodes)))
 
@@ -369,6 +395,9 @@ var _ = Describe("StaticDrift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 5, 0, 0)
+
 			// Since we cannot acquire limits, we should not have any drifts
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
@@ -409,6 +438,9 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 2, 2, 0)
+
 			// Should drift nodes since we can scale up to target
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(2))
@@ -417,7 +449,11 @@ var _ = Describe("StaticDrift", func() {
 				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 				// Cascade any deletion of the nodeClaims to the nodes
 				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(cmd.Candidates[0].NodeClaim))
 			}
+
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 2, 0, 0)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(2))
 			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 2, map[string]string{
@@ -460,6 +496,9 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 5, 2, 0)
+
 			// Should drift 2 nodes since we can only acquire 2 limit
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(2))
@@ -468,7 +507,11 @@ var _ = Describe("StaticDrift", func() {
 				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 				// Cascade any deletion of the nodeClaims to the nodes
 				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(cmd.Candidates[0].NodeClaim))
 			}
+
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 5, 0, 0)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(5))
 			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 2, map[string]string{
@@ -508,6 +551,9 @@ var _ = Describe("StaticDrift", func() {
 			for i := range 5 {
 				ExpectSingletonReconciled(ctx, disruptionController)
 
+				// Verify StateNodePool Has been updated
+				ExpectStateNodePoolCount(cluster, nodePool.Name, 5, 1, 0)
+
 				cmds := queue.GetCommands()
 				Expect(cmds).To(HaveLen(1))
 				for _, cmd := range cmds {
@@ -519,6 +565,9 @@ var _ = Describe("StaticDrift", func() {
 					ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
 					ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(cmd.Candidates[0].NodeClaim))
 				}
+
+				// Verify StateNodePool Has been updated
+				ExpectStateNodePoolCount(cluster, nodePool.Name, 5, 0, 0)
 
 				Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(5))
 				ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, float64(i+1), map[string]string{
@@ -570,6 +619,9 @@ var _ = Describe("StaticDrift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 2, 0, 0)
+
 			// Should not disrupt drifted nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
@@ -591,6 +643,9 @@ var _ = Describe("StaticDrift", func() {
 
 			ExpectSingletonReconciled(ctx, disruptionController)
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 1, 1, 0)
+
 			// Should drift nodes since we already scaled down nodes to replicas
 			cmds = queue.GetCommands()
 			Expect(cmds).To(HaveLen(1))
@@ -599,7 +654,11 @@ var _ = Describe("StaticDrift", func() {
 				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 				// Cascade any deletion of the nodeClaims to the nodes
 				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(cmd.Candidates[0].NodeClaim))
 			}
+
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 1, 0, 0)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(1))
 			ExpectMetricCounterValue(disruption.DecisionsPerformedTotal, 1, map[string]string{
@@ -730,6 +789,11 @@ var _ = Describe("StaticDrift", func() {
 				metrics.ReasonLabel:   string(v1.DisruptionReasonDrifted),
 			})
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool1.Name, 2, 2, 0)
+			ExpectStateNodePoolCount(cluster, nodePool2.Name, 2, 0, 0)
+			ExpectStateNodePoolCount(cluster, nodePool3.Name, 2, 2, 0)
+
 			// Execute commands, should drift 4 nodes total
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(4))
@@ -748,7 +812,13 @@ var _ = Describe("StaticDrift", func() {
 				ExpectObjectReconciled(ctx, env.Client, queue, cmd.Candidates[0].NodeClaim)
 				// Cascade any deletion of the nodeClaims to the nodes
 				ExpectNodeClaimsCascadeDeletion(ctx, env.Client, cmd.Candidates[0].NodeClaim)
+				ExpectReconcileSucceeded(ctx, nodeClaimStateController, client.ObjectKeyFromObject(cmd.Candidates[0].NodeClaim))
 			}
+
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool1.Name, 2, 0, 0)
+			ExpectStateNodePoolCount(cluster, nodePool2.Name, 2, 0, 0)
+			ExpectStateNodePoolCount(cluster, nodePool3.Name, 2, 0, 0)
 
 			Expect(len(ExpectNodeClaims(ctx, env.Client))).To(Equal(len(allNodes)))
 
@@ -801,6 +871,9 @@ var _ = Describe("StaticDrift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 			ExpectSingletonReconciled(ctx, disruptionController)
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 5, 5, 0)
+
 			// Should drift the node since no limits are constraining it
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(5))
@@ -813,6 +886,9 @@ var _ = Describe("StaticDrift", func() {
 			// inform cluster state about nodes and nodeclaims
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 1, 0, 0)
 
 			// Should not drift any nodes
 			cmds := queue.GetCommands()
@@ -827,6 +903,9 @@ var _ = Describe("StaticDrift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 			ExpectSingletonReconciled(ctx, disruptionController)
 
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 1, 0, 0)
+
 			// Should not drift any nodes
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
@@ -840,6 +919,9 @@ var _ = Describe("StaticDrift", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
 
 			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Verify StateNodePool Has been updated
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 1, 0, 0)
 
 			// Should not drift any nodes
 			cmds := queue.GetCommands()
