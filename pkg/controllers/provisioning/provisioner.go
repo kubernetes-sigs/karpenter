@@ -54,6 +54,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/daemonset"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -471,7 +472,7 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*corev1.Pod, erro
 	return lo.Map(daemonSetList.Items, func(d appsv1.DaemonSet, _ int) *corev1.Pod {
 		pod := p.cluster.GetDaemonSetPod(&d)
 		if pod == nil {
-			pod = &corev1.Pod{Spec: d.Spec.Template.Spec}
+			pod = daemonset.PodForDaemonSet(&d)
 		}
 		// Replacing retrieved pod affinity with daemonset pod template required node affinity since this is overridden
 		// by the daemonset controller during pod creation
