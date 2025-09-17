@@ -91,6 +91,21 @@ var _ = Describe("Topology", func() {
 		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2))
 	})
 
+	It("should not spread when a nil label selector is defined", func() {
+		topology := []corev1.TopologySpreadConstraint{{
+			TopologyKey:       corev1.LabelTopologyZone,
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			MaxSkew:           1,
+		}}
+		pods := test.UnschedulablePods(test.PodOptions{
+			ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+			TopologySpreadConstraints: topology,
+		}, 2)
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+		ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2))
+	})
+
 	Context("Zonal", func() {
 		It("should balance pods across zones (match labels)", func() {
 			topology := []corev1.TopologySpreadConstraint{{
