@@ -22,9 +22,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -64,7 +66,7 @@ var _ = Describe("StaticCapacity", func() {
 			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
 
 			for _, node := range nodes {
-				Expect(node.Labels).To(HaveKeyWithValue(v1.CapacityTypeLabelKey, v1.CapacityTypeOnDemand))
+				Expect(node.Labels).To(HaveKeyWithValue(v1.NodePoolLabelKey, nodePool.Name))
 			}
 		})
 
@@ -118,7 +120,8 @@ var _ = Describe("StaticCapacity", func() {
 			env.ExpectCreated(nodeClass, nodePool)
 
 			// Should only create 5 nodes due to limit
-			env.EventuallyExpectInitializedNodeCount("==", 5)
+			env.ConsistentlyExpectNodeClaimCountNotExceed(5*time.Minute, 5)
+
 			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 5)
 			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
 		})
@@ -253,7 +256,7 @@ var _ = Describe("StaticCapacity", func() {
 
 	Context("Drift", func() {
 		BeforeEach(func() {
-			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
+			nodePool.Spec.Replicas = lo.ToPtr(int64(10))
 			if env.IsDefaultNodeClassKWOK() {
 				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
 					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -270,9 +273,9 @@ var _ = Describe("StaticCapacity", func() {
 		})
 
 		It("should replace drifted nodes", func() {
-			// Initially should have 2 nodes
-			env.EventuallyExpectInitializedNodeCount("==", 5)
-			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 5)
+			// Initially should have 10 nodes
+			env.EventuallyExpectInitializedNodeCount("==", 10)
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 10)
 			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
 
 			// Drift the nodeclaims
@@ -283,17 +286,21 @@ var _ = Describe("StaticCapacity", func() {
 			env.EventuallyExpectDrifted(nodeClaims...)
 
 			// Should create a replacement node and then remove the drifted one
-			env.ConsistentlyExpectDisruptionsUntilNoneLeft(5, 5, 5*time.Minute)
+			env.ConsistentlyExpectDisruptionsUntilNoneLeft(10, 10, 5*time.Minute)
 		})
 
-		It("should handle drift with node limits", func() {
-			// Initially should have 2 nodes
-			env.EventuallyExpectInitializedNodeCount("==", 5)
-			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 5)
+		It("should handle drift with node limits when budget allows", func() {
+			// Initially should have 10 nodes
+			env.EventuallyExpectInitializedNodeCount("==", 10)
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 10)
 			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
 
+			// Allows 4 node drift
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "4"}}
+
+			// Allows 2 drifts
 			nodePool.Spec.Limits = v1.Limits{
-				corev1.ResourceName("nodes"): resource.MustParse("6"),
+				corev1.ResourceName("nodes"): resource.MustParse("12"),
 			}
 			nodePool.Spec.Template.Annotations = map[string]string{"test": "annotation"}
 			env.ExpectUpdated(nodePool)
@@ -301,41 +308,31 @@ var _ = Describe("StaticCapacity", func() {
 			// Verify the drifted node was replaced
 			env.EventuallyExpectDrifted(nodeClaims...)
 
-			// Should create a replacement node and then remove the drifted one
-			env.ConsistentlyExpectDisruptionsUntilNoneLeft(5, 1, 5*time.Minute)
-		})
-	})
-
-	Context("Edge Cases", func() {
-		BeforeEach(func() {
-			if env.IsDefaultNodeClassKWOK() {
-				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values: []string{
-							"c-16x-amd64-linux",
-							"c-16x-arm64-linux",
-						},
-					},
-				})
-			}
+			// Should create a replacement node and then remove the drifted one 2 at a time
+			env.ConsistentlyExpectDisruptionsUntilNoneLeft(10, 2, 5*time.Minute)
 		})
 
-		It("should handle NodePool deletion gracefully", func() {
-			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
-			env.ExpectCreated(nodeClass, nodePool)
-
-			env.EventuallyExpectInitializedNodeCount("==", 3)
-			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 3)
+		It("should handle drift with node limits when budget restricts", func() {
+			// Initially should have 10 nodes
+			env.EventuallyExpectInitializedNodeCount("==", 10)
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 10)
 			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
 
-			// Delete the NodePool
-			env.ExpectDeleted(nodePool)
+			// Allows 2 node drift
+			nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "2"}}
 
-			// All nodes should eventually be cleaned up
-			env.EventuallyExpectInitializedNodeCount("==", 0)
-			env.EventuallyExpectCreatedNodeClaimCount("==", 0)
+			// Allows 5 drifts
+			nodePool.Spec.Limits = v1.Limits{
+				corev1.ResourceName("nodes"): resource.MustParse("15"),
+			}
+			nodePool.Spec.Template.Annotations = map[string]string{"test": "annotation"}
+			env.ExpectUpdated(nodePool)
+
+			// Verify the drifted node was replaced
+			env.EventuallyExpectDrifted(nodeClaims...)
+
+			// Should create a replacement node and then remove the drifted one 2 at a time
+			env.ConsistentlyExpectDisruptionsUntilNoneLeft(10, 2, 5*time.Minute)
 		})
 	})
 
@@ -380,7 +377,7 @@ var _ = Describe("StaticCapacity", func() {
 			label = map[string]string{"app": "large-app"}
 		})
 
-		It("should not affect dynamic NodeClaim creation when static NodePool is present", func() {
+		It("should provision dynamic nodeclaims when static nodeclaims cant satisfy pod constraints", func() {
 			env.ExpectCreated(nodeClass, nodePool, dynamicNodePool)
 
 			env.EventuallyExpectInitializedNodeCount("==", 2)
@@ -437,6 +434,79 @@ var _ = Describe("StaticCapacity", func() {
 				return nc.Labels[v1.NodePoolLabelKey] == nodePool.Name
 			})
 			Expect(len(staticNodeClaimsAfter)).To(Equal(2))
+		})
+	})
+
+	Context("Edge Cases", func() {
+		BeforeEach(func() {
+			if env.IsDefaultNodeClassKWOK() {
+				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values: []string{
+							"c-16x-amd64-linux",
+							"c-16x-arm64-linux",
+						},
+					},
+				})
+			}
+		})
+
+		It("should not go over limit during concurrent changes/executions", func() {
+			// Start with 3 replicas and set a limit of 5 nodes
+			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
+			nodePool.Spec.Limits = v1.Limits{
+				corev1.ResourceName("nodes"): resource.MustParse("5"),
+			}
+			env.ExpectCreated(nodeClass, nodePool)
+
+			// Wait for initial nodes to be created
+			env.EventuallyExpectInitializedNodeCount("==", 3)
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 3)
+			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
+
+			// Trigger drift by changing NodePool template
+			nodePool.Spec.Template.Annotations = map[string]string{"drift-trigger": "test-value"}
+
+			// Simultaneously scale up to 4 replicas while drift is happening
+			// This should test that we don't exceed the limit of 5 during replacement
+			nodePool.Spec.Replicas = lo.ToPtr(int64(4))
+			env.ExpectUpdated(nodePool)
+
+			// Verify drift is detected on existing nodes
+			env.EventuallyExpectDrifted(nodeClaims...)
+
+			// Throughout the entire process, we should never exceed 5 nodes
+			// This includes temporary nodes created during drift replacement
+			env.ConsistentlyExpectNodeClaimCountNotExceed(3*time.Minute, 5)
+
+			// Should eventually have exactly 4 nodes (the target replica count)
+			env.EventuallyExpectInitializedNodeCount("==", 4)
+			finalNodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 4)
+			env.EventuallyExpectNodeClaimsReady(finalNodeClaims...)
+
+			// All final nodes should have the new annotation (either newly created or replaced due to drift)
+			nodes := env.EventuallyExpectInitializedNodeCount("==", 4)
+			for _, node := range nodes {
+				Expect(node.Annotations).To(HaveKeyWithValue("drift-trigger", "test-value"))
+			}
+		})
+
+		It("should handle NodePool deletion gracefully", func() {
+			nodePool.Spec.Replicas = lo.ToPtr(int64(3))
+			env.ExpectCreated(nodeClass, nodePool)
+
+			env.EventuallyExpectInitializedNodeCount("==", 3)
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 3)
+			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
+
+			// Delete the NodePool
+			env.ExpectDeleted(nodePool)
+
+			// All nodes should eventually be cleaned up
+			env.EventuallyExpectInitializedNodeCount("==", 0)
+			env.EventuallyExpectCreatedNodeClaimCount("==", 0)
 		})
 	})
 })
