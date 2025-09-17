@@ -148,7 +148,7 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 		return fmt.Errorf("validating cli flags / env vars, invalid MIN_VALUES_POLICY %q", o.minValuesPolicyRaw)
 	}
 	if o.CPURequests <= 0 {
-		return fmt.Errorf("validating cli flags / env vars, invalid CPU_REQUESTS %d, must be positive", o.CPURequests)
+		o.CPURequests = 1000
 	}
 	gates, err := ParseFeatureGates(o.FeatureGates.inputStr)
 	if err != nil {
