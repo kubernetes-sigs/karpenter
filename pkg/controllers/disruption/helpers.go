@@ -243,11 +243,14 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	// Additionally, don't consider nodeclaims that have the terminating condition. A nodeclaim should have
 	// the Terminating condition only when the node is drained and cloudprovider.Delete() was successful
 	// on the underlying cloud provider machine.
-	filteredNodes := cluster.DeepCopyNodesWithReject(func(node *state.StateNode) bool {
-		return !node.Managed() || !node.Initialized() || node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()
-	})
+	var nodes state.StateNodes
+	for n := range cluster.Nodes() {
+		if n.Managed() && n.Initialized() && !n.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+			nodes = append(nodes, n.DeepCopy())
+		}
+	}
 
-	for _, node := range filteredNodes {
+	for _, node := range nodes {
 		nodePool := node.Labels()[v1.NodePoolLabelKey]
 		numNodes[nodePool]++
 

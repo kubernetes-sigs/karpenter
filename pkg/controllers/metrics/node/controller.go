@@ -176,9 +176,12 @@ func NewController(cluster *state.Cluster) *Controller {
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, "metrics.node") //nolint:ineffassign,staticcheck
 
-	nodes := c.cluster.DeepCopyNodesWithReject(func(n *state.StateNode) bool {
-		return n.Node == nil
-	})
+	var nodes state.StateNodes
+	for n := range c.cluster.Nodes() {
+		if n.Node != nil {
+			nodes = append(nodes, n.DeepCopy())
+		}
+	}
 
 	// Build per-node metrics
 	metricsMap := lo.SliceToMap(nodes, func(n *state.StateNode) (string, []*metrics.StoreMetric) {
