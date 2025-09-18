@@ -72,8 +72,6 @@ func NewController(kubeClient client.Client, cluster *state.Cluster, cloudProvid
 
 // Reconcile the resource
 // Requeue after computing Static NodePool to ensure we don't miss any events
-// Note/todo : We have race bw queue and deprovisioning controller, while handling drift we create new replacements and then mark old as deleting
-// Although the delta is small, we need to track replacing NodeClaims to solve it the right way
 func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "static.deprovisioning")
 
@@ -81,8 +79,12 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
-	runningNodeClaims, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
+	runningNodeClaims, _, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
 	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
+	// To avoid race conditions between deprovisioning and the disruption controller,
+	// we only include running NodeClaims when counting for deprovisioning purposes.
+	// Including both active NodeClaims and those pending disruption could cause us
+	// to temporarily exceed the desired replica count while replacements are being created.
 	nodeClaimsToDeprovision := int64(runningNodeClaims) - desiredReplicas
 
 	// Only handle scale down - scale up is handled by provisioning controller
