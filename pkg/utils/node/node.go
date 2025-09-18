@@ -116,6 +116,11 @@ func GetPods(ctx context.Context, kubeClient client.Client, nodes ...*corev1.Nod
 
 // GetNodeClaims grabs all NodeClaims with a providerID that matches the provided Node
 func GetNodeClaims(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*v1.NodeClaim, error) {
+	// Nodes without providerID should not match any NodeClaims to prevent false positives
+	// with NodeClaims that also have empty providerIDs (e.g., during NodeClaim creation)
+	if node.Spec.ProviderID == "" {
+		return nil, nil
+	}
 	ncs := &v1.NodeClaimList{}
 	if err := kubeClient.List(ctx, ncs, nodeclaimutils.ForProviderID(node.Spec.ProviderID)); err != nil {
 		return nil, fmt.Errorf("listing nodeclaims, %w", err)
