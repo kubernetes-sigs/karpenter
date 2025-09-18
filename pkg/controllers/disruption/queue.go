@@ -246,6 +246,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 }
 
 // markDisrupted taints the node and adds the Disrupted condition to the NodeClaim for a candidate that is about to be disrupted
+// For static NodeClaims, we mark NodeClaims as pendingdisruption in statenodepool
 func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, error) {
 	errs := make([]error, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
@@ -273,6 +274,11 @@ func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, 
 			continue
 		}
 		markedCandidates = append(markedCandidates, cmd.Candidates[i])
+
+		// Mark all StaticNodeClaims as pendingdisruption in nodepoolstate
+		if cmd.Candidates[i].OwnedByStaticNodePool() {
+			q.cluster.NodePoolState.MarkNodeClaimPendingDisruption(cmd.Candidates[i].NodePool.Name, cmd.Candidates[i].NodeClaim.Name)
+		}
 	}
 	return markedCandidates, multierr.Combine(errs...)
 }
@@ -324,7 +330,6 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 		// we don't want to disrupt workloads with no way to provision new nodes for them.
 		return serrors.Wrap(fmt.Errorf("launching replacement nodeclaim, %w", err), "command-id", cmd.ID)
 	}
-	// todo : Solve the race bw queue and deprovisioning controller for Static NodePool
 	// IMPORTANT
 	// We must MarkForDeletion AFTER we launch the replacements and not before
 	// The reason for this is to avoid producing double-launches
