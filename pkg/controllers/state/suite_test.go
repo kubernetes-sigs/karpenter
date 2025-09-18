@@ -2805,6 +2805,29 @@ var _ = Describe("NodePoolState Tracking", func() {
 	})
 })
 
+var _ = Describe("DeepCopyNodesWithReject", func() {
+	BeforeEach(func() {
+		for i := 0; i < 3; i++ {
+			node := test.Node(test.NodeOptions{
+				ProviderID: fmt.Sprintf("%d", i),
+			})
+			ExpectApplied(ctx, env.Client, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+		}
+		cluster.MarkForDeletion("1")
+	})
+	DescribeTable("filtering scenarios",
+		func(rejectFunc func(*state.StateNode) bool, expected int) {
+			result := cluster.DeepCopyNodesWithReject(rejectFunc)
+			Expect(result).To(HaveLen(expected))
+		},
+		Entry("no rejecting", func(n *state.StateNode) bool { return false }, 3),
+		Entry("reject all", func(n *state.StateNode) bool { return true }, 0),
+		Entry("reject marked for deletion", func(n *state.StateNode) bool { return n.MarkedForDeletion() }, 2),
+		Entry("reject not marked for deletion", func(n *state.StateNode) bool { return !n.MarkedForDeletion() }, 1),
+	)
+})
+
 func ExpectStateNodeCount(comparator string, count int) int {
 	GinkgoHelper()
 	c := 0

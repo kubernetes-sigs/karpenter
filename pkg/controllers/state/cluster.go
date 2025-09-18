@@ -255,6 +255,21 @@ func (c *Cluster) DeepCopyNodes() StateNodes {
 	})
 }
 
+// DeepCopyNodesWithReject create a DeepCopy of all state nodes in which the reject function returns false (i.e. we don't reject the node).
+// NOTE: This is very inefficient so this should only be used when DeepCopying is absolutely necessary
+func (c *Cluster) DeepCopyNodesWithReject(reject func(*StateNode) bool) StateNodes {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result StateNodes
+	for _, node := range c.nodes {
+		if !reject(node) {
+			result = append(result, node.DeepCopy())
+		}
+	}
+	return result
+}
+
 // IsNodeNominated returns true if the given node was expected to have a pod bound to it during a recent scheduling
 // batch
 func (c *Cluster) IsNodeNominated(providerID string) bool {

@@ -31,7 +31,6 @@ import (
 	"github.com/awslabs/operatorpkg/singleton"
 
 	"github.com/google/uuid"
-	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/clock"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -136,7 +135,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	// Karpenter taints nodes with a karpenter.sh/disruption taint as part of the disruption process while it progresses in memory.
 	// If Karpenter restarts or fails with an error during a disruption action, some nodes can be left tainted.
 	// Idempotently remove this taint from candidates that are not in the orchestration queue before continuing.
-	outdatedNodes := lo.Reject(c.cluster.DeepCopyNodes(), func(s *state.StateNode, _ int) bool {
+	outdatedNodes := c.cluster.DeepCopyNodesWithReject(func(s *state.StateNode) bool {
 		return c.queue.HasAny(s.ProviderID()) || s.MarkedForDeletion()
 	})
 	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {
