@@ -5,7 +5,7 @@ go 1.24.6
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/avast/retry-go v3.0.0+incompatible
-	github.com/awslabs/operatorpkg v0.0.0-20250822220536-d4fbec42f646
+	github.com/awslabs/operatorpkg v0.0.0-20250909182303-e8e550b6f339
 	github.com/docker/docker v28.4.0+incompatible
 	github.com/go-logr/logr v1.4.3
 	github.com/imdario/mergo v0.3.16
@@ -20,14 +20,14 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/text v0.29.0
 	golang.org/x/time v0.13.0
-	k8s.io/api v0.35.0-alpha.0
-	k8s.io/apiextensions-apiserver v0.35.0-alpha.0
-	k8s.io/apimachinery v0.35.0-alpha.0
-	k8s.io/client-go v0.35.0-alpha.0
-	k8s.io/cloud-provider v0.34.0
-	k8s.io/component-base v0.35.0-alpha.0
-	k8s.io/component-helpers v0.34.0
-	k8s.io/csi-translation-lib v0.34.0
+	k8s.io/api v0.34.1
+	k8s.io/apiextensions-apiserver v0.34.1
+	k8s.io/apimachinery v0.34.1
+	k8s.io/client-go v0.34.1
+	k8s.io/cloud-provider v0.34.1
+	k8s.io/component-base v0.34.1
+	k8s.io/component-helpers v0.34.1
+	k8s.io/csi-translation-lib v0.34.1
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
 	sigs.k8s.io/controller-runtime v0.22.1
