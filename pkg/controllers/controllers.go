@@ -47,6 +47,7 @@ import (
 	nodeclaimhydration "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/hydration"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/podevents"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
@@ -68,7 +69,9 @@ func NewControllers(
 	kubeClient client.Client,
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
+	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
+	instanceTypeStore *nodeoverlay.InstanceTypeStore,
 ) []controller.Controller {
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
@@ -134,6 +137,10 @@ func NewControllers(
 	if options.FromContext(ctx).FeatureGates.StaticCapacity {
 		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock))
 		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock))
+	}
+
+	if options.FromContext(ctx).FeatureGates.NodeOverlay {
+		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
 	}
 
 	return controllers

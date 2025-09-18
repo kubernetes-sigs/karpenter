@@ -565,37 +565,86 @@ var _ = Describe("Resources", func() {
 				})
 			})
 		})
-	})
-	Context("Resource Merging", func() {
-		It("should merge resource limits into requests if no request exists for the given container", func() {
-			container := v1.Container{
-				Resources: v1.ResourceRequirements{
-					Limits: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("1Gi"),
+		Context("Pod Level Resources", func() {
+			It("should calculate resource requests when the pod level resources is specified", func() {
+				pod := test.Pod(test.PodOptions{
+					PodResourceRequirements: v1.ResourceRequirements{
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("4"), v1.ResourceMemory: resource.MustParse("4Gi")},
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
 					},
-				},
-			}
-			requests := resources.MergeResourceLimitsIntoRequests(container)
-			ExpectResources(requests, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("2"),
-				v1.ResourceMemory: resource.MustParse("1Gi"),
+					ResourceRequirements: v1.ResourceRequirements{
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("3"), v1.ResourceMemory: resource.MustParse("3Gi")},
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+					},
+				})
+				podResources := resources.Ceiling(pod)
+				ExpectResources(podResources.Requests, v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("2"),
+					v1.ResourceMemory: resource.MustParse("2Gi"),
+				})
+				ExpectResources(podResources.Limits, v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("4"),
+					v1.ResourceMemory: resource.MustParse("4Gi"),
+				})
 			})
-		})
-		It("should merge resource limits into requests if no request exists for the given sidecarContainer", func() {
-			container := v1.Container{
-				RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
-				Resources: v1.ResourceRequirements{
-					Limits: v1.ResourceList{
-						v1.ResourceCPU:    resource.MustParse("2"),
-						v1.ResourceMemory: resource.MustParse("1Gi"),
+			It("should calculate resource requests when only the pod level resources request is specified", func() {
+				pod := test.Pod(test.PodOptions{
+					PodResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("2"), v1.ResourceMemory: resource.MustParse("2Gi")},
 					},
-				},
-			}
-			requests := resources.MergeResourceLimitsIntoRequests(container)
-			ExpectResources(requests, v1.ResourceList{
-				v1.ResourceCPU:    resource.MustParse("2"),
-				v1.ResourceMemory: resource.MustParse("1Gi"),
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+					},
+					InitContainers: []v1.Container{
+						{
+							RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+								Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+							},
+						},
+					},
+				})
+				podResources := resources.Ceiling(pod)
+				ExpectResources(podResources.Requests, v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("2"),
+					v1.ResourceMemory: resource.MustParse("2Gi"),
+				})
+				ExpectResources(podResources.Limits, v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("2"),
+					v1.ResourceMemory: resource.MustParse("2Gi"),
+				})
+			})
+			It("should calculate resource requests when the pod level resources requests is defaulted from limits", func() {
+				pod := test.Pod(test.PodOptions{
+					PodResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("10Gi")}, // simulate the API server’s defaulting from limits
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("10"), v1.ResourceMemory: resource.MustParse("10Gi")},
+					},
+					ResourceRequirements: v1.ResourceRequirements{
+						Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+						Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+					},
+					InitContainers: []v1.Container{
+						{
+							RestartPolicy: lo.ToPtr(v1.ContainerRestartPolicyAlways),
+							Resources: v1.ResourceRequirements{
+								Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+								Limits:   v1.ResourceList{v1.ResourceCPU: resource.MustParse("1"), v1.ResourceMemory: resource.MustParse("1Gi")},
+							},
+						},
+					},
+				})
+				podResources := resources.Ceiling(pod)
+				ExpectResources(podResources.Requests, v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("10"),
+					v1.ResourceMemory: resource.MustParse("10Gi"),
+				})
+				ExpectResources(podResources.Limits, v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("10"),
+					v1.ResourceMemory: resource.MustParse("10Gi"),
+				})
 			})
 		})
 	})
