@@ -10,7 +10,7 @@ This design introduces a **Karpenter DRA KWOK Driver** - a mock DRA driver that 
 2. **Test creates DRA pod** referencing the ResourceClaim
 3. **Karpenter provisions KWOK node** in response to unschedulable pod
 4. **Node registration triggers ResourceSlice creation** based on:
-   - **Case 1:** Check for matching NodeOverlay with DRA annotations
+   - **Case 1:** Check for matching NodeOverlay with embedded ResourceSlice objects (future enhancement)
    - **Case 2:** Use ConfigMap mappings if no NodeOverlay matches
 5. **Kubernetes scheduler discovers ResourceSlices** and binds pod to node
 6. **Pod successfully schedules** to the node with available DRA resources
@@ -20,40 +20,52 @@ This design introduces a **Karpenter DRA KWOK Driver** - a mock DRA driver that 
 ## Implementation
 
 ### Case 1: Node Overlay Integration
-Tests **Karpenter's integrated DRA scheduling** where DRA resources are known during the scheduling simulation. NodeOverlay informs Karpenter about expected DRA resources during scheduling, Provisioner includes DRA resources in NodeClaim templates, and Karpenter provisions nodes knowing they will have specific DRA devices. The driver then creates ResourceSlices matching what Karpenter expected.
+Tests **Karpenter's integrated DRA scheduling** where DRA device counts are known during the scheduling simulation via extended resources. NodeOverlay informs Karpenter about expected DRA device capacity during scheduling through extended resources, Provisioner includes these extended resources in NodeClaim templates, and Karpenter provisions nodes knowing they will have specific device counts. The driver then creates ResourceSlices with detailed device information matching the NodeOverlay's extended resource count.
 
-**Example Node Overlay with DRA** (using existing API):
+**Example Node Overlay with DRA** (future API extension):
 ```yaml
 apiVersion: karpenter.sh/v1alpha1
 kind: NodeOverlay
 metadata:
   name: gpu-dra-config
-  annotations:
-    dra.karpenter.sh/device-config: |
-      driver: "fake-gpu.kwok.x-k8s.io"
-      devices:
-      - name: "nvidia-h100"
-        count: 8
-        attributes:
-          memory: "80Gi"
-          compute-capability: "9.0"
-          vendor: "nvidia"
 spec:
+  weight: 10  # Higher weight for conflict resolution
   requirements:
   - key: node.kubernetes.io/instance-type
     operator: In
     values: ["g5.48xlarge"]
   capacity:
-    nvidia.com/gpu: "8"  # DRA device capacity
+    fake-gpu.kwok.x-k8s.io/device: "8"  # Custom extended resource for DRA devices
+  # TODO: Extend NodeOverlay API to embed ResourceSlice templates
+  resourceSlices:  # FUTURE: Embedded ResourceSlice objects (not yet implemented)
+  - apiVersion: resource.k8s.io/v1alpha3
+    kind: ResourceSlice
+    spec:
+      # nodeName will be filled in by driver when node is created
+      driver: "fake-gpu.kwok.x-k8s.io"
+      devices:
+      - name: "nvidia-h100-0"
+        driver: "fake-gpu.kwok.x-k8s.io"
+        attributes:
+          memory: "80Gi"
+          compute-capability: "9.0"
+          vendor: "nvidia"
+      - name: "nvidia-h100-1"
+        driver: "fake-gpu.kwok.x-k8s.io"
+        attributes:
+          memory: "80Gi"
+          compute-capability: "9.0"
+          vendor: "nvidia"
+      # ... (6 more devices for total of 8)
 ```
 
 **How it works**:
-1. **Driver discovers NodeOverlay resources**: Watches for NodeOverlay resources with DRA annotations and capacity
-2. **Node Overlay defines DRA intent**: Uses `capacity` for device resources and `annotations` for device metadata
-3. **Karpenter scheduling integration**: Provisioner includes DRA resources in scheduling simulation via NodeOverlay
-4. **KWOK node creation triggers driver**: When Karpenter provisions a KWOK node, driver finds matching NodeOverlay and extracts DRA configuration
-5. **Fake ResourceSlice creation**: Acts as mock DRA driver for the KWOK node, creating fake ResourceSlices for testing
-6. **Test validation**: Validates that Karpenter's DRA-aware scheduling worked correctly with fake GPU resources
+1. **Test author defines NodeOverlay configuration**: "g5.48xlarge KWOK nodes should have 8x fake H100 GPUs" via ResourceSlices
+2. **Driver watches for KWOK nodes**: When Karpenter creates a KWOK node with `instance-type: g5.48xlarge`
+3. **NodeOverlay match found**: Driver checks for NodeOverlay with embedded ResourceSlice objects, finds matching configuration
+4. **Driver creates ResourceSlice**: Acts as fake DRA driver using embedded ResourceSlice objects from NodeOverlay
+5. **Scheduler sees configured devices**: ResourceSlices with fake devices become available for DRA pod scheduling
+6. **Test validation**: Validates that the driver correctly provides DRA resources and enables successful pod scheduling
 
 ### Case 2: ConfigMap Fallback Configuration
 Tests **DRA resource provisioning when no NodeOverlay configuration is found**. When the driver cannot find matching NodeOverlay resources with DRA annotations for a KWOK node, it falls back to ConfigMap-based device configuration. This validates that the driver can handle nodes that weren't pre-configured with DRA resources in NodeOverlay and ensures consistent DRA device availability across different provisioning scenarios.
@@ -97,12 +109,12 @@ data:
 ```
 
 **How it works**:
-1. **Test author defines manual fallback mappings**: "g5.48xlarge KWOK nodes should have 8x fake H100 GPUs when no NodeOverlay is found"
+1. **Test author defines ConfigMap configuration**: "g5.48xlarge KWOK nodes should have 8x fake H100 GPUs when no NodeOverlay is found"
 2. **Driver watches for KWOK nodes**: When Karpenter creates a KWOK node with `instance-type: g5.48xlarge`
-3. **No NodeOverlay match found**: Driver checks for NodeOverlay with DRA annotations, finds none, falls back to ConfigMap
-4. **Karpenter KWOK DRA driver creates ResourceSlice**: Acts as fake DRA driver using ConfigMap configuration
+3. **No NodeOverlay match found**: Driver checks for NodeOverlay with embedded ResourceSlice objects, finds none, falls back to ConfigMap
+4. **Driver creates ResourceSlice**: Acts as fake DRA driver using ConfigMap configuration
 5. **Scheduler sees configured devices**: ResourceSlices with fake devices become available for DRA pod scheduling
-6. **Test validation**: Validates that the driver correctly provides DRA resources even without NodeOverlay configuration
+6. **Test validation**: Validates that the driver correctly provides DRA resources and enables successful pod scheduling
 
 ## Possible Directory Structure
 
