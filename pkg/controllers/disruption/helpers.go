@@ -233,21 +233,25 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
 	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
 
-	// We only consider nodes that we own and are initialized towards the total.
-	// If a node is launched/registered, but not initialized, pods aren't scheduled
-	// to the node, and these are treated as unhealthy until they're cleaned up.
-	// This prevents odd roundup cases with percentages where replacement nodes that
-	// aren't initialized could be counted towards the total, resulting in more disruptions
-	// to active nodes than desired, where Karpenter should wait for these nodes to be
-	// healthy before continuing.
-	// Additionally, don't consider nodeclaims that have the terminating condition. A nodeclaim should have
-	// the Terminating condition only when the node is drained and cloudprovider.Delete() was successful
-	// on the underlying cloud provider machine.
 	var nodes state.StateNodes
-	for n := range cluster.Nodes() {
-		if n.Managed() && n.Initialized() && !n.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
-			nodes = append(nodes, n.DeepCopy())
+	for node := range cluster.Nodes() {
+		// We only consider nodes that we own and are initialized towards the total.
+		// If a node is launched/registered, but not initialized, pods aren't scheduled
+		// to the node, and these are treated as unhealthy until they're cleaned up.
+		// This prevents odd roundup cases with percentages where replacement nodes that
+		// aren't initialized could be counted towards the total, resulting in more disruptions
+		// to active nodes than desired, where Karpenter should wait for these nodes to be
+		// healthy before continuing.
+		if !node.Managed() || !node.Initialized() {
+			continue
 		}
+		// Additionally, don't consider nodeclaims that have the terminating condition. A nodeclaim should have
+		// the Terminating condition only when the node is drained and cloudprovider.Delete() was successful
+		// on the underlying cloud provider machine.
+		if node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
+			continue
+		}
+		nodes = append(nodes, node.DeepCopy())
 	}
 
 	for _, node := range nodes {
