@@ -113,7 +113,6 @@ spec:
                           reasons:
                             description: |-
                               Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
-                              Otherwise, this will apply to each reason defined.
                               allowed reasons are Underutilized, Empty, and Drifted.
                             items:
                               description: DisruptionReason defines valid reasons for disruption budgets.
@@ -166,6 +165,41 @@ spec:
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
                   description: Limits define a set of bounds for provisioning capacity.
+                  type: object
+                repair:
+                  description: Repair defines the repair policies for nodes in this NodePool
+                  properties:
+                    defaultTolerationDuration:
+                      description: |-
+                        DefaultTolerationDuration is the default duration to wait before repairing
+                        nodes for any condition not explicitly configured in Policies.
+                        If not specified, uses the CloudProvider's default durations.
+                      pattern: ^([0-9]+(s|m|h))+$
+                      type: string
+                    policies:
+                      description: |-
+                        Policies defines the repair policies for different node conditions.
+                        These policies override the default tolerationDuration from the CloudProvider.
+                      items:
+                        properties:
+                          conditionType:
+                            description: ConditionType specifies the node condition to monitor
+                            type: string
+                          status:
+                            description: Status specifies the condition status that indicates unhealthy state
+                            type: string
+                          toleration:
+                            description: |-
+                              Toleration is the duration to wait before attempting to terminate
+                              nodes that match this repair policy. If not specified, defaults to the
+                              cloud provider's recommended duration for this condition type.
+                            pattern: ^([0-9]+(s|m|h))+$
+                            type: string
+                        required:
+                          - conditionType
+                          - status
+                        type: object
+                      type: array
                   type: object
                 template:
                   description: |-

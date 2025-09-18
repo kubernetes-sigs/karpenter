@@ -18,6 +18,7 @@ package health_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -112,6 +113,39 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
+		It("should delete an unhealthy node and record metrics", func() {
+			unhealthyCondition := corev1.NodeCondition{
+				Type:               "KubeletReady",
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+			}
+			node.Status.Conditions = append(node.Status.Conditions, unhealthyCondition)
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{{
+				ConditionType:      unhealthyCondition.Type,
+				ConditionStatus:    unhealthyCondition.Status,
+				TolerationDuration: 30 * time.Minute,
+			}}
+			fakeClock.Step(60 * time.Minute)
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+
+			ExpectObjectReconciled(ctx, env.Client, healthController, node)
+
+			nc := ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nc.DeletionTimestamp).ToNot(BeNil())
+
+			// Check metrics
+			ExpectMetricCounterValue(metrics.NodeClaimsDisruptedTotal, 1, map[string]string{
+				metrics.ReasonLabel:       metrics.UnhealthyReason,
+				metrics.NodePoolLabel:     nodePool.Name,
+				metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
+			})
+			ExpectMetricCounterValue(health.NodeClaimsUnhealthyDisruptedTotal, 1, map[string]string{
+				health.Condition:          pretty.ToSnakeCase(string(unhealthyCondition.Type)),
+				metrics.NodePoolLabel:     nodePool.Name,
+				metrics.CapacityTypeLabel: node.Labels[v1.CapacityTypeLabelKey],
+				health.ImageID:            nodeClaim.Status.ImageID,
+			})
+		})
 		It("should not delete node when unhealthy type does not match cloud provider passed in value", func() {
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:               "FakeHealthyNode",
@@ -160,7 +194,7 @@ var _ = Describe("Node Health", func() {
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -176,7 +210,7 @@ var _ = Describe("Node Health", func() {
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -193,7 +227,7 @@ var _ = Describe("Node Health", func() {
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
+				LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
 			})
 			fakeClock.Step(60 * time.Minute)
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
@@ -203,49 +237,83 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, terminationTime))
 		})
-		It("should return the requeue interval for the condition closest to its terminationDuration", func() {
+		It("should return the requeue interval for the condition closest to its terminationDuration using NodePool configuration", func() {
+			// Configure CloudProvider with specific repair policies
 			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
-				{
-					ConditionType:      "BadNode",
-					ConditionStatus:    corev1.ConditionFalse,
-					TolerationDuration: 60 * time.Minute,
-				},
 				{
 					ConditionType:      "ValidUnhealthyCondition",
 					ConditionStatus:    corev1.ConditionFalse,
 					TolerationDuration: 30 * time.Minute,
 				},
+				{
+					ConditionType:      "BadNode",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 45 * time.Minute,
+				},
 			}
-			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
-				Type:   "ValidUnhealthyCondition",
-				Status: corev1.ConditionFalse,
-				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
-			}, corev1.NodeCondition{
-				Type:   "BadNode",
-				Status: corev1.ConditionFalse,
-				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
-			})
+
+			// Configure NodePool with the same specific repair policies
+			nodePool.Spec.Repair = &v1.RepairSpec{
+				DefaultTolerationDuration: lo.ToPtr(metav1.Duration{Duration: 45 * time.Minute}),
+				Policies: []v1.RepairPolicy{
+					{
+						ConditionType: "ValidUnhealthyCondition",
+						Status:        corev1.ConditionFalse,
+						Toleration:    lo.ToPtr(metav1.Duration{Duration: 30 * time.Minute}),
+					},
+				},
+			}
+
+			// Create node conditions at the current fakeClock time
+			currentTime := fakeClock.Now()
+			fmt.Println("=== Test Debug Info ===")
+			fmt.Printf("Current time: %s\n", currentTime)
+
+			// Add only the ValidUnhealthyCondition with the shorter toleration duration
+			node.Status.Conditions = append(node.Status.Conditions,
+				corev1.NodeCondition{
+					Type:               "ValidUnhealthyCondition",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: currentTime},
+				},
+			)
+
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
+			// Advance 27 minutes - should be 3 minutes from ValidUnhealthyCondition triggering
 			fakeClock.Step(27 * time.Minute)
+			fmt.Printf("After step, time is: %s\n", fakeClock.Now())
+			fmt.Printf("Expected time until termination: %s\n", time.Minute*3)
 
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
+			fmt.Printf("Actual RequeueAfter: %s\n", result.RequeueAfter)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
 		})
 		It("should return the requeue interval for the time between now and when the nodeClaim termination time", func() {
+			// Make sure the cloud provider has the right repair policies
+			cloudProvider.RepairPolicy = []cloudprovider.RepairPolicy{
+				{
+					ConditionType:      "BadNode",
+					ConditionStatus:    corev1.ConditionFalse,
+					TolerationDuration: 30 * time.Minute,
+				},
+			}
+
+			// Create node condition at the current fakeClock time
+			currentTime := fakeClock.Now()
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
 				// We expect the last transition for HealthyNode condition to wait 30 minutes
-				LastTransitionTime: metav1.Time{Time: time.Now()},
+				LastTransitionTime: metav1.Time{Time: currentTime},
 			})
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
 
+			// Step forward 27 minutes, leaving 3 minutes until termination
 			fakeClock.Step(27 * time.Minute)
 
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
+			// The requeue time should be 3 minutes (180 seconds)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
 		})
 	})

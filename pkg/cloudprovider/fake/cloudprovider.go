@@ -296,8 +296,16 @@ func (c *CloudProvider) IsDrifted(context.Context, *v1.NodeClaim) (cloudprovider
 	return c.Drifted, nil
 }
 
-func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
-	return c.RepairPolicy
+func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairStatement {
+	// Convert RepairPolicy to RepairStatement for backward compatibility
+	statements := make([]cloudprovider.RepairStatement, len(c.RepairPolicy))
+	for i, policy := range c.RepairPolicy {
+		statements[i] = cloudprovider.RepairStatement{
+			ConditionType:   policy.ConditionType,
+			ConditionStatus: policy.ConditionStatus,
+		}
+	}
+	return statements
 }
 
 // Name returns the CloudProvider implementation name.

@@ -156,18 +156,16 @@ func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 	return []status.Object{&v1alpha1.KWOKNodeClass{}}
 }
 
-func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
-	return []cloudprovider.RepairPolicy{
+func (c CloudProvider) RepairPolicies() []cloudprovider.RepairStatement {
+	return []cloudprovider.RepairStatement{
 		// Supported Kubelet Node Conditions
 		{
-			ConditionType:      corev1.NodeReady,
-			ConditionStatus:    corev1.ConditionFalse,
-			TolerationDuration: 10 * time.Minute,
+			ConditionType:   corev1.NodeReady,
+			ConditionStatus: corev1.ConditionFalse,
 		},
 		{
-			ConditionType:      corev1.NodeReady,
-			ConditionStatus:    corev1.ConditionUnknown,
-			TolerationDuration: 10 * time.Minute,
+			ConditionType:   corev1.NodeReady,
+			ConditionStatus: corev1.ConditionUnknown,
 		},
 	}
 }
