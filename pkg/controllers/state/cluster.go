@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
+	"sigs.k8s.io/karpenter/pkg/utils/nodepool/registrationhealth"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -58,12 +59,13 @@ type Cluster struct {
 	hasSynced     atomic.Bool
 
 	mu                        sync.RWMutex
-	nodes                     map[string]*StateNode           // provider id -> cached node
-	bindings                  map[types.NamespacedName]string // pod namespaced named -> node name
-	nodeNameToProviderID      map[string]string               // node name -> provider id
-	nodeClaimNameToProviderID map[string]string               // node claim name -> provider id
-	nodePoolResources         map[string]corev1.ResourceList  // node pool name -> resource list
-	daemonSetPods             sync.Map                        // daemonSet -> existing pod
+	nodes                     map[string]*StateNode                                 // provider id -> cached node
+	bindings                  map[types.NamespacedName]string                       // pod namespaced named -> node name
+	nodeNameToProviderID      map[string]string                                     // node name -> provider id
+	nodeClaimNameToProviderID map[string]string                                     // node claim name -> provider id
+	nodePoolResources         map[string]corev1.ResourceList                        // node pool name -> resource list
+	nodePoolToAZlaunched      map[string]*registrationhealth.NodeRegistrationBuffer // nodePoolUID -> recent launch results
+	daemonSetPods             sync.Map                                              // daemonSet -> existing pod
 
 	NodePoolState *NodePoolState
 
@@ -98,6 +100,7 @@ func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovid
 		nodeNameToProviderID:      map[string]string{},
 		nodeClaimNameToProviderID: map[string]string{},
 		nodePoolResources:         map[string]corev1.ResourceList{},
+		nodePoolToAZlaunched:      map[string]*registrationhealth.NodeRegistrationBuffer{},
 
 		NodePoolState: NewNodePoolState(),
 
@@ -476,6 +479,15 @@ func (c *Cluster) UpdatePodToNodeClaimMapping(ncPods map[string][]*corev1.Pod) {
 			c.podToNodeClaim.Store(client.ObjectKeyFromObject(p), ncName)
 		}
 	}
+}
+
+func (c *Cluster) NodePoolNodeRegistrationBuffer(ctx context.Context, np string) *registrationhealth.NodeRegistrationBuffer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.nodePoolToAZlaunched[np]; !ok {
+		c.nodePoolToAZlaunched[np] = registrationhealth.New()
+	}
+	return c.nodePoolToAZlaunched[np]
 }
 
 // PodSchedulingDecisionTime returns when Karpenter first decided if a pod could schedule a pod in scheduling simulations.

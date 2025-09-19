@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -65,6 +66,7 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	recorder      events.Recorder
+	cluster       *state.Cluster
 
 	launch         *Launch
 	registration   *Registration
@@ -72,16 +74,17 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, cluster *state.Cluster) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		recorder:      recorder,
+		cluster:       cluster,
 
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Hour, time.Minute), recorder: recorder},
-		registration:   &Registration{kubeClient: kubeClient, recorder: recorder},
+		registration:   &Registration{kubeClient: kubeClient, recorder: recorder, cluster: cluster},
 		initialization: &Initialization{kubeClient: kubeClient},
-		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
+		liveness:       &Liveness{clock: clk, kubeClient: kubeClient, cluster: cluster},
 	}
 }
 
