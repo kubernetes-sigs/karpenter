@@ -58,6 +58,7 @@ func NodePool(overrides ...v1.NodePool) *v1.NodePool {
 	if override.Status.Conditions == nil {
 		override.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
 		override.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+		override.StatusConditions().SetUnknown(v1.ConditionTypeNodeRegistrationHealthy)
 	}
 	np := &v1.NodePool{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),

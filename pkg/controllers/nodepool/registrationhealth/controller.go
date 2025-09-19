@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -41,16 +42,19 @@ import (
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	cluster       *state.Cluster
 }
 
 // NewController will create a controller to reset NodePool's registration health when there is an update to NodePool/NodeClass spec
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
+		cluster:       cluster,
 	}
 }
 
+//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepool.registrationhealth")
 
@@ -64,12 +68,27 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	}
 	stored := nodePool.DeepCopy()
 
-	// If NodeClass/NodePool have been updated then NodeRegistrationHealthy = Unknown
+	// If Karpenter restarts i.e. if the buffer for the nodePool is empty and the NodeRegistrationHealthy status condition
+	// is set to either true/false then we pre-hydrate the buffer with the existing state of the status condition
+
+	if c.cluster.NodePoolNodeRegistrationBuffer(ctx, string(nodePool.UID)).IsHealthy() == 0 {
+		if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsTrue() {
+			c.cluster.NodePoolNodeRegistrationBuffer(ctx, string(nodePool.UID)).AddHealth(true)
+		}
+		if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
+			c.cluster.NodePoolNodeRegistrationBuffer(ctx, string(nodePool.UID)).AddHealth(false)
+			c.cluster.NodePoolNodeRegistrationBuffer(ctx, string(nodePool.UID)).AddHealth(false)
+		}
+	}
+
+	// If NodeClass/NodePool have been updated then NodeRegistrationHealthy = Unknown and reset the buffer
 	if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy) == nil ||
 		nodePool.Status.NodeClassObservedGeneration != nodeClass.GetGeneration() ||
 		nodePool.Generation != nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).ObservedGeneration {
 		nodePool.StatusConditions().SetUnknown(v1.ConditionTypeNodeRegistrationHealthy)
+		c.cluster.NodePoolNodeRegistrationBuffer(ctx, string(nodePool.UID)).Reset()
 	}
+
 	nodePool.Status.NodeClassObservedGeneration = nodeClass.GetGeneration()
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
