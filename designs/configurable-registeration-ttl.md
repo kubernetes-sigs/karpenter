@@ -28,22 +28,13 @@ Lastly, we will move registrationTTL to fully be in NodePool CRD and default it 
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
-  annotations:
-    karpenter.sh/nodepool-hash: "13817533045586861872"
-    karpenter.sh/nodepool-hash-version: v3
-  creationTimestamp: "2025-02-12T17:59:44Z"
   name: example-nodepool
 spec:
-  disruption: {}
-    consolidateAfter: 5m
-    consolidationPolicy: WhenEmptyOrUnderutilized
-  limits:
-    nodes: "800"
   template:
     metadata: {}
     spec:
       expireAfter: 288h0m0s
-      registrationTTL: 20m # New variable
+      maxNodeProvisionTime: 20m # New variable
 ```
 
 #### Concerns
