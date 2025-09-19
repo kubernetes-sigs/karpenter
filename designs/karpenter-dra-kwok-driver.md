@@ -68,7 +68,7 @@ spec:
 6. **Test validation**: Validates that the driver correctly provides DRA resources and enables successful pod scheduling
 
 ### Case 2: ConfigMap Fallback Configuration
-Tests **DRA resource provisioning when no NodeOverlay configuration is found**. When the driver cannot find matching NodeOverlay resources with DRA annotations for a KWOK node, it falls back to ConfigMap-based device configuration. This validates that the driver can handle nodes that weren't pre-configured with DRA resources in NodeOverlay and ensures consistent DRA device availability across different provisioning scenarios.
+Tests **DRA resource provisioning when no NodeOverlay configuration is found** - simulating scenarios where ResourceSlices exist on nodes but weren't defined through NodeOverlay configuration. This addresses when other out of band components manage nodes, partial NodeOverlay coverage (only some instance types configured), and 3rd party DRA driver integration (GPU operators working independently). The driver falls back to ConfigMap-based device configuration when no matching NodeOverlay is found, creating ResourceSlices that Karpenter must then discover and incorporate into future scheduling decisions. This ensures we correctly test that Karpenter successfully discovers ResourceSlices and schedules against them, even if they weren't defined on any NodeOverlays.
 
 ```yaml
 apiVersion: v1
@@ -116,20 +116,25 @@ data:
 5. **Scheduler sees configured devices**: ResourceSlices with fake devices become available for DRA pod scheduling
 6. **Test validation**: Validates that the driver correctly provides DRA resources and enables successful pod scheduling
 
-## Possible Directory Structure
-
+## Directory Structure
 ```
 karpenter/
-├── pkg/
-│   └── controllers/
-│       ├── controllers.go                # MODIFIED: Register DRAKWOK driver
-│       └── dra/                          # NEW: DRA controller package
-│           ├── dra_kwok_driver.go        # NEW: Main DRA driver logic
-│           ├── node_overlay.go           # NEW: Node Overlay parsing (Case 1)
-│           ├── config.go                 # NEW: ConfigMap parsing (Case 2)
-│           └── resourceslice.go          # NEW: ResourceSlice operations
-│
-└── test/suites/
-    └── integration/
-        └── dra_kwok_integration_test.go  # Our DRA KWOK integration tests
+├── dra-kwok-driver/                   
+│   ├── main.go                        # Driver entry point                     
+│   └── pkg/
+│       ├── controller/
+│       │   ├── controller.go          # Main controller logic
+│       │   ├── nodeoverlay.go         # NodeOverlay parsing (Case 1)
+│       │   ├── configmap.go           # ConfigMap parsing (Case 2)
+│       │   └── resourceslice.go       # ResourceSlice operations
+│       └── config/
+│           └── types.go               # Configuration types
+└── test/suites/integration/
+    └── dra_kwok_test.go               # Our DRA KWOK integration tests
 ```
+1. main.go starts the controller
+2. controller.go receives KWOK node events
+3. nodeoverlay.go tries to find matching NodeOverlay (Case 1)
+4. If no match: configmap.go provides fallback config (Case 2)  
+5. resourceslice.go creates/updates/deletes the ResourceSlices
+6. types.go provides the data structures throughout
