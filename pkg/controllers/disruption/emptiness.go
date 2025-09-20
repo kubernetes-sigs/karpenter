@@ -40,6 +40,9 @@ func NewEmptiness(c consolidation, opts ...option.Function[MethodOptions]) *Empt
 
 // ShouldDisrupt is a predicate used to filter candidates
 func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
+	if c.OwnedByStaticNodePool() {
+		return false
+	}
 	// If consolidation is disabled, don't do anything. This emptiness should run for both WhenEmpty and WhenEmptyOrUnderutilized
 	if c.NodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
 		e.recorder.Publish(disruptionevents.Unconsolidatable(c.Node, c.NodeClaim, fmt.Sprintf("NodePool %q has consolidation disabled", c.NodePool.Name))...)
@@ -52,9 +55,9 @@ func (e *Emptiness) ShouldDisrupt(_ context.Context, c *Candidate) bool {
 // ComputeCommand generates a disruption command given candidates
 //
 //nolint:gocyclo
-func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) (Command, error) {
+func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping map[string]int, candidates ...*Candidate) ([]Command, error) {
 	if e.IsConsolidated() {
-		return Command{}, nil
+		return []Command{}, nil
 	}
 	candidates = e.sortCandidates(candidates)
 
@@ -82,7 +85,7 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 		if !constrainedByBudgets {
 			e.markConsolidated()
 		}
-		return Command{}, nil
+		return []Command{}, nil
 	}
 
 	cmd := Command{
@@ -92,12 +95,11 @@ func (e *Emptiness) ComputeCommand(ctx context.Context, disruptionBudgetMapping 
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, nil
+			return []Command{}, nil
 		}
-		return Command{}, err
+		return []Command{}, err
 	}
-
-	return validCmd, nil
+	return []Command{validCmd}, nil
 }
 
 func (e *Emptiness) Reason() v1.DisruptionReason {
