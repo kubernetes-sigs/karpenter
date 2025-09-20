@@ -598,6 +598,12 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		its := s.nodeClaimTemplates[i].InstanceTypeOptions
 		// if limits have been applied to the nodepool, ensure we filter instance types to avoid violating those limits
 		if remaining, ok := s.remainingResources[s.nodeClaimTemplates[i].NodePoolName]; ok {
+			nodesRemaining, ok := remaining[resources.Node]
+			// if the field doesn't exist, there is no limit for nodes on this nodepool
+			if ok && nodesRemaining.IsZero() {
+				errs[i] = serrors.Wrap(fmt.Errorf("all available nodes have been exhausted for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))
+				return true
+			}
 			its = filterByRemainingResources(its, remaining)
 			if len(its) == 0 {
 				errs[i] = serrors.Wrap(fmt.Errorf("all available instance types exceed limits for nodepool"), "NodePool", klog.KRef("", s.nodeClaimTemplates[i].NodePoolName))

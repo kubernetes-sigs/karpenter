@@ -27,6 +27,7 @@ import (
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -349,20 +350,25 @@ func (in *StateNode) Initialized() bool {
 }
 
 func (in *StateNode) Capacity() corev1.ResourceList {
+	var capacity corev1.ResourceList
 	if !in.Initialized() && in.NodeClaim != nil {
 		// Override any zero quantity values in the node status
 		if in.Node != nil {
-			ret := lo.Assign(in.Node.Status.Capacity)
+			capacity = lo.Assign(in.Node.Status.Capacity)
 			for resourceName, quantity := range in.NodeClaim.Status.Capacity {
-				if resources.IsZero(ret[resourceName]) {
-					ret[resourceName] = quantity
+				if resources.IsZero(capacity[resourceName]) {
+					capacity[resourceName] = quantity
 				}
 			}
-			return ret
+		} else {
+			capacity = lo.Assign(in.NodeClaim.Status.Capacity)
 		}
-		return in.NodeClaim.Status.Capacity
+	} else {
+		capacity = lo.Assign(in.Node.Status.Capacity)
 	}
-	return in.Node.Status.Capacity
+
+	capacity[resources.Node] = resource.MustParse("1")
+	return capacity
 }
 
 func (in *StateNode) Allocatable() corev1.ResourceList {
