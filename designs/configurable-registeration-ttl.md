@@ -9,7 +9,8 @@ Karpenter currently hardcodes [registration TTL](https://github.com/kubernetes-s
 This is problematic because some users have nodes that take longer that time to register. As mentioned in the issue, nodes that run GPU can often take > 15 minutes to start up. 
 Use cases:
 - GPU driver installation during node bootstrap
-- Windows AMIs security tooling installation 
+- Windows AMIs security tooling installation
+
 
 ## Non-Goal
 Setting cloud provider defaults are not within the scope of this proposal/ RFC
@@ -57,3 +58,30 @@ We will keep a default for all nodes at 15 minute TTL however in the cases that 
 #### Leveraging NodeOverlay 
 
 We could enable this feature via Node Overlay. However the issue is it isn't always the case that a instance type specifically is causing issues but rather a instance type running a specific AMI. This makes it difficult to use NodeOverlay to change the maxNodeProvisionTime. 
+
+## Future Investigation/ Discussion 
+### Cluster level flag
+
+Cluster level flag: Cluster Autoscaler has this, and it wasn't enough, users ended up adding a nodepool level configurable flag.
+
+Nodepool level flag: As different nodepools have different expectations and requirements around registration, nodepool level makes more sense and avoids forcing one-size-fits-all behavior.
+
+We should consider allowing both a Cluster level flag with nodepool override. This would allow Cloud providers to override max provision time. Note that at this time we don't have a good interface for Cloud provider to set / modify these kind of behaviors.
+
+From Bryce:
+```
+(I know you mentioned cloudprovider override out of scope, but i would mention that as the fourth option, with the fifth being node overlay)
+
+User stories (why this is needed)
+Some notes from my experience
+
+As different nodepools have different expectations and requirements around registration. I have seen customers set this value to 45m and to 5m, both extending provisioning time to give long P99 requests longer to finish without abandoning the call, and then separately, abandoning requests that are slower than we see on average and re-rolling. These are two things we could include as user stories for why this is needed, outside of standard GPU provisioning + bootstrapping times.
+
+Also, different cloudproviders have different performance expectations. 15 minutes seems reasonable for most instance types + images for Azure + AWS, but maybe there are other cloudproviders that have different performance expectations.
+
+Sometimes the node registration failures come from a source outside of Karpenter’s control. For example the kubelet is getting throttled by the apiserver, due to APIServer QPS. Deleting the underlying VM will not make the scale up goal faster in this case, it does the opposite. Some customers are willing to pay for a bigger apiserver, some customers don't have that option. Either way, it makes sense that we would want to prevent this VM GC if it’s not the VM provisioning that’s the bottleneck in registration, but rather the apiserver. Deleting and recreating adds additional pressure and churn to the apiserver that's already overloaded. This is yet another reason to let that registration be configurable by the user.
+```
+
+
+
+
