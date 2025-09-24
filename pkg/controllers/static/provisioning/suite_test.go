@@ -400,6 +400,11 @@ var _ = Describe("Static Provisioning Controller", func() {
 			nodePool.Spec.Replicas = lo.ToPtr(int64(15))
 			ExpectApplied(ctx, env.Client, nodePool)
 
+			// Update the state with Created NodeClaims
+			for _, nodeClaim := range nodeClaims.Items {
+				ExpectNodeClaimDeployedAndStateUpdated(ctx, env.Client, cluster, cloudProvider, &nodeClaim)
+			}
+
 			result = ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
 
@@ -516,7 +521,42 @@ var _ = Describe("Static Provisioning Controller", func() {
 				var list v1.NodeClaimList
 				_ = env.Client.List(ctx, &list)
 				return len(list.Items)
-			}).Should(BeNumerically("<=", 10))
+			}, 5*time.Second).Should(BeNumerically("<=", 10))
+		})
+		It("should wait for cluster to be synced and not over provision", func() {
+			nodePool := test.StaticNodePool()
+			nodePool.Spec.Limits = v1.Limits{
+				corev1.ResourceName("nodes"): resource.MustParse("10"),
+			}
+			nodePool.Spec.Replicas = lo.ToPtr(int64(5))
+			ExpectApplied(ctx, env.Client, nodePool)
+
+			// Run many reconciles in parallel
+			n := 50
+			errs := make(chan error, n)
+			for i := 0; i < n; i++ {
+				go func() {
+					defer GinkgoRecover()
+					if i%4 == 0 {
+						cluster.Reset()
+					}
+					_, e := controller.Reconcile(ctx, nodePool)
+					errs <- e
+				}()
+			}
+			for i := 0; i < n; i++ {
+				Expect(<-errs).ToNot(HaveOccurred())
+			}
+
+			// we should never observe > limit NodeClaims.
+			Consistently(func() int {
+				var list v1.NodeClaimList
+				_ = env.Client.List(ctx, &list)
+				return len(list.Items)
+			}, 5*time.Second).Should(BeNumerically("<=", 10))
+
+			// at the end we should have right counts in StateNodePool
+			ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
 		})
 
 	})

@@ -79,6 +79,8 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		return reconcile.Result{}, nil
 	}
 
+	// We dont have to wait for cluster sync as we cannot really have internal state representing more NodeClaims than actual
+	// During controller crashes we gradually populate our cluster/NodePoolState, as and when we populate we delete NC if we are over-provisioned
 	runningNodeClaims, _, _ := c.cluster.NodePoolState.GetNodeCount(np.Name)
 	desiredReplicas := lo.FromPtr(np.Spec.Replicas)
 	// To avoid race conditions between deprovisioning and the disruption controller,
