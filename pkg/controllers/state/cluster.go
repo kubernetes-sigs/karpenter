@@ -897,3 +897,8 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 		return
 	}
 }
+
+// HasSynced returns whether the cluster state has been synchronized at least once.
+func (c *Cluster) HasSynced() bool {
+	return c.hasSynced.Load()
+}
