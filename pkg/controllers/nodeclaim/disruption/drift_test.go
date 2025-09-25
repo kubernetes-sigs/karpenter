@@ -449,7 +449,7 @@ var _ = Describe("Drift", func() {
 					},
 				},
 			}
-			nodeClaim.ObjectMeta.Annotations[v1.NodePoolHashAnnotationKey] = nodePool.Hash()
+			nodeClaim.Annotations[v1.NodePoolHashAnnotationKey] = nodePool.Hash()
 		})
 		// We need to test each all the fields on the NodePool when we expect the field to be drifted
 		// This will also test that the NodePool fields can be hashed.
@@ -479,14 +479,14 @@ var _ = Describe("Drift", func() {
 			Entry("TerminationGracePeriod", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{TerminationGracePeriod: &metav1.Duration{Duration: 100 * time.Minute}}}}}),
 		)
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodePool", func() {
-			nodePool.ObjectMeta.Annotations = map[string]string{}
+			nodePool.Annotations = map[string]string{}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodeClaim", func() {
-			nodeClaim.ObjectMeta.Annotations = map[string]string{
+			nodeClaim.Annotations = map[string]string{
 				v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -495,11 +495,11 @@ var _ = Describe("Drift", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
 		It("should not return drifted if the NodeClaim's karpenter.sh/nodepool-hash-version annotation does not match the NodePool's", func() {
-			nodePool.ObjectMeta.Annotations = map[string]string{
+			nodePool.Annotations = map[string]string{
 				v1.NodePoolHashAnnotationKey:        "test-hash-1",
 				v1.NodePoolHashVersionAnnotationKey: "test-version-1",
 			}
-			nodeClaim.ObjectMeta.Annotations = map[string]string{
+			nodeClaim.Annotations = map[string]string{
 				v1.NodePoolHashAnnotationKey:        "test-hash-2",
 				v1.NodePoolHashVersionAnnotationKey: "test-version-2",
 			}
@@ -509,7 +509,7 @@ var _ = Describe("Drift", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
 		It("should not return drifted if karpenter.sh/nodepool-hash-version annotation is not present on the NodeClaim", func() {
-			nodeClaim.ObjectMeta.Annotations = map[string]string{
+			nodeClaim.Annotations = map[string]string{
 				v1.NodePoolHashAnnotationKey: "test-hash-111111111",
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
