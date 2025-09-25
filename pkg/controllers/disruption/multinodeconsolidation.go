@@ -54,32 +54,8 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	}
 	candidates = m.sortCandidates(candidates)
 
-	// In order, filter out all candidates that would violate the budget.
-	// Since multi-node consolidation relies on the ordering of
-	// these candidates, and does computation in batches of these nodes by
-	// simulateScheduling(nodes[0, n]), doing a binary search on n to find
-	// the optimal consolidation command, this pre-filters out nodes that
-	// would have violated the budget anyway, preserving the ordering
-	// and only considering a number of nodes that can be disrupted.
-	disruptableCandidates := make([]*Candidate, 0, len(candidates))
 	constrainedByBudgets := false
-	for _, candidate := range candidates {
-		// If there's disruptions allowed for the candidate's nodepool,
-		// add it to the list of candidates, and decrement the budget.
-		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
-			constrainedByBudgets = true
-			continue
-		}
-		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
-		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
-		// can find their nodes disrupted here.
-		if len(candidate.reschedulablePods) == 0 {
-			continue
-		}
-		// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
-		disruptableCandidates = append(disruptableCandidates, candidate)
-		disruptionBudgetMapping[candidate.NodePool.Name]--
-	}
+	disruptableCandidates, constrainedByBudgets := m.constrainCandidatesByBudget(candidates, disruptionBudgetMapping, constrainedByBudgets)
 
 	// Only consider a maximum batch of 100 NodeClaims to save on computation.
 	// This could be further configurable in the future.
@@ -108,6 +84,40 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		return []Command{}, fmt.Errorf("validating consolidation, %w", err)
 	}
 	return []Command{cmd}, nil
+}
+
+// constrainCandidatesByBudget filters out candidates that would violate the disruption budget
+func (m *MultiNodeConsolidation) constrainCandidatesByBudget(candidates []*Candidate, disruptionBudgetMapping map[string]int, constrainedByBudgets bool) ([]*Candidate, bool) {
+	// Clone so we don't mutate the original budget mapping
+	disruptionBudgetMapping = lo.Assign(disruptionBudgetMapping)
+
+	// In order, filter out all candidates that would violate the budget.
+	// Since multi-node consolidation relies on the ordering of
+	// these candidates, and does computation in batches of these nodes by
+	// simulateScheduling(nodes[0, n]), doing a binary search on n to find
+	// the optimal consolidation command, this pre-filters out nodes that
+	// would have violated the budget anyway, preserving the ordering
+	// and only considering a number of nodes that can be disrupted.
+	disruptableCandidates := make([]*Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		// If there's disruptions allowed for the candidate's nodepool,
+		// add it to the list of candidates, and decrement the budget.
+		if disruptionBudgetMapping[candidate.NodePool.Name] == 0 {
+			constrainedByBudgets = true
+			continue
+		}
+		// Filter out empty candidates. If there was an empty node that wasn't consolidated before this, we should
+		// assume that it was due to budgets. If we don't filter out budgets, users who set a budget for `empty`
+		// can find their nodes disrupted here.
+		if len(candidate.reschedulablePods) == 0 {
+			continue
+		}
+		// set constrainedByBudgets to true if any node was a candidate but was constrained by a budget
+		disruptableCandidates = append(disruptableCandidates, candidate)
+		disruptionBudgetMapping[candidate.NodePool.Name]--
+	}
+
+	return disruptableCandidates, constrainedByBudgets
 }
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The
