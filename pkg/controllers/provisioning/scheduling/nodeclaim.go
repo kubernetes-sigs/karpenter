@@ -129,7 +129,7 @@ func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData) 
 	nodeClaimRequirements.Add(podData.Requirements.Values()...)
 
 	// Check Topology Requirements
-	topologyRequirements, err := n.topology.AddRequirements(pod, n.NodeClaimTemplate.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
+	topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData) 
 	n.InstanceTypeOptions = remaining
 	n.Spec.Resources.Requests = requests
 	n.Requirements = nodeClaimRequirements
-	n.topology.Record(pod, n.NodeClaim.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
+	n.topology.Record(pod, n.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, hostPorts)
 	n.releaseReservedOfferings(n.reservedOfferings, reservedOfferings)
 	n.reservedOfferings = reservedOfferings
