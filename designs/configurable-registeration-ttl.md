@@ -81,7 +81,3 @@ Also, different cloudproviders have different performance expectations. 15 minut
 
 Sometimes the node registration failures come from a source outside of Karpenter’s control. For example the kubelet is getting throttled by the apiserver, due to APIServer QPS. Deleting the underlying VM will not make the scale up goal faster in this case, it does the opposite. Some customers are willing to pay for a bigger apiserver, some customers don't have that option. Either way, it makes sense that we would want to prevent this VM GC if it’s not the VM provisioning that’s the bottleneck in registration, but rather the apiserver. Deleting and recreating adds additional pressure and churn to the apiserver that's already overloaded. This is yet another reason to let that registration be configurable by the user.
 ```
-
-
-
-
