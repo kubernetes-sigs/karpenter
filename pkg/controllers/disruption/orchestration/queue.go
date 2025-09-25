@@ -195,7 +195,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	}
 
 	// Get command from queue. This waits until queue is non-empty.
-	cmd, shutdown := q.TypedRateLimitingInterface.Get()
+	cmd, shutdown := q.Get()
 	if shutdown {
 		panic("unexpected failure, disruption queue has shut down")
 	}
@@ -207,8 +207,8 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 			// store the error that is causing us to fail, so we can bubble it up later if this times out.
 			cmd.lastError = err
 			// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
-			q.TypedRateLimitingInterface.Done(cmd)
-			q.TypedRateLimitingInterface.AddRateLimited(cmd)
+			q.Done(cmd)
+			q.AddRateLimited(cmd)
 			return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 		}
 		// If the command failed, bail on the action.
@@ -341,8 +341,8 @@ func (q *Queue) HasAny(ids ...string) bool {
 // Remove fully clears the queue of all references of a hash/command
 func (q *Queue) Remove(cmd *Command) {
 	// mark this item as done processing. This is necessary so that the RLI is able to add the item back in.
-	q.TypedRateLimitingInterface.Done(cmd)
-	q.TypedRateLimitingInterface.Forget(cmd)
+	q.Done(cmd)
+	q.Forget(cmd)
 	q.cluster.UnmarkForDeletion(lo.Map(cmd.candidates, func(s *state.StateNode, _ int) string { return s.ProviderID() })...)
 	// Remove all candidates linked to the command
 	q.mu.Lock()

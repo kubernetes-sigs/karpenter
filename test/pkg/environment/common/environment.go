@@ -45,7 +45,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/operator"
-	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
+	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck,staticcheck
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 )
 
