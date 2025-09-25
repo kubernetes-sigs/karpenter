@@ -101,7 +101,7 @@ func IsProvisionable(pod *corev1.Pod) bool {
 // - Has the `karpenter.sh/do-not-disrupt` annotation
 // - Is an actively running pod
 func IsDisruptable(pod *corev1.Pod) bool {
-	return !(IsActive(pod) && HasDoNotDisrupt(pod))
+	return !IsActive(pod) || !HasDoNotDisrupt(pod)
 }
 
 // FailedToSchedule ensures that the kube-scheduler has seen this pod and has intentionally
@@ -164,7 +164,7 @@ func IsOwnedByNode(pod *corev1.Pod) bool {
 
 func IsOwnedBy(pod *corev1.Pod, gvks []schema.GroupVersionKind) bool {
 	for _, ignoredOwner := range gvks {
-		for _, owner := range pod.ObjectMeta.OwnerReferences {
+		for _, owner := range pod.OwnerReferences {
 			if owner.APIVersion == ignoredOwner.GroupVersion().String() && owner.Kind == ignoredOwner.Kind {
 				return true
 			}
