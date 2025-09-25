@@ -25,10 +25,12 @@ import (
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
+	"github.com/samber/lo/mutable"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	scheduler "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -55,15 +57,32 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	candidates = m.sortCandidates(candidates)
 
 	constrainedByBudgets := false
-	disruptableCandidates, constrainedByBudgets := m.constrainCandidatesByBudget(candidates, disruptionBudgetMapping, constrainedByBudgets)
+	randomizedShuffleLimit := options.FromContext(ctx).MultiNodeRandomizedShuffleLimit
+	var cmd Command
 
-	// Only consider a maximum batch of 100 NodeClaims to save on computation.
-	// This could be further configurable in the future.
-	maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
+	// This will always run at least once without shuffling, then up to N times with shuffling
+	for randomizedShuffleLimit+1 > 0 {
+		randomizedShuffleLimit--
 
-	cmd, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
-	if err != nil {
-		return []Command{}, err
+		var disruptableCandidates []*Candidate
+		disruptableCandidates, constrainedByBudgets = m.constrainCandidatesByBudget(candidates, disruptionBudgetMapping, constrainedByBudgets)
+
+		// Only consider a maximum batch of 100 NodeClaims to save on computation.
+		// This could be further configurable in the future.
+		maxParallel := lo.Clamp(len(disruptableCandidates), 0, 100)
+
+		cmd, err := m.firstNConsolidationOption(ctx, disruptableCandidates, maxParallel)
+		if err != nil {
+			return []Command{}, err
+		}
+
+		if cmd.Decision() != NoOpDecision {
+			// We found a valid consolidation command, break out
+			break
+		}
+
+		// We're still going? Time to shuffle and try again
+		mutable.Shuffle(candidates)
 	}
 
 	if cmd.Decision() == NoOpDecision {
@@ -76,7 +95,7 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		return []Command{}, nil
 	}
 
-	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
+	if cmd, err := m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
 			return []Command{}, nil

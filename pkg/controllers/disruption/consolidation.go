@@ -163,7 +163,7 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		}, nil
 	}
 
-	// we're not going to turn a single node into multiple candidates
+	// we're not going to turn one or more nodes into multiple candidates
 	if len(results.NewNodeClaims) != 1 {
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Can't remove without creating %d candidates", len(results.NewNodeClaims)))...)
