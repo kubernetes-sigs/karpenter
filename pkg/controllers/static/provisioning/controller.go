@@ -75,8 +75,8 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 
 	// We need to wait until our representation of cluster is populated accurately with what we have in api-server or else
 	// we would end up over provisioning due to misrepresentation of NodePoolState in our cluster state.
-	// This usually happens when there are controller crashes
-	if !c.cluster.Synced(ctx) {
+	// This usually happens when there is controller crash, so we check if the cluster has synced atleast once.
+	if !c.cluster.HasSynced() && !c.cluster.Synced(ctx) {
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 
