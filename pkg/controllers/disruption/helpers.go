@@ -232,7 +232,9 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	disruptionBudgetMapping := map[string]int{}
 	numNodes := map[string]int{}   // map[nodepool] -> node count in nodepool
 	disrupting := map[string]int{} // map[nodepool] -> nodes undergoing disruption
-	for _, node := range cluster.DeepCopyNodes() {
+
+	var nodes state.StateNodes
+	for node := range cluster.Nodes() {
 		// We only consider nodes that we own and are initialized towards the total.
 		// If a node is launched/registered, but not initialized, pods aren't scheduled
 		// to the node, and these are treated as unhealthy until they're cleaned up.
@@ -243,14 +245,16 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 		if !node.Managed() || !node.Initialized() {
 			continue
 		}
-
 		// Additionally, don't consider nodeclaims that have the terminating condition. A nodeclaim should have
 		// the Terminating condition only when the node is drained and cloudprovider.Delete() was successful
 		// on the underlying cloud provider machine.
 		if node.NodeClaim.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue() {
 			continue
 		}
+		nodes = append(nodes, node.DeepCopy())
+	}
 
+	for _, node := range nodes {
 		nodePool := node.Labels()[v1.NodePoolLabelKey]
 		numNodes[nodePool]++
 
