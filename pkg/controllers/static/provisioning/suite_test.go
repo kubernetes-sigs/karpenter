@@ -535,14 +535,14 @@ var _ = Describe("Static Provisioning Controller", func() {
 			n := 50
 			errs := make(chan error, n)
 			for i := 0; i < n; i++ {
-				go func() {
+				go func(i int) {
 					defer GinkgoRecover()
 					if i%4 == 0 {
 						cluster.Reset()
 					}
 					_, e := controller.Reconcile(ctx, nodePool)
 					errs <- e
-				}()
+				}(i)
 			}
 			for i := 0; i < n; i++ {
 				Expect(<-errs).ToNot(HaveOccurred())
