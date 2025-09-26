@@ -30,6 +30,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -489,6 +490,63 @@ var _ = Describe("Registration", func() {
 		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
 			Type:   v1.ConditionTypeNodeRegistrationHealthy,
 			Status: metav1.ConditionTrue,
+		})
+	})
+	It("should not add NodeRegistrationHealthy=true on the nodePool if registration succeeds once and if it had previously failed twice in the registrationHealthBuffer", func() {
+		nodeClaim1 := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		nodeClaim2 := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, nodeClaim2)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim1)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim2)
+
+		// If the node hasn't registered in the registration timeframe, then we deprovision the nodeClaim
+		fakeClock.Step(time.Minute * 6)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim1)
+		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim2)
+
+		// NodeClaim registration failed twice which is greater than our threshold so update the NodeRegistrationHealthy status condition
+		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{Type: v1.ConditionTypeNodeRegistrationHealthy, Status: metav1.ConditionFalse})
+		Expect(npState.Status(string(nodePool.UID))).To(BeEquivalentTo(nodepoolhealth.StatusUnhealthy))
+		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim1, nodeClaim2)
+		ExpectNotFound(ctx, env.Client, nodeClaim1, nodeClaim2)
+
+		cloudProvider.Reset()
+		nodeClaim3 := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+			},
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim3)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim3)
+		nodeClaim3 = ExpectExists(ctx, env.Client, nodeClaim3)
+
+		node := test.Node(test.NodeOptions{ProviderID: nodeClaim3.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
+		ExpectApplied(ctx, env.Client, node)
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim3)
+
+		nodeClaim3 = ExpectExists(ctx, env.Client, nodeClaim3)
+		Expect(nodeClaim3.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
+		Expect(nodeClaim3.Status.NodeName).To(Equal(node.Name))
+
+		Expect(npState.Status(string(nodePool.UID))).To(BeEquivalentTo(nodepoolhealth.StatusUnhealthy))
+		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
+			Type:   v1.ConditionTypeNodeRegistrationHealthy,
+			Status: metav1.ConditionFalse,
 		})
 	})
 	It("should not block on updating NodeRegistrationHealthy status condition if nodeClaim is not owned by a nodePool", func() {
