@@ -19,6 +19,7 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/samber/lo"
@@ -44,6 +45,7 @@ import (
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pdb"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 var errCandidateDeleting = fmt.Errorf("candidate is deleting")
@@ -267,15 +269,39 @@ func BuildDisruptionBudgetMapping(ctx context.Context, cluster *state.Cluster, c
 	}
 	for _, nodePool := range nodePools {
 		allowedDisruptions := nodePool.MustGetAllowedDisruptions(clk, numNodes[nodePool.Name], reason)
-		disruptionBudgetMapping[nodePool.Name] = lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
+		remainingDisruptionBudget := lo.Max([]int{allowedDisruptions - disrupting[nodePool.Name], 0})
+
+		// Take the minimum of the remaining budget and the node limit since we don't want to disrupt more nodes than the hard limit allows.
+		remainingNodeLimit := getNodePoolRemainingNodeLimit(nodePool, numNodes[nodePool.Name])
+		disruptionBudgetMapping[nodePool.Name] = lo.Min([]int{remainingDisruptionBudget, remainingNodeLimit})
+
 		NodePoolAllowedDisruptions.Set(float64(allowedDisruptions), map[string]string{
 			metrics.NodePoolLabel: nodePool.Name, metrics.ReasonLabel: string(reason),
 		})
-		if numNodes[nodePool.Name] != 0 && allowedDisruptions == 0 {
+
+		if remainingNodeLimit == 0 {
+			// If limit is 0, we block disruptions but not because of the disruption budget.
+			// So we publish a different event, and this event takes precedence because it is a harder limit.
+			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReasonByNodeLimit(nodePool, reason))
+		} else if numNodes[nodePool.Name] != 0 && allowedDisruptions == 0 {
 			recorder.Publish(disruptionevents.NodePoolBlockedForDisruptionReason(nodePool, reason))
 		}
 	}
 	return disruptionBudgetMapping, nil
+}
+
+// getNodePoolRemainingNodeLimit returns the remaining node limit for a NodePool
+func getNodePoolRemainingNodeLimit(nodePool *v1.NodePool, nodeCount int) int {
+	nodePoolNodeLimit := math.MaxInt32
+	// Check if there's a defined node limit, if not there is no limit (set to very high number)
+	nodePoolLimits := corev1.ResourceList(nodePool.Spec.Limits)
+	if nodeLimit, ok := nodePoolLimits[resources.Node]; ok {
+		nodePoolNodeLimit = int(nodeLimit.Value())
+	}
+
+	remainingNodeCount := nodePoolNodeLimit - nodeCount
+
+	return remainingNodeCount
 }
 
 // mapCandidates maps the list of proposed candidates with the current state
