@@ -189,15 +189,12 @@ var _ = Describe("SingleNodeConsolidation", func() {
 
 			// Mark nodePool2 as timed out
 			consolidation.PreviouslyUnseenNodePools.Insert(nodePool2.Name)
-			// Create a budget mapping that allows all disruptions
-			budgetMapping := map[string]int{
-				nodePool1.Name: 1,
-				nodePool2.Name: 1,
-				nodePool3.Name: 1,
-			}
+			// Build disruption budgets
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			Expect(err).To(Succeed())
 
 			// Call ComputeCommand which should process all nodepools
-			_, _, _ = consolidation.ComputeCommand(ctx, budgetMapping, candidates...)
+			_, _, _ = consolidation.ComputeCommand(ctx, budgets, candidates...)
 
 			// Verify nodePool2 is no longer marked as timed out
 			Expect(consolidation.PreviouslyUnseenNodePools.Has(nodePool2.Name)).To(BeFalse())
@@ -209,14 +206,11 @@ var _ = Describe("SingleNodeConsolidation", func() {
 			candidates, err := createCandidates(1.0, 10)
 			Expect(err).To(BeNil())
 
-			// Create a budget mapping that allows all disruptions
-			budgetMapping := map[string]int{
-				nodePool1.Name: 30,
-				nodePool2.Name: 30,
-				nodePool3.Name: 30,
-			}
+			// Build disruption budgets
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
+			Expect(err).To(Succeed())
 
-			_, _, _ = consolidation.ComputeCommand(ctx, budgetMapping, candidates...)
+			_, _, _ = consolidation.ComputeCommand(ctx, budgets, candidates...)
 
 			// Verify all nodepools are marked as timed out
 			// since we timed out before processing any candidates
@@ -268,7 +262,7 @@ func createCandidates(disruptionCost float64, nodesPerNodePool ...int) ([]*disru
 		}
 	}
 
-	limits, err := pdb.NewLimits(ctx, fakeClock, env.Client)
+	limits, err := pdb.NewLimits(ctx, env.Client)
 	if err != nil {
 		return nil, err
 	}
