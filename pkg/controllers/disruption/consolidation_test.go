@@ -1818,7 +1818,7 @@ var _ = Describe("Consolidation", func() {
 				namespace := test.Namespace()
 				pdb := test.PodDisruptionBudget(test.PDBOptions{
 					ObjectMeta: metav1.ObjectMeta{
-						Namespace: namespace.ObjectMeta.Name,
+						Namespace: namespace.Name,
 					},
 					Labels:         labels,
 					MaxUnavailable: fromInt(0),
@@ -2301,6 +2301,41 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(1))
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, nodeClaims[1], nodes[1])
+		})
+		It("does not delete nodes with pod churn, deletes nodes without pod churn", func() {
+			// create our RS so we can link a pod to it
+			ExpectApplied(ctx, env.Client, nodePool)
+			for i := range 2 {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+
+			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
+			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
+			Expect(err).To(Succeed())
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
+			Expect(err).To(Succeed())
+
+			// this test validator invalidates the command because it creates pod churn during validaiton
+			emptyConsolidation.Validator = NewTestEmptinessValidator(nodes, nodeClaims, nodePool, emptyConsolidation.Validator.(*disruption.EmptinessValidator), WithChurn())
+
+			fakeClock.Step(10 * time.Minute)
+
+			var wg sync.WaitGroup
+			ExpectToWait(fakeClock, &wg)
+			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			wg.Wait()
+			Expect(err).To(Succeed())
+			Expect(results).To(Equal(pscheduling.Results{}))
+			Expect(cmd.Candidates()).To(HaveLen(1))
+			// the test validator manually binds a pod to nodes[0], causing it to no longer be eligible
+			Expect(cmd.Candidates()[0].StateNode.Node.Name).To(Equal(nodes[1].Name))
+			Expect(cmd.Decision()).To(Equal(disruption.DeleteDecision))
+
+			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
+
 		})
 		It("can delete nodes if another nodePool has no node template", func() {
 			// create our RS so we can link a pod to it
