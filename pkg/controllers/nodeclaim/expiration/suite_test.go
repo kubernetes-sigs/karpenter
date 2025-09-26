@@ -163,7 +163,7 @@ var _ = Describe("Expiration", func() {
 		nodeClaim.Spec.ExpireAfter = v1.MustParseNillableDuration("200s")
 		ExpectApplied(ctx, env.Client, nodeClaim, node)
 
-		fakeClock.SetTime(nodeClaim.CreationTimestamp.Time.Add(time.Second * 100))
+		fakeClock.SetTime(nodeClaim.CreationTimestamp.Add(time.Second * 100))
 
 		result := ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 		Expect(result.RequeueAfter).To(BeNumerically("~", time.Second*100, time.Second))

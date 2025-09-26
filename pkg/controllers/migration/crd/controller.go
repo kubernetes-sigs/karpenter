@@ -62,7 +62,7 @@ func (c *Controller) Reconcile(ctx context.Context, crd *apiextensionsv1.CustomR
 		return object.GVK(nc)
 	})[0]
 	if _, ok := lo.Find(apis.CRDs, func(item *apiextensionsv1.CustomResourceDefinition) bool {
-		return item.ObjectMeta.Name == crd.Name
+		return item.Name == crd.Name
 	}); !ok && nodeClassGvk.Kind != crd.Spec.Names.Kind {
 		return reconcile.Result{}, nil
 	}

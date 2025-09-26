@@ -334,12 +334,12 @@ var _ = Describe("Termination", func() {
 		ExpectExists(ctx, env.Client, node)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
-		_, annotationExists := nodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]
+		_, annotationExists := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]
 		Expect(annotationExists).To(BeTrue())
 	})
 	It("should not change the annotation if the NodeClaim has a terminationGracePeriod and the annotation already exists", func() {
 		nodeClaim.Spec.TerminationGracePeriod = &metav1.Duration{Duration: time.Second * 300}
-		nodeClaim.ObjectMeta.Annotations = map[string]string{
+		nodeClaim.Annotations = map[string]string{
 			v1.NodeClaimTerminationTimestampAnnotationKey: "2024-04-01T12:00:00-05:00",
 		}
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)

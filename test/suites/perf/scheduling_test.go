@@ -72,7 +72,7 @@ var _ = Describe("Performance", func() {
 			env.EventuallyExpectHealthyPodCount(labelSelector, replicas)
 
 			env.TimeIntervalCollector.Start("Drift")
-			nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{
+			nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{
 				"test-drift": "true",
 			})
 			env.ExpectUpdated(nodePool)
@@ -134,7 +134,7 @@ var _ = Describe("Performance", func() {
 			env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, totalReplicas)
 
 			env.TimeIntervalCollector.Start("Drift")
-			nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{
+			nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{
 				"test-drift": "true",
 			})
 			env.ExpectUpdated(nodePool)
