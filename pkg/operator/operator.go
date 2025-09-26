@@ -244,8 +244,8 @@ func (o *Operator) WithControllers(ctx context.Context, controllers ...controlle
 func (o *Operator) WithWebhooks(ctx context.Context, ctors ...knativeinjection.ControllerConstructor) *Operator {
 	if !options.FromContext(ctx).DisableWebhook {
 		o.webhooks = append(o.webhooks, ctors...)
-		lo.Must0(o.Manager.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
-		lo.Must0(o.Manager.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
+		lo.Must0(o.AddReadyzCheck("webhooks", webhooks.HealthProbe(ctx)))
+		lo.Must0(o.AddHealthzCheck("webhooks", webhooks.HealthProbe(ctx)))
 	}
 	return o
 }
