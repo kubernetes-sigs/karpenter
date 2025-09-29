@@ -165,10 +165,10 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 	}
 
 	if valid := lo.Filter(validatedCandidates, func(cn *Candidate, _ int) bool {
-		if e.cluster.IsNodeNominated(cn.ProviderID()) || disruptionBudgetMapping[cn.NodePool.Name] == 0 {
+		if e.cluster.IsNodeNominated(cn.ProviderID()) || disruptionBudgetMapping[cn.nodePool.Name] == 0 {
 			return false
 		}
-		disruptionBudgetMapping[cn.NodePool.Name]--
+		disruptionBudgetMapping[cn.nodePool.Name]--
 		return true
 	}); len(valid) > 0 {
 		return valid, nil
