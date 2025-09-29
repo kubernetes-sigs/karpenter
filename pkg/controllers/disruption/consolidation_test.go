@@ -2323,7 +2323,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToWait(fakeClock, &wg)
+			ExpectToWait(&wg)
 			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			wg.Wait()
 			Expect(err).To(Succeed())
