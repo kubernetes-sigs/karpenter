@@ -89,7 +89,7 @@ func (l Limits) isEvictable(pod *v1.Pod, evictionBlocker evictionBlocker) (clien
 		return client.ObjectKey{}, true
 	}
 	for _, pdb := range l {
-		if pdb.key.Namespace == pod.ObjectMeta.Namespace {
+		if pdb.key.Namespace == pod.Namespace {
 			if pdb.selector.Matches(labels.Set(pod.Labels)) {
 
 				// if the PDB policy is set to allow evicting unhealthy pods, then it won't stop us from
@@ -148,11 +148,7 @@ func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	canAlwaysEvictUnhealthyPods := false
-
-	if pdb.Spec.UnhealthyPodEvictionPolicy != nil && *pdb.Spec.UnhealthyPodEvictionPolicy == policyv1.AlwaysAllow {
-		canAlwaysEvictUnhealthyPods = true
-	}
+	canAlwaysEvictUnhealthyPods := pdb.Spec.UnhealthyPodEvictionPolicy != nil && *pdb.Spec.UnhealthyPodEvictionPolicy == policyv1.AlwaysAllow
 
 	return &pdbItem{
 		key:                client.ObjectKeyFromObject(&pdb),
