@@ -159,16 +159,16 @@ func (e *EmptinessValidator) validateCandidates(ctx context.Context, candidates 
 	if len(validatedCandidates) == 0 {
 		return nil, NewValidationError(fmt.Errorf("%d candidates are no longer valid", len(candidates)))
 	}
-	disruptionBudgetMapping, err := BuildDisruptionBudgetMapping(ctx, e.cluster, e.clock, e.kubeClient, e.cloudProvider, e.recorder, e.reason)
+	disruptionBudgetMapping, err := BuildDisruptionBudgets(ctx, e.cluster, e.clock, e.kubeClient, e.recorder)
 	if err != nil {
 		return nil, fmt.Errorf("building disruption budgets, %w", err)
 	}
 
 	if valid := lo.Filter(validatedCandidates, func(cn *Candidate, _ int) bool {
-		if e.cluster.IsNodeNominated(cn.ProviderID()) || disruptionBudgetMapping[cn.NodePool.Name] == 0 {
+		if e.cluster.IsNodeNominated(cn.ProviderID()) || disruptionBudgetMapping[cn.nodePool.Name][e.reason] == 0 {
 			return false
 		}
-		disruptionBudgetMapping[cn.NodePool.Name]--
+		disruptionBudgetMapping[cn.nodePool.Name][e.reason]--
 		return true
 	}); len(valid) > 0 {
 		return valid, nil

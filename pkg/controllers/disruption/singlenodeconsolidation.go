@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -33,15 +32,11 @@ const SingleNodeConsolidationTimeoutDuration = 3 * time.Minute
 // SingleNodeConsolidation is the consolidation controller that performs single-node consolidation.
 type SingleNodeConsolidation struct {
 	consolidation
-	PreviouslyUnseenNodePools sets.Set[string]
 	Validator
 }
 
 func NewSingleNodeConsolidation(consolidation consolidation) *SingleNodeConsolidation {
-	s := &SingleNodeConsolidation{
-		consolidation:             consolidation,
-		PreviouslyUnseenNodePools: sets.New[string](),
-	}
+	s := &SingleNodeConsolidation{consolidation: consolidation}
 	s.Validator = NewConsolidationValidator(consolidation, s.ShouldDisrupt)
 	return s
 }

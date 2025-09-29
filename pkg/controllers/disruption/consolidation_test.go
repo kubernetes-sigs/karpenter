@@ -2273,7 +2273,7 @@ var _ = Describe("Consolidation", func() {
 			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
 
 			emptyConsolidation := disruption.NewEmptiness(disruption.MakeConsolidation(fakeClock, cluster, env.Client, prov, cloudProvider, recorder, queue))
-			budgets, err := disruption.BuildDisruptionBudgetMapping(ctx, cluster, fakeClock, env.Client, cloudProvider, recorder, emptyConsolidation.Reason())
+			budgets, err := disruption.BuildDisruptionBudgets(ctx, cluster, fakeClock, env.Client, recorder)
 			Expect(err).To(Succeed())
 
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
@@ -2285,7 +2285,7 @@ var _ = Describe("Consolidation", func() {
 			fakeClock.Step(10 * time.Minute)
 
 			var wg sync.WaitGroup
-			ExpectToWait(fakeClock, &wg)
+			ExpectToWait(&wg)
 			cmd, results, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
 			wg.Wait()
 			Expect(err).To(Succeed())
