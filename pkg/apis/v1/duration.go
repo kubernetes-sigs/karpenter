@@ -70,7 +70,7 @@ func (d NillableDuration) MarshalJSON() ([]byte, error) {
 		return d.Raw, nil
 	}
 	if d.Duration != nil {
-		return json.Marshal(d.Duration.String())
+		return json.Marshal(d.String())
 	}
 	return json.Marshal(Never)
 }
@@ -81,7 +81,7 @@ func (d NillableDuration) ToUnstructured() interface{} {
 		return d.Raw
 	}
 	if d.Duration != nil {
-		return d.Duration.String()
+		return d.String()
 	}
 	return Never
 }

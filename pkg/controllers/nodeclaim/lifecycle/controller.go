@@ -253,14 +253,14 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 
 func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	// if the expiration annotation is already set, we don't need to do anything
-	if _, exists := nodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
+	if _, exists := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
 		return nil
 	}
 
 	// In Kubernetes, every object has a terminationGracePeriodSeconds, defaulted to and un-changeable from 0. There is an additional TerminationGracePeriodSeconds in the PodSpec which can be configured.
 	// We use the kubernetes object TerminationGracePeriod to infer that the DeletionTimestamp is always equal to the time the NodeClaim is deleted.
 	// This should not be confused with the NodeClaim.spec.terminationGracePeriod field introduced in Karpenter Custom Resources.
-	if nodeClaim.Spec.TerminationGracePeriod != nil && !nodeClaim.ObjectMeta.DeletionTimestamp.IsZero() {
+	if nodeClaim.Spec.TerminationGracePeriod != nil && !nodeClaim.DeletionTimestamp.IsZero() {
 		terminationTimeString := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339)
 		return c.annotateTerminationGracePeriodTerminationTime(ctx, nodeClaim, terminationTimeString)
 	}
@@ -270,7 +270,7 @@ func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx c
 
 func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.Context, nodeClaim *v1.NodeClaim, terminationTime string) error {
 	stored := nodeClaim.DeepCopy()
-	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
+	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 
 	// We use client.MergeFromWithOptimisticLock because patching a terminationGracePeriod annotation
 	// can cause races with the health controller, as that controller sets the current time as the terminationGracePeriod annotation
