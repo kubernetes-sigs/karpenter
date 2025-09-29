@@ -42,6 +42,21 @@ apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the c
 		--set-string controller.env[0].name=ENABLE_PROFILING \
 		--set-string controller.env[0].value=true
 
+dra-apply-with-kind: verify build-with-kind
+	kubectl apply -f kwok/charts/crds
+	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
+		$(HELM_OPTS) \
+		--set controller.image.repository=$(IMG_REPOSITORY) \
+		--set controller.image.tag=$(IMG_TAG) \
+		--set serviceMonitor.enabled=false \
+		--set-string controller.env[0].name=ENABLE_PROFILING \
+		--set-string controller.env[0].value=true
+
+get-kind-image: ## Extract the actual KWOK image repository from Kind cluster
+	$(eval IMG_REPOSITORY=$(shell docker exec $(KIND_CLUSTER_NAME)-control-plane crictl images | grep "kind.local/kwok" | awk '{print $$1}' | head -1))
+	$(eval IMG_TAG=latest)
+	@echo "Using Repository: $(IMG_REPOSITORY), Tag: $(IMG_TAG)"
+
 JUNIT_REPORT := $(if $(ARTIFACT_DIR), --ginkgo.junit-report="$(ARTIFACT_DIR)/junit_report.xml")
 e2etests: ## Run the e2e suite against your local cluster
 	cd test && go test \
@@ -86,6 +101,15 @@ test-memory: ## Run memory usage tests for node overlay store
 
 benchmark: ## Run benchmark tests for node overlay store
 	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
+
+test-dra-driver: ## Run DRA tests
+	go test ./dra-kwok-driver/pkg/... \
+		-race \
+		-timeout 20m \
+		--ginkgo.focus="${FOCUS}" \
+		--ginkgo.randomize-all \
+		--ginkgo.v \
+		-cover
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	go tool -modfile=go.tools.mod ginkgo \
