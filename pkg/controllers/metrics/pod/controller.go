@@ -117,8 +117,8 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	pod := &corev1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
 		if errors.IsNotFound(err) {
-			c.pendingPods.Delete(req.NamespacedName.String())
-			c.metricStore.Delete(req.NamespacedName.String())
+			c.pendingPods.Delete(req.String())
+			c.metricStore.Delete(req.String())
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
