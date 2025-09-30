@@ -69,6 +69,7 @@ type NodePoolSpec struct {
 	//       * disruption.consolidateAfter
 	//   - Only limits.nodes is supported; other resource limits (e.g., CPU, memory) must not be specified.
 	//   - Weight is not supported.
+	// Note: This field is alpha.
 	// +kubebuilder:validation:Minimum:=0
 	// +optional
 	Replicas *int64 `json:"replicas,omitempty"`
