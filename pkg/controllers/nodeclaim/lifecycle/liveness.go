@@ -32,11 +32,13 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 )
 
 type Liveness struct {
 	clock      clock.Clock
 	kubeClient client.Client
+	npState    nodepoolhealth.State
 }
 
 // registrationTimeout is a heuristic time that we expect the node to register within
@@ -81,6 +83,12 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 			// This should never occur because if we failed to launch we requeue the object with error instead of this requeueAfter
 			return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
 		}
+		if err := l.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, err
+		}
 		if err := l.deleteNodeClaimForTimeout(ctx, LaunchTimeout, nodeClaim); err != nil {
 			if client.IgnoreNotFound(err) != nil {
 				return reconcile.Result{}, err
@@ -121,8 +129,9 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 		if err := l.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 			return err
 		}
-		if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown() {
-			stored := nodePool.DeepCopy()
+		l.npState.Update(string(nodePool.UID), false)
+		stored := nodePool.DeepCopy()
+		if l.npState.Status(string(nodePool.UID)) == nodepoolhealth.StatusUnhealthy && !nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
 			// If the nodeClaim failed to register during the timeout set NodeRegistrationHealthy status condition on
 			// NodePool to False. If the launch failed get the launch failure reason and message from nodeClaim.
 			if launchCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); launchCondition.IsTrue() {
