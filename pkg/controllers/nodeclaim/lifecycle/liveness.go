@@ -129,9 +129,9 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 		if err := l.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 			return err
 		}
-		l.npState.Update(string(nodePool.UID), false)
+		l.npState.Update(nodePool.UID, false)
 		stored := nodePool.DeepCopy()
-		if l.npState.Status(string(nodePool.UID)) == nodepoolhealth.StatusUnhealthy && !nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
+		if l.npState.Status(nodePool.UID) == nodepoolhealth.StatusUnhealthy && !nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
 			// If the nodeClaim failed to register during the timeout set NodeRegistrationHealthy status condition on
 			// NodePool to False. If the launch failed get the launch failure reason and message from nodeClaim.
 			if launchCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); launchCondition.IsTrue() {

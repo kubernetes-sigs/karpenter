@@ -16,41 +16,37 @@ limitations under the License.
 
 package ringbuffer
 
-type Buffer[T any] struct {
-	values       []T
-	currentIndex int
+type RingBuffer[T any] struct {
+	values []T
+	head   int
 }
 
-func NewBuffer[T any](capacity int) *Buffer[T] {
-	return &Buffer[T]{
+func New[T any](capacity int) *RingBuffer[T] {
+	return &RingBuffer[T]{
 		values: make([]T, 0, capacity),
 	}
 }
 
-func (b *Buffer[T]) Insert(value T) {
+func (b *RingBuffer[T]) Insert(value T) {
 	// If buffer is not full, append the new value
 	if len(b.values) < cap(b.values) {
 		b.values = append(b.values, value)
 		return
 	}
 	// If buffer is full, replace the oldest entry
-	b.values[b.currentIndex] = value
-	b.currentIndex = (b.currentIndex + 1) % cap(b.values)
+	b.values[b.head] = value
+	b.head = (b.head + 1) % cap(b.values)
 }
 
-func (b *Buffer[T]) Len() int {
+func (b *RingBuffer[T]) Len() int {
 	return len(b.values)
 }
 
-func (b *Buffer[T]) Reset() {
+func (b *RingBuffer[T]) Reset() {
 	b.values = b.values[:0]
-	b.currentIndex = 0
+	b.head = 0
 }
 
-func (b *Buffer[T]) GetItems() []T {
+func (b *RingBuffer[T]) Items() []T {
 	return b.values
-}
-
-func (b *Buffer[T]) Capacity() int {
-	return cap(b.values)
 }

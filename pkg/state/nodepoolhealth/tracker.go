@@ -19,6 +19,8 @@ package nodepoolhealth
 import (
 	"sync"
 
+	"k8s.io/apimachinery/pkg/types"
+
 	"sigs.k8s.io/karpenter/pkg/utils/ringbuffer"
 )
 
@@ -37,12 +39,12 @@ const (
 
 type Tracker struct {
 	sync.RWMutex
-	buffer ringbuffer.Buffer[bool]
+	buffer ringbuffer.RingBuffer[bool]
 }
 
 func NewTracker(capacity int) *Tracker {
 	return &Tracker{
-		buffer: *ringbuffer.NewBuffer[bool](capacity),
+		buffer: *ringbuffer.New[bool](capacity),
 	}
 }
 
@@ -61,21 +63,18 @@ func (t *Tracker) Reset() {
 }
 
 func (t *Tracker) Status() Status {
-	t.Lock()
-	defer t.Unlock()
-
 	if t.buffer.Len() == 0 {
 		return StatusUnknown
 	}
 	// Count number of true and false
-	unhealthyCount := 0
-	for _, value := range t.buffer.GetItems() {
+	var unhealthyCount int
+	for _, value := range t.buffer.Items() {
 		if !value {
 			unhealthyCount++
 		}
 	}
 	// Determine health status based on threshold
-	if (float64(unhealthyCount) / float64(t.buffer.Capacity())) >= ThresholdFalse {
+	if (float64(unhealthyCount) / float64(BufferSize)) >= ThresholdFalse {
 		return StatusUnhealthy
 	} else {
 		return StatusHealthy
@@ -89,34 +88,31 @@ func (t *Tracker) SetStatus(status Status) {
 	case StatusHealthy:
 		t.Update(true)
 	case StatusUnhealthy:
-		t.Update(false)
-		t.Update(false)
+		for range int(BufferSize * ThresholdFalse) {
+			t.Update(false)
+		}
 	}
 }
 
-type State map[string]*Tracker
+type State map[types.UID]*Tracker
 
-func (s State) nodePoolNodeRegistration(nodepool string) *Tracker {
-	tracker, exists := s[nodepool]
+func (s State) nodePoolNodeRegistration(nodePoolUID types.UID) *Tracker {
+	tracker, exists := s[nodePoolUID]
 	if !exists {
 		tracker = NewTracker(BufferSize)
-		s[nodepool] = tracker
+		s[nodePoolUID] = tracker
 	}
 	return tracker
 }
 
-func (s State) Status(nodePool string) Status {
-	return s.nodePoolNodeRegistration(nodePool).Status()
+func (s State) Status(nodePoolUID types.UID) Status {
+	return s.nodePoolNodeRegistration(nodePoolUID).Status()
 }
 
-func (s State) Update(nodePool string, launchStatus bool) {
-	s.nodePoolNodeRegistration(nodePool).Update(launchStatus)
+func (s State) Update(nodePoolUID types.UID, launchStatus bool) {
+	s.nodePoolNodeRegistration(nodePoolUID).Update(launchStatus)
 }
 
-func (s State) SetStatus(nodePool string, status Status) {
-	s.nodePoolNodeRegistration(nodePool).SetStatus(status)
-}
-
-func (s State) ResetStatus(nodePool string) {
-	s.nodePoolNodeRegistration(nodePool).Reset()
+func (s State) SetStatus(nodePoolUID types.UID, status Status) {
+	s.nodePoolNodeRegistration(nodePoolUID).SetStatus(status)
 }

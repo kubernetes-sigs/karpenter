@@ -71,12 +71,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 
 	// If Karpenter restarts i.e. if the buffer for the nodePool is empty and the NodeRegistrationHealthy status condition
 	// is set to either true/false then we pre-hydrate the buffer with the existing state of the status condition
-	if c.npState.Status(string(nodePool.UID)) == nodepoolhealth.StatusUnknown {
+	if c.npState.Status(nodePool.UID) == nodepoolhealth.StatusUnknown {
 		if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsTrue() {
-			c.npState.SetStatus(string(nodePool.UID), nodepoolhealth.StatusHealthy)
+			c.npState.SetStatus(nodePool.UID, nodepoolhealth.StatusHealthy)
 		}
 		if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
-			c.npState.SetStatus(string(nodePool.UID), nodepoolhealth.StatusUnhealthy)
+			c.npState.SetStatus(nodePool.UID, nodepoolhealth.StatusUnhealthy)
 		}
 	}
 
@@ -85,7 +85,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 		nodePool.Status.NodeClassObservedGeneration != nodeClass.GetGeneration() ||
 		nodePool.Generation != nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).ObservedGeneration {
 		nodePool.StatusConditions().SetUnknown(v1.ConditionTypeNodeRegistrationHealthy)
-		c.npState.ResetStatus(string(nodePool.UID))
+		c.npState.SetStatus(nodePool.UID, nodepoolhealth.StatusUnknown)
 	}
 
 	nodePool.Status.NodeClassObservedGeneration = nodeClass.GetGeneration()

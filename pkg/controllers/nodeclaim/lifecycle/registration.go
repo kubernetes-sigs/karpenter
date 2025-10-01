@@ -104,9 +104,9 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 		if err := r.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 			return err
 		}
-		r.npState.Update(string(nodePool.UID), true)
+		r.npState.Update(nodePool.UID, true)
 		stored := nodePool.DeepCopy()
-		if r.npState.Status(string(nodePool.UID)) == nodepoolhealth.StatusHealthy && nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+		if r.npState.Status(nodePool.UID) == nodepoolhealth.StatusHealthy && nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy) {
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 			// can cause races due to the fact that it fully replaces the list on a change
 			// Here, we are updating the status condition list

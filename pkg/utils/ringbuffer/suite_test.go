@@ -32,27 +32,27 @@ func TestAPIs(t *testing.T) {
 
 var _ = Describe("RingBufferUtils", func() {
 	It("should validate ring buffer functionality", func() {
-		boolBuffer := ringbuffer.NewBuffer[bool](4)
-		Expect(boolBuffer.Capacity()).To(BeEquivalentTo(4))
+		boolBuffer := ringbuffer.New[bool](4)
+		Expect(cap(boolBuffer.Items())).To(Equal(4))
 		boolBuffer.Insert(true)
-		Expect(boolBuffer.Len()).To(BeEquivalentTo(1))
-		for _, value := range boolBuffer.GetItems() {
-			Expect(value).To(BeEquivalentTo(true))
+		Expect(boolBuffer.Len()).To(Equal(1))
+		for _, value := range boolBuffer.Items() {
+			Expect(value).To(Equal(true))
 		}
 		boolBuffer.Reset()
-		Expect(boolBuffer.Len()).To(BeEquivalentTo(0))
+		Expect(boolBuffer.Len()).To(Equal(0))
 	})
 	It("should expect the oldest entry in the buffer to be replaced when the buffer is full", func() {
-		boolBuffer := ringbuffer.NewBuffer[bool](2)
+		boolBuffer := ringbuffer.New[bool](2)
 		boolBuffer.Insert(true)
 		boolBuffer.Insert(true)
-		Expect(boolBuffer.Len()).To(BeEquivalentTo(2))
-		for _, value := range boolBuffer.GetItems() {
-			Expect(value).To(BeEquivalentTo(true))
+		Expect(boolBuffer.Len()).To(Equal(2))
+		for _, value := range boolBuffer.Items() {
+			Expect(value).To(Equal(true))
 		}
 		boolBuffer.Insert(false)
-		Expect(boolBuffer.Len()).To(BeEquivalentTo(2))
-		Expect(boolBuffer.GetItems()[0]).To(BeEquivalentTo(false))
-		Expect(boolBuffer.GetItems()[1]).To(BeEquivalentTo(true))
+		Expect(boolBuffer.Len()).To(Equal(2))
+		Expect(boolBuffer.Items()[0]).To(Equal(false))
+		Expect(boolBuffer.Items()[1]).To(Equal(true))
 	})
 })

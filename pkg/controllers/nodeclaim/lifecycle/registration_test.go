@@ -519,7 +519,7 @@ var _ = Describe("Registration", func() {
 
 		// NodeClaim registration failed twice which is greater than our threshold so update the NodeRegistrationHealthy status condition
 		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{Type: v1.ConditionTypeNodeRegistrationHealthy, Status: metav1.ConditionFalse})
-		Expect(npState.Status(string(nodePool.UID))).To(BeEquivalentTo(nodepoolhealth.StatusUnhealthy))
+		Expect(npState.Status(nodePool.UID)).To(BeEquivalentTo(nodepoolhealth.StatusUnhealthy))
 		ExpectFinalizersRemoved(ctx, env.Client, nodeClaim1, nodeClaim2)
 		ExpectNotFound(ctx, env.Client, nodeClaim1, nodeClaim2)
 
@@ -543,7 +543,7 @@ var _ = Describe("Registration", func() {
 		Expect(nodeClaim3.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())
 		Expect(nodeClaim3.Status.NodeName).To(Equal(node.Name))
 
-		Expect(npState.Status(string(nodePool.UID))).To(BeEquivalentTo(nodepoolhealth.StatusUnhealthy))
+		Expect(npState.Status(nodePool.UID)).To(BeEquivalentTo(nodepoolhealth.StatusUnhealthy))
 		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{
 			Type:   v1.ConditionTypeNodeRegistrationHealthy,
 			Status: metav1.ConditionFalse,
