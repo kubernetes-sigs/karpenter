@@ -39,7 +39,7 @@ import (
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/test"
-	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck
+	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck,staticcheck
 	"sigs.k8s.io/karpenter/test/pkg/debug"
 
 	"knative.dev/pkg/system"

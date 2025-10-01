@@ -37,10 +37,13 @@ const MultiNodeConsolidationTimeoutDuration = 1 * time.Minute
 
 type MultiNodeConsolidation struct {
 	consolidation
+	Validator
 }
 
 func NewMultiNodeConsolidation(consolidation consolidation) *MultiNodeConsolidation {
-	return &MultiNodeConsolidation{consolidation: consolidation}
+	m := &MultiNodeConsolidation{consolidation: consolidation}
+	m.Validator = NewConsolidationValidator(consolidation, m.ShouldDisrupt)
+	return m
 }
 
 func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionBudgetMapping map[string]map[v1.DisruptionReason]int, candidates ...*Candidate) (Command, scheduling.Results, error) {
@@ -95,7 +98,7 @@ func (m *MultiNodeConsolidation) ComputeCommand(ctx context.Context, disruptionB
 		return cmd, scheduling.Results{}, nil
 	}
 
-	if err := NewValidation(m.clock, m.cluster, m.kubeClient, m.provisioner, m.cloudProvider, m.recorder, m.queue, m.Reason()).IsValid(ctx, cmd, consolidationTTL); err != nil {
+	if cmd, err = m.Validate(ctx, cmd, consolidationTTL); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).Info(fmt.Sprintf("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid, %s", cmd))
 			return Command{}, scheduling.Results{}, nil
@@ -184,7 +187,7 @@ func filterOutSameType(newNodeClaim *scheduling.NodeClaim, consolidate []*Candid
 	// get the price of the cheapest node that we currently are considering deleting indexed by instance type
 	for _, c := range consolidate {
 		existingInstanceTypes.Insert(c.instanceType.Name)
-		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduler.NewLabelRequirements(c.StateNode.Labels()))
+		compatibleOfferings := c.instanceType.Offerings.Compatible(scheduler.NewLabelRequirements(c.Labels()))
 		if len(compatibleOfferings) == 0 {
 			continue
 		}

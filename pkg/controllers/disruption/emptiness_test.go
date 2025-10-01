@@ -18,6 +18,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -40,6 +41,68 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
+
+type TestEmptinessValidator struct {
+	churn      bool
+	nodes      []*corev1.Node
+	nodeClaims []*v1.NodeClaim
+	nodePool   *v1.NodePool
+	emptiness  *disruption.EmptinessValidator
+}
+
+type TestEmptinessValidatorOption func(*TestEmptinessValidator)
+
+func WithChurn() TestEmptinessValidatorOption {
+	return func(v *TestEmptinessValidator) {
+		v.churn = true
+	}
+}
+
+func NewTestEmptinessValidator(nodes []*corev1.Node, nodeClaims []*v1.NodeClaim, nodePool *v1.NodePool, e *disruption.EmptinessValidator, opts ...TestEmptinessValidatorOption) disruption.Validator {
+	v := &TestEmptinessValidator{
+		nodes:      nodes,
+		nodeClaims: nodeClaims,
+		nodePool:   nodePool,
+		emptiness:  e,
+	}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
+}
+
+func (t *TestEmptinessValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
+	var pods []*corev1.Pod
+	if t.churn {
+		ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, t.nodes, t.nodeClaims)
+		rs := test.ReplicaSet()
+		ExpectApplied(ctx, env.Client, rs)
+		// Simulate churn
+		pods = test.Pods(1, test.PodOptions{
+			ResourceRequirements: corev1.ResourceRequirements{
+				Requests: map[corev1.ResourceName]resource.Quantity{
+					// 100m * 10 = 1 vCPU. This should be less than the largest node capacity.
+					corev1.ResourceCPU: resource.MustParse("100m"),
+				},
+			},
+			ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
+				"app": "test",
+			},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "apps/v1",
+						Kind:               "ReplicaSet",
+						Name:               rs.Name,
+						UID:                rs.UID,
+						Controller:         lo.ToPtr(true),
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
+				}}})
+		ExpectApplied(ctx, env.Client, pods[0])
+		ExpectManualBinding(ctx, env.Client, pods[0], t.nodes[0])
+	}
+	return t.emptiness.Validate(ctx, cmd, 0)
+}
 
 var _ = Describe("Emptiness", func() {
 	var nodePool *v1.NodePool
