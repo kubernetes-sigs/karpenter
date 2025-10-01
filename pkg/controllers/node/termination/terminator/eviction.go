@@ -143,20 +143,20 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	// Check if the queue is empty. client-go recommends not using this function to gate the subsequent
 	// get call, but since we're popping items off the queue synchronously, there should be no synchonization
 	// issues.
-	if q.TypedRateLimitingInterface.Len() == 0 {
+	if q.Len() == 0 {
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 	// Get pod from queue. This waits until queue is non-empty.
-	item, shutdown := q.TypedRateLimitingInterface.Get()
+	item, shutdown := q.Get()
 	if shutdown {
 		return reconcile.Result{}, fmt.Errorf("EvictionQueue is broken and has shutdown")
 	}
 
-	defer q.TypedRateLimitingInterface.Done(item)
+	defer q.Done(item)
 
 	// Evict the pod
 	if q.Evict(ctx, item) {
-		q.TypedRateLimitingInterface.Forget(item)
+		q.Forget(item)
 		q.mu.Lock()
 		q.set.Delete(item)
 		q.mu.Unlock()
@@ -164,7 +164,7 @@ func (q *Queue) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	}
 
 	// Requeue pod if eviction failed
-	q.TypedRateLimitingInterface.AddRateLimited(item)
+	q.AddRateLimited(item)
 	return reconcile.Result{RequeueAfter: singleton.RequeueImmediately}, nil
 }
 
