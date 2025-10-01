@@ -189,8 +189,8 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 				Requirements: scheduling.NewRequirements(lo.Map(off.Requirements, func(req corev1.NodeSelectorRequirement, _ int) *scheduling.Requirement {
 					return scheduling.NewRequirement(req.Key, req.Operator, req.Values...)
 				})...),
-				Price:     off.Offering.Price,
-				Available: off.Offering.Available,
+				Price:     off.Price,
+				Available: off.Available,
 			}
 		}),
 		Capacity: options.Resources,
