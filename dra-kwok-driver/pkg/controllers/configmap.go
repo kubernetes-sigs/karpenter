@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/yaml"
 
@@ -58,6 +59,10 @@ func (r *ConfigMapController) Register(ctx context.Context, mgr manager.Manager)
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("configmap").
 		For(&corev1.ConfigMap{}).
+		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			// Only watch our specific ConfigMap
+			return obj.GetName() == r.configMapName && obj.GetNamespace() == r.configMapNamespace
+		})).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 1, // Single threaded to avoid config race conditions
 		}).
@@ -67,11 +72,6 @@ func (r *ConfigMapController) Register(ctx context.Context, mgr manager.Manager)
 // Reconcile handles ConfigMap changes
 func (r *ConfigMapController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
-
-	// Only process our specific ConfigMap
-	if req.Name != r.configMapName || req.Namespace != r.configMapNamespace {
-		return reconcile.Result{}, nil
-	}
 
 	log.V(1).Info("reconciling configmap", "name", req.Name, "namespace", req.Namespace)
 
