@@ -66,8 +66,8 @@ deviceClasses:
 		// Verify ConfigMap exists
 		fetchedCM := &corev1.ConfigMap{}
 		Eventually(func() error {
-			return env.Client.Get(env, 
-				client.ObjectKey{Name: "dra-kwok-configmap", Namespace: "karpenter"}, 
+			return env.Client.Get(env,
+				client.ObjectKey{Name: "dra-kwok-configmap", Namespace: "karpenter"},
 				fetchedCM)
 		}).WithTimeout(10 * time.Second).Should(Succeed())
 
