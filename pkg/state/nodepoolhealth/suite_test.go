@@ -74,4 +74,8 @@ var _ = Describe("NodePoolHealthState", func() {
 		npState.SetStatus(npUUID2, nodepoolhealth.StatusUnknown)
 		Expect(npState.Status(npUUID2)).To(Equal(nodepoolhealth.StatusUnknown))
 	})
+	It("should create a copy of the tracker and update it and not the original tracker in case of Dry Run", func() {
+		Expect(npState.DryRun(npUUID, true).Status()).To(Equal(nodepoolhealth.StatusHealthy))
+		Expect(npState.Status(npUUID)).To(Equal(nodepoolhealth.StatusUnknown))
+	})
 })

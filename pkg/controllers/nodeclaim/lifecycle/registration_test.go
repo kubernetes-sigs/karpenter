@@ -70,10 +70,20 @@ var _ = Describe("Registration", func() {
 	DescribeTable(
 		"Registration",
 		func(isManagedNodeClaim bool) {
+			ExpectApplied(ctx, env.Client, nodePool)
 			nodeClaimOpts := []v1.NodeClaim{{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1.NodePoolLabelKey: nodePool.Name,
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion:         object.GVK(nodePool).GroupVersion().String(),
+							Kind:               object.GVK(nodePool).Kind,
+							Name:               nodePool.Name,
+							UID:                nodePool.UID,
+							BlockOwnerDeletion: lo.ToPtr(true),
+						},
 					},
 				},
 			}}
@@ -467,16 +477,26 @@ var _ = Describe("Registration", func() {
 		Expect(node.Spec.Taints).To(HaveLen(0))
 	})
 	It("should add NodeRegistrationHealthy=true on the nodePool if registration succeeds and if it was previously false", func() {
+		ExpectApplied(ctx, env.Client, nodePool)
 		nodeClaimOpts := []v1.NodeClaim{{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.NodePoolLabelKey: nodePool.Name,
 				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         object.GVK(nodePool).GroupVersion().String(),
+						Kind:               object.GVK(nodePool).Kind,
+						Name:               nodePool.Name,
+						UID:                nodePool.UID,
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
+				},
 			},
 		}}
 		nodeClaim := test.NodeClaim(nodeClaimOpts...)
 		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "unhealthy", "unhealthy")
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 
@@ -493,10 +513,20 @@ var _ = Describe("Registration", func() {
 		})
 	})
 	It("should not add NodeRegistrationHealthy=true on the nodePool if registration succeeds once and if it had previously failed twice in the registrationHealthBuffer", func() {
+		ExpectApplied(ctx, env.Client, nodePool)
 		nodeClaim1 := test.NodeClaim(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.NodePoolLabelKey: nodePool.Name,
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         object.GVK(nodePool).GroupVersion().String(),
+						Kind:               object.GVK(nodePool).Kind,
+						Name:               nodePool.Name,
+						UID:                nodePool.UID,
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
 				},
 			},
 		})
@@ -505,10 +535,19 @@ var _ = Describe("Registration", func() {
 				Labels: map[string]string{
 					v1.NodePoolLabelKey: nodePool.Name,
 				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         object.GVK(nodePool).GroupVersion().String(),
+						Kind:               object.GVK(nodePool).Kind,
+						Name:               nodePool.Name,
+						UID:                nodePool.UID,
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
+				},
 			},
 		})
 		cloudProvider.AllowedCreateCalls = 0 // Don't allow Create() calls to succeed
-		ExpectApplied(ctx, env.Client, nodePool, nodeClaim1, nodeClaim2)
+		ExpectApplied(ctx, env.Client, nodeClaim1, nodeClaim2)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim1)
 		_ = ExpectObjectReconcileFailed(ctx, env.Client, nodeClaimController, nodeClaim2)
 
@@ -528,6 +567,15 @@ var _ = Describe("Registration", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.NodePoolLabelKey: nodePool.Name,
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         object.GVK(nodePool).GroupVersion().String(),
+						Kind:               object.GVK(nodePool).Kind,
+						Name:               nodePool.Name,
+						UID:                nodePool.UID,
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
 				},
 			},
 		})
@@ -549,15 +597,51 @@ var _ = Describe("Registration", func() {
 			Status: metav1.ConditionFalse,
 		})
 	})
-	It("should not block on updating NodeRegistrationHealthy status condition if nodeClaim is not owned by a nodePool", func() {
-		nodeClaim := test.NodeClaim()
+	It("should not update NodeRegistrationHealthy status condition if nodePool owning the nodeClaim is deleted", func() {
+		nodePool = test.NodePool(
+			v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-nodepool",
+				},
+			},
+		)
+		ExpectApplied(ctx, env.Client, nodePool)
+		nodeClaim := test.NodeClaim(v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					v1.NodePoolLabelKey: nodePool.Name,
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         object.GVK(nodePool).GroupVersion().String(),
+						Kind:               object.GVK(nodePool).Kind,
+						Name:               nodePool.Name,
+						UID:                nodePool.UID,
+						BlockOwnerDeletion: lo.ToPtr(true),
+					},
+				},
+			},
+		})
 		ExpectApplied(ctx, env.Client, nodeClaim)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		// Delete the nodePool referenced on the nodeClaim
+		ExpectDeleted(ctx, env.Client, nodePool)
+		//Recreate the nodePool so that it will have a different UID
+		nodePool = test.NodePool(
+			v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-nodepool",
+				},
+			},
+		)
+		ExpectApplied(ctx, env.Client, nodePool)
+		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{Type: v1.ConditionTypeNodeRegistrationHealthy, Status: metav1.ConditionUnknown})
 
 		node := test.Node(test.NodeOptions{ProviderID: nodeClaim.Status.ProviderID, Taints: []corev1.Taint{v1.UnregisteredNoExecuteTaint}})
 		ExpectApplied(ctx, env.Client, node)
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimController, nodeClaim)
+		operatorpkg.ExpectStatusConditions(ctx, env.Client, 1*time.Minute, nodePool, status.Condition{Type: v1.ConditionTypeNodeRegistrationHealthy, Status: metav1.ConditionUnknown})
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeRegistered).IsTrue()).To(BeTrue())

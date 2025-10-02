@@ -116,3 +116,10 @@ func (s State) Update(nodePoolUID types.UID, launchStatus bool) {
 func (s State) SetStatus(nodePoolUID types.UID, status Status) {
 	s.nodePoolNodeRegistration(nodePoolUID).SetStatus(status)
 }
+
+func (s State) DryRun(nodePoolUID types.UID, launchStatus bool) *Tracker {
+	trackerCopy := NewTracker(BufferSize)
+	trackerCopy.buffer = s.nodePoolNodeRegistration(nodePoolUID).buffer
+	trackerCopy.Update(launchStatus)
+	return trackerCopy
+}
