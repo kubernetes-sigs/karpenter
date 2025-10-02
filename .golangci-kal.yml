@@ -1,0 +1,25 @@
+linters-settings:
+  custom:
+    kubeapilinter:
+      type: "module"
+      description: "Kube API Linter lints Kube like APIs based on API conventions"
+      settings:
+        linters:
+          enable:
+            - requiredfields
+            - statusoptional
+            - statussubresource
+            - commentstart
+            - conditions
+            - nomaps
+            - optionalorrequired
+            - ssatags
+
+linters:
+  disable-all: true
+  enable:
+    - kubeapilinter
+
+run:
+  timeout: 5m
+  go: '1.24'
