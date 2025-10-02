@@ -70,7 +70,7 @@ func main() {
 	// Initialize controllers with simple defaults
 	configMapController := controllers.NewConfigMapController(
 		mgr.GetClient(),
-		"dra-kwok-config",
+		"dra-kwok-configmap",
 		"karpenter",
 		nil,
 	)

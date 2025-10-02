@@ -73,7 +73,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 			// Create DRA KWOK driver ConfigMap with GPU configuration
 			draConfigMap = &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "dra-kwok-config",
+					Name:      "dra-kwok-configmap",
 					Namespace: "karpenter",
 				},
 				Data: map[string]string{
@@ -322,7 +322,7 @@ mappings:
 		It("should support FPGA device types", func() {
 			draConfigMap = &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "dra-kwok-config", 
+					Name:      "dra-kwok-configmap", 
 					Namespace: "karpenter",
 				},
 				Data: map[string]string{
@@ -418,7 +418,7 @@ mappings:
 		It("should handle invalid ConfigMap gracefully", func() {
 			draConfigMap = &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "dra-kwok-config",
+					Name:      "dra-kwok-configmap",
 					Namespace: "karpenter",
 				},
 				Data: map[string]string{
