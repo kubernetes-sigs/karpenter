@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -106,7 +107,7 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 			return err
 		}
 		if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
-			return o.UID == nodePool.UID
+			return o.Kind == object.GVK(nodePool).Kind && o.UID == nodePool.UID
 		}); !found {
 			return nil
 		}

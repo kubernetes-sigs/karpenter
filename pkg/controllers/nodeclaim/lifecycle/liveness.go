@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
 
@@ -132,7 +133,7 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 			return err
 		}
 		if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
-			return o.UID == nodePool.UID
+			return o.Kind == object.GVK(nodePool).Kind && o.UID == nodePool.UID
 		}); !found {
 			return nil
 		}

@@ -82,4 +82,13 @@ var _ = Describe("NodePoolHealthState", func() {
 		Expect(npState.DryRun(npUUID, false).Status()).To(Equal(nodepoolhealth.StatusUnhealthy))
 		Expect(npState.Status(npUUID)).To(Equal(nodepoolhealth.StatusHealthy))
 	})
+	It("should reset the buffer first when setting status", func() {
+		npState.Update(npUUID, false)
+		npState.Update(npUUID, false)
+		Expect(npState.Status(npUUID)).To(Equal(nodepoolhealth.StatusUnhealthy))
+
+		// This SetStatus call should first reset the buffer and then add entries to the buffer such that the status becomes healthy
+		npState.SetStatus(npUUID, nodepoolhealth.StatusHealthy)
+		Expect(npState.Status(npUUID)).To(Equal(nodepoolhealth.StatusHealthy))
+	})
 })

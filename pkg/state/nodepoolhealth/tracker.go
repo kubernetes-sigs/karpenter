@@ -86,8 +86,10 @@ func (t *Tracker) SetStatus(status Status) {
 	case StatusUnknown:
 		t.buffer.Reset()
 	case StatusHealthy:
+		t.buffer.Reset()
 		t.Update(true)
 	case StatusUnhealthy:
+		t.buffer.Reset()
 		for range int(BufferSize * ThresholdFalse) {
 			t.Update(false)
 		}
