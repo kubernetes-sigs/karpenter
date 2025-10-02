@@ -44,7 +44,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 	BeforeEach(func() {
 		// Set up node pool for GPU nodes
 		nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
-			Kind: "NodeClass", 
+			Kind: "NodeClass",
 			Name: "default",
 		}
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
@@ -178,7 +178,7 @@ mappings:
 			By("Verifying the node has the expected GPU labels")
 			nodes := env.Monitor.CreatedNodes()
 			Expect(nodes).To(HaveLen(1))
-			
+
 			node := nodes[0]
 			// Should have GPU instance type
 			Expect([]string{"g4dn.xlarge", "p3.2xlarge"}).To(ContainElement(node.Labels["node.kubernetes.io/instance-type"]))
@@ -209,10 +209,11 @@ mappings:
 			Expect(resourceSlice.Spec.Devices).To(HaveLen(1))
 
 			device := resourceSlice.Spec.Devices[0]
-			if node.Labels["node.kubernetes.io/instance-type"] == "g4dn.xlarge" {
+			switch node.Labels["node.kubernetes.io/instance-type"] {
+			case "g4dn.xlarge":
 				Expect(device.Name).To(Equal("nvidia-t4-0"))
 				Expect(device.Basic.Attributes["type"].StringValue).To(Equal("nvidia-tesla-t4"))
-			} else if node.Labels["node.kubernetes.io/instance-type"] == "p3.2xlarge" {
+			case "p3.2xlarge":
 				Expect(device.Name).To(Equal("nvidia-v100-0"))
 				Expect(device.Basic.Attributes["type"].StringValue).To(Equal("nvidia-tesla-v100"))
 			}
@@ -322,7 +323,7 @@ mappings:
 		It("should support FPGA device types", func() {
 			draConfigMap = &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "dra-kwok-configmap", 
+					Name:      "dra-kwok-configmap",
 					Namespace: "karpenter",
 				},
 				Data: map[string]string{
@@ -371,7 +372,7 @@ mappings:
 						Spec: corev1.PodSpec{
 							Containers: []corev1.Container{
 								{
-									Name:    "fpga-container", 
+									Name:    "fpga-container",
 									Image:   "ubuntu:20.04",
 									Command: []string{"sleep", "3600"},
 									Resources: corev1.ResourceRequirements{
@@ -382,8 +383,8 @@ mappings:
 								},
 							},
 							NodeSelector: map[string]string{
-								"accelerator-type":              "fpga",
-								test.DiscoveryLabel:             "owned",
+								"accelerator-type":  "fpga",
+								test.DiscoveryLabel: "owned",
 							},
 						},
 					},
@@ -394,7 +395,7 @@ mappings:
 
 			By("Expecting node with FPGA support to be created")
 			env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(map[string]string{
-				"app": "fpga-workload", 
+				"app": "fpga-workload",
 			}), 1)
 
 			By("Verifying FPGA ResourceSlice is created")
@@ -432,7 +433,7 @@ mappings: []
 			By("Creating invalid ConfigMap")
 			env.ExpectCreated(draConfigMap)
 
-			By("Creating workload that requests DRA resources") 
+			By("Creating workload that requests DRA resources")
 			deployment = &appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-config-workload",
@@ -455,7 +456,7 @@ mappings: []
 							Containers: []corev1.Container{
 								{
 									Name:    "test-container",
-									Image:   "ubuntu:20.04", 
+									Image:   "ubuntu:20.04",
 									Command: []string{"sleep", "60"},
 									Resources: corev1.ResourceRequirements{
 										Requests: corev1.ResourceList{

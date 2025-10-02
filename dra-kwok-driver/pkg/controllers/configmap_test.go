@@ -158,9 +158,9 @@ mappings:
 			onConfigChangeCalled := false
 			testClient := fake.NewClientBuilder().Build()
 			testController := NewConfigMapController(
-				testClient, 
+				testClient,
 				"test-config",
-				"test-namespace", 
+				"test-namespace",
 				func(cfg *config.Config) {
 					onConfigChangeCalled = true
 				},
