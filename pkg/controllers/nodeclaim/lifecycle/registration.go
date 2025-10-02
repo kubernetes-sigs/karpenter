@@ -105,21 +105,21 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 		if err := r.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 			return err
 		}
-		_, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+		if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 			return o.UID == nodePool.UID
-		})
-		if found {
-			stored := nodePool.DeepCopy()
-			if r.npState.DryRun(nodePool.UID, true).Status() == nodepoolhealth.StatusHealthy && nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy) {
-				// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
-				// can cause races due to the fact that it fully replaces the list on a change
-				// Here, we are updating the status condition list
-				if err := r.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
-					return err
-				}
-			}
-			r.npState.Update(nodePool.UID, true)
+		}); !found {
+			return nil
 		}
+		stored := nodePool.DeepCopy()
+		if r.npState.DryRun(nodePool.UID, true).Status() == nodepoolhealth.StatusHealthy && nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+			// can cause races due to the fact that it fully replaces the list on a change
+			// Here, we are updating the status condition list
+			if err := r.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
+				return err
+			}
+		}
+		r.npState.Update(nodePool.UID, true)
 	}
 	return nil
 }

@@ -131,28 +131,28 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 		if err := l.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 			return err
 		}
-		_, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+		if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 			return o.UID == nodePool.UID
-		})
-		if found {
-			stored := nodePool.DeepCopy()
-			if l.npState.DryRun(nodePool.UID, false).Status() == nodepoolhealth.StatusUnhealthy && !nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
-				// If the nodeClaim failed to register during the timeout set NodeRegistrationHealthy status condition on
-				// NodePool to False. If the launch failed get the launch failure reason and message from nodeClaim.
-				if launchCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); launchCondition.IsTrue() {
-					nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "RegistrationFailed", "Failed to register node")
-				} else {
-					nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, launchCondition.Reason, launchCondition.Message)
-				}
-				// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
-				// can cause races due to the fact that it fully replaces the list on a change
-				// Here, we are updating the status condition list
-				if err := l.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
-					return err
-				}
-			}
-			l.npState.Update(nodePool.UID, false)
+		}); !found {
+			return nil
 		}
+		stored := nodePool.DeepCopy()
+		if l.npState.DryRun(nodePool.UID, false).Status() == nodepoolhealth.StatusUnhealthy && !nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
+			// If the nodeClaim failed to register during the timeout set NodeRegistrationHealthy status condition on
+			// NodePool to False. If the launch failed get the launch failure reason and message from nodeClaim.
+			if launchCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); launchCondition.IsTrue() {
+				nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, "RegistrationFailed", "Failed to register node")
+			} else {
+				nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeRegistrationHealthy, launchCondition.Reason, launchCondition.Message)
+			}
+			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+			// can cause races due to the fact that it fully replaces the list on a change
+			// Here, we are updating the status condition list
+			if err := l.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
+				return err
+			}
+		}
+		l.npState.Update(nodePool.UID, false)
 	}
 	return nil
 }
