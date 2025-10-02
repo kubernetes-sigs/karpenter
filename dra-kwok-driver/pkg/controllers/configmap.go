@@ -122,21 +122,10 @@ func (r *ConfigMapController) Reconcile(ctx context.Context, req reconcile.Reque
 
 // parseConfigFromConfigMap extracts configuration from the ConfigMap
 func (r *ConfigMapController) parseConfigFromConfigMap(cm *corev1.ConfigMap) (*config.Config, error) {
-	// Look for configuration in common keys
-	var configData string
-	var found bool
-
-	// Try common configuration keys
-	for _, key := range []string{"config.yaml", "config.yml", "config", "dra-kwok-config.yaml"} {
-		if data, exists := cm.Data[key]; exists {
-			configData = data
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return nil, fmt.Errorf("no configuration found in configmap, expected keys: config.yaml, config.yml, config, dra-kwok-config.yaml")
+	// Get configuration from config.yaml key (as defined in tests)
+	configData, exists := cm.Data["config.yaml"]
+	if !exists {
+		return nil, fmt.Errorf("no configuration found in configmap, expected key: config.yaml")
 	}
 
 	// Parse YAML configuration

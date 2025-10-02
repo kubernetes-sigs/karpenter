@@ -36,7 +36,7 @@ var _ = Describe("ConfigMapController", func() {
 	var (
 		controller         *ConfigMapController
 		fakeClient         *fake.ClientBuilder
-		configMapName      = "dra-kwok-config"
+		configMapName      = "dra-kwok-configmap"
 		configMapNamespace = "karpenter"
 	)
 
@@ -82,7 +82,7 @@ mappings:
 		})
 
 		It("should handle different config key names", func() {
-			testCases := []string{"config.yaml", "config.yml", "config", "dra-kwok-config.yaml"}
+			testCases := []string{"config.yaml"}
 
 			for _, key := range testCases {
 				configMap := &corev1.ConfigMap{

@@ -33,7 +33,7 @@ var _ = Describe("DRA ConfigMap Integration", func() {
 		// Create a basic ConfigMap for DRA configuration
 		draConfigMap = &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "dra-kwok-config",
+				Name:      "dra-kwok-configmap",
 				Namespace: "karpenter",
 			},
 			Data: map[string]string{
@@ -67,7 +67,7 @@ deviceClasses:
 		fetchedCM := &corev1.ConfigMap{}
 		Eventually(func() error {
 			return env.Client.Get(env, 
-				client.ObjectKey{Name: "dra-kwok-config", Namespace: "karpenter"}, 
+				client.ObjectKey{Name: "dra-kwok-configmap", Namespace: "karpenter"}, 
 				fetchedCM)
 		}).WithTimeout(10 * time.Second).Should(Succeed())
 
@@ -84,7 +84,7 @@ deviceClasses:
 		Eventually(func() error {
 			fetchedCM := &corev1.ConfigMap{}
 			if err := env.Client.Get(env,
-				client.ObjectKey{Name: "dra-kwok-config", Namespace: "karpenter"},
+				client.ObjectKey{Name: "dra-kwok-configmap", Namespace: "karpenter"},
 				fetchedCM); err != nil {
 				return err
 			}
@@ -103,7 +103,7 @@ deviceClasses:
 		fetchedCM := &corev1.ConfigMap{}
 		Eventually(func() string {
 			_ = env.Client.Get(env,
-				client.ObjectKey{Name: "dra-kwok-config", Namespace: "karpenter"},
+				client.ObjectKey{Name: "dra-kwok-configmap", Namespace: "karpenter"},
 				fetchedCM)
 			return fetchedCM.Data["config.yaml"]
 		}).WithTimeout(10 * time.Second).Should(ContainSubstring("amd-gpu"))
@@ -120,7 +120,7 @@ deviceClasses:
 		fetchedCM := &corev1.ConfigMap{}
 		Eventually(func() error {
 			return env.Client.Get(env,
-				client.ObjectKey{Name: "dra-kwok-config", Namespace: "karpenter"},
+				client.ObjectKey{Name: "dra-kwok-configmap", Namespace: "karpenter"},
 				fetchedCM)
 		}).WithTimeout(10 * time.Second).Should(Not(Succeed()))
 

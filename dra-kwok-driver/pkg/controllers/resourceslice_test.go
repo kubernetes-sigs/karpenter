@@ -56,7 +56,7 @@ var _ = Describe("ResourceSliceController", func() {
 		Expect(resourcev1.AddToScheme(scheme)).To(Succeed())
 
 		fakeClient = fake.NewClientBuilder().WithScheme(scheme).Build()
-		configController = NewConfigMapController(fakeClient, "dra-kwok-config", "karpenter", nil)
+		configController = NewConfigMapController(fakeClient, "dra-kwok-configmap", "karpenter", nil)
 		resourceController = NewResourceSliceController(fakeClient, driverName, configController)
 	})
 
