@@ -60,6 +60,7 @@ import (
 	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 )
 
 func NewControllers(
@@ -76,6 +77,7 @@ func NewControllers(
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
+	npState := make(nodepoolhealth.State)
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
@@ -91,12 +93,12 @@ func NewControllers(
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
-		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider),
+		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider, npState),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
 		nodepoolvalidation.NewController(kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
-		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
