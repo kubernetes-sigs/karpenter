@@ -24,7 +24,7 @@ import (
 	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	resourcev1beta1 "k8s.io/api/resource/v1beta1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -38,7 +38,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 	var (
 		draConfigMap  *corev1.ConfigMap
 		deployment    *appsv1.Deployment
-		resourceSlice *resourcev1beta1.ResourceSlice
+		resourceSlice *resourcev1.ResourceSlice
 	)
 
 	BeforeEach(func() {
@@ -184,8 +184,8 @@ mappings:
 			Expect([]string{"g4dn.xlarge", "p3.2xlarge"}).To(ContainElement(node.Labels["node.kubernetes.io/instance-type"]))
 
 			By("Checking that ResourceSlices are created for the GPU node")
-			Eventually(func() []resourcev1beta1.ResourceSlice {
-				var resourceSlices resourcev1beta1.ResourceSliceList
+			Eventually(func() []resourcev1.ResourceSlice {
+				var resourceSlices resourcev1.ResourceSliceList
 				err := env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
 					"spec.nodeName": node.Name,
 				})
@@ -196,7 +196,7 @@ mappings:
 			}, 30*time.Second, 1*time.Second).Should(Not(BeEmpty()))
 
 			// Get the ResourceSlice for verification
-			var resourceSlices resourcev1beta1.ResourceSliceList
+			var resourceSlices resourcev1.ResourceSliceList
 			Expect(env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
 				"spec.nodeName": node.Name,
 			})).To(Succeed())
@@ -212,10 +212,10 @@ mappings:
 			switch node.Labels["node.kubernetes.io/instance-type"] {
 			case "g4dn.xlarge":
 				Expect(device.Name).To(Equal("nvidia-t4-0"))
-				Expect(device.Basic.Attributes["type"].StringValue).To(Equal("nvidia-tesla-t4"))
+				Expect(device.Attributes[resourcev1.QualifiedName("type")].StringValue).To(Equal("nvidia-tesla-t4"))
 			case "p3.2xlarge":
 				Expect(device.Name).To(Equal("nvidia-v100-0"))
-				Expect(device.Basic.Attributes["type"].StringValue).To(Equal("nvidia-tesla-v100"))
+				Expect(device.Attributes[resourcev1.QualifiedName("type")].StringValue).To(Equal("nvidia-tesla-v100"))
 			}
 		})
 
@@ -306,7 +306,7 @@ mappings:
 			By("Verifying ResourceSlices are updated with new configuration")
 			if node.Labels["node.kubernetes.io/instance-type"] == "g4dn.xlarge" {
 				Eventually(func() int {
-					var resourceSlices resourcev1beta1.ResourceSliceList
+					var resourceSlices resourcev1.ResourceSliceList
 					err := env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
 						"spec.nodeName": node.Name,
 					})
@@ -402,8 +402,8 @@ mappings:
 			nodes := env.Monitor.CreatedNodes()
 			Expect(nodes).To(HaveLen(1))
 
-			Eventually(func() []resourcev1beta1.ResourceSlice {
-				var resourceSlices resourcev1beta1.ResourceSliceList
+			Eventually(func() []resourcev1.ResourceSlice {
+				var resourceSlices resourcev1.ResourceSliceList
 				err := env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
 					"spec.nodeName": nodes[0].Name,
 				})
@@ -475,7 +475,7 @@ mappings: []
 
 			By("Verifying that no ResourceSlices are created with invalid config")
 			Consistently(func() int {
-				var resourceSlices resourcev1beta1.ResourceSliceList
+				var resourceSlices resourcev1.ResourceSliceList
 				err := env.Client.List(env.Context, &resourceSlices)
 				if err != nil {
 					return -1
