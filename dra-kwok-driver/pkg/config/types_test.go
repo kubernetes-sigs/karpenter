@@ -33,7 +33,7 @@ var _ = Describe("Config", func() {
 	Describe("Validation", func() {
 		It("should validate a complete config", func() {
 			config := &Config{
-				Driver: "kwok.example.com/gpu",
+				Driver: "karpenter.sh/dra-kwok-driver",
 				Mappings: []Mapping{
 					{
 						Name: "gpu-mapping",
@@ -57,7 +57,7 @@ var _ = Describe("Config", func() {
 					},
 				},
 			}
-			Expect(config.Driver).To(Equal("kwok.example.com/gpu"))
+			Expect(config.Driver).To(Equal("karpenter.sh/dra-kwok-driver"))
 			Expect(config.Mappings).To(HaveLen(1))
 			Expect(config.Mappings[0].Name).To(Equal("gpu-mapping"))
 			Expect(config.Mappings[0].ResourceSlice.Devices).To(HaveLen(1))
