@@ -77,7 +77,7 @@ func main() {
 
 	resourceSliceController := controllers.NewResourceSliceController(
 		mgr.GetClient(),
-		"kwok.example.com/gpu",
+		"karpenter.sh/dra-kwok-driver",
 		configMapController,
 	)
 

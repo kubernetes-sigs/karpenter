@@ -46,7 +46,7 @@ var _ = Describe("ResourceSliceController", func() {
 		configController   *ConfigMapController
 		fakeClient         client.Client
 		scheme             *runtime.Scheme
-		driverName         = "kwok.example.com/gpu"
+		driverName         = "karpenter.sh/dra-kwok-driver"
 	)
 
 	BeforeEach(func() {

@@ -53,7 +53,7 @@ var _ = Describe("ConfigMapController", func() {
 			configMap := &corev1.ConfigMap{
 				Data: map[string]string{
 					"config.yaml": `
-driver: gpu.example.com
+driver: karpenter.sh/dra-kwok-driver
 mappings:
 - name: gpu-mapping
   nodeSelector:
@@ -74,7 +74,7 @@ mappings:
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cfg).ToNot(BeNil())
-			Expect(cfg.Driver).To(Equal("gpu.example.com"))
+			Expect(cfg.Driver).To(Equal("karpenter.sh/dra-kwok-driver"))
 			Expect(cfg.Mappings).To(HaveLen(1))
 			Expect(cfg.Mappings[0].Name).To(Equal("gpu-mapping"))
 			Expect(cfg.Mappings[0].ResourceSlice.Devices).To(HaveLen(1))
