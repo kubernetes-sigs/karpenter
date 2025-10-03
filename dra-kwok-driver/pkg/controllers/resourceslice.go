@@ -113,20 +113,11 @@ func (r *ResourceSliceController) Reconcile(ctx context.Context, req reconcile.R
 	return r.reconcileResourceSlicesForNode(ctx, node, mapping, cfg.Driver)
 }
 
-// isKWOKNode determines if a node is a KWOK node
+// isKWOKNode determines if a node is a KWOK node created by Karpenter's KWOK provider
 func (r *ResourceSliceController) isKWOKNode(node *corev1.Node) bool {
-	// Check for KWOK-specific labels or annotations
-	if provider, ok := node.Labels["kwok.x-k8s.io/provider"]; ok && provider == "kwok" {
-		return true
-	}
-	if nodeType, ok := node.Labels["type"]; ok && nodeType == "kwok" {
-		return true
-	}
-	// Check for KWOK node annotation
-	if _, ok := node.Annotations["kwok.x-k8s.io/node"]; ok {
-		return true
-	}
-	return false
+	// Karpenter KWOK provider adds this annotation to all nodes it creates
+	_, ok := node.Annotations["kwok.x-k8s.io/node"]
+	return ok
 }
 
 // findMatchingMapping finds a mapping that matches the node's labels
