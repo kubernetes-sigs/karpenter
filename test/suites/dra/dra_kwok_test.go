@@ -52,7 +52,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 					Key:      "node.kubernetes.io/instance-type",
 					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"g4dn.xlarge", "p3.2xlarge"},
+					Values:   []string{"c-4x-amd64-linux", "m-8x-amd64-linux"},
 				},
 			},
 		}
@@ -83,11 +83,11 @@ driver: gpu.example.com
 
 # Device mappings for different GPU node types
 mappings:
-  # NVIDIA T4 GPUs (g4dn.xlarge)
+  # NVIDIA T4 GPUs (c-4x-amd64-linux)
   - name: gpu-t4-mapping
     nodeSelector:
       matchLabels:
-        node.kubernetes.io/instance-type: g4dn.xlarge
+        node.kubernetes.io/instance-type: c-4x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
       devices:
@@ -99,11 +99,11 @@ mappings:
             compute-capability: "7.5"
             cuda-cores: "2560"
 
-  # NVIDIA V100 GPUs (p3.2xlarge)  
+  # NVIDIA V100 GPUs (m-8x-amd64-linux)  
   - name: gpu-v100-mapping
     nodeSelector:
       matchLabels:
-        node.kubernetes.io/instance-type: p3.2xlarge
+        node.kubernetes.io/instance-type: m-8x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
       devices:
@@ -181,7 +181,7 @@ mappings:
 
 			node := nodes[0]
 			// Should have GPU instance type
-			Expect([]string{"g4dn.xlarge", "p3.2xlarge"}).To(ContainElement(node.Labels["node.kubernetes.io/instance-type"]))
+			Expect([]string{"c-4x-amd64-linux", "m-8x-amd64-linux"}).To(ContainElement(node.Labels["node.kubernetes.io/instance-type"]))
 
 			By("Checking that ResourceSlices are created for the GPU node")
 			Eventually(func() []resourcev1.ResourceSlice {
@@ -210,10 +210,10 @@ mappings:
 
 			device := resourceSlice.Spec.Devices[0]
 			switch node.Labels["node.kubernetes.io/instance-type"] {
-			case "g4dn.xlarge":
+			case "c-4x-amd64-linux":
 				Expect(device.Name).To(Equal("nvidia-t4-0"))
 				Expect(device.Attributes[resourcev1.QualifiedName("type")].StringValue).To(Equal("nvidia-tesla-t4"))
-			case "p3.2xlarge":
+			case "m-8x-amd64-linux":
 				Expect(device.Name).To(Equal("nvidia-v100-0"))
 				Expect(device.Attributes[resourcev1.QualifiedName("type")].StringValue).To(Equal("nvidia-tesla-v100"))
 			}
@@ -283,7 +283,7 @@ mappings:
   - name: gpu-t4-updated-mapping
     nodeSelector:
       matchLabels:
-        node.kubernetes.io/instance-type: g4dn.xlarge
+        node.kubernetes.io/instance-type: c-4x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
       devices:
@@ -304,7 +304,7 @@ mappings:
 			}, 10*time.Second, 1*time.Second).Should(Succeed())
 
 			By("Verifying ResourceSlices are updated with new configuration")
-			if node.Labels["node.kubernetes.io/instance-type"] == "g4dn.xlarge" {
+			if node.Labels["node.kubernetes.io/instance-type"] == "c-4x-amd64-linux" {
 				Eventually(func() int {
 					var resourceSlices resourcev1.ResourceSliceList
 					err := env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
