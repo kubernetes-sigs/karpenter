@@ -135,43 +135,43 @@ func (r *ResourceSliceController) findMatchingMapping(node *corev1.Node, mapping
 	return nil
 }
 
-// reconcileResourceSlicesForNode creates or updates ResourceSlices for a specific node
+// reconcileResourceSlicesForNode creates or updates a single ResourceSlice for a node containing all device types
 func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Context, node *corev1.Node, mapping *config.Mapping, driverName string) (reconcile.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	// Create ResourceSlices for each device type
-	for i, deviceConfig := range mapping.ResourceSlice.Devices {
-		resourceSliceName := fmt.Sprintf("%s-%s-%d", node.Name, deviceConfig.Name, i)
+	// Create a single ResourceSlice for all devices on this node
+	resourceSliceName := fmt.Sprintf("%s-devices", node.Name)
 
-		resourceSlice := &resourcev1.ResourceSlice{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: resourceSliceName,
-				Labels: map[string]string{
-					"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
-					"kwok.x-k8s.io/node":       node.Name,
-					"kwok.x-k8s.io/device":     deviceConfig.Name,
-				},
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: "v1",
-						Kind:       "Node",
-						Name:       node.Name,
-						UID:        node.UID,
-					},
+	resourceSlice := &resourcev1.ResourceSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: resourceSliceName,
+			Labels: map[string]string{
+				"kwok.x-k8s.io/managed-by": "dra-kwok-driver",
+				"kwok.x-k8s.io/node":       node.Name,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "v1",
+					Kind:       "Node",
+					Name:       node.Name,
+					UID:        node.UID,
 				},
 			},
-			Spec: resourcev1.ResourceSliceSpec{
-				NodeName: &node.Name,
-				Driver:   driverName,
-				Pool: resourcev1.ResourcePool{
-					Name:               fmt.Sprintf("%s-pool", deviceConfig.Name),
-					ResourceSliceCount: 1,
-				},
+		},
+		Spec: resourcev1.ResourceSliceSpec{
+			NodeName: &node.Name,
+			Driver:   driverName,
+			Pool: resourcev1.ResourcePool{
+				Name:               fmt.Sprintf("%s-device-pool", node.Name),
+				ResourceSliceCount: 1,
 			},
-		}
+		},
+	}
 
-		// Create devices for this ResourceSlice
-		devices := make([]resourcev1.Device, deviceConfig.Count)
+	// Collect all devices from all device types into a single slice
+	var allDevices []resourcev1.Device
+	for _, deviceConfig := range mapping.ResourceSlice.Devices {
+		// Create devices for this device type
 		for j := 0; j < deviceConfig.Count; j++ {
 			deviceName := fmt.Sprintf("%s-%d", deviceConfig.Name, j)
 
@@ -184,46 +184,47 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 				}
 			}
 
-			devices[j] = resourcev1.Device{
+			device := resourcev1.Device{
 				Name:       deviceName,
 				Attributes: deviceAttributes,
 			}
+			allDevices = append(allDevices, device)
 		}
-		resourceSlice.Spec.Devices = devices
+	}
+	resourceSlice.Spec.Devices = allDevices
 
-		// Create or update the ResourceSlice
-		existing := &resourcev1.ResourceSlice{}
-		err := r.Get(ctx, types.NamespacedName{Name: resourceSliceName}, existing)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				// Create new ResourceSlice
-				log.Info("creating resourceslice",
-					"resourceslice", resourceSliceName,
-					"node", node.Name,
-					"devices", len(devices),
-				)
-				if err := r.Create(ctx, resourceSlice); err != nil {
-					log.Error(err, "failed to create resourceslice", "resourceslice", resourceSliceName)
-					return reconcile.Result{}, err
-				}
-			} else {
-				log.Error(err, "failed to get resourceslice", "resourceslice", resourceSliceName)
+	// Create or update the ResourceSlice
+	existing := &resourcev1.ResourceSlice{}
+	err := r.Get(ctx, types.NamespacedName{Name: resourceSliceName}, existing)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create new ResourceSlice
+			log.Info("creating resourceslice",
+				"resourceslice", resourceSliceName,
+				"node", node.Name,
+				"devices", len(allDevices),
+			)
+			if err := r.Create(ctx, resourceSlice); err != nil {
+				log.Error(err, "failed to create resourceslice", "resourceslice", resourceSliceName)
 				return reconcile.Result{}, err
 			}
 		} else {
-			// Update existing ResourceSlice
-			existing.Spec = resourceSlice.Spec
-			existing.Labels = resourceSlice.Labels
+			log.Error(err, "failed to get resourceslice", "resourceslice", resourceSliceName)
+			return reconcile.Result{}, err
+		}
+	} else {
+		// Update existing ResourceSlice
+		existing.Spec = resourceSlice.Spec
+		existing.Labels = resourceSlice.Labels
 
-			log.Info("updating resourceslice",
-				"resourceslice", resourceSliceName,
-				"node", node.Name,
-				"devices", len(devices),
-			)
-			if err := r.Update(ctx, existing); err != nil {
-				log.Error(err, "failed to update resourceslice", "resourceslice", resourceSliceName)
-				return reconcile.Result{}, err
-			}
+		log.Info("updating resourceslice",
+			"resourceslice", resourceSliceName,
+			"node", node.Name,
+			"devices", len(allDevices),
+		)
+		if err := r.Update(ctx, existing); err != nil {
+			log.Error(err, "failed to update resourceslice", "resourceslice", resourceSliceName)
+			return reconcile.Result{}, err
 		}
 	}
 
