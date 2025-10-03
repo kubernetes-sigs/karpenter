@@ -137,7 +137,7 @@ func (r *ConfigMapController) parseConfigFromConfigMap(cm *corev1.ConfigMap) (*c
 	return cfg, nil
 }
 
-// GetConfig returns the current configuration (thread-safe read)
+// GetConfig returns the current configuration
 func (r *ConfigMapController) GetConfig() *config.Config {
 	return r.driverConfig
 }

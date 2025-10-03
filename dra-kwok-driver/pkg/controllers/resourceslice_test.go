@@ -61,29 +61,7 @@ var _ = Describe("ResourceSliceController", func() {
 	})
 
 	Describe("isKWOKNode", func() {
-		It("should identify KWOK nodes by provider label", func() {
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"kwok.x-k8s.io/provider": "kwok",
-					},
-				},
-			}
-			Expect(resourceController.isKWOKNode(node)).To(BeTrue())
-		})
-
-		It("should identify KWOK nodes by type label", func() {
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"type": "kwok",
-					},
-				},
-			}
-			Expect(resourceController.isKWOKNode(node)).To(BeTrue())
-		})
-
-		It("should identify KWOK nodes by annotation", func() {
+		It("should identify KWOK nodes by Karpenter KWOK annotation", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
@@ -94,11 +72,23 @@ var _ = Describe("ResourceSliceController", func() {
 			Expect(resourceController.isKWOKNode(node)).To(BeTrue())
 		})
 
-		It("should not identify regular nodes as KWOK", func() {
+		It("should not identify non-KWOK nodes", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						"kubernetes.io/os": "linux",
+					},
+				},
+			}
+			Expect(resourceController.isKWOKNode(node)).To(BeFalse())
+		})
+
+		It("should not identify nodes with other KWOK-like labels", func() {
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"kwok.x-k8s.io/provider": "kwok",
+						"type":                   "kwok",
 					},
 				},
 			}
@@ -209,8 +199,10 @@ var _ = Describe("ResourceSliceController", func() {
 					Name: "kwok-node-1",
 					UID:  "node-uid-123",
 					Labels: map[string]string{
-						"kwok.x-k8s.io/provider":           "kwok",
 						"node.kubernetes.io/instance-type": "g4dn.xlarge",
+					},
+					Annotations: map[string]string{
+						"kwok.x-k8s.io/node": "fake",
 					},
 				},
 			}
@@ -371,8 +363,10 @@ var _ = Describe("ResourceSliceController", func() {
 					Name: "kwok-node-no-match",
 					UID:  "node-uid-456",
 					Labels: map[string]string{
-						"kwok.x-k8s.io/provider":           "kwok",
 						"node.kubernetes.io/instance-type": "t3.micro", // Won't match mapping
+					},
+					Annotations: map[string]string{
+						"kwok.x-k8s.io/node": "fake",
 					},
 				},
 			}
