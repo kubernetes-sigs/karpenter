@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -28,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 
@@ -309,10 +311,38 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 
 // filterByPrice returns the instanceTypes that are lower priced than the current candidate and any error that indicates the input couldn't be filtered.
 // Apply the price improvement factor to require cost savings threshold before consolidation.
-// This prevents excessive churn from marginal price improvements.
 // Returns true if filtering succeeded, false if it failed (caller should not proceed with consolidation).
+// getPriceImprovementFactor resolves the price improvement factor with the following precedence:
+// 1. NodePool-level (if set and valid)
+// 2. Operator-level
+// 3. Default (1.0)
+func (c *consolidation) getPriceImprovementFactor(ctx context.Context, candidates []*Candidate) float64 {
+	// For multi-node consolidation, use the first candidate's NodePool
+	if len(candidates) > 0 && candidates[0].NodePool != nil {
+		if candidates[0].NodePool.Spec.Disruption.ConsolidationPriceImprovementFactor != nil {
+			factorStr := *candidates[0].NodePool.Spec.Disruption.ConsolidationPriceImprovementFactor
+			if factor, err := strconv.ParseFloat(factorStr, 64); err != nil {
+				log.FromContext(ctx).Error(err, "Invalid NodePool consolidationPriceImprovementFactor, falling back to operator-level setting",
+					"nodePool", candidates[0].NodePool.Name, "value", factorStr)
+			} else if factor < 0.0 || factor > 1.0 {
+				log.FromContext(ctx).Info("NodePool consolidationPriceImprovementFactor out of range, falling back to operator-level setting",
+					"nodePool", candidates[0].NodePool.Name, "value", factor)
+			} else {
+				log.FromContext(ctx).V(1).Info("Using NodePool-level consolidation price improvement factor",
+					"nodePool", candidates[0].NodePool.Name, "value", factor)
+				return factor
+			}
+		}
+	}
+	// Fall back to operator-level setting
+	operatorFactor := options.FromContext(ctx).ConsolidationPriceImprovementFactor
+	log.FromContext(ctx).V(1).Info("Using operator-level consolidation price improvement factor",
+		"value", operatorFactor)
+	return operatorFactor
+}
+
 func (c *consolidation) filterByPrice(ctx context.Context, candidates []*Candidate, results pscheduling.Results, candidatePrice float64) bool {
-	priceImprovementFactor := options.FromContext(ctx).ConsolidationPriceImprovementFactor
+	priceImprovementFactor := c.getPriceImprovementFactor(ctx, candidates)
 
 	var err error
 	if priceImprovementFactor == 1.0 {

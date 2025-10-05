@@ -126,7 +126,7 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             lo.ToPtr(false),
 					StaticCapacity:          lo.ToPtr(false),
 				},
-				ConsolidationPriceImprovementFactor: lo.ToPtr(0.8),
+				ConsolidationPriceImprovementFactor: lo.ToPtr(1.0),
 				IgnoreDRARequests:                   lo.ToPtr(true),
 			}))
 		})

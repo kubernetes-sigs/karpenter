@@ -5442,5 +5442,43 @@ var _ = Describe("Consolidation", func() {
 				Expect(savingsEvents).To(BeEmpty())
 			})
 		})
+
+		Describe("NodePool-level Price Improvement Factor", func() {
+			It("should parse NodePool-level price improvement factor from string", func() {
+				// Test that the NodePool API accepts string values
+				customFactor := "0.8"
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor = &customFactor
+
+				Expect(nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor).ToNot(BeNil())
+				Expect(*nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor).To(Equal("0.8"))
+			})
+
+			It("should handle nil NodePool price improvement factor", func() {
+				// Test that consolidation works when NodePool factor is not set
+				Expect(nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor).To(BeNil())
+			})
+
+			It("should handle various valid NodePool price improvement factor formats", func() {
+				testCases := []string{"0.0", "0.5", "1.0", ".5", "0.8", "0.01"}
+
+				for _, factorStr := range testCases {
+					// Create a fresh NodePool for each test case to avoid resourceVersion conflicts
+					testNodePool := test.NodePool()
+					customFactor := factorStr
+					testNodePool.Spec.Disruption.ConsolidationPriceImprovementFactor = &customFactor
+
+					// Should pass runtime validation
+					Expect(testNodePool.RuntimeValidate(ctx)).To(Succeed(),
+						fmt.Sprintf("Factor %s should pass runtime validation", factorStr))
+
+					// Should be accepted by Kubernetes API
+					Expect(env.Client.Create(ctx, testNodePool)).To(Succeed(),
+						fmt.Sprintf("Factor %s should be accepted by Kubernetes API", factorStr))
+
+					// Clean up for next iteration
+					Expect(env.Client.Delete(ctx, testNodePool)).To(Succeed())
+				}
+			})
+		})
 	})
 })

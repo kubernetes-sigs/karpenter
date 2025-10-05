@@ -19,6 +19,7 @@ package v1
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -26,7 +27,7 @@ import (
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate(ctx context.Context) (errs error) {
-	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist())
+	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(), in.Spec.Disruption.validateConsolidationPriceImprovementFactor())
 	return errs
 }
 
@@ -52,6 +53,18 @@ func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs
 	for _, requirement := range in.Spec.Requirements {
 		if requirement.Key == NodePoolLabelKey {
 			errs = multierr.Append(errs, fmt.Errorf("invalid key: %q in requirements, restricted", requirement.Key))
+		}
+	}
+	return errs
+}
+
+func (in *Disruption) validateConsolidationPriceImprovementFactor() (errs error) {
+	if in.ConsolidationPriceImprovementFactor != nil {
+		factorStr := *in.ConsolidationPriceImprovementFactor
+		if factor, err := strconv.ParseFloat(factorStr, 64); err != nil {
+			errs = multierr.Append(errs, fmt.Errorf("invalid consolidationPriceImprovementFactor %q: must be a valid float value between 0.0 and 1.0", factorStr))
+		} else if factor < 0.0 || factor > 1.0 {
+			errs = multierr.Append(errs, fmt.Errorf("invalid consolidationPriceImprovementFactor %q: must be between 0.0 and 1.0, got %f", factorStr, factor))
 		}
 	}
 	return errs
