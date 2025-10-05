@@ -278,6 +278,22 @@ func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValues(reqs scheduling
 	return n, nil
 }
 
+// RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor removes instance types that don't meet the required
+// price improvement factor. The priceImprovementFactor should be between 0.0 and 1.0, where 0.8 means
+// the replacement must be at most 80% of the current price (20% cost savings).
+func (n *NodeClaim) RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(reqs scheduling.Requirements, maxPrice float64, priceImprovementFactor float64) (*NodeClaim, error) {
+	// Calculate the maximum allowed price based on the improvement factor
+	maxAllowedPrice := maxPrice * priceImprovementFactor
+	n.InstanceTypeOptions = lo.Filter(n.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) bool {
+		launchPrice := it.Offerings.Available().WorstLaunchPrice(reqs)
+		return launchPrice < maxAllowedPrice
+	})
+	if _, _, err := n.InstanceTypeOptions.SatisfiesMinValues(reqs); err != nil {
+		return nil, err
+	}
+	return n, nil
+}
+
 func InstanceTypeList(instanceTypeOptions []*cloudprovider.InstanceType) string {
 	var itSb strings.Builder
 	for i, it := range instanceTypeOptions {

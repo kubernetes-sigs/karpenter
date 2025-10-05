@@ -194,21 +194,8 @@ func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...
 		return c.computeSpotToSpotConsolidation(ctx, candidates, results, candidatePrice)
 	}
 
-	// filterByPrice returns the instanceTypes that are lower priced than the current candidate and any error that indicates the input couldn't be filtered.
-	// If we use this directly for spot-to-spot consolidation, we are bound to get repeated consolidations because the strategy that chooses to launch the spot instance from the list does
-	// it based on availability and price which could result in selection/launch of non-lowest priced instance in the list. So, we would keep repeating this loop till we get to lowest priced instance
-	// causing churns and landing onto lower available spot instance ultimately resulting in higher interruptions.
-	results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValues(results.NewNodeClaims[0].Requirements, candidatePrice)
-	if err != nil {
-		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Filtering by price: %v", err))...)
-		}
-		return Command{}, nil
-	}
-	if len(results.NewNodeClaims[0].InstanceTypeOptions) == 0 {
-		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
-		}
+	// Apply price filtering to ensure cost savings requirements are met
+	if !c.filterByPrice(ctx, candidates, results, candidatePrice) {
 		return Command{}, nil
 	}
 
@@ -249,19 +236,8 @@ func (c *consolidation) computeSpotToSpotConsolidation(ctx context.Context, cand
 	// All possible replacements for the current candidate compatible with spot offerings
 	results.NewNodeClaims[0].InstanceTypeOptions = results.NewNodeClaims[0].InstanceTypeOptions.Compatible(results.NewNodeClaims[0].Requirements)
 
-	// filterByPrice returns the instanceTypes that are lower priced than the current candidate and any error that indicates the input couldn't be filtered.
-	var err error
-	results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValues(results.NewNodeClaims[0].Requirements, candidatePrice)
-	if err != nil {
-		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Filtering by price: %v", err))...)
-		}
-		return Command{}, nil
-	}
-	if len(results.NewNodeClaims[0].InstanceTypeOptions) == 0 {
-		if len(candidates) == 1 {
-			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
-		}
+	// Apply price filtering to ensure cost savings requirements are met
+	if !c.filterByPrice(ctx, candidates, results, candidatePrice) {
 		return Command{}, nil
 	}
 
@@ -329,4 +305,39 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 		price += compatibleOfferings.Cheapest().Price
 	}
 	return price, nil
+}
+
+// filterByPrice returns the instanceTypes that are lower priced than the current candidate and any error that indicates the input couldn't be filtered.
+// Apply the price improvement factor to require cost savings threshold before consolidation.
+// This prevents excessive churn from marginal price improvements.
+// Returns true if filtering succeeded, false if it failed (caller should not proceed with consolidation).
+func (c *consolidation) filterByPrice(ctx context.Context, candidates []*Candidate, results pscheduling.Results, candidatePrice float64) bool {
+	priceImprovementFactor := options.FromContext(ctx).ConsolidationPriceImprovementFactor
+
+	var err error
+	if priceImprovementFactor == 1.0 {
+		// Use legacy behavior
+		results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValues(results.NewNodeClaims[0].Requirements, candidatePrice)
+	} else {
+		// Apply price improvement factor to require significant cost savings
+		results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(results.NewNodeClaims[0].Requirements, candidatePrice, priceImprovementFactor)
+	}
+	if err != nil {
+		if len(candidates) == 1 {
+			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Filtering by price: %v", err))...)
+		}
+		return false
+	}
+	if len(results.NewNodeClaims[0].InstanceTypeOptions) == 0 {
+		if len(candidates) == 1 {
+			if priceImprovementFactor == 1.0 {
+				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
+			} else {
+				savingsPercent := int((1.0 - priceImprovementFactor) * 100)
+				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Can't replace with a node that offers at least %d%% cost savings", savingsPercent))...)
+			}
+		}
+		return false
+	}
+	return true
 }

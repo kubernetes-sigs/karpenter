@@ -1215,6 +1215,12 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, spotNode)
 		})
 		It("spot to spot consolidation should order the instance types by price before enforcing minimum flexibility.", func() {
+			ctx = options.ToContext(ctx, &options.Options{
+				ConsolidationPriceImprovementFactor: 1.0, // Allow any cost savings for spot-to-spot consolidation tests
+				FeatureGates: options.FeatureGates{
+					SpotToSpotConsolidation: true, // Enable spot-to-spot consolidation
+				},
+			})
 			// Fetch 18 spot instances
 			spotInstances = lo.Slice(lo.Filter(cloudProvider.InstanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 				for _, o := range i.Offerings {
@@ -1224,7 +1230,7 @@ var _ = Describe("Consolidation", func() {
 				}
 				return false
 			}), 0, 18)
-			// Assign the prices for 18 spot instance in ascending order incrementally
+			// Assign the prices for 18 spot instance with smaller price increments to ensure 15+ meet the 0.8 factor
 			for i, inst := range spotInstances {
 				inst.Offerings[0].Price = 1.00 + float64(i)*0.1
 			}
@@ -1325,6 +1331,12 @@ var _ = Describe("Consolidation", func() {
 			ExpectNotFound(ctx, env.Client, spotNodeClaim, spotNode)
 		})
 		It("spot to spot consolidation should consider the max of default and minimum number of instanceTypeOptions from minValues in requirement for truncation if minimum number of instanceTypeOptions from minValues in requirement is greater than 15.", func() {
+			ctx = options.ToContext(ctx, &options.Options{
+				ConsolidationPriceImprovementFactor: 1.0, // Allow any cost savings for spot-to-spot consolidation tests
+				FeatureGates: options.FeatureGates{
+					SpotToSpotConsolidation: true, // Enable spot-to-spot consolidation
+				},
+			})
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
 					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -1546,6 +1558,12 @@ var _ = Describe("Consolidation", func() {
 			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
 		})
 		It("spot to spot consolidation should consider the default for truncation if minimum number of instanceTypeOptions from minValues in requirement is less than 15.", func() {
+			ctx = options.ToContext(ctx, &options.Options{
+				ConsolidationPriceImprovementFactor: 1.0, // Allow any cost savings for spot-to-spot consolidation tests
+				FeatureGates: options.FeatureGates{
+					SpotToSpotConsolidation: true, // Enable spot-to-spot consolidation
+				},
+			})
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
 					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
@@ -4859,6 +4877,570 @@ var _ = Describe("Consolidation", func() {
 			// Should not consolidate static NodeClaims
 			cmds := queue.GetCommands()
 			Expect(cmds).To(HaveLen(0))
+		})
+	})
+
+	Describe("Price Improvement Factor", func() {
+		Context("On-Demand Consolidation", func() {
+			BeforeEach(func() {
+				// Set custom instance types with clear price differences
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					fake.NewInstanceType(fake.InstanceTypeOptions{
+						Name: "small",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+									corev1.LabelTopologyZone: "test-zone-1a",
+								}),
+								Price: 0.5,
+							},
+						},
+					}),
+					fake.NewInstanceType(fake.InstanceTypeOptions{
+						Name: "medium",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+									corev1.LabelTopologyZone: "test-zone-1a",
+								}),
+								Price: 0.8, // 60% more expensive than small
+							},
+						},
+					}),
+					fake.NewInstanceType(fake.InstanceTypeOptions{
+						Name: "large",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+									corev1.LabelTopologyZone: "test-zone-1a",
+								}),
+								Price: 1.2, // 140% more expensive than small
+							},
+						},
+					}),
+				}
+			})
+
+			It("should consolidate when replacement meets price improvement factor", func() {
+				ctx = options.ToContext(ctx, &options.Options{
+					ConsolidationPriceImprovementFactor: 0.5, // Require 50% cost savings
+				})
+
+				// Create expensive node
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "large",
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				// Create pod that can fit on smaller instance
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "test"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("0.5"),
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1))
+				Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			})
+
+			It("should not consolidate when replacement doesn't meet price improvement factor", func() {
+				ctx = options.ToContext(ctx, &options.Options{
+					ConsolidationPriceImprovementFactor: 0.4, // Require 60% cost savings (0.8 * 0.4 = 0.32)
+				})
+
+				// Create medium-priced node (price 0.8)
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "medium",
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "test"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("0.5"),
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(0)) // No consolidation should occur since small (0.5) > medium*0.4 (0.32)
+			})
+
+			It("should use legacy behavior when price improvement factor is 1.0", func() {
+				ctx = options.ToContext(ctx, &options.Options{
+					ConsolidationPriceImprovementFactor: 1.0, // Legacy behavior
+				})
+
+				// Create medium node - should consolidate to small (any cost savings)
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "medium",
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "test"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("0.5"),
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1))
+				Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			})
+
+			It("should not consolidate when price improvement factor is 0.0", func() {
+				ctx = options.ToContext(ctx, &options.Options{
+					ConsolidationPriceImprovementFactor: 0.0, // Disable price-based consolidation
+				})
+
+				// Create most expensive node
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "large",
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "test"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("0.5"),
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(0)) // No consolidation should occur
+			})
+		})
+
+		Context("Spot-to-Spot Consolidation", func() {
+			BeforeEach(func() {
+				// Enable spot-to-spot consolidation feature gate
+				ctx = options.ToContext(ctx, &options.Options{
+					FeatureGates: options.FeatureGates{
+						SpotToSpotConsolidation: true,
+					},
+				})
+
+				// Create many spot instance types with price differences
+				spotInstanceTypes := make([]*cloudprovider.InstanceType, 0)
+				prices := []float64{0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0}
+				for i, price := range prices {
+					instanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+						Name: fmt.Sprintf("spot-instance-%d", i),
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
+									corev1.LabelTopologyZone: "test-zone-1a",
+								}),
+								Price: price,
+							},
+						},
+					})
+					spotInstanceTypes = append(spotInstanceTypes, instanceType)
+				}
+				cloudProvider.InstanceTypes = spotInstanceTypes
+			})
+
+			It("should consolidate spot-to-spot when cheaper options meet price improvement factor", func() {
+				ctx = options.ToContext(ctx, &options.Options{
+					FeatureGates: options.FeatureGates{
+						SpotToSpotConsolidation: true,
+					},
+					ConsolidationPriceImprovementFactor: 0.85, // Require 15% cost savings (1.0 * 0.85 = 0.85)
+				})
+
+				// Create expensive spot node (price 1.0)
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "spot-instance-18",
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeSpot,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "test"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("0.5"),
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1))
+				Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			})
+
+			It("should not consolidate spot-to-spot when cheaper options don't meet price improvement factor", func() {
+				ctx = options.ToContext(ctx, &options.Options{
+					FeatureGates: options.FeatureGates{
+						SpotToSpotConsolidation: true,
+					},
+					ConsolidationPriceImprovementFactor: 0.9, // Require 90% cost savings
+				})
+
+				// Create moderately expensive spot node (price 0.55)
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "spot-instance-5",
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeSpot,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "test"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("0.5"),
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(0)) // No consolidation - not enough cheaper options
+			})
+
+			It("should respect 15 minimum instance types for spot-to-spot consolidation", func() {
+				ctx = options.ToContext(ctx, &options.Options{
+					FeatureGates: options.FeatureGates{
+						SpotToSpotConsolidation: true,
+					},
+					ConsolidationPriceImprovementFactor: 0.9, // Require 10% cost savings (0.85 * 0.9 = 0.765)
+				})
+
+				// Create spot node that has many cheaper options (spot-instance-16 has price 0.85)
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "spot-instance-16", // Price 0.85
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeSpot,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "test"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("0.5"),
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1))
+				Expect(cmds[0].Decision()).To(Equal(disruption.ReplaceDecision))
+			})
+		})
+
+		Context("Error Messages and Events", func() {
+			BeforeEach(func() {
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+					fake.NewInstanceType(fake.InstanceTypeOptions{
+						Name: "expensive",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+									corev1.LabelTopologyZone: "test-zone-1a",
+								}),
+								Price: 2.0,
+							},
+						},
+					}),
+					fake.NewInstanceType(fake.InstanceTypeOptions{
+						Name: "cheaper",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("4Gi"),
+						},
+						Offerings: []*cloudprovider.Offering{
+							{
+								Available: true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{
+									v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+									corev1.LabelTopologyZone: "test-zone-1a",
+								}),
+								Price: 1.5, // Only 25% cheaper, won't meet 50% improvement factor
+							},
+						},
+					}),
+				}
+			})
+
+			It("should emit specific savings percentage in error messages", func() {
+				ctx = options.ToContext(ctx, &options.Options{
+					ConsolidationPriceImprovementFactor: 0.5, // Require 50% cost savings
+				})
+
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "expensive",
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "test"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("0.5"),
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(0))
+
+				// Check that we got the specific error message with percentage
+				evts := recorder.Events()
+				var unconsolidatableEvents []events.Event
+				for _, e := range evts {
+					if e.Reason == "Unconsolidatable" {
+						unconsolidatableEvents = append(unconsolidatableEvents, e)
+					}
+				}
+				Expect(unconsolidatableEvents).ToNot(BeEmpty())
+				Expect(unconsolidatableEvents[0].Message).To(ContainSubstring("50% cost savings"))
+			})
+
+			It("should use legacy message when price improvement factor is 1.0", func() {
+				ctx = options.ToContext(ctx, &options.Options{
+					ConsolidationPriceImprovementFactor: 1.0,
+				})
+
+				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePool.Name,
+							corev1.LabelInstanceTypeStable: "expensive",
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				})
+				nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				pod := test.Pod(test.PodOptions{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{"app": "test"},
+					},
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("0.5"),
+						},
+					},
+				})
+
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node, pod)
+				ExpectManualBinding(ctx, env.Client, pod, node)
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
+
+				ExpectSingletonReconciled(ctx, disruptionController)
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(1)) // Should consolidate with 25% savings
+
+				// Should not emit specific percentage message
+				evts := recorder.Events()
+				var unconsolidatableEvents []events.Event
+				for _, e := range evts {
+					if e.Reason == "Unconsolidatable" {
+						unconsolidatableEvents = append(unconsolidatableEvents, e)
+					}
+				}
+				var savingsEvents []events.Event
+				for _, e := range unconsolidatableEvents {
+					if strings.Contains(e.Message, "% cost savings") {
+						savingsEvents = append(savingsEvents, e)
+					}
+				}
+				Expect(savingsEvents).To(BeEmpty())
+			})
 		})
 	})
 })
