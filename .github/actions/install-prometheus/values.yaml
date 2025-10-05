@@ -41,6 +41,7 @@ kubelet:
       scrape: enabled
 prometheus:
   prometheusSpec:
+    maximumStartupDurationSeconds: 60
     tolerations:
       - key: CriticalAddonsOnly
         operator: Exists

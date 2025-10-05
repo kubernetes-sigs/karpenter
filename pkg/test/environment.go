@@ -23,12 +23,14 @@ import (
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -50,6 +52,7 @@ type Environment struct {
 type EnvironmentOptions struct {
 	crds          []*apiextensionsv1.CustomResourceDefinition
 	fieldIndexers []func(cache.Cache) error
+	configOptions []func(*rest.Config)
 }
 
 // WithCRDs registers the specified CRDs to the apiserver for use in testing
@@ -59,18 +62,68 @@ func WithCRDs(crds ...*apiextensionsv1.CustomResourceDefinition) option.Function
 	}
 }
 
-// WithFieldIndexers expects a function that indexes fields against the cache such as cache.IndexField(...)
+// WithFieldIndexers expects a function that indexes fields against the cache such as cache.IndexField(...).
+//
+// Note: Only use when necessary, the use of field indexers in functional tests requires the use of the cache syncing
+// client, which can have significant drawbacks for test performance.
 func WithFieldIndexers(fieldIndexers ...func(cache.Cache) error) option.Function[EnvironmentOptions] {
 	return func(o *EnvironmentOptions) {
 		o.fieldIndexers = append(o.fieldIndexers, fieldIndexers...)
 	}
 }
 
-func NodeClaimFieldIndexer(ctx context.Context) func(cache.Cache) error {
+// WithConfigOptions allows customization of the rest.Config before client creation
+func WithConfigOptions(options ...func(*rest.Config)) option.Function[EnvironmentOptions] {
+	return func(o *EnvironmentOptions) {
+		o.configOptions = append(o.configOptions, options...)
+	}
+}
+
+func NodeProviderIDFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		return c.IndexField(ctx, &corev1.Node{}, "spec.providerID", func(obj client.Object) []string {
+			return []string{obj.(*corev1.Node).Spec.ProviderID}
+		})
+	}
+}
+
+func NodeClaimProviderIDFieldIndexer(ctx context.Context) func(cache.Cache) error {
 	return func(c cache.Cache) error {
 		return c.IndexField(ctx, &v1.NodeClaim{}, "status.providerID", func(obj client.Object) []string {
 			return []string{obj.(*v1.NodeClaim).Status.ProviderID}
 		})
+	}
+}
+
+func NodeClaimNodeClassRefFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		var err error
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.group", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Spec.NodeClassRef.Group}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.kind", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Spec.NodeClassRef.Kind}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodeClaim{}, "spec.nodeClassRef.name", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodeClaim).Spec.NodeClassRef.Name}
+		}))
+		return err
+	}
+}
+
+func NodePoolNodeClassRefFieldIndexer(ctx context.Context) func(cache.Cache) error {
+	return func(c cache.Cache) error {
+		var err error
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.group", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Group}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.kind", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Kind}
+		}))
+		err = multierr.Append(err, c.IndexField(ctx, &v1.NodePool{}, "spec.template.spec.nodeClassRef.name", func(obj client.Object) []string {
+			return []string{obj.(*v1.NodePool).Spec.Template.Spec.NodeClassRef.Name}
+		}))
+		return err
 	}
 }
 
@@ -86,16 +139,17 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 	opts := option.Resolve(options...)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	version := version.MustParseSemantic(strings.Replace(env.WithDefaultString("K8S_VERSION", "1.30.x"), ".x", ".0", -1))
+	version := version.MustParseSemantic(strings.ReplaceAll(env.WithDefaultString("K8S_VERSION", "1.34.x"), ".x", ".0"))
 	environment := envtest.Environment{Scheme: scheme.Scheme, CRDs: opts.crds}
-	if version.Minor() >= 21 {
+	if version.Minor() >= 21 && version.Minor() < 32 {
 		// PodAffinityNamespaceSelector is used for label selectors in pod affinities.  If the feature-gate is turned off,
 		// the api-server just clears out the label selector so we never see it.  If we turn it on, the label selectors
 		// are passed to us and we handle them. This feature is alpha in apiextensionsv1.21, beta in apiextensionsv1.22 and will be GA in 1.24. See
 		// https://github.com/kubernetes/enhancements/issues/2249 for more info.
 		environment.ControlPlane.GetAPIServer().Configure().Set("feature-gates", "PodAffinityNamespaceSelector=true")
 	}
-	if version.Minor() >= 24 {
+	//MinDomains got promoted to stable in 1.32
+	if version.Minor() >= 24 && version.Minor() < 32 {
 		// MinDomainsInPodTopologySpread enforces a minimum number of eligible node domains for pod scheduling
 		// See https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/#spread-constraint-definition
 		// Ref: https://github.com/aws/karpenter-core/pull/330
@@ -103,6 +157,11 @@ func NewEnvironment(options ...option.Function[EnvironmentOptions]) *Environment
 	}
 
 	_ = lo.Must(environment.Start())
+
+	// Apply any config overrides
+	for _, option := range opts.configOptions {
+		option(environment.Config)
+	}
 
 	// We use a modified client if we need field indexers
 	var c client.Client

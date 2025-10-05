@@ -27,7 +27,7 @@ func FailedConsistencyCheckEvent(nodeClaim *v1.NodeClaim, message string) events
 	return events.Event{
 		InvolvedObject: nodeClaim,
 		Type:           corev1.EventTypeWarning,
-		Reason:         "FailedConsistencyCheck",
+		Reason:         events.FailedConsistencyCheck,
 		Message:        message,
 		DedupeValues:   []string{string(nodeClaim.UID), message},
 	}

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-K8S_VERSION="${K8S_VERSION:="1.30.x"}"
-KUBEBUILDER_ASSETS="/usr/local/kubebuilder/bin"
+K8S_VERSION="${K8S_VERSION:="1.34.x"}"
+KUBEBUILDER_ASSETS="${KUBEBUILDER_ASSETS:=/usr/local/kubebuilder/bin}"
 
 main() {
     tools
@@ -11,7 +11,10 @@ main() {
 
 tools() {
     go install github.com/google/go-licenses@latest
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+    # asciicheck is a dependency of golangci-lint that got removed so golangci changed their go.mod to use the forked version
+    # fix - https://github.com/golangci/golangci-lint/issues/6017
+    # change to latest once golangci releases new version with the fix
+    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@main
     go install github.com/mikefarah/yq/v4@latest
     go install github.com/google/ko@latest
     go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest

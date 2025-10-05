@@ -24,38 +24,37 @@ import (
 	"k8s.io/client-go/util/workqueue"
 )
 
-// RateLimitingInterface is copied from https://github.com/kubernetes-sigs/controller-runtime/blob/e6c3d139d2b6c286b1dbba6b6a95919159cfe655/pkg/controller/controllertest/testing.go#L48
-// but is an interface{} implementation to use while the orchestration queue can't use the TypedQueue
+// TypedRateLimitingInterface is copied from https://github.com/kubernetes-sigs/controller-runtime/blob/e6c3d139d2b6c286b1dbba6b6a95919159cfe655/pkg/controller/controllertest/testing.go#L48
 
-// RateLimitingInterface implements a RateLimiting queue as a non-ratelimited queue for testing.
+// TypedRateLimitingInterface implements a TypedRateLimiting queue as a non-ratelimited queue for testing.
 // This helps testing by having functions that use a RateLimiting queue synchronously add items to the queue.
-type RateLimitingInterface struct {
-	workqueue.Interface
+type TypedRateLimitingInterface[T comparable] struct {
+	*workqueue.Typed[T]
 	AddedRateLimitedLock sync.Mutex
 	AddedRatelimited     []any
 }
 
-func NewRateLimitingInterface(queueConfig workqueue.QueueConfig) *RateLimitingInterface {
-	return &RateLimitingInterface{Interface: workqueue.NewWithConfig(queueConfig)}
+func NewTypedRateLimitingInterface[T comparable](queueConfig workqueue.TypedQueueConfig[T]) *TypedRateLimitingInterface[T] {
+	return &TypedRateLimitingInterface[T]{Typed: workqueue.NewTypedWithConfig[T](queueConfig)}
 }
 
-// AddAfter implements RateLimitingInterface.
-func (q *RateLimitingInterface) AddAfter(item interface{}, duration time.Duration) {
+// AddAfter implements TypedRateLimitingInterface.
+func (q *TypedRateLimitingInterface[T]) AddAfter(item T, duration time.Duration) {
 	q.Add(item)
 }
 
-// AddRateLimited implements RateLimitingInterface.
-func (q *RateLimitingInterface) AddRateLimited(item interface{}) {
+// AddRateLimited implements TypedRateLimitingInterface.
+func (q *TypedRateLimitingInterface[T]) AddRateLimited(item T) {
 	q.AddedRateLimitedLock.Lock()
 	q.AddedRatelimited = append(q.AddedRatelimited, item)
 	q.AddedRateLimitedLock.Unlock()
 	q.Add(item)
 }
 
-// Forget implements RateLimitingInterface.
-func (q *RateLimitingInterface) Forget(item interface{}) {}
+// Forget implements TypedRateLimitingInterface.
+func (q *TypedRateLimitingInterface[T]) Forget(item T) {}
 
-// NumRequeues implements RateLimitingInterface.
-func (q *RateLimitingInterface) NumRequeues(item interface{}) int {
+// NumRequeues implements TypedRateLimitingInterface.
+func (q *TypedRateLimitingInterface[T]) NumRequeues(item T) int {
 	return 0
 }

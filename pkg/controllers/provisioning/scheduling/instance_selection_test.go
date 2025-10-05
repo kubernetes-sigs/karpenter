@@ -607,9 +607,17 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceCPU:    resource.MustParse("1"),
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
-				Offerings: []cloudprovider.Offering{
-					{Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}), Price: 1.0, Available: true},
-					{Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}), Price: 0.2, Available: true},
+				Offerings: []*cloudprovider.Offering{
+					{
+						Available:    true,
+						Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
+						Price:        1.0,
+					},
+					{
+						Available:    true,
+						Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
+						Price:        0.2,
+					},
 				},
 			}),
 			fake.NewInstanceType(fake.InstanceTypeOptions{
@@ -620,9 +628,17 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceCPU:    resource.MustParse("1"),
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
-				Offerings: []cloudprovider.Offering{
-					{Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}), Price: 1.3, Available: true},
-					{Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}), Price: 0.1, Available: true},
+				Offerings: []*cloudprovider.Offering{
+					{
+						Available:    true,
+						Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
+						Price:        1.3,
+					},
+					{
+						Available:    true,
+						Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
+						Price:        0.1,
+					},
 				},
 			}),
 		}
@@ -655,11 +671,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -671,11 +687,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
-					Available:    true,
 				},
 			}
 			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
@@ -733,11 +749,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -749,11 +765,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
-					Available:    true,
 				},
 			}
 			opts3 := fake.InstanceTypeOptions{
@@ -765,11 +781,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts3.Offerings = []cloudprovider.Offering{
+			opts3.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
-					Available:    true,
 				},
 			}
 
@@ -829,11 +845,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -845,11 +861,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
-					Available:    true,
 				},
 			}
 			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts1, scheduler.NewRequirement(instanceGeneration, corev1.NodeSelectorOpIn, "2")))
@@ -861,8 +877,7 @@ var _ = Describe("Instance Type Selection", func() {
 				{
 					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
 						Key:      instanceGeneration,
-						Operator: corev1.NodeSelectorOpGt,
-						Values:   []string{"2"},
+						Operator: corev1.NodeSelectorOpExists,
 					},
 					MinValues: lo.ToPtr(2),
 				},
@@ -875,11 +890,25 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceCPU:    resource.MustParse("0.9"),
 					corev1.ResourceMemory: resource.MustParse("0.9Gi")},
 				},
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      instanceGeneration,
+						Operator: corev1.NodeSelectorOpGt,
+						Values:   []string{"2"},
+					},
+				},
 			})
 			pod2 := test.UnschedulablePod(test.PodOptions{
 				ResourceRequirements: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("0.9"),
 					corev1.ResourceMemory: resource.MustParse("0.9Gi")},
+				},
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      instanceGeneration,
+						Operator: corev1.NodeSelectorOpGt,
+						Values:   []string{"2"},
+					},
 				},
 			})
 
@@ -887,7 +916,7 @@ var _ = Describe("Instance Type Selection", func() {
 			ExpectApplied(ctx, env.Client, pod2)
 			results, _ := prov.Schedule(ctx)
 			for _, v := range results.PodErrors {
-				Expect(v.Error()).To(ContainSubstring(`minValues requirement is not met for "karpenter/numerical-value"`))
+				Expect(v.Error()).To(ContainSubstring(`minValues requirement is not met for label(s) (label(s)=[karpenter/numerical-value])`))
 			}
 			ExpectNotScheduled(ctx, env.Client, pod1)
 			ExpectNotScheduled(ctx, env.Client, pod2)
@@ -905,11 +934,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -921,11 +950,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
-					Available:    true,
 				},
 			}
 			opts3 := fake.InstanceTypeOptions{
@@ -937,11 +966,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts3.Offerings = []cloudprovider.Offering{
+			opts3.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
-					Available:    true,
 				},
 			}
 			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts1, scheduler.NewRequirement(instanceGeneration, corev1.NodeSelectorOpIn, "2")))
@@ -1000,11 +1029,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -1016,11 +1045,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
-					Available:    true,
 				},
 			}
 			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts1, scheduler.NewRequirement(instanceGeneration, corev1.NodeSelectorOpIn, "2")))
@@ -1069,11 +1098,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -1085,11 +1114,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
-					Available:    true,
 				},
 			}
 			opts3 := fake.InstanceTypeOptions{
@@ -1101,11 +1130,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts3.Offerings = []cloudprovider.Offering{
+			opts3.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
-					Available:    true,
 				},
 			}
 			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
@@ -1171,11 +1200,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -1187,11 +1216,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
-					Available:    true,
 				},
 			}
 			opts3 := fake.InstanceTypeOptions{
@@ -1203,11 +1232,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts3.Offerings = []cloudprovider.Offering{
+			opts3.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
-					Available:    true,
 				},
 			}
 			opts4 := fake.InstanceTypeOptions{
@@ -1219,11 +1248,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts4.Offerings = []cloudprovider.Offering{
+			opts4.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.2,
-					Available:    true,
 				},
 			}
 			instanceTypes = append(instanceTypes, fake.NewInstanceTypeWithCustomRequirement(opts1, scheduler.NewRequirement(instanceGeneration, corev1.NodeSelectorOpIn, "2")))
@@ -1317,11 +1346,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -1333,18 +1362,18 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
-					Available:    true,
 				},
 			}
 			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
 			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts2))
 			// We have the required InstanceTypes that meet the minValues requirement.
 			cloudProvider.InstanceTypes = instanceTypes
-			// The truncation is changed from the default 100 to 1 for the ease of testing.
+			// The truncation is changed from the default to 1 for the ease of testing.
 			// This will truncate the 2 InstanceTypes to 1 resulting in breaking the minValue requirement and hence should fail the scheduling.
 			scheduling.MaxInstanceTypes = 1
 
@@ -1392,11 +1421,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -1408,11 +1437,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
-					Available:    true,
 				},
 			}
 			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
@@ -1477,11 +1506,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 				},
 			}
-			opts1.Offerings = []cloudprovider.Offering{
+			opts1.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        0.52,
-					Available:    true,
 				},
 			}
 			opts2 := fake.InstanceTypeOptions{
@@ -1493,11 +1522,11 @@ var _ = Describe("Instance Type Selection", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 				},
 			}
-			opts2.Offerings = []cloudprovider.Offering{
+			opts2.Offerings = []*cloudprovider.Offering{
 				{
+					Available:    true,
 					Requirements: scheduler.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 					Price:        1.0,
-					Available:    true,
 				},
 			}
 			instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))

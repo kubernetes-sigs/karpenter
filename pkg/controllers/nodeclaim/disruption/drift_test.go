@@ -27,8 +27,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 )
@@ -43,7 +45,9 @@ var _ = Describe("Drift", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
 					v1.NodePoolLabelKey:            nodePool.Name,
-					corev1.LabelInstanceTypeStable: test.RandomName(),
+					corev1.LabelInstanceTypeStable: it.Name,
+					corev1.LabelTopologyZone:       "test-zone-1a",
+					v1.CapacityTypeLabelKey:        v1.CapacityTypeSpot,
 				},
 				Annotations: map[string]string{
 					v1.NodePoolHashAnnotationKey: nodePool.Hash(),
@@ -52,10 +56,75 @@ var _ = Describe("Drift", func() {
 		})
 		// NodeClaims are required to be launched before they can be evaluated for drift
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
+		Expect(nodeClaim.StatusConditions().Clear(v1.ConditionTypeDrifted)).To(Succeed())
 	})
-	It("should detect drift", func() {
-		cp.Drifted = "drifted"
+	DescribeTable(
+		"Drift",
+		func(isNodeClaimManaged bool) {
+			cp.Drifted = "drifted"
+			if !isNodeClaimManaged {
+				nodeClaim.Spec.NodeClassRef = &v1.NodeClassReference{
+					Group: "karpenter.test.sh",
+					Kind:  "UnmanagedNodeClass",
+					Name:  "default",
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			if isNodeClaimManaged {
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+			} else {
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsUnknown()).To(BeTrue())
+			}
+		},
+		Entry("should detect drift", true),
+		Entry("should ignore drift for NodeClaims not managed by this instance of Karpenter", false),
+	)
+	It("should detect stale instance type drift if the instance type label doesn't exist", func() {
+		delete(nodeClaim.Labels, corev1.LabelInstanceTypeStable)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+	})
+	It("should detect stale instance type drift if the instance type doesn't exist", func() {
+		cp.InstanceTypes = nil
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+	})
+	It("should detect stale instance type drift if the instance type offerings doesn't exist", func() {
+		cp.InstanceTypes = lo.Map(cp.InstanceTypes, func(it *cloudprovider.InstanceType, _ int) *cloudprovider.InstanceType {
+			it.Offerings = cloudprovider.Offerings{}
+			return it
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(BeTrue())
+	})
+	It("should detect stale instance type drift if the instance type offerings aren't compatible with the nodeclaim", func() {
+		cp.InstanceTypes = lo.Map(cp.InstanceTypes, func(it *cloudprovider.InstanceType, _ int) *cloudprovider.InstanceType {
+			if it.Name == nodeClaim.Labels[corev1.LabelInstanceTypeStable] {
+				for i := range it.Offerings {
+					it.Offerings[i].Requirements = scheduling.NewLabelRequirements(map[string]string{
+						corev1.LabelTopologyZone: test.RandomName(),
+					})
+				}
+			}
+			return it
+		})
+		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+		fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
 		ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 
 		nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
@@ -128,7 +197,6 @@ var _ = Describe("Drift", func() {
 		Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 	})
 	It("should remove the status condition from the nodeClaim if the nodeClaim is no longer drifted", func() {
-		cp.Drifted = ""
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
 		ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 
@@ -140,7 +208,6 @@ var _ = Describe("Drift", func() {
 	Context("NodeRequirement Drift", func() {
 		DescribeTable("",
 			func(oldNodePoolReq []v1.NodeSelectorRequirementWithMinValues, newNodePoolReq []v1.NodeSelectorRequirementWithMinValues, labels map[string]string, drifted bool) {
-				cp.Drifted = ""
 				nodePool.Spec.Template.Spec.Requirements = oldNodePoolReq
 				nodeClaim.Labels = lo.Assign(nodeClaim.Labels, labels)
 
@@ -257,18 +324,18 @@ var _ = Describe("Drift", func() {
 				true,
 			),
 			Entry(
-				"should not return drifted if a nodeClaim is grater then node requirement",
+				"should not return drifted if a nodeClaim is greater then node requirement",
 				[]v1.NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}}},
-					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpGt, Values: []string{"2"}}},
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-label", Operator: corev1.NodeSelectorOpGt, Values: []string{"2"}}},
 				},
 				[]v1.NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}}},
-					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpGt, Values: []string{"10"}}},
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-label", Operator: corev1.NodeSelectorOpGt, Values: []string{"10"}}},
 				},
 				map[string]string{
-					v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
-					corev1.LabelInstanceTypeStable: "5",
+					v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand,
+					"test-label":            "5",
 				},
 				true,
 			),
@@ -276,21 +343,20 @@ var _ = Describe("Drift", func() {
 				"should not return drifted if a nodeClaim is less then node requirement",
 				[]v1.NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}}},
-					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpLt, Values: []string{"5"}}},
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-label", Operator: corev1.NodeSelectorOpLt, Values: []string{"5"}}},
 				},
 				[]v1.NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}}},
-					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}}},
+					{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: "test-label", Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}}},
 				},
 				map[string]string{
-					v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
-					corev1.LabelInstanceTypeStable: "2",
+					v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand,
+					"test-label":            "2",
 				},
 				true,
 			),
 		)
 		It("should return drifted only on NodeClaims that are drifted from an updated nodePool", func() {
-			cp.Drifted = ""
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: v1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{v1.CapacityTypeOnDemand}}},
 				{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelOSStable, Operator: corev1.NodeSelectorOpIn, Values: []string{string(corev1.Linux), string(corev1.Windows)}}},
@@ -303,7 +369,7 @@ var _ = Describe("Drift", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						v1.NodePoolLabelKey:            nodePool.Name,
-						corev1.LabelInstanceTypeStable: test.RandomName(),
+						corev1.LabelInstanceTypeStable: it.Name,
 						v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
 						corev1.LabelOSStable:           string(corev1.Windows),
 					},
@@ -345,8 +411,7 @@ var _ = Describe("Drift", func() {
 	Context("NodePool Static Drift", func() {
 		var nodePoolController *hash.Controller
 		BeforeEach(func() {
-			cp.Drifted = ""
-			nodePoolController = hash.NewController(env.Client)
+			nodePoolController = hash.NewController(env.Client, cp)
 			nodePool = &v1.NodePool{
 				ObjectMeta: nodePool.ObjectMeta,
 				Spec: v1.NodePoolSpec{
@@ -364,9 +429,9 @@ var _ = Describe("Drift", func() {
 						Spec: v1.NodeClaimTemplateSpec{
 							Requirements: nodePool.Spec.Template.Spec.Requirements,
 							NodeClassRef: &v1.NodeClassReference{
-								Kind:  "fakeKind",
-								Name:  "fakeName",
-								Group: "fakeGroup",
+								Group: "karpenter.test.sh",
+								Kind:  "TestNodeClass",
+								Name:  "default",
 							},
 							Taints: []corev1.Taint{
 								{
@@ -386,7 +451,7 @@ var _ = Describe("Drift", func() {
 					},
 				},
 			}
-			nodeClaim.ObjectMeta.Annotations[v1.NodePoolHashAnnotationKey] = nodePool.Hash()
+			nodeClaim.Annotations[v1.NodePoolHashAnnotationKey] = nodePool.Hash()
 		})
 		// We need to test each all the fields on the NodePool when we expect the field to be drifted
 		// This will also test that the NodePool fields can be hashed.
@@ -411,21 +476,19 @@ var _ = Describe("Drift", func() {
 			Entry("Labels", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{"keyLabelTest": "valueLabelTest"}}}}}),
 			Entry("Taints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{Taints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),
 			Entry("StartupTaints", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{StartupTaints: []corev1.Taint{{Key: "keytest2taint", Effect: corev1.TaintEffectNoExecute}}}}}}),
-			Entry("NodeClassRef APIVersion", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Group: "testVersion"}}}}}),
 			Entry("NodeClassRef Name", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Name: "testName"}}}}}),
-			Entry("NodeClassRef Kind", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{NodeClassRef: &v1.NodeClassReference{Kind: "testKind"}}}}}),
 			Entry("ExpireAfter", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{ExpireAfter: v1.MustParseNillableDuration("100m")}}}}),
 			Entry("TerminationGracePeriod", v1.NodePool{Spec: v1.NodePoolSpec{Template: v1.NodeClaimTemplate{Spec: v1.NodeClaimTemplateSpec{TerminationGracePeriod: &metav1.Duration{Duration: 100 * time.Minute}}}}}),
 		)
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodePool", func() {
-			nodePool.ObjectMeta.Annotations = map[string]string{}
+			nodePool.Annotations = map[string]string{}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
 		It("should not return drifted if karpenter.sh/nodepool-hash annotation is not present on the NodeClaim", func() {
-			nodeClaim.ObjectMeta.Annotations = map[string]string{
+			nodeClaim.Annotations = map[string]string{
 				v1.NodePoolHashVersionAnnotationKey: v1.NodePoolHashVersion,
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -434,11 +497,11 @@ var _ = Describe("Drift", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
 		It("should not return drifted if the NodeClaim's karpenter.sh/nodepool-hash-version annotation does not match the NodePool's", func() {
-			nodePool.ObjectMeta.Annotations = map[string]string{
+			nodePool.Annotations = map[string]string{
 				v1.NodePoolHashAnnotationKey:        "test-hash-1",
 				v1.NodePoolHashVersionAnnotationKey: "test-version-1",
 			}
-			nodeClaim.ObjectMeta.Annotations = map[string]string{
+			nodeClaim.Annotations = map[string]string{
 				v1.NodePoolHashAnnotationKey:        "test-hash-2",
 				v1.NodePoolHashVersionAnnotationKey: "test-version-2",
 			}
@@ -448,7 +511,7 @@ var _ = Describe("Drift", func() {
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
 		It("should not return drifted if karpenter.sh/nodepool-hash-version annotation is not present on the NodeClaim", func() {
-			nodeClaim.ObjectMeta.Annotations = map[string]string{
+			nodeClaim.Annotations = map[string]string{
 				v1.NodePoolHashAnnotationKey: "test-hash-111111111",
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
@@ -456,5 +519,61 @@ var _ = Describe("Drift", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted)).To(BeNil())
 		})
+	})
+	Context("Reserved Capacity", func() {
+		const labelCapacityReservationType = "karpenter.test.sh/capacity-reservation-type"
+		BeforeEach(func() {
+			cloudprovider.ReservedCapacityLabels.Insert(labelCapacityReservationType)
+			v1.WellKnownLabels.Insert(labelCapacityReservationType)
+			for _, o := range it.Offerings {
+				for label := range cloudprovider.ReservedCapacityLabels {
+					o.Requirements.Add(scheduling.NewRequirement(label, corev1.NodeSelectorOpDoesNotExist))
+				}
+			}
+			reservedOffering := &cloudprovider.Offering{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeReserved,
+					corev1.LabelTopologyZone: "test-zone-1a",
+				}),
+				ReservationCapacity: 1,
+			}
+			for label := range cloudprovider.ReservedCapacityLabels {
+				value := test.RandomName()
+				reservedOffering.Requirements.Add(scheduling.NewRequirement(label, corev1.NodeSelectorOpIn, value))
+				nodeClaim.Labels[label] = value
+			}
+			it.Offerings = append(it.Offerings, reservedOffering)
+			nodeClaim.Labels[v1.CapacityTypeLabelKey] = v1.CapacityTypeReserved
+		})
+		AfterEach(func() {
+			cloudprovider.ReservedCapacityLabels.Delete(labelCapacityReservationType)
+			v1.WellKnownLabels.Delete(labelCapacityReservationType)
+		})
+		DescribeTable(
+			"InstanceTypeNotFound",
+			func(expectDrifted bool, includedCapacityTypes ...string) {
+				it.Offerings = lo.Filter(it.Offerings, func(o *cloudprovider.Offering, _ int) bool {
+					ct := o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
+					for _, ict := range includedCapacityTypes {
+						if ct == ict {
+							return true
+						}
+					}
+					return false
+				})
+				ExpectApplied(ctx, env.Client, nodePool, nodeClaim)
+				fakeClock.Step(time.Hour * 2) // To move 2h past the creationTimestamp
+				ExpectObjectReconciled(ctx, env.Client, nodeClaimDisruptionController, nodeClaim)
+
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrifted).IsTrue()).To(Equal(expectDrifted))
+			},
+			Entry("shouldn't drift when a matching instance type exists with reserved and on-demand offerings", false, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand),
+			Entry("shouldn't drift when a matching instance type exists with reserved offerings", false, v1.CapacityTypeReserved),
+			Entry("shouldn't drift when a matching instance type exists with on-demand offerings", false, v1.CapacityTypeOnDemand),
+			Entry("should drift when a matching instance type exists but the only offering is spot", true, v1.CapacityTypeSpot),
+			Entry("should drift when a matching instance type exists but there are no compatible offerings", true),
+		)
 	})
 })

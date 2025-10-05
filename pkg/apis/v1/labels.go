@@ -20,7 +20,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
@@ -32,14 +34,16 @@ const (
 	ArchitectureArm64    = "arm64"
 	CapacityTypeSpot     = "spot"
 	CapacityTypeOnDemand = "on-demand"
+	CapacityTypeReserved = "reserved"
 )
 
 // Karpenter specific domains and labels
 const (
-	NodePoolLabelKey        = apis.Group + "/nodepool"
-	NodeInitializedLabelKey = apis.Group + "/initialized"
-	NodeRegisteredLabelKey  = apis.Group + "/registered"
-	CapacityTypeLabelKey    = apis.Group + "/capacity-type"
+	NodePoolLabelKey            = apis.Group + "/nodepool"
+	NodeInitializedLabelKey     = apis.Group + "/initialized"
+	NodeRegisteredLabelKey      = apis.Group + "/registered"
+	NodeDoNotSyncTaintsLabelKey = apis.Group + "/do-not-sync-taints"
+	CapacityTypeLabelKey        = apis.Group + "/capacity-type"
 )
 
 // Karpenter specific annotations
@@ -49,6 +53,7 @@ const (
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
+	NodeClaimMinValuesRelaxedAnnotationKey     = apis.Group + "/nodeclaim-min-values-relaxed"
 )
 
 // Karpenter specific finalizers
@@ -86,6 +91,33 @@ var (
 		v1.LabelWindowsBuild,
 	)
 
+	// WellKnownResources are resources that are expected from the instance types
+	// provided by cloud providers.
+	WellKnownResources = sets.New[v1.ResourceName](
+		v1.ResourceCPU,
+		v1.ResourceMemory,
+		v1.ResourceEphemeralStorage,
+		v1.ResourcePods,
+	)
+
+	// WellKnownValuesForRequirements are for requirements where a known set of values
+	// is expected to be used for that requirement. For example, in the AWS provider,
+	// only on-demand, spot, and reserved make sense as values for the capacity type requirement
+	WellKnownValuesForRequirements = map[string]sets.Set[string]{
+		CapacityTypeLabelKey: sets.New(
+			CapacityTypeOnDemand,
+			CapacityTypeSpot,
+			CapacityTypeReserved,
+		),
+	}
+
+	// WellKnownLabelsForOfferings are for requirements where a known labels that will be used in the
+	// offerings passed back by the provider
+	WellKnownLabelsForOfferings = sets.New(
+		v1.LabelTopologyZone,
+		CapacityTypeLabelKey,
+	)
+
 	// RestrictedLabels are labels that should not be used
 	// because they may interfere with the internal provisioning logic.
 	RestrictedLabels = sets.New(
@@ -109,7 +141,18 @@ func IsRestrictedLabel(key string) error {
 		return nil
 	}
 	if IsRestrictedNodeLabel(key) {
-		return fmt.Errorf("label %s is restricted; specify a well known label: %v, or a custom label that does not use a restricted domain: %v", key, sets.List(WellKnownLabels), sets.List(RestrictedLabelDomains))
+		return serrors.Wrap(fmt.Errorf("label is restricted; specify a well known label or a custom label that does not use a restricted domain"), "label", key, "well-known-labels", sets.List(WellKnownLabels), "restricted-labels", sets.List(RestrictedLabelDomains))
+	}
+	return nil
+}
+
+// HasKnownValues returns an error if the requirement has well known values and is only presented with unknown values.
+func HasKnownValues(requirement NodeSelectorRequirementWithMinValues) error {
+	if !WellKnownLabels.Has(requirement.Key) {
+		return nil
+	}
+	if !WellKnownValuesForRequirements[requirement.Key].HasAny(requirement.Values...) {
+		return fmt.Errorf("invalid values: %v for key: %s, expected one of: %v", requirement.Values, requirement.Key, WellKnownValuesForRequirements[requirement.Key].UnsortedList())
 	}
 	return nil
 }
@@ -140,4 +183,8 @@ func GetLabelDomain(key string) string {
 		return parts[0]
 	}
 	return ""
+}
+
+func NodeClassLabelKey(gk schema.GroupKind) string {
+	return fmt.Sprintf("%s/%s", gk.Group, strings.ToLower(gk.Kind))
 }

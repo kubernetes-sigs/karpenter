@@ -25,6 +25,16 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
+var (
+	// defaultNodeClass is the default NodeClass type used when creating NodeClassRefs for NodePools and NodeClaims
+	defaultNodeClass status.Object = &v1alpha1.TestNodeClass{}
+)
+
+// SetDefaultNodeClassType configures the default NodeClass type used when generating NodeClassRefs for test NodePools and NodeClaims.
+func SetDefaultNodeClassType(nc status.Object) {
+	defaultNodeClass = nc
+}
+
 // NodeClass creates a test NodeClass with defaults that can be overridden by overrides.
 // Overrides are applied in order, with a last write wins semantic.
 func NodeClass(overrides ...v1alpha1.TestNodeClass) *v1alpha1.TestNodeClass {

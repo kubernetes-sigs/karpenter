@@ -18,14 +18,12 @@ package readiness
 
 import (
 	"context"
-	logger "log"
 
-	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -34,7 +32,8 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/utils/nodepool"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
+	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 )
 
 // Controller for the resource
@@ -54,24 +53,29 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodepool.readiness")
 	stored := nodePool.DeepCopy()
-	supportedNC := c.cloudProvider.GetSupportedNodeClasses()
 
-	if len(supportedNC) == 0 {
-		logger.Fatal("no supported node classes found for the cloud provider")
-	}
-	nodeClass, err := c.getNodeClass(ctx, nodePool, supportedNC)
-	if err != nil {
+	nodeClass, err := nodepoolutils.GetNodeClass(ctx, c.kubeClient, nodePool, c.cloudProvider)
+	if client.IgnoreNotFound(err) != nil {
 		return reconcile.Result{}, err
 	}
+	// Ignore NodePools which aren't using a supported NodeClass
 	if nodeClass == nil {
+		return reconcile.Result{}, nil
+	}
+	switch {
+	case errors.IsNotFound(err):
 		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassNotFound", "NodeClass not found on cluster")
-	} else if !nodeClass.GetDeletionTimestamp().IsZero() {
+	case !nodeClass.GetDeletionTimestamp().IsZero():
 		nodePool.StatusConditions().SetFalse(v1.ConditionTypeNodeClassReady, "NodeClassTerminating", "NodeClass is Terminating")
-	} else {
+	default:
 		c.setReadyCondition(nodePool, nodeClass)
 	}
+
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
-		if err = c.kubeClient.Status().Update(ctx, nodePool); client.IgnoreNotFound(err) != nil {
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the status condition list
+		if err = c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
@@ -79,21 +83,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 		}
 	}
 	return reconcile.Result{}, nil
-}
-func (c *Controller) getNodeClass(ctx context.Context, nodePool *v1.NodePool, supportedNC []status.Object) (status.Object, error) {
-	nodeClass, ok := lo.Find(supportedNC, func(nc status.Object) bool {
-		return object.GVK(nc).Group == nodePool.Spec.Template.Spec.NodeClassRef.Group && object.GVK(nc).Kind == nodePool.Spec.Template.Spec.NodeClassRef.Kind
-	})
-	if !ok {
-		return nodeClass, nil
-	}
-	if err := c.kubeClient.Get(ctx, client.ObjectKey{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name}, nodeClass); err != nil {
-		if errors.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return nodeClass, nil
 }
 
 func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.Object) {
@@ -107,17 +96,13 @@ func (c *Controller) setReadyCondition(nodePool *v1.NodePool, nodeClass status.O
 	}
 }
 
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	builder := controllerruntime.NewControllerManagedBy(m)
-	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
-		builder = builder.Watches(
-			nodeClass,
-			nodepool.NodeClassEventHandler(c.kubeClient),
-		)
-	}
-	return builder.
+func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
+	b := controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.readiness").
-		For(&v1.NodePool{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		Complete(reconcile.AsReconciler(m.GetClient(), c))
+		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)})
+	for _, nodeClass := range c.cloudProvider.GetSupportedNodeClasses() {
+		b.Watches(nodeClass, nodepoolutils.NodeClassEventHandler(c.kubeClient))
+	}
+	return b.Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

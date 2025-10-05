@@ -20,7 +20,6 @@ package scheduling_test
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"math"
 	"math/rand"
@@ -34,11 +33,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
 	fakecr "sigs.k8s.io/controller-runtime/pkg/client/fake"
-	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -46,9 +45,15 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
-	operatorlogging "sigs.k8s.io/karpenter/pkg/operator/logging"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/operator/logging"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
+
+func init() {
+	log.SetLogger(logging.NopLogger)
+}
 
 const MinPodsPerSec = 100.0
 const PrintStats = false
@@ -58,9 +63,6 @@ var r = rand.New(rand.NewSource(42))
 
 // To run the benchmarks use:
 // `go test -tags=test_performance -run=XXX -bench=.`
-//
-// To run the benchmarks with minValues included in NodePool requirements, use:
-// `go test -tags=test_performance -run=XXX -bench=. -minValues=true`
 //
 // to get something statistically significant for comparison we need to run them several times and then
 // compare the results between the old performance and the new performance.
@@ -73,31 +75,37 @@ var r = rand.New(rand.NewSource(42))
 //
 // ```
 func BenchmarkScheduling1(b *testing.B) {
-	benchmarkScheduler(b, 400, 1)
+	benchmarkScheduler(b, makeDiversePods(1))
 }
 func BenchmarkScheduling50(b *testing.B) {
-	benchmarkScheduler(b, 400, 50)
+	benchmarkScheduler(b, makeDiversePods(50))
 }
 func BenchmarkScheduling100(b *testing.B) {
-	benchmarkScheduler(b, 400, 100)
+	benchmarkScheduler(b, makeDiversePods(100))
 }
 func BenchmarkScheduling500(b *testing.B) {
-	benchmarkScheduler(b, 400, 500)
+	benchmarkScheduler(b, makeDiversePods(500))
 }
 func BenchmarkScheduling1000(b *testing.B) {
-	benchmarkScheduler(b, 400, 1000)
+	benchmarkScheduler(b, makeDiversePods(1000))
 }
 func BenchmarkScheduling2000(b *testing.B) {
-	benchmarkScheduler(b, 400, 2000)
+	benchmarkScheduler(b, makeDiversePods(2000))
 }
 func BenchmarkScheduling5000(b *testing.B) {
-	benchmarkScheduler(b, 400, 5000)
+	benchmarkScheduler(b, makeDiversePods(5000))
 }
-
-var includeMinValues bool
-
-func init() {
-	flag.BoolVar(&includeMinValues, "minValues", false, "include minValues in NodePool requirement")
+func BenchmarkScheduling10000(b *testing.B) {
+	benchmarkScheduler(b, makeDiversePods(10000))
+}
+func BenchmarkScheduling20000(b *testing.B) {
+	benchmarkScheduler(b, makeDiversePods(20000))
+}
+func BenchmarkRespectPreferences(b *testing.B) {
+	benchmarkScheduler(b, makePreferencePods(4000))
+}
+func BenchmarkIgnorePreferences(b *testing.B) {
+	benchmarkScheduler(b, makePreferencePods(4000), scheduling.IgnorePreferences)
 }
 
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
@@ -117,65 +125,46 @@ func TestSchedulingProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating heap profile: %s", err)
 	}
-	defer lo.Must0(pprof.WriteHeapProfile(heapf))
+	defer func() { lo.Must0(pprof.WriteHeapProfile(heapf)) }()
 
 	totalPods := 0
 	totalNodes := 0
 	var totalTime time.Duration
-	for _, instanceCount := range []int{400} {
-		for _, podCount := range []int{10, 100, 500, 1000, 1500, 2000, 5000} {
-			start := time.Now()
-			res := testing.Benchmark(func(b *testing.B) { benchmarkScheduler(b, instanceCount, podCount) })
-			totalTime += time.Since(start) / time.Duration(res.N)
-			nodeCount := res.Extra["nodes"]
-			fmt.Fprintf(tw, "%d instances %d pods\t%d nodes\t%s per scheduling\t%s per pod\n", instanceCount, podCount, int(nodeCount), time.Duration(res.NsPerOp()), time.Duration(res.NsPerOp()/int64(podCount)))
-			totalPods += podCount
-			totalNodes += int(nodeCount)
-		}
+	fmt.Fprintf(tw, "============== Generic Pods ==============\n")
+	for _, podCount := range []int{1, 50, 100, 500, 1000, 1500, 2000, 5000, 10000, 20000} {
+		start := time.Now()
+		res := testing.Benchmark(func(b *testing.B) {
+			benchmarkScheduler(b, makeDiversePods(podCount))
+		})
+		totalTime += time.Since(start) / time.Duration(res.N)
+		nodeCount := res.Extra["nodes"]
+		fmt.Fprintf(tw, "%s\t%d pods\t%d nodes\t%s per scheduling\t%s per pod\n", fmt.Sprintf("%d Pods", podCount), podCount, int(nodeCount), time.Duration(res.NsPerOp()), time.Duration(res.NsPerOp()/int64(podCount)))
+		totalPods += podCount
+		totalNodes += int(nodeCount)
 	}
-	fmt.Println("scheduled", totalPods, "against", totalNodes, "nodes in total in", totalTime, "with minValues included", includeMinValues, float64(totalPods)/totalTime.Seconds(), "pods/sec")
+	fmt.Fprintf(tw, "============== Preference Pods ==============\n")
+	for _, opt := range []scheduling.Options{nil, scheduling.IgnorePreferences} {
+		start := time.Now()
+		podCount := 4000
+		res := testing.Benchmark(func(b *testing.B) {
+			benchmarkScheduler(b, makePreferencePods(podCount), opt)
+		})
+		totalTime += time.Since(start) / time.Duration(res.N)
+		nodeCount := res.Extra["nodes"]
+		fmt.Fprintf(tw, "%s\t%d pods\t%d nodes\t%s per scheduling\t%s per pod\n", lo.Ternary(opt == nil, "PreferencePolicy=Respect", "PreferencePolicy=Ignore"), podCount, int(nodeCount), time.Duration(res.NsPerOp()), time.Duration(res.NsPerOp()/int64(podCount)))
+		totalPods += podCount
+		totalNodes += int(nodeCount)
+	}
+	fmt.Fprintf(tw, "\nscheduled %d against %d nodes in total in %s %f pods/sec\n", totalPods, totalNodes, totalTime, float64(totalPods)/totalTime.Seconds())
 	tw.Flush()
 }
 
-func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
-	// disable logging
-	ctx = ctrl.IntoContext(context.Background(), operatorlogging.NopLogger)
-	nodePoolWithMinValues := test.NodePool(v1.NodePool{
-		Spec: v1.NodePoolSpec{
-			Template: v1.NodeClaimTemplate{
-				Spec: v1.NodeClaimTemplateSpec{
-					Requirements: []v1.NodeSelectorRequirementWithMinValues{
-						{
-							NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-								Key:      corev1.LabelInstanceTypeStable,
-								Operator: corev1.NodeSelectorOpExists,
-							},
-							MinValues: lo.ToPtr(50), // Adding highest possible minValues and safest way to add it would be to instanceType requirement.
-						},
-					},
-				},
-			},
-		},
-	})
-	nodePoolWithoutMinValues := test.NodePool()
-	nodePool := lo.Ternary(includeMinValues, nodePoolWithMinValues, nodePoolWithoutMinValues)
-	instanceTypes := fake.InstanceTypes(instanceCount)
-	cloudProvider = fake.NewCloudProvider()
-	cloudProvider.InstanceTypes = instanceTypes
-
-	client := fakecr.NewFakeClient()
-	pods := makeDiversePods(podCount)
-	cluster = state.NewCluster(&clock.RealClock{}, client)
-	domains := map[string]sets.Set[string]{}
-	topology, err := scheduling.NewTopology(ctx, client, cluster, domains, pods)
+func benchmarkScheduler(b *testing.B, pods []*corev1.Pod, opts ...scheduling.Options) {
+	ctx = options.ToContext(injection.WithControllerName(context.Background(), "provisioner"), test.Options())
+	scheduler, err := setupScheduler(ctx, pods, append(opts, scheduling.NumConcurrentReconciles(5))...)
 	if err != nil {
-		b.Fatalf("creating topology, %s", err)
+		b.Fatalf("creating scheduler, %s", err)
 	}
-
-	scheduler := scheduling.NewScheduler(client, []*v1.NodePool{nodePool},
-		cluster, nil, topology,
-		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes}, nil,
-		events.NewRecorder(&record.FakeRecorder{}))
 
 	b.ResetTimer()
 	// Pack benchmark
@@ -183,9 +172,14 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	podsScheduledInRound1 := 0
 	nodesInRound1 := 0
 	for i := 0; i < b.N; i++ {
-		results := scheduler.Solve(ctx, pods)
+		results, err := scheduler.Solve(ctx, pods)
+		if err != nil {
+			b.Fatalf("expected scheduler to schedule all pods without error, got %s", err)
+		}
+		if len(results.PodErrors) > 0 {
+			b.Fatalf("expected all pods to schedule, got %d pods that didn't", len(results.PodErrors))
+		}
 		if i == 0 {
-
 			minPods := math.MaxInt64
 			maxPods := 0
 			var podCounts []int
@@ -208,8 +202,8 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 				}
 				variance /= float64(nodesInRound1)
 				stddev := math.Sqrt(variance)
-				fmt.Printf("%d instance types %d pods resulted in %d nodes with pods per node min=%d max=%d mean=%f stddev=%f\n",
-					instanceCount, podCount, nodesInRound1, minPods, maxPods, meanPodsPerNode, stddev)
+				fmt.Printf("400 instance types %d pods resulted in %d nodes with pods per node min=%d max=%d mean=%f stddev=%f\n",
+					len(pods), nodesInRound1, minPods, maxPods, meanPodsPerNode, stddev)
 			}
 		}
 	}
@@ -218,24 +212,54 @@ func benchmarkScheduler(b *testing.B, instanceCount, podCount int) {
 	b.ReportMetric(podsPerSec, "pods/sec")
 	b.ReportMetric(float64(podsScheduledInRound1), "pods")
 	b.ReportMetric(float64(nodesInRound1), "nodes")
+}
 
-	// we don't care if it takes a bit of time to schedule a few pods as there is some setup time required for sorting
-	// instance types, computing topologies, etc.  We want to ensure that the larger batches of pods don't become too
-	// slow.
-	if len(pods) > 100 {
-		if podsPerSec < MinPodsPerSec {
-			b.Fatalf("scheduled %f pods/sec, expected at least %f", podsPerSec, MinPodsPerSec)
-		}
+func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.Options) (*scheduling.Scheduler, error) {
+	nodePool := test.NodePool(v1.NodePool{
+		Spec: v1.NodePoolSpec{
+			Limits: v1.Limits{
+				corev1.ResourceCPU:    resource.MustParse("10000000"),
+				corev1.ResourceMemory: resource.MustParse("10000000Gi"),
+			},
+		},
+	})
+
+	// Apply limits to both of the NodePools
+	cloudProvider = fake.NewCloudProvider()
+	instanceTypes := fake.InstanceTypes(400)
+	cloudProvider.InstanceTypes = instanceTypes
+
+	client := fakecr.NewFakeClient()
+	clock := &clock.RealClock{}
+	cluster = state.NewCluster(clock, client, cloudProvider)
+	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, []*v1.NodePool{nodePool}, map[string][]*cloudprovider.InstanceType{
+		nodePool.Name: instanceTypes,
+	}, pods, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating topology, %w", err)
 	}
+
+	return scheduling.NewScheduler(
+		ctx,
+		client,
+		[]*v1.NodePool{nodePool},
+		cluster,
+		nil,
+		topology,
+		map[string][]*cloudprovider.InstanceType{nodePool.Name: instanceTypes},
+		nil,
+		events.NewRecorder(&record.FakeRecorder{}),
+		clock,
+		opts...,
+	), nil
 }
 
 func makeDiversePods(count int) []*corev1.Pod {
 	var pods []*corev1.Pod
-	numTypes := 6
+	numTypes := 5
 	pods = append(pods, makeGenericPods(count/numTypes)...)
 	pods = append(pods, makeTopologySpreadPods(count/numTypes, corev1.LabelTopologyZone)...)
 	pods = append(pods, makeTopologySpreadPods(count/numTypes, corev1.LabelHostname)...)
-	pods = append(pods, makePodAffinityPods(count/numTypes, corev1.LabelHostname)...)
 	pods = append(pods, makePodAffinityPods(count/numTypes, corev1.LabelTopologyZone)...)
 	pods = append(pods, makePodAntiAffinityPods(count/numTypes, corev1.LabelHostname)...)
 
@@ -254,7 +278,10 @@ func makePodAntiAffinityPods(count int, key string) []*corev1.Pod {
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					UID:    uuid.NewUUID(), // set the UUID so the cached data is properly stored in the scheduler
+				},
 				PodAntiRequirements: []corev1.PodAffinityTerm{
 					{
 						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
@@ -273,12 +300,20 @@ func makePodAntiAffinityPods(count int, key string) []*corev1.Pod {
 func makePodAffinityPods(count int, key string) []*corev1.Pod {
 	var pods []*corev1.Pod
 	for i := 0; i < count; i++ {
+		// We use self-affinity here because using affinity that relies on other pod
+		// domains doens't guarantee that all pods can schedule. In the case where you are not
+		// using self-affinity and the domain doesn't exist, scheduling will fail for all pods with
+		// affinities against this domain
+		labels := randomAffinityLabels()
 		pods = append(pods, test.Pod(
 			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: randomAffinityLabels()},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+					UID:    uuid.NewUUID(), // set the UUID so the cached data is properly stored in the scheduler
+				},
 				PodRequirements: []corev1.PodAffinityTerm{
 					{
-						LabelSelector: &metav1.LabelSelector{MatchLabels: randomAffinityLabels()},
+						LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
 						TopologyKey:   key,
 					},
 				},
@@ -297,7 +332,10 @@ func makeTopologySpreadPods(count int, key string) []*corev1.Pod {
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: randomLabels()},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: randomLabels(),
+					UID:    uuid.NewUUID(), // set the UUID so the cached data is properly stored in the scheduler
+				},
 				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
 					{
 						MaxSkew:           1,
@@ -323,13 +361,66 @@ func makeGenericPods(count int) []*corev1.Pod {
 	for i := 0; i < count; i++ {
 		pods = append(pods, test.Pod(
 			test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{Labels: randomLabels()},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: randomLabels(),
+					UID:    uuid.NewUUID(), // set the UUID so the cached data is properly stored in the scheduler
+				},
 				ResourceRequirements: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceCPU:    randomCPU(),
 						corev1.ResourceMemory: randomMemory(),
 					},
 				}}))
+	}
+	return pods
+}
+
+func makePreferencePods(count int) []*corev1.Pod {
+	pods := test.Pods(count, test.PodOptions{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				"app": "nginx",
+			},
+		},
+		NodePreferences: []corev1.NodeSelectorRequirement{
+			// This is a preference that can be satisfied
+			{
+				Key:      corev1.LabelTopologyZone,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"test-zone-1"},
+			},
+		},
+		PodAntiPreferences: []corev1.WeightedPodAffinityTerm{
+			// This is a preference that can't be satisfied
+			{
+				Weight: 10,
+				PodAffinityTerm: corev1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+						"app": "nginx",
+					}},
+					TopologyKey: corev1.LabelTopologyZone,
+				},
+			},
+			// This is a preference that can be satisfied
+			{
+				Weight: 1,
+				PodAffinityTerm: corev1.PodAffinityTerm{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+						"app": "nginx",
+					}},
+					TopologyKey: corev1.LabelHostname,
+				},
+			},
+		},
+		ResourceRequirements: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    randomCPU(),
+				corev1.ResourceMemory: randomMemory(),
+			},
+		},
+	})
+	for _, p := range pods {
+		p.UID = uuid.NewUUID() // set the UUID so the cached data is properly stored in the scheduler
 	}
 	return pods
 }

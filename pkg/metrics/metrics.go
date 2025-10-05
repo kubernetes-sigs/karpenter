@@ -17,6 +17,7 @@ limitations under the License.
 package metrics
 
 import (
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
@@ -29,20 +30,22 @@ const (
 )
 
 var (
-	NodeClaimsCreatedTotal = prometheus.NewCounterVec(
+	NodeClaimsCreatedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
 			Name:      "created_total",
-			Help:      "Number of nodeclaims created in total by Karpenter. Labeled by reason the nodeclaim was created and the owning nodepool.",
+			Help:      "Number of nodeclaims created in total by Karpenter. Labeled by reason the nodeclaim was created, the owning nodepool, and if min values was relaxed for this nodeclaim.",
 		},
 		[]string{
 			ReasonLabel,
 			NodePoolLabel,
-			CapacityTypeLabel,
+			MinValuesRelaxedLabel,
 		},
 	)
-	NodeClaimsTerminatedTotal = prometheus.NewCounterVec(
+	NodeClaimsTerminatedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
@@ -54,7 +57,8 @@ var (
 			CapacityTypeLabel,
 		},
 	)
-	NodeClaimsDisruptedTotal = prometheus.NewCounterVec(
+	NodeClaimsDisruptedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeClaimSubsystem,
@@ -67,7 +71,8 @@ var (
 			CapacityTypeLabel,
 		},
 	)
-	NodesCreatedTotal = prometheus.NewCounterVec(
+	NodesCreatedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
@@ -78,7 +83,8 @@ var (
 			NodePoolLabel,
 		},
 	)
-	NodesTerminatedTotal = prometheus.NewCounterVec(
+	NodesTerminatedTotal = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: NodeSubsystem,
@@ -90,8 +96,3 @@ var (
 		},
 	)
 )
-
-func init() {
-	crmetrics.Registry.MustRegister(NodeClaimsCreatedTotal, NodeClaimsTerminatedTotal, NodeClaimsDisruptedTotal,
-		NodesCreatedTotal, NodesTerminatedTotal)
-}

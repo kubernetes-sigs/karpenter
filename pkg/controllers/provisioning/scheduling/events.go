@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/flowcontrol"
 
@@ -42,10 +43,21 @@ func NominatePodEvent(pod *corev1.Pod, node *corev1.Node, nodeClaim *v1.NodeClai
 	return events.Event{
 		InvolvedObject: pod,
 		Type:           corev1.EventTypeNormal,
-		Reason:         "Nominated",
+		Reason:         events.Nominated,
 		Message:        fmt.Sprintf("Pod should schedule on: %s", strings.Join(info, ", ")),
 		DedupeValues:   []string{string(pod.UID)},
 		RateLimiter:    PodNominationRateLimiter,
+	}
+}
+
+func NoCompatibleInstanceTypes(np *v1.NodePool, minValuesIncompatibleError bool) events.Event {
+	return events.Event{
+		InvolvedObject: np,
+		Type:           corev1.EventTypeWarning,
+		Reason:         events.NoCompatibleInstanceTypes,
+		Message:        lo.Ternary(minValuesIncompatibleError, "NodePool requirements filtered out all compatible available instance types due to minValues incompatibility", "NodePool requirements filtered out all compatible available instance types"),
+		DedupeValues:   []string{string(np.UID)},
+		DedupeTimeout:  1 * time.Minute,
 	}
 }
 
@@ -53,7 +65,7 @@ func PodFailedToScheduleEvent(pod *corev1.Pod, err error) events.Event {
 	return events.Event{
 		InvolvedObject: pod,
 		Type:           corev1.EventTypeWarning,
-		Reason:         "FailedScheduling",
+		Reason:         events.FailedScheduling,
 		Message:        fmt.Sprintf("Failed to schedule pod, %s", err),
 		DedupeValues:   []string{string(pod.UID)},
 		DedupeTimeout:  5 * time.Minute,

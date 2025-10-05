@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,9 +38,9 @@ type NodeClaimController struct {
 	kubeClient client.Client
 }
 
-func NewNodeClaimController(kubeClient client.Client) *NodeClaimController {
+func NewNodeClaimController(kc client.Client) *NodeClaimController {
 	return &NodeClaimController{
-		kubeClient: kubeClient,
+		kubeClient: kc,
 	}
 }
 
@@ -47,11 +48,11 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 	nc := &v1.NodeClaim{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, nc); err != nil {
 		if errors.IsNotFound(err) {
-			fmt.Printf("[DELETED %s] NODECLAIM %s\n", time.Now().Format(time.RFC3339), req.NamespacedName.String())
+			fmt.Printf("[DELETED %s] NODECLAIM %s\n", time.Now().Format(time.RFC3339), req.String())
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	fmt.Printf("[CREATED/UPDATED %s] NODECLAIM %s %s\n", time.Now().Format(time.RFC3339), req.NamespacedName.Name, c.GetInfo(nc))
+	fmt.Printf("[CREATED/UPDATED %s] NODECLAIM %s %s\n", time.Now().Format(time.RFC3339), req.Name, c.GetInfo(nc))
 	return reconcile.Result{}, nil
 }
 
@@ -75,6 +76,6 @@ func (c *NodeClaimController) Register(_ context.Context, m manager.Manager) err
 				return c.GetInfo(oldNodeClaim) != c.GetInfo(newNodeClaim)
 			},
 		}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10, SkipNameValidation: lo.ToPtr(true)}).
 		Complete(c)
 }

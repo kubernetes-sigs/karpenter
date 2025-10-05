@@ -28,8 +28,11 @@ const (
 	ConditionTypeInitialized          = "Initialized"
 	ConditionTypeConsolidatable       = "Consolidatable"
 	ConditionTypeDrifted              = "Drifted"
+	ConditionTypeDrained              = "Drained"
+	ConditionTypeVolumesDetached      = "VolumesDetached"
 	ConditionTypeInstanceTerminating  = "InstanceTerminating"
 	ConditionTypeConsistentStateFound = "ConsistentStateFound"
+	ConditionTypeDisruptionReason     = "DisruptionReason"
 )
 
 // NodeClaimStatus defines the observed state of NodeClaim

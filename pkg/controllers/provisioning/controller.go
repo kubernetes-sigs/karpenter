@@ -29,21 +29,30 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
+)
+
+const (
+	minReconciles = 10
+	maxReconciles = 1000
 )
 
 // PodController for the resource
 type PodController struct {
 	kubeClient  client.Client
 	provisioner *Provisioner
+	cluster     *state.Cluster
 }
 
 // NewPodController constructs a controller instance
-func NewPodController(kubeClient client.Client, provisioner *Provisioner) *PodController {
+func NewPodController(kubeClient client.Client, provisioner *Provisioner, cluster *state.Cluster) *PodController {
 	return &PodController{
 		kubeClient:  kubeClient,
 		provisioner: provisioner,
+		cluster:     cluster,
 	}
 }
 
@@ -54,7 +63,9 @@ func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile
 	if !pod.IsProvisionable(p) {
 		return reconcile.Result{}, nil
 	}
-	c.provisioner.Trigger()
+	c.provisioner.Trigger(p.UID)
+	// ACK the pending pod when first observed so that total time spent pending due to Karpenter is tracked.
+	c.cluster.AckPods(p)
 	// Continue to requeue until the pod is no longer provisionable. Pods may
 	// not be scheduled as expected if new pods are created while nodes are
 	// coming online. Even if a provisioning loop is successful, the pod may
@@ -62,11 +73,11 @@ func (c *PodController) Reconcile(ctx context.Context, p *corev1.Pod) (reconcile
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *PodController) Register(_ context.Context, m manager.Manager) error {
+func (c *PodController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.pod").
 		For(&corev1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
@@ -97,7 +108,7 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 	}) {
 		return reconcile.Result{}, nil
 	}
-	c.provisioner.Trigger()
+	c.provisioner.Trigger(n.UID)
 	// Continue to requeue until the node is no longer provisionable. Pods may
 	// not be scheduled as expected if new pods are created while nodes are
 	// coming online. Even if a provisioning loop is successful, the pod may
@@ -105,10 +116,10 @@ func (c *NodeController) Reconcile(ctx context.Context, n *corev1.Node) (reconci
 	return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func (c *NodeController) Register(_ context.Context, m manager.Manager) error {
+func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("provisioner.trigger.node").
 		For(&corev1.Node{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

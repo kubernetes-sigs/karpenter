@@ -31,7 +31,7 @@ import (
 
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
-	nodeutil "sigs.k8s.io/karpenter/pkg/utils/node"
+	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutil "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -73,7 +73,10 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 		corev1.LabelNodeExcludeBalancers: "karpenter",
 	})
 	if !equality.Semantic.DeepEqual(node, stored) {
-		if err := t.kubeClient.Patch(ctx, node, client.StrategicMergeFrom(stored)); err != nil {
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the taint list
+		if err := t.kubeClient.Patch(ctx, node, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			return err
 		}
 		taintValues := []any{
@@ -91,12 +94,12 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 // Drain evicts pods from the node and returns true when all pods are evicted
 // https://kubernetes.io/docs/concepts/architecture/nodes/#graceful-node-shutdown
 func (t *Terminator) Drain(ctx context.Context, node *corev1.Node, nodeGracePeriodExpirationTime *time.Time) error {
-	pods, err := nodeutil.GetPods(ctx, t.kubeClient, node)
+	pods, err := nodeutils.GetPods(ctx, t.kubeClient, node)
 	if err != nil {
 		return fmt.Errorf("listing pods on node, %w", err)
 	}
 	podsToDelete := lo.Filter(pods, func(p *corev1.Pod, _ int) bool {
-		return podutil.IsWaitingEviction(p, t.clock) && !podutil.IsTerminating(p)
+		return podutil.IsWaitingEviction(p, t.clock) && (!podutil.IsTerminating(p) || podutil.IsPodEligibleForForcedEviction(p, nodeGracePeriodExpirationTime))
 	})
 	if err := t.DeleteExpiringPods(ctx, podsToDelete, nodeGracePeriodExpirationTime); err != nil {
 		return fmt.Errorf("deleting expiring pods, %w", err)
@@ -138,7 +141,7 @@ func (t *Terminator) DeleteExpiringPods(ctx context.Context, pods []*corev1.Pod,
 	for _, pod := range pods {
 		// check if the node has an expiration time and the pod needs to be deleted
 		deleteTime := t.podDeleteTimeWithGracePeriod(nodeGracePeriodTerminationTime, pod)
-		if deleteTime != nil && time.Now().After(*deleteTime) {
+		if deleteTime != nil && t.clock.Now().After(*deleteTime) {
 			// delete pod proactively to give as much of its terminationGracePeriodSeconds as possible for deletion
 			// ensure that we clamp the maximum pod terminationGracePeriodSeconds to the node's remaining expiration time in the delete command
 			gracePeriodSeconds := lo.ToPtr(int64(time.Until(*nodeGracePeriodTerminationTime).Seconds()))

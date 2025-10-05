@@ -17,9 +17,11 @@ limitations under the License.
 package kwok
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 
 	"github.com/samber/lo"
@@ -27,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/kwok/options"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -61,12 +64,21 @@ type InstanceTypeOptions struct {
 }
 
 //go:embed instance_types.json
-var rawInstanceTypes []byte
+var defaultRawInstanceTypes []byte
 
 // ConstructInstanceTypes create many instance types based on the embedded instance type data
-func ConstructInstanceTypes() ([]*cloudprovider.InstanceType, error) {
+func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType, error) {
 	var instanceTypes []*cloudprovider.InstanceType
 	var instanceTypeOptions []InstanceTypeOptions
+
+	rawInstanceTypes := defaultRawInstanceTypes
+	if customInstanceTypes := options.FromContext(ctx).InstanceTypesFilePath; customInstanceTypes != "" {
+		customRawInstanceTypes, err := os.ReadFile(customInstanceTypes)
+		if err != nil {
+			return nil, fmt.Errorf("could not read custom instance types file: %w", err)
+		}
+		rawInstanceTypes = customRawInstanceTypes
+	}
 
 	if err := json.Unmarshal(rawInstanceTypes, &instanceTypeOptions); err != nil {
 		return nil, fmt.Errorf("could not parse JSON data: %w", err)
@@ -157,6 +169,15 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 		return req.Values
 	})))
 
+	for _, offering := range options.Offerings {
+		for _, requirement := range offering.Requirements {
+			v1.WellKnownLabels = v1.WellKnownLabels.Insert(requirement.Key)
+		}
+		for _, requirement := range offering.Offering.Requirements {
+			v1.WellKnownLabels = v1.WellKnownLabels.Insert(requirement.Key)
+		}
+	}
+
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, options.Architecture),
@@ -172,13 +193,14 @@ func newInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
 	return &cloudprovider.InstanceType{
 		Name:         options.Name,
 		Requirements: requirements,
-		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) cloudprovider.Offering {
-			return cloudprovider.Offering{
+		Offerings: lo.Map(options.Offerings, func(off KWOKOffering, _ int) *cloudprovider.Offering {
+			return &cloudprovider.Offering{
+				ReservationCapacity: off.ReservationCapacity,
 				Requirements: scheduling.NewRequirements(lo.Map(off.Requirements, func(req corev1.NodeSelectorRequirement, _ int) *scheduling.Requirement {
 					return scheduling.NewRequirement(req.Key, req.Operator, req.Values...)
 				})...),
-				Price:     off.Offering.Price,
-				Available: off.Offering.Available,
+				Price:     off.Price,
+				Available: off.Available,
 			}
 		}),
 		Capacity: options.Resources,

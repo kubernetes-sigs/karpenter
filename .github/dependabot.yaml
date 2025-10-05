@@ -61,3 +61,11 @@ updates:
       action-deps:
         patterns:
           - '*'
+  - package-ecosystem: github-actions
+    directory: .github/actions/run-bench-test
+    schedule:
+      interval: weekly
+    groups:
+      action-deps:
+        patterns:
+          - '*'

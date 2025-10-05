@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -53,7 +54,7 @@ func Node(overrides ...NodeOptions) *corev1.Node {
 	}
 
 	return &corev1.Node{
-		ObjectMeta: ObjectMeta(options.ObjectMeta),
+		ObjectMeta: NamespacedObjectMeta(options.ObjectMeta),
 		Spec: corev1.NodeSpec{
 			Unschedulable: options.Unschedulable,
 			Taints:        options.Taints,
@@ -71,7 +72,9 @@ func NodeClaimLinkedNode(nodeClaim *v1.NodeClaim) *corev1.Node {
 	n := Node(
 		NodeOptions{
 			ObjectMeta: metav1.ObjectMeta{
-				Labels:      nodeClaim.Labels,
+				Labels: lo.Assign(map[string]string{
+					v1.NodeClassLabelKey(nodeClaim.Spec.NodeClassRef.GroupKind()): nodeClaim.Spec.NodeClassRef.Name,
+				}, nodeClaim.Labels),
 				Annotations: nodeClaim.Annotations,
 				Finalizers:  nodeClaim.Finalizers,
 			},

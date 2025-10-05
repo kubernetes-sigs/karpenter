@@ -20,24 +20,32 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
 	"sigs.k8s.io/karpenter/pkg/controllers"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator"
 )
 
 func main() {
 	ctx, op := operator.NewOperator()
-	instanceTypes, err := kwok.ConstructInstanceTypes()
+	instanceTypes, err := kwok.ConstructInstanceTypes(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed constructing instance types")
 	}
 
-	cloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
+	overlayUndecoratedCloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
+	cloudProvider := overlay.Decorate(overlayUndecoratedCloudProvider, op.GetClient(), op.InstanceTypeStore)
+	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
 	op.
 		WithControllers(ctx, controllers.NewControllers(
+			ctx,
 			op.Manager,
 			op.Clock,
 			op.GetClient(),
 			op.EventRecorder,
 			cloudProvider,
+			overlayUndecoratedCloudProvider,
+			clusterState,
+			op.InstanceTypeStore,
 		)...).Start(ctx)
 }

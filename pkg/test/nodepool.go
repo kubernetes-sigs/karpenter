@@ -19,6 +19,7 @@ package test
 import (
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/imdario/mergo"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 // NodePool creates a test NodePool with defaults that can be overridden by overrides.
@@ -45,7 +47,9 @@ func NodePool(overrides ...v1.NodePool) *v1.NodePool {
 	}
 	if override.Spec.Template.Spec.NodeClassRef == nil {
 		override.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
-			Name: "default",
+			Group: object.GVK(defaultNodeClass).Group,
+			Kind:  object.GVK(defaultNodeClass).Kind,
+			Name:  "default",
 		}
 	}
 	if override.Spec.Template.Spec.Requirements == nil {
@@ -54,6 +58,7 @@ func NodePool(overrides ...v1.NodePool) *v1.NodePool {
 	if override.Status.Conditions == nil {
 		override.StatusConditions().SetTrue(v1.ConditionTypeValidationSucceeded)
 		override.StatusConditions().SetTrue(v1.ConditionTypeNodeClassReady)
+		override.StatusConditions().SetUnknown(v1.ConditionTypeNodeRegistrationHealthy)
 	}
 	np := &v1.NodePool{
 		ObjectMeta: ObjectMeta(override.ObjectMeta),
@@ -86,5 +91,35 @@ func ReplaceRequirements(nodePool *v1.NodePool, reqs ...v1.NodeSelectorRequireme
 		return keys.Has(r.Key)
 	})
 	nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, reqs...)
+	return nodePool
+}
+
+// StaticNodePool creates a test NodePool suitable for static provisioning
+// It will keep limits.nodes if provided in overrides, otherwise limits will be nil
+func StaticNodePool(overrides ...v1.NodePool) *v1.NodePool {
+	// First create the NodePool with all overrides
+	nodePool := NodePool(overrides...)
+
+	var hasNodesLimit bool
+	var nodesLimit resource.Quantity
+	for _, override := range overrides {
+		if override.Spec.Limits != nil {
+			if limit, ok := override.Spec.Limits[resources.Node]; ok {
+				hasNodesLimit = true
+				nodesLimit = limit
+				break
+			}
+		}
+	}
+
+	// Set limits based on whether nodes limit was provided
+	if !hasNodesLimit {
+		nodePool.Spec.Limits = nil
+	} else {
+		nodePool.Spec.Limits = v1.Limits(corev1.ResourceList{
+			resources.Node: nodesLimit,
+		})
+	}
+
 	return nodePool
 }

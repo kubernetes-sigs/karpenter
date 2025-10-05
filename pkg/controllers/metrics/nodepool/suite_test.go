@@ -29,6 +29,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -39,6 +40,7 @@ import (
 var nodePoolController *nodepool.Controller
 var ctx context.Context
 var env *test.Environment
+var cp *fake.CloudProvider
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -48,7 +50,8 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
-	nodePoolController = nodepool.NewController(env.Client)
+	cp = fake.NewCloudProvider()
+	nodePoolController = nodepool.NewController(env.Client, cp)
 })
 
 var _ = AfterSuite(func() {
@@ -63,32 +66,48 @@ var _ = Describe("Metrics", func() {
 				Template: v1.NodeClaimTemplate{
 					Spec: v1.NodeClaimTemplateSpec{
 						NodeClassRef: &v1.NodeClassReference{
-							Name: "default",
+							Group: "karpenter.test.sh",
+							Kind:  "TestNodeClass",
+							Name:  "default",
 						},
 					},
 				},
 			},
 		})
 	})
-	It("should update the nodepool limit metrics", func() {
-		limits := v1.Limits{
-			corev1.ResourceCPU:              resource.MustParse("10"),
-			corev1.ResourceMemory:           resource.MustParse("10Mi"),
-			corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
-		}
-		nodePool.Spec.Limits = limits
-		ExpectApplied(ctx, env.Client, nodePool)
-		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+	DescribeTable(
+		"should update the nodepool limit metrics",
+		func(isNodePoolManaged bool) {
+			limits := v1.Limits{
+				corev1.ResourceCPU:              resource.MustParse("10"),
+				corev1.ResourceMemory:           resource.MustParse("10Mi"),
+				corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
+			}
+			nodePool.Spec.Limits = limits
+			if !isNodePoolManaged {
+				nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
+					Group: "karpenter.test.sh",
+					Kind:  "UnmanagedNodeClass",
+					Name:  "default",
+				}
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
 
-		for k, v := range limits {
-			m, found := FindMetricWithLabelValues("karpenter_nodepools_limit", map[string]string{
-				"nodepool":      nodePool.GetName(),
-				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
-			})
-			Expect(found).To(BeTrue())
-			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
-		}
-	})
+			for k, v := range limits {
+				m, found := FindMetricWithLabelValues("karpenter_nodepools_limit", map[string]string{
+					"nodepool":      nodePool.GetName(),
+					"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
+				})
+				Expect(found).To(Equal(isNodePoolManaged))
+				if isNodePoolManaged {
+					Expect(m.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
+				}
+			}
+		},
+		Entry("should update the nodepool limit metrics", true),
+		Entry("should ignore nodepools not managed by this instance of Karpenter", false),
+	)
 	It("should update the nodepool usage metrics", func() {
 		resources := corev1.ResourceList{
 			corev1.ResourceCPU:              resource.MustParse("10"),

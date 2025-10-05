@@ -19,10 +19,13 @@ package kwok
 import (
 	"context"
 	_ "embed"
+	stderrors "errors"
 	"fmt"
 	"math/rand"
 	"strings"
+	"time"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/samber/lo"
@@ -30,7 +33,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/karpenter/kwok/apis/v1alpha1"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -56,15 +61,36 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1
 	if err != nil {
 		return nil, fmt.Errorf("translating nodeclaim to node, %w", err)
 	}
-	if err := c.kubeClient.Create(ctx, node); err != nil {
-		return nil, fmt.Errorf("creating node, %w", err)
+	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("resolving node class from nodeclaim, %w", err))
+		}
+		return nil, fmt.Errorf("resolving node class from nodeclaim, %w", err)
 	}
+	if status := nodeClass.StatusConditions().Get(status.ConditionReady); status.IsFalse() {
+		return nil, cloudprovider.NewNodeClassNotReadyError(stderrors.New(status.Message))
+	}
+	// Kick-off a goroutine to allow us to asynchronously register nodes
+	// We're fine to leak this because failed registration can also happen in real providers
+	go func() {
+		time.Sleep(nodeClass.Spec.NodeRegistrationDelay.Duration)
+		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return true }, func() error {
+			return c.kubeClient.Create(ctx, node)
+		}); err != nil {
+			log.FromContext(ctx).Error(err, "failed creating node from nodeclaim")
+		}
+	}()
 	// convert the node back into a node claim to get the chosen resolved requirement values.
 	return c.toNodeClaim(node)
 }
 
-func (c CloudProvider) DisruptionReasons() []v1.DisruptionReason {
-	return []v1.DisruptionReason{v1alpha1.DisruptionReasonExampleReason}
+func (c CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1alpha1.KWOKNodeClass, error) {
+	nodeClass := &v1alpha1.KWOKNodeClass{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeClaim.Spec.NodeClassRef.Name}, nodeClass); err != nil {
+		return nil, err
+	}
+	return nodeClass, nil
 }
 
 func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
@@ -74,11 +100,11 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) erro
 		}
 		return fmt.Errorf("deleting node, %w", err)
 	}
-	return nil
+	return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance terminated"))
 }
 
 func (c CloudProvider) Get(ctx context.Context, providerID string) (*v1.NodeClaim, error) {
-	nodeName := strings.Replace(providerID, kwokProviderPrefix, "", -1)
+	nodeName := strings.ReplaceAll(providerID, kwokProviderPrefix, "")
 	node := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 		if errors.IsNotFound(err) {
@@ -130,18 +156,34 @@ func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 	return []status.Object{&v1alpha1.KWOKNodeClass{}}
 }
 
+func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
+	return []cloudprovider.RepairPolicy{
+		// Supported Kubelet Node Conditions
+		{
+			ConditionType:      corev1.NodeReady,
+			ConditionStatus:    corev1.ConditionFalse,
+			TolerationDuration: 10 * time.Minute,
+		},
+		{
+			ConditionType:      corev1.NodeReady,
+			ConditionStatus:    corev1.ConditionUnknown,
+			TolerationDuration: 10 * time.Minute,
+		},
+	}
+}
+
 func (c CloudProvider) getInstanceType(instanceTypeName string) (*cloudprovider.InstanceType, error) {
 	it, found := lo.Find(c.instanceTypes, func(it *cloudprovider.InstanceType) bool {
 		return it.Name == instanceTypeName
 	})
 	if !found {
-		return nil, fmt.Errorf("unable to find instance type %q", instanceTypeName)
+		return nil, serrors.Wrap(fmt.Errorf("unable to find instance type"), "instance-type", instanceTypeName)
 	}
 	return it, nil
 }
 
 func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
-	newName := strings.Replace(namesgenerator.GetRandomName(0), "_", "-", -1)
+	newName := strings.ReplaceAll(namesgenerator.GetRandomName(0), "_", "-")
 	//nolint
 	newName = fmt.Sprintf("%s-%d", newName, rand.Uint32())
 
@@ -159,15 +201,15 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 	for _, val := range req.Values {
 		it, err := c.getInstanceType(val)
 		if err != nil {
-			return nil, fmt.Errorf("instance type %s not found", val)
+			return nil, serrors.Wrap(fmt.Errorf("instance type not found"), "instance-type", val)
 		}
 
 		availableOfferings := it.Offerings.Available().Compatible(requirements)
 
-		offeringsByPrice := lo.GroupBy(availableOfferings, func(of cloudprovider.Offering) float64 { return of.Price })
+		offeringsByPrice := lo.GroupBy(availableOfferings, func(of *cloudprovider.Offering) float64 { return of.Price })
 		minOfferingPrice := lo.Min(lo.Keys(offeringsByPrice))
 		if cheapestOffering == nil || minOfferingPrice < cheapestOffering.Price {
-			cheapestOffering = lo.ToPtr(lo.Sample(offeringsByPrice[minOfferingPrice]))
+			cheapestOffering = lo.Sample(offeringsByPrice[minOfferingPrice])
 			instanceType = it
 		}
 	}
@@ -183,8 +225,11 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 			Taints:     []corev1.Taint{v1.UnregisteredNoExecuteTaint},
 		},
 		Status: corev1.NodeStatus{
-			Capacity:    instanceType.Capacity,
-			Allocatable: instanceType.Allocatable(),
+			// KWOK nodes don't support overriding Karpenter's WellKnownResources,
+			// so we only apply resource requests, since NodeOverlay will not apply.
+			// If this changes in the future, we'll need to update capacity and allocatable values for KWOK nodes.
+			Capacity:    nodeClaim.Spec.Resources.Requests,
+			Allocatable: lo.Assign(nodeClaim.Spec.Resources.Requests, instanceType.Allocatable()),
 			Phase:       corev1.NodePending,
 		},
 	}, nil
@@ -211,14 +256,17 @@ func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.Ins
 			ret[r.Key] = r.Values()[0]
 		}
 	}
+	for _, r := range offering.Requirements {
+		if r.Len() == 1 && r.Operator() == corev1.NodeSelectorOpIn {
+			ret[r.Key] = r.Values()[0]
+		}
+	}
 	// add in github.com/awslabs/eks-node-viewer label so that it shows up.
 	ret[v1alpha1.NodeViewerLabelKey] = fmt.Sprintf("%f", offering.Price)
 	// Kwok has some scalability limitations.
 	// Randomly add each new node to one of the pre-created kwokPartitions.
 
 	ret[v1alpha1.KwokPartitionLabelKey] = lo.Sample(kwokPartitions)
-	ret[v1.CapacityTypeLabelKey] = offering.Requirements.Get(v1.CapacityTypeLabelKey).Any()
-	ret[corev1.LabelTopologyZone] = offering.Requirements.Get(corev1.LabelTopologyZone).Any()
 	ret[corev1.LabelHostname] = nodeClaim.Name
 
 	ret[v1alpha1.KwokLabelKey] = v1alpha1.KwokLabelValue

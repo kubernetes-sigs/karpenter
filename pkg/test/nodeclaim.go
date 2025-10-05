@@ -19,7 +19,9 @@ package test
 import (
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/imdario/mergo"
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -42,9 +44,14 @@ func NodeClaim(overrides ...v1.NodeClaim) *v1.NodeClaim {
 	}
 	if override.Spec.NodeClassRef == nil {
 		override.Spec.NodeClassRef = &v1.NodeClassReference{
-			Name: "default",
+			Group: object.GVK(defaultNodeClass).Group,
+			Kind:  object.GVK(defaultNodeClass).Kind,
+			Name:  "default",
 		}
 	}
+	override.Labels = lo.Assign(map[string]string{
+		v1.NodeClassLabelKey(override.Spec.NodeClassRef.GroupKind()): override.Spec.NodeClassRef.Name,
+	}, override.Labels)
 	if override.Spec.Requirements == nil {
 		override.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{}
 	}

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -49,11 +50,11 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 	n := &corev1.Node{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, n); err != nil {
 		if errors.IsNotFound(err) {
-			fmt.Printf("[DELETED %s] NODE %s\n", time.Now().Format(time.RFC3339), req.NamespacedName.String())
+			fmt.Printf("[DELETED %s] NODE %s\n", time.Now().Format(time.RFC3339), req.String())
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	fmt.Printf("[CREATED/UPDATED %s] NODE %s %s\n", time.Now().Format(time.RFC3339), req.NamespacedName.Name, c.GetInfo(ctx, n))
+	fmt.Printf("[CREATED/UPDATED %s] NODE %s %s\n", time.Now().Format(time.RFC3339), req.Name, c.GetInfo(ctx, n))
 	return reconcile.Result{}, nil
 }
 
@@ -78,6 +79,6 @@ func (c *NodeController) Register(ctx context.Context, m manager.Manager) error 
 				return o.GetLabels()[v1.NodePoolLabelKey] != ""
 			}),
 		)).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10, SkipNameValidation: lo.ToPtr(true)}).
 		Complete(c)
 }

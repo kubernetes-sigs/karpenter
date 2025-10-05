@@ -561,10 +561,8 @@ var _ = Describe("Requirements", func() {
 		},
 			Entry("Zone Label #1", "topology.kubernetesio/zone", `label "topology.kubernetesio/zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
 			Entry("Zone Label #1", "node.io/zone", `label "node.io/zone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
-			Entry("Zone Label #1", "topology.kubernetesiozone", `label "topology.kubernetesiozone" does not have known values (typo of "topology.kubernetes.io/zone"?)`),
 			Entry("Region Label #1", "topology.kubernetes.io/regio", `label "topology.kubernetes.io/regio" does not have known values (typo of "topology.kubernetes.io/region"?)`),
 			Entry("Region Label #2", "node.kubernetes.io/region", `label "node.kubernetes.io/region" does not have known values (typo of "topology.kubernetes.io/region"?)`),
-			Entry("NodePool Label #1", "karpenter.shnodepool", `label "karpenter.shnodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
 			Entry("NodePool Label #2", "karpenter/nodepool", `label "karpenter/nodepool" does not have known values (typo of "karpenter.sh/nodepool"?)`),
 		)
 		It("should display an error message for unknown labels", func() {
@@ -698,17 +696,6 @@ var _ = Describe("Requirements", func() {
 		})
 	})
 })
-
-// Keeping this in case we need it, I ran for 1m+ samples and had no issues
-// fuzz: elapsed: 2m27s, execs: 1002748 (6130/sec), new interesting: 30 (total: 33)
-func FuzzEditDistance(f *testing.F) {
-	f.Add("foo", "bar")
-	f.Add("foo", "")
-	f.Add("", "foo")
-	f.Fuzz(func(t *testing.T, lhs, rhs string) {
-		editDistance(lhs, rhs)
-	})
-}
 
 // TestSchedulingProfile is used to gather profiling metrics, benchmarking is primarily done with standard
 // Go benchmark functions

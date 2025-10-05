@@ -30,7 +30,7 @@ metadata:
 rules:
   # Read
   - apiGroups: ["karpenter.sh"]
-    resources: ["nodepools", "nodepools/status", "nodeclaims", "nodeclaims/status"]
+    resources: ["nodepools", "nodepools/status", "nodeclaims", "nodeclaims/status", "nodeoverlays", "nodeoverlays/status"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods", "nodes", "persistentvolumes", "persistentvolumeclaims", "replicationcontrollers", "namespaces"]
@@ -49,10 +49,10 @@ rules:
     verbs: ["get", "list", "watch"]
   # Write
   - apiGroups: ["karpenter.sh"]
-    resources: ["nodeclaims", "nodeclaims/status"]
+    resources: ["nodeclaims", "nodeclaims/status", "nodeclaims/finalizers"]
     verbs: ["create", "delete", "update", "patch"]
   - apiGroups: ["karpenter.sh"]
-    resources: ["nodepools", "nodepools/status"]
+    resources: ["nodepools", "nodepools/status", "nodepools/finalizers", "nodeoverlays/status"]
     verbs: ["update", "patch"]
   - apiGroups: [""]
     resources: ["events"]
@@ -66,9 +66,6 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["delete"]
-  - apiGroups: ["apiextensions.k8s.io"]
-    resources: ["customresourcedefinitions"]
-    verbs: ["update"]
   {{- with .Values.additionalClusterRoleRules -}}
   {{ toYaml . | nindent 2 }}
   {{- end -}}

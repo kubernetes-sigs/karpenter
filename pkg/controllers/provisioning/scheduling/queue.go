@@ -34,8 +34,8 @@ type Queue struct {
 }
 
 // NewQueue constructs a new queue given the input pods, sorting them to optimize for bin-packing into nodes.
-func NewQueue(pods ...*v1.Pod) *Queue {
-	sort.Slice(pods, byCPUAndMemoryDescending(pods))
+func NewQueue(pods []*v1.Pod, podData map[types.UID]*PodData) *Queue {
+	sort.Slice(pods, byCPUAndMemoryDescending(pods, podData))
 	return &Queue{
 		pods:    pods,
 		lastLen: map[types.UID]int{},
@@ -60,26 +60,22 @@ func (q *Queue) Pop() (*v1.Pod, bool) {
 }
 
 // Push a pod onto the queue, counting each time a pod is immediately requeued. This is used to detect staleness.
-func (q *Queue) Push(pod *v1.Pod, relaxed bool) {
+func (q *Queue) Push(pod *v1.Pod) {
 	q.pods = append(q.pods, pod)
-	if relaxed {
-		q.lastLen = map[types.UID]int{}
-	} else {
-		q.lastLen[pod.UID] = len(q.pods)
-	}
+	q.lastLen[pod.UID] = len(q.pods)
 }
 
 func (q *Queue) List() []*v1.Pod {
 	return q.pods
 }
 
-func byCPUAndMemoryDescending(pods []*v1.Pod) func(i int, j int) bool {
+func byCPUAndMemoryDescending(pods []*v1.Pod, podData map[types.UID]*PodData) func(i int, j int) bool {
 	return func(i, j int) bool {
 		lhsPod := pods[i]
 		rhsPod := pods[j]
 
-		lhs := resources.RequestsForPods(lhsPod)
-		rhs := resources.RequestsForPods(rhsPod)
+		lhs := podData[lhsPod.UID].Requests
+		rhs := podData[rhsPod.UID].Requests
 
 		cpuCmp := resources.Cmp(lhs[v1.ResourceCPU], rhs[v1.ResourceCPU])
 		if cpuCmp < 0 {

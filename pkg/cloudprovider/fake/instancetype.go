@@ -64,27 +64,47 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 		options.Resources[corev1.ResourcePods] = resource.MustParse("5")
 	}
 	if len(options.Offerings) == 0 {
-		options.Offerings = []cloudprovider.Offering{
-			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1.CapacityTypeLabelKey:  "spot",
-				corev1.LabelTopologyZone: "test-zone-1",
-			}), Price: PriceFromResources(options.Resources), Available: true},
-			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1.CapacityTypeLabelKey:  "spot",
-				corev1.LabelTopologyZone: "test-zone-2",
-			}), Price: PriceFromResources(options.Resources), Available: true},
-			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1.CapacityTypeLabelKey:  "on-demand",
-				corev1.LabelTopologyZone: "test-zone-1",
-			}), Price: PriceFromResources(options.Resources), Available: true},
-			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1.CapacityTypeLabelKey:  "on-demand",
-				corev1.LabelTopologyZone: "test-zone-2",
-			}), Price: PriceFromResources(options.Resources), Available: true},
-			{Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1.CapacityTypeLabelKey:  "on-demand",
-				corev1.LabelTopologyZone: "test-zone-3",
-			}), Price: PriceFromResources(options.Resources), Available: true},
+		options.Offerings = []*cloudprovider.Offering{
+			{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  "spot",
+					corev1.LabelTopologyZone: "test-zone-1",
+				}),
+				Price: PriceFromResources(options.Resources),
+			},
+			{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  "spot",
+					corev1.LabelTopologyZone: "test-zone-2",
+				}),
+				Price: PriceFromResources(options.Resources),
+			},
+			{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  "on-demand",
+					corev1.LabelTopologyZone: "test-zone-1",
+				}),
+				Price: PriceFromResources(options.Resources),
+			},
+			{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  "on-demand",
+					corev1.LabelTopologyZone: "test-zone-2",
+				}),
+				Price: PriceFromResources(options.Resources),
+			},
+			{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  "on-demand",
+					corev1.LabelTopologyZone: "test-zone-3",
+				}),
+				Price: PriceFromResources(options.Resources),
+			},
 		}
 	}
 	if len(options.Architecture) == 0 {
@@ -97,10 +117,10 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, options.Name),
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, options.Architecture),
 		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
-		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(corev1.LabelTopologyZone).Any()
 		})...),
-		scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o cloudprovider.Offering, _ int) string {
+		scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
 		})...),
 		scheduling.NewRequirement(LabelInstanceSize, corev1.NodeSelectorOpDoesNotExist),
@@ -151,14 +171,14 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 								},
 							}
 							price := PriceFromResources(opts.Resources)
-							opts.Offerings = []cloudprovider.Offering{
+							opts.Offerings = []*cloudprovider.Offering{
 								{
+									Available: true,
 									Requirements: scheduling.NewLabelRequirements(map[string]string{
 										v1.CapacityTypeLabelKey:  ct,
 										corev1.LabelTopologyZone: zone,
 									}),
-									Price:     price,
-									Available: true,
+									Price: price,
 								},
 							}
 							instanceTypes = append(instanceTypes, NewInstanceType(opts))

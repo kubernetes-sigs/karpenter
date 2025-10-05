@@ -17,15 +17,12 @@ limitations under the License.
 package scheduling
 
 import (
+	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 )
-
-func init() {
-	crmetrics.Registry.MustRegister(SchedulingDurationSeconds, QueueDepth)
-}
 
 const (
 	ControllerLabel    = "controller"
@@ -34,7 +31,8 @@ const (
 )
 
 var (
-	SchedulingDurationSeconds = prometheus.NewHistogramVec(
+	DurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: schedulerSubsystem,
@@ -46,7 +44,8 @@ var (
 			ControllerLabel,
 		},
 	)
-	QueueDepth = prometheus.NewGaugeVec(
+	QueueDepth = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
 		prometheus.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: schedulerSubsystem,
@@ -56,6 +55,41 @@ var (
 		[]string{
 			ControllerLabel,
 			schedulingIDLabel,
+		},
+	)
+	UnfinishedWorkSeconds = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: schedulerSubsystem,
+			Name:      "unfinished_work_seconds",
+			Help:      "How many seconds of work has been done that is in progress and hasn't been observed by scheduling_duration_seconds.",
+		},
+		[]string{
+			ControllerLabel,
+			schedulingIDLabel,
+		},
+	)
+	IgnoredPodCount = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: schedulerSubsystem,
+			Name:      "ignored_pods_count",
+			Help:      "Number of pods ignored during scheduling by Karpenter",
+		},
+		[]string{},
+	)
+	UnschedulablePodsCount = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: schedulerSubsystem,
+			Name:      "unschedulable_pods_count",
+			Help:      "The number of unschedulable Pods.",
+		},
+		[]string{
+			ControllerLabel,
 		},
 	)
 )

@@ -19,9 +19,9 @@ package v1
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
@@ -36,6 +36,9 @@ import (
 // launch nodes in response to pods that are unschedulable. A single nodepool
 // is capable of managing a diverse set of nodes. Node properties are determined
 // from a combination of nodepool and pod scheduling constraints.
+// +kubebuilder:validation:XValidation:rule="has(self.replicas) == has(oldSelf.replicas)",message="Cannot transition NodePool between static (replicas set) and dynamic (replicas unset) provisioning modes"
+// +kubebuilder:validation:XValidation:rule="!has(self.replicas) || (!has(self.limits) || size(self.limits) == 0 || (size(self.limits) == 1 && 'nodes' in self.limits))",message="only 'limits.nodes' is supported on static NodePools"
+// +kubebuilder:validation:XValidation:rule="!has(self.replicas) || !has(self.weight)",message="'weight' is not supported on static NodePools"
 type NodePoolSpec struct {
 	// Template contains the template of possibilities for the provisioning logic to launch a NodeClaim with.
 	// NodeClaims launched from this NodePool will often be further constrained than the template specifies.
@@ -46,29 +49,45 @@ type NodePoolSpec struct {
 	// +optional
 	Disruption Disruption `json:"disruption"`
 	// Limits define a set of bounds for provisioning capacity.
+	// Limits other than limits.nodes is not supported when replicas is set.
 	// +optional
 	Limits Limits `json:"limits,omitempty"`
 	// Weight is the priority given to the nodepool during scheduling. A higher
 	// numerical weight indicates that this nodepool will be ordered
 	// ahead of other nodepools with lower weights. A nodepool with no weight
 	// will be treated as if it is a nodepool with a weight of 0.
+	// Weight is not supported when replicas is set.
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
 	Weight *int32 `json:"weight,omitempty"`
+	// Replicas is the desired number of nodes for the NodePool. When specified, the NodePool will
+	// maintain this fixed number of replicas rather than scaling based on pod demand.
+	// When replicas is set:
+	//   - The following fields are ignored:
+	//       * disruption.consolidationPolicy
+	//       * disruption.consolidateAfter
+	//   - Only limits.nodes is supported; other resource limits (e.g., CPU, memory) must not be specified.
+	//   - Weight is not supported.
+	// Note: This field is alpha.
+	// +kubebuilder:validation:Minimum:=0
+	// +optional
+	Replicas *int64 `json:"replicas,omitempty"`
 }
 
 type Disruption struct {
 	// ConsolidateAfter is the duration the controller will wait
 	// before attempting to terminate nodes that are underutilized.
 	// Refer to ConsolidationPolicy for how underutilization is considered.
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// When replicas is set, ConsolidateAfter is simply ignored
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +required
 	ConsolidateAfter NillableDuration `json:"consolidateAfter"`
 	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
 	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified
+	// When replicas is set, ConsolidationPolicy is simply ignored
 	// +kubebuilder:default:="WhenEmptyOrUnderutilized"
 	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized}
 	// +optional
@@ -89,7 +108,8 @@ type Disruption struct {
 type Budget struct {
 	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
-	// allowed reasons are Underutilized, Empty, and Drifted and additional CloudProvider-specific reasons.
+	// allowed reasons are Underutilized, Empty, and Drifted.
+	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
@@ -129,7 +149,6 @@ const (
 )
 
 // DisruptionReason defines valid reasons for disruption budgets.
-// CloudProviders will need to append to the list of enums when implementing cloud provider disruption reasons
 // +kubebuilder:validation:Enum={Underutilized,Empty,Drifted}
 type DisruptionReason string
 
@@ -148,7 +167,7 @@ func (l Limits) ExceededBy(resources v1.ResourceList) error {
 	for resourceName, usage := range resources {
 		if limit, ok := l[resourceName]; ok {
 			if usage.Cmp(limit) > 0 {
-				return fmt.Errorf("%s resource usage of %v exceeds limit of %v", resourceName, usage.AsDec(), limit.AsDec())
+				return serrors.Wrap(fmt.Errorf("resource usage exceeds limit"), "resource-name", resourceName, "usage", usage.AsDec(), "limit", limit.AsDec())
 			}
 		}
 	}
@@ -182,6 +201,8 @@ type NodeClaimTemplateSpec struct {
 	// +required
 	Requirements []NodeSelectorRequirementWithMinValues `json:"requirements" hash:"ignore"`
 	// NodeClassRef is a reference to an object that defines provider specific configuration
+	// +kubebuilder:validation:XValidation:rule="self.group == oldSelf.group",message="nodeClassRef.group is immutable"
+	// +kubebuilder:validation:XValidation:rule="self.kind == oldSelf.kind",message="nodeClassRef.kind is immutable"
 	// +required
 	NodeClassRef *NodeClassReference `json:"nodeClassRef"`
 	// TerminationGracePeriod is the maximum duration the controller will wait before forcefully deleting the pods on a node, measured from when deletion is first initiated.
@@ -206,7 +227,7 @@ type NodeClaimTemplateSpec struct {
 	// is useful to implement features like eventually consistent node upgrade,
 	// memory leak protection, and disruption testing.
 	// +kubebuilder:default:="720h"
-	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+)|(Never)$`
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"
 	// +kubebuilder:validation:Schemaless
 	// +optional
@@ -217,8 +238,8 @@ type NodeClaimTemplateSpec struct {
 func (in *NodeClaimTemplate) ToNodeClaim() *NodeClaim {
 	return &NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels:      in.ObjectMeta.Labels,
-			Annotations: in.ObjectMeta.Annotations,
+			Labels:      in.Labels,
+			Annotations: in.Annotations,
 		},
 		Spec: NodeClaimSpec{
 			Taints:                 in.Spec.Taints,
@@ -252,13 +273,14 @@ type ObjectMeta struct {
 // +kubebuilder:storageversion
 // +kubebuilder:resource:path=nodepools,scope=Cluster,categories=karpenter
 // +kubebuilder:printcolumn:name="NodeClass",type="string",JSONPath=".spec.template.spec.nodeClassRef.name",description=""
-// +kubebuilder:printcolumn:name="Nodes",type="string",JSONPath=".status.resources.nodes",description=""
+// +kubebuilder:printcolumn:name="Nodes",type="string",JSONPath=".status.nodes",description=""
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
 // +kubebuilder:printcolumn:name="Weight",type="integer",JSONPath=".spec.weight",priority=1,description=""
 // +kubebuilder:printcolumn:name="CPU",type="string",JSONPath=".status.resources.cpu",priority=1,description=""
 // +kubebuilder:printcolumn:name="Memory",type="string",JSONPath=".status.resources.memory",priority=1,description=""
 // +kubebuilder:subresource:status
+// +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.nodes
 type NodePool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -288,23 +310,6 @@ type NodePoolList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []NodePool `json:"items"`
-}
-
-// OrderByWeight orders the NodePools in the NodePoolList by their priority weight in-place.
-// This priority evaluates the following things in precedence order:
-//  1. NodePools that have a larger weight are ordered first
-//  2. If two NodePools have the same weight, then the NodePool with the name later in the alphabet will come first
-func (nl *NodePoolList) OrderByWeight() {
-	sort.Slice(nl.Items, func(a, b int) bool {
-		weightA := lo.FromPtr(nl.Items[a].Spec.Weight)
-		weightB := lo.FromPtr(nl.Items[b].Spec.Weight)
-
-		if weightA == weightB {
-			// Order NodePools by name for a consistent ordering when sorting equal weight
-			return nl.Items[a].Name > nl.Items[b].Name
-		}
-		return weightA > weightB
-	})
 }
 
 // MustGetAllowedDisruptions calls GetAllowedDisruptionsByReason if the error is not nil. This reduces the
@@ -375,7 +380,7 @@ func (in *Budget) IsActive(c clock.Clock) (bool, error) {
 	if err != nil {
 		// Should only occur if there's a discrepancy
 		// with the validation regex and the cron package.
-		return false, fmt.Errorf("invariant violated, invalid cron %s", schedule)
+		return false, serrors.Wrap(fmt.Errorf("invariant violated, invalid cron, %w", err), "cron", schedule)
 	}
 	// Walk back in time for the duration associated with the schedule
 	checkPoint := c.Now().UTC().Add(-lo.FromPtr(in.Duration).Duration)
