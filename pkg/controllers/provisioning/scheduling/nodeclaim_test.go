@@ -104,7 +104,7 @@ var _ = Describe("NodeClaim", func() {
 		maxPrice := 3.0
 		priceImprovementFactor := 0.7
 
-		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(
+		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(
 			nodeClaim.Requirements, maxPrice, priceImprovementFactor)
 
 		Expect(err).ToNot(HaveOccurred())
@@ -121,7 +121,7 @@ var _ = Describe("NodeClaim", func() {
 		maxPrice := 3.0
 		priceImprovementFactor := 1.0
 
-		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(
+		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(
 			nodeClaim.Requirements, maxPrice, priceImprovementFactor)
 
 		Expect(err).ToNot(HaveOccurred())
@@ -138,7 +138,7 @@ var _ = Describe("NodeClaim", func() {
 		maxPrice := 1.2
 		priceImprovementFactor := 0.5
 
-		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(
+		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(
 			nodeClaim.Requirements, maxPrice, priceImprovementFactor)
 
 		Expect(err).ToNot(HaveOccurred())
@@ -151,7 +151,7 @@ var _ = Describe("NodeClaim", func() {
 		maxPrice := 3.0
 		priceImprovementFactor := 0.0
 
-		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(
+		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(
 			nodeClaim.Requirements, maxPrice, priceImprovementFactor)
 
 		Expect(err).ToNot(HaveOccurred())
@@ -168,7 +168,7 @@ var _ = Describe("NodeClaim", func() {
 		maxPrice := 3.0
 		priceImprovementFactor := 0.7 // Only cheapest will pass
 
-		_, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(
+		_, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(
 			nodeClaim.Requirements, maxPrice, priceImprovementFactor)
 
 		Expect(err).To(HaveOccurred())
@@ -180,7 +180,7 @@ var _ = Describe("NodeClaim", func() {
 		maxPrice := 4.0
 		priceImprovementFactor := 0.1 // Require 90% cost savings
 
-		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(
+		result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(
 			nodeClaim.Requirements, maxPrice, priceImprovementFactor)
 
 		Expect(err).ToNot(HaveOccurred())
@@ -190,7 +190,7 @@ var _ = Describe("NodeClaim", func() {
 
 	DescribeTable("should handle price improvement factor edge cases",
 		func(maxPrice float64, priceImprovementFactor float64, expectedInstanceCount int) {
-			result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(
+			result, err := nodeClaim.RemoveInstanceTypeOptionsByPriceAndMinValues(
 				nodeClaim.Requirements, maxPrice, priceImprovementFactor)
 
 			Expect(err).ToNot(HaveOccurred())

@@ -344,14 +344,9 @@ func (c *consolidation) getPriceImprovementFactor(ctx context.Context, candidate
 func (c *consolidation) filterByPrice(ctx context.Context, candidates []*Candidate, results pscheduling.Results, candidatePrice float64) bool {
 	priceImprovementFactor := c.getPriceImprovementFactor(ctx, candidates)
 
+	// Apply price improvement factor to require cost savings (1.0 = legacy behavior, < 1.0 = require cost savings percentage)
 	var err error
-	if priceImprovementFactor == 1.0 {
-		// Use legacy behavior
-		results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValues(results.NewNodeClaims[0].Requirements, candidatePrice)
-	} else {
-		// Apply price improvement factor to require significant cost savings
-		results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValuesWithFactor(results.NewNodeClaims[0].Requirements, candidatePrice, priceImprovementFactor)
-	}
+	results.NewNodeClaims[0], err = results.NewNodeClaims[0].RemoveInstanceTypeOptionsByPriceAndMinValues(results.NewNodeClaims[0].Requirements, candidatePrice, priceImprovementFactor)
 	if err != nil {
 		if len(candidates) == 1 {
 			c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, fmt.Sprintf("Filtering by price: %v", err))...)
