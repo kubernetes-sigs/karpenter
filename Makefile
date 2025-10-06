@@ -73,7 +73,7 @@ delete: ## Delete the controller from your ~/.kube/config cluster
 	helm uninstall karpenter --namespace $(KARPENTER_NAMESPACE)
 
 test: ## Run tests
-	go test ./pkg/... ./dra-kwok-driver/pkg/... \
+	go test ./pkg/... \
 		-race \
 		-timeout 20m \
 		--ginkgo.focus="${FOCUS}" \
@@ -81,11 +81,22 @@ test: ## Run tests
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
+<<<<<<< HEAD
 test-memory: ## Run memory usage tests for node overlay store
 	go test -v ./pkg/controllers/nodeoverlay/... -run TestMemoryUsage
 
 benchmark: ## Run benchmark tests for node overlay store
 	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
+=======
+test-dra: ## Run DRA tests
+	go test ./dra-kwok-driver/pkg/... \
+		-race \
+		-timeout 20m \
+		--ginkgo.focus="${FOCUS}" \
+		--ginkgo.randomize-all \
+		--ginkgo.v \
+		-cover
+>>>>>>> 463fe988 (seperate makefile target)
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	go tool -modfile=go.tools.mod ginkgo \
