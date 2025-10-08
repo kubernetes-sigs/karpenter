@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -33,6 +34,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	disruptionevents "sigs.k8s.io/karpenter/pkg/controllers/disruption/events"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -202,6 +204,10 @@ func BuildNodePoolMap(ctx context.Context, kubeClient client.Client, cloudProvid
 
 		nodePoolInstanceTypes, err := cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
+			if nodeoverlay.IsUnevaluatedNodePoolError(err) {
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "skipping, node overlies are not applied")
+				continue
+			}
 			// don't error out on building the node pool, we just won't be able to handle any nodes that
 			// were created by it
 			log.FromContext(ctx).Error(err, fmt.Sprintf("failed listing instance types for %s", np.Name))

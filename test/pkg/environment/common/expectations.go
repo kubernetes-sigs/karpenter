@@ -1036,6 +1036,17 @@ func (env *Environment) ConsistentlyExpectNodeClaimsNotDrifted(duration time.Dur
 	}, duration).Should(Succeed())
 }
 
+func (env *Environment) ConsistentlyExpectNodeClaimCountNotExceed(duration time.Duration, count int) {
+	GinkgoHelper()
+	By(fmt.Sprintf("consistently expect NodeClaim count to not exceed %d for %s", count, duration))
+
+	Consistently(func(g Gomega) {
+		nodeClaimList := &v1.NodeClaimList{}
+		g.Expect(env.Client.List(env, nodeClaimList)).To(Succeed())
+		g.Expect(len(nodeClaimList.Items)).To(BeNumerically("<=", count))
+	}, duration).Should(Succeed())
+}
+
 func (env *Environment) EventuallyExpectEmpty(nodeClaims ...*v1.NodeClaim) {
 	GinkgoHelper()
 	Eventually(func(g Gomega) {

@@ -102,7 +102,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -136,7 +136,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -161,7 +161,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -192,7 +192,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -222,7 +222,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -275,7 +275,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -319,7 +319,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      nil,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -356,7 +356,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -365,7 +365,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode2}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode2, NodePool: nodePool}},
 				Replacements:      replacements2,
 			}
 			Expect(queue.StartCommand(ctx, cmd2)).To(BeNil())

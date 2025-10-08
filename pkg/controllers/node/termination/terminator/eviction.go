@@ -115,7 +115,6 @@ func (q *Queue) Name() string {
 
 func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
 	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
-	log.FromContext(ctx).V(1).Info("eviction-queue maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(100, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(q.Name()).

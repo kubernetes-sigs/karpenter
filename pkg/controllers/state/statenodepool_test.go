@@ -49,7 +49,6 @@ var _ = Describe("NodePoolState", func() {
 		ExpectApplied(ctx, env.Client, nodePool)
 	})
 
-	// rsumukha@ todo : Add tests to verify Reserve and Release behavior during NodeClaim Create call
 	Context("ReserveNodeCount", func() {
 		It("should reserve requested capacity when available", func() {
 			granted := cluster.NodePoolState.ReserveNodeCount(nodePool.Name, 5, 3)

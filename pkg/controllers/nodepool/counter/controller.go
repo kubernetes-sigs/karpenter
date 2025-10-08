@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -81,8 +80,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}
 	stored := nodePool.DeepCopy()
-	// Determine resource usage and update nodepool.status.resources
+	// Determine resource usage and update nodepool.status.resources and nodepool.status.Nodes
 	nodePool.Status.Resources = lo.Assign(BaseResources, c.cluster.NodePoolResourcesFor(nodePool.Name))
+	nodeQuantity := nodePool.Status.Resources[resources.Node]
+	nodePool.Status.Nodes = lo.ToPtr(nodeQuantity.Value())
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -92,8 +93,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)
-	log.FromContext(ctx).V(1).Info("nodepool.counter maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodepool.counter").
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider), predicate.Funcs{
@@ -101,7 +100,6 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 			UpdateFunc: func(e event.UpdateEvent) bool { return false },
 			DeleteFunc: func(e event.DeleteEvent) bool { return false },
 		})).
-		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
-
 }

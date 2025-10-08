@@ -355,7 +355,17 @@ var _ = Describe("Options", func() {
 			err := opts.Parse(fs, "--log-level", "hello")
 			Expect(err).ToNot(BeNil())
 		})
+		DescribeTable(
+			"should fallback to the default if a non-positive value is provided for CPU_REQUESTS",
+			func(value string) {
+				Expect(opts.Parse(fs, "--cpu-requests", value)).To(Succeed())
+				Expect(opts.CPURequests).To(BeNumerically("==", 1000))
+			},
+			Entry("zero is provided", "0"),
+			Entry("negative value is provided", "-50"),
+		)
 	})
+
 })
 
 func expectOptionsMatch(optsA, optsB *options.Options) {

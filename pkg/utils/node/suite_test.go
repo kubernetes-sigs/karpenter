@@ -83,4 +83,14 @@ var _ = Describe("NodeUtils", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeClaims).To(HaveLen(0))
 	})
+	It("should not return nodeClaim for node since the node supplied here has no provider ID", func() {
+		testNode = test.Node(test.NodeOptions{
+			ProviderID: "",
+		})
+		ExpectApplied(ctx, env.Client, testNode, nodeClaim)
+
+		nodeClaims, err := nodeutils.GetNodeClaims(ctx, env.Client, testNode)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(nodeClaims).To(HaveLen(0))
+	})
 })
