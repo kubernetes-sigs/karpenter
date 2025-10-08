@@ -88,6 +88,7 @@ The state field dictates how the overprovisioner controller manages the node lif
 
 This offers a balance between the speed of Running and the cost of Stopped, though it has more cloud-provider-specific prerequisites. When a pod needs capacity from a Stopped or Hibernated pool, the overprovisioner controller will start the instance, wait for it to join the cluster, and then make it available for scheduling.
 
+Since all the nodes are managed by NodeClaim CRD, we need to add a filed in the CRD to make sure it recognise which kind of state a node is in. We can add a lable to the nodeclaim which indicates wheather its hot, cold, or warm state node and based on that the consolidation or scaleup decisions can be made. Along with the label, we would be required to add some taints on the nodes so that during the initial startup, it does not schedule actual workload onto the same.
 
 ### Strategies Explained
 The strategy field provides high-level control over the behavior of the overprovisioning logic.
@@ -111,7 +112,7 @@ The controller will use `ceil()` to round up, ensuring at least one spare node i
 
 One of the alternatives suggested was to extend the NodePool API directly[1]. This was rejected because it conflates two distinct responsibilities: defining the properties of a pool of capacity (NodePool) and defining the proactive management strategy for that capacity (Overprovisioner). A separate CRD provides a cleaner separation of concerns, a more intuitive user experience, and avoids creating an overly complex, monolithic API object. The common "pause pod" workaround was also considered and rejected as it is an operationally burdensome hack and not cost effective solve for larger spike.
 
-### Possible implementation using CRDs
+### Possible implementation using current nodepool CRDs
 
 Here is the CRD mentioned which includes the overprovisioning in the existing definition. In this case, if there is a same overprovisioning config required for all the nodepools, the same config needs to be copied and managed as its part of the same CRD. This makes it a bit complex to manage them as well as it would be more error prone if the overprovisioning gets more complex with diff type of node state, stratagy, sizing and schedules. However, there is some upside in terms of some shared core functionality could be used, however, future enhancement could be hampered if this adds any other requirements.  
 ```apiVersion: karpenter.sh/v1beta1
