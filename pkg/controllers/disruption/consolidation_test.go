@@ -220,9 +220,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: emptyConsolidation.ConsolidationType()})
@@ -278,9 +278,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiNodeConsolidation.ShouldDisrupt, multiNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := multiNodeConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := multiNodeConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(multiNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 2, map[string]string{disruption.ConsolidationTypeLabel: multiNodeConsolidation.ConsolidationType()})
@@ -321,9 +321,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleNodeConsolidation.ShouldDisrupt, singleNodeConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := singleNodeConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := singleNodeConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(singleNodeConsolidation.IsConsolidated()).To(BeFalse())
 			ExpectMetricCounterValue(disruption.FailedValidationsTotal, 1, map[string]string{disruption.ConsolidationTypeLabel: singleNodeConsolidation.ConsolidationType()})
@@ -729,9 +729,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -792,10 +792,10 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, emptyConsolidation.ShouldDisrupt, emptyConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd.Results).To(Equal(pscheduling.Results{}))
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(HaveLen(0))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -817,9 +817,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := multiConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -880,9 +880,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, multiConsolidation.ShouldDisrupt, multiConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := multiConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := multiConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(multiConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -904,9 +904,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := singleConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -967,9 +967,9 @@ var _ = Describe("Consolidation", func() {
 			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, singleConsolidation.ShouldDisrupt, singleConsolidation.Class(), queue)
 			Expect(err).To(Succeed())
 
-			cmd, err := singleConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := singleConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd).To(Equal(disruption.Command{}))
+			Expect(cmds).To(Equal([]disruption.Command{}))
 
 			Expect(singleConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -1444,6 +1444,107 @@ var _ = Describe("Consolidation", func() {
 			// and delete the old one
 			ExpectNotFound(ctx, env.Client, spotNodeClaim, spotNode)
 		})
+		It("should handle failing filterOutSameInstanceType correctly (without a panic) when minValues isn't satisfied", func() {
+			// Create a NodePool that has minValues in requirement
+			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpExists,
+					},
+					MinValues: lo.ToPtr(2),
+				},
+				{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      v1.CapacityTypeLabelKey,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{v1.CapacityTypeOnDemand},
+					},
+				},
+			}
+			currentInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "current-on-demand",
+				Resources: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("5"),
+				},
+				Offerings: []*cloudprovider.Offering{
+					{
+						Available:    true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
+						Price:        0.5,
+					},
+				},
+			})
+			otherInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
+				Name: "other-on-demand",
+				Resources: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("5"),
+				},
+				Offerings: []*cloudprovider.Offering{
+					{
+						Available:    true,
+						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
+						Price:        0.4,
+					},
+				},
+			})
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
+				currentInstanceType,
+				otherInstanceType,
+			}
+			nodeClaims, nodes := test.NodeClaimsAndNodes(3, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:            nodePool.Name,
+						corev1.LabelInstanceTypeStable: currentInstanceType.Name,
+						v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+						corev1.LabelTopologyZone:       "test-zone-1a",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Allocatable: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:  resource.MustParse("4"),
+						corev1.ResourcePods: resource.MustParse("100"),
+					},
+				},
+			})
+			for i := range nodeClaims {
+				nodeClaims[i].StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
+			ExpectApplied(ctx, env.Client, nodePool)
+			ExpectApplied(ctx, env.Client, lo.Map(nodeClaims, func(o *v1.NodeClaim, _ int) client.Object { return o })...)
+			ExpectApplied(ctx, env.Client, lo.Map(nodes, func(o *corev1.Node, _ int) client.Object { return o })...)
+			pods := test.Pods(4, test.PodOptions{
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("2"),
+					},
+				},
+			})
+			ExpectApplied(ctx, env.Client, lo.Map(pods, func(o *corev1.Pod, _ int) client.Object { return o })...)
+
+			// Schedule a single pod to each of the first two nodes and two pods to the third
+			// Expect that the first two nodes should attempt to multi-node consolidate into each other with a replacement
+			// When multi-node consolidation is performed it should hit the edge case where minValues is not satisfied after
+			// performing filterOutSameInstanceType since, when the first two nodes combine, there are only two options available
+			// for replacement; however, one of them is the same type as the nodes already are, meaning it will get filtered out
+			// and no longer satisfy the minValues for the NodePool requirement
+			ExpectManualBinding(ctx, env.Client, pods[0], nodes[0])
+			ExpectManualBinding(ctx, env.Client, pods[1], nodes[1])
+			ExpectManualBinding(ctx, env.Client, pods[2], nodes[2])
+			ExpectManualBinding(ctx, env.Client, pods[3], nodes[2])
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, nodes, nodeClaims)
+			ExpectSingletonReconciled(ctx, disruptionController)
+			// Process the item so that the nodes can be deleted.
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(1))
+			ExpectObjectReconciled(ctx, env.Client, queue, cmds[0].Candidates[0].NodeClaim)
+			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaims...)
+
+			// Eventually expect consolidation to evaluate that it can delete one of the first two nodes
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+			Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+		})
 		It("spot to spot consolidation should consider the default for truncation if minimum number of instanceTypeOptions from minValues in requirement is less than 15.", func() {
 			nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 				{
@@ -1882,7 +1983,7 @@ var _ = Describe("Consolidation", func() {
 				namespace := test.Namespace()
 				pdb := test.PodDisruptionBudget(test.PDBOptions{
 					ObjectMeta: metav1.ObjectMeta{
-						Namespace: namespace.ObjectMeta.Name,
+						Namespace: namespace.Name,
 					},
 					Labels:         labels,
 					MaxUnavailable: fromInt(0),
@@ -2368,13 +2469,16 @@ var _ = Describe("Consolidation", func() {
 			Expect(err).To(Succeed())
 
 			// this test validator invalidates the command because it creates pod churn during validaiton
-			cmd, err := emptyConsolidation.ComputeCommand(ctx, budgets, candidates...)
+			cmds, err := emptyConsolidation.ComputeCommands(ctx, budgets, candidates...)
 			Expect(err).To(Succeed())
-			Expect(cmd.Results).To(Equal(pscheduling.Results{}))
-			Expect(cmd.Candidates).To(HaveLen(1))
-			// the test validator manually binds a pod to nodes[0], causing it to no longer be eligible
-			Expect(cmd.Candidates[0].StateNode.Node.Name).To(Equal(nodes[1].Name))
-			Expect(cmd.Decision()).To(Equal(disruption.DeleteDecision))
+			Expect(len(cmds)).To(Equal(1))
+			for _, cmd := range cmds {
+				Expect(cmd.Results).To(Equal(pscheduling.Results{}))
+				Expect(cmd.Candidates).To(HaveLen(1))
+				// the test validator manually binds a pod to nodes[0], causing it to no longer be eligible
+				Expect(cmd.Candidates[0].StateNode.Node.Name).To(Equal(nodes[1].Name))
+				Expect(cmd.Decision()).To(Equal(disruption.DeleteDecision))
+			}
 
 			Expect(emptyConsolidation.IsConsolidated()).To(BeFalse())
 		})
@@ -4672,11 +4776,6 @@ var _ = Describe("Consolidation", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{leastExpensiveInstance, mostExpensiveInstance}
 		})
 
-		AfterEach(func() {
-			// Reset the relaxation policy to not pollute other tests.
-			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyStrict)}))
-		})
-
 		It("should not consolidate a node by relaxing min values when policy is set to BestEffort", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{MinValuesPolicy: lo.ToPtr(options.MinValuesPolicyBestEffort)}))
 			nodeClaims, nodes := test.NodeClaimsAndNodes(1, v1.NodeClaim{
@@ -4721,6 +4820,45 @@ var _ = Describe("Consolidation", func() {
 			Expect(lo.Filter(recorder.Events(), func(e events.Event, _ int) bool {
 				return e.Reason == events.Unconsolidatable && strings.Contains(e.Message, "minValues requirement is not met for label(s) (label(s)=[node.kubernetes.io/instance-type])")
 			})).To(HaveLen(2))
+		})
+	})
+	Context("Static NodePool", func() {
+		It("should not consolidate static NodePool nodes", func() {
+			staticNp := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas:   lo.ToPtr(int64(2)), // Static nodepool with 2 desired replica
+					Disruption: v1.Disruption{},
+				},
+			})
+
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:        staticNp.Name,
+						v1.NodeInitializedLabelKey: "true",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10"),
+						corev1.ResourceMemory: resource.MustParse("1000Mi"),
+						corev1.ResourcePods:   resource.MustParse("2"),
+					},
+				},
+			})
+			// This is not possible as we dont set ConditionTypeConsolidatable on static NodeClaims, incase user sets it
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+			}
+
+			ExpectApplied(ctx, env.Client, staticNp, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1])
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+			ExpectSingletonReconciled(ctx, disruptionController)
+
+			// Should not consolidate static NodeClaims
+			cmds := queue.GetCommands()
+			Expect(cmds).To(HaveLen(0))
 		})
 	})
 })

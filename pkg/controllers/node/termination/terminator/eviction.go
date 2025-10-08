@@ -48,14 +48,16 @@ import (
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 const (
-	evictionQueueBaseDelay                 = 100 * time.Millisecond
-	evictionQueueUserMisconfigurationDelay = 1 * time.Second
-	evictionQueueMaxDelay                  = 10 * time.Second
+	evictionQueueBaseDelay = 100 * time.Millisecond
+	evictionQueueMaxDelay  = 10 * time.Second
+	minReconciles          = 100
+	maxReconciles          = 5000
 
 	multiplePodDisruptionBudgetsError = "This pod has more than one PodDisruptionBudget, which the eviction subresource does not support."
 )
@@ -111,7 +113,9 @@ func (q *Queue) Name() string {
 	return "eviction-queue"
 }
 
-func (q *Queue) Register(_ context.Context, m manager.Manager) error {
+func (q *Queue) Register(ctx context.Context, m manager.Manager) error {
+	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
+	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(100, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(q.Name()).
 		WatchesRawSource(source.Channel(q.source, handler.TypedFuncs[*corev1.Pod, reconcile.Request]{
@@ -124,9 +128,10 @@ func (q *Queue) Register(_ context.Context, m manager.Manager) error {
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
 				workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](evictionQueueBaseDelay, evictionQueueMaxDelay),
-				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
+				// qps scales linearly with concurrentReconciles, bucket size is 10 * qps
+				&workqueue.TypedBucketRateLimiter[reconcile.Request]{Limiter: rate.NewLimiter(rate.Limit(qps), bucketSize)},
 			),
-			MaxConcurrentReconciles: 100,
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), q))
 }
@@ -198,9 +203,8 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 				return reconcile.Result{}, err2
 			}
 			errorMessage := lo.Ternary(message == multiplePodDisruptionBudgetsError, "eviction does not support multiple PDBs", "evicting pod violates a PDB")
-			requeueDuration := lo.Ternary(message == multiplePodDisruptionBudgetsError, evictionQueueUserMisconfigurationDelay, evictionQueueBaseDelay)
 			q.recorder.Publish(terminatorevents.NodeFailedToDrain(node, serrors.Wrap(errors.New(errorMessage), "Pod", klog.KRef(pod.Namespace, pod.Name))))
-			return reconcile.Result{RequeueAfter: requeueDuration}, nil
+			return reconcile.Result{Requeue: true}, nil
 		}
 		// Its not a PDB, we should requeue
 		return reconcile.Result{}, err

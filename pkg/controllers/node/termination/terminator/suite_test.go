@@ -138,7 +138,8 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
 			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+			//nolint:staticcheck
+			Expect(result.Requeue).To(BeTrue())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "429"})
 			e := recorder.Events()
 			Expect(e).To(HaveLen(1))
@@ -154,7 +155,8 @@ var _ = Describe("Eviction/Queue", func() {
 			ExpectManualBinding(ctx, env.Client, pod, node)
 			queue.Add(pod)
 			result := ExpectObjectReconciled(ctx, env.Client, queue, pod)
-			Expect(result.RequeueAfter).To(BeNumerically("==", time.Second))
+			//nolint:staticcheck
+			Expect(result.Requeue).To(BeTrue())
 			ExpectMetricCounterValue(terminator.NodesEvictionRequestsTotal, 1, map[string]string{terminator.CodeLabel: "500"})
 			e := recorder.Events()
 			Expect(e).To(HaveLen(1))

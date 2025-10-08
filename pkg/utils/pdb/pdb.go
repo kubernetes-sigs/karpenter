@@ -91,7 +91,7 @@ func (l Limits) isEvictable(pod *v1.Pod, evictionBlocker evictionBlocker) ([]cli
 	}
 
 	matchingPDBs := lo.Filter(l, func(pdb *pdbItem, _ int) bool {
-		return pdb.key.Namespace == pod.ObjectMeta.Namespace && pdb.selector.Matches(labels.Set(pod.Labels))
+		return pdb.key.Namespace == pod.Namespace && pdb.selector.Matches(labels.Set(pod.Labels))
 	})
 
 	// Regardless of whether the PDBs allow disruptions, Kubernetes doesn't support multiple PDBs on a single pod:
@@ -157,11 +157,7 @@ func newPdb(pdb policyv1.PodDisruptionBudget) (*pdbItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	canAlwaysEvictUnhealthyPods := false
-
-	if pdb.Spec.UnhealthyPodEvictionPolicy != nil && *pdb.Spec.UnhealthyPodEvictionPolicy == policyv1.AlwaysAllow {
-		canAlwaysEvictUnhealthyPods = true
-	}
+	canAlwaysEvictUnhealthyPods := pdb.Spec.UnhealthyPodEvictionPolicy != nil && *pdb.Spec.UnhealthyPodEvictionPolicy == policyv1.AlwaysAllow
 
 	return &pdbItem{
 		key:                client.ObjectKeyFromObject(&pdb),

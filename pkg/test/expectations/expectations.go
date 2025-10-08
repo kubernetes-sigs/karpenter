@@ -54,6 +54,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
@@ -63,7 +64,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
 
 const (
@@ -178,6 +179,20 @@ func ExpectDeleted(ctx context.Context, c client.Client, objects ...client.Objec
 	}
 }
 
+func ExpectReconciled(ctx context.Context, reconciler reconcile.Reconciler, request reconcile.Request) reconcile.Result {
+	GinkgoHelper()
+	result, err := reconciler.Reconcile(ctx, request)
+	Expect(err).ToNot(HaveOccurred())
+	return result
+}
+
+func ExpectReconciledFailed(ctx context.Context, reconciler reconcile.Reconciler, request reconcile.Request) reconcile.Result {
+	GinkgoHelper()
+	result, err := reconciler.Reconcile(ctx, request)
+	Expect(err).To(HaveOccurred())
+	return result
+}
+
 func ExpectSingletonReconciled(ctx context.Context, reconciler singleton.Reconciler) reconcile.Result {
 	GinkgoHelper()
 	result, err := singleton.AsReconciler(reconciler).Reconcile(ctx, reconcile.Request{})
@@ -239,8 +254,9 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&corev1.PersistentVolume{},
 		&storagev1.StorageClass{},
 		&v1.NodePool{},
-		&v1alpha1.TestNodeClass{},
+		&testv1alpha1.TestNodeClass{},
 		&v1.NodeClaim{},
+		&v1alpha1.NodeOverlay{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)
@@ -665,13 +681,12 @@ func ExpectNodeClaims(ctx context.Context, c client.Client) []*v1.NodeClaim {
 func ExpectStateNodeExists(cluster *state.Cluster, node *corev1.Node) *state.StateNode {
 	GinkgoHelper()
 	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.Node.Name != node.Name {
-			return true
+	for n := range cluster.Nodes() {
+		if n.Node.Name == node.Name {
+			ret = n.DeepCopy()
+			break
 		}
-		ret = n.DeepCopy()
-		return false
-	})
+	}
 	Expect(ret).ToNot(BeNil())
 	return ret
 }
@@ -679,13 +694,12 @@ func ExpectStateNodeExists(cluster *state.Cluster, node *corev1.Node) *state.Sta
 func ExpectStateNodeExistsForNodeClaim(cluster *state.Cluster, nodeClaim *v1.NodeClaim) *state.StateNode {
 	GinkgoHelper()
 	var ret *state.StateNode
-	cluster.ForEachNode(func(n *state.StateNode) bool {
-		if n.NodeClaim.Status.ProviderID != nodeClaim.Status.ProviderID {
-			return true
+	for n := range cluster.Nodes() {
+		if n.NodeClaim.Status.ProviderID == nodeClaim.Status.ProviderID {
+			ret = n.DeepCopy()
+			break
 		}
-		ret = n.DeepCopy()
-		return false
-	})
+	}
 	Expect(ret).ToNot(BeNil())
 	return ret
 }
@@ -752,4 +766,13 @@ func ExpectParallelized(fs ...func()) {
 		}()
 	}
 	wg.Wait()
+}
+
+func ExpectStateNodePoolCount(cluster *state.Cluster, npName string, r, d, pd int) {
+	GinkgoHelper()
+
+	running, deleting, pendingdisruption := cluster.NodePoolState.GetNodeCount(npName)
+	Expect(running).To(Equal(r))
+	Expect(deleting).To(Equal(d))
+	Expect(pendingdisruption).To(Equal(pd))
 }

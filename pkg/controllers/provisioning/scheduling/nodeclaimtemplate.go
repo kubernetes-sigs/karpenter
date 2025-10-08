@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
@@ -37,7 +38,7 @@ var DefaultTerminationGracePeriod *metav1.Duration = nil
 
 // MaxInstanceTypes is a constant that restricts the number of instance types to be sent for launch. Note that this
 // is intentionally changed to var just to help in testing the code.
-var MaxInstanceTypes = 60
+var MaxInstanceTypes = 600
 
 // NodeClaimTemplate encapsulates the fields required to create a node and mirrors
 // the fields in NodePool. These structs are maintained separately in order
@@ -50,15 +51,17 @@ type NodeClaimTemplate struct {
 	NodePoolWeight      int32
 	InstanceTypeOptions cloudprovider.InstanceTypes
 	Requirements        scheduling.Requirements
+	IsStaticNodeClaim   bool
 }
 
 func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 	nct := &NodeClaimTemplate{
-		NodeClaim:      *nodePool.Spec.Template.ToNodeClaim(),
-		NodePoolName:   nodePool.Name,
-		NodePoolUUID:   nodePool.UID,
-		NodePoolWeight: lo.FromPtr(nodePool.Spec.Weight),
-		Requirements:   scheduling.NewRequirements(),
+		NodeClaim:         *nodePool.Spec.Template.ToNodeClaim(),
+		NodePoolName:      nodePool.Name,
+		NodePoolUUID:      nodePool.UID,
+		NodePoolWeight:    lo.FromPtr(nodePool.Spec.Weight),
+		Requirements:      scheduling.NewRequirements(),
+		IsStaticNodeClaim: nodePool.Spec.Replicas != nil,
 	}
 	nct.Annotations = lo.Assign(nct.Annotations, map[string]string{
 		v1.NodePoolHashAnnotationKey:        nodePool.Hash(),
@@ -74,11 +77,25 @@ func NewNodeClaimTemplate(nodePool *v1.NodePool) *NodeClaimTemplate {
 }
 
 func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
-	// Order the instance types by price and only take the first 100 of them to decrease the instance type size in the requirements
-	instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
-	i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
-		return i.Name
-	})...))
+	// Inject instanceType requirements for NodeClaims belonging to dynamic NodePool
+	// For static we let cloudprovider.Create()
+	if !i.IsStaticNodeClaim {
+		// Order the instance types by price and only take up to MaxInstanceTypes of them to decrease the instance type size in the requirements
+		instanceTypes := lo.Slice(i.InstanceTypeOptions.OrderByPrice(i.Requirements), 0, MaxInstanceTypes)
+		i.Requirements.Add(scheduling.NewRequirementWithFlexibility(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, i.Requirements.Get(corev1.LabelInstanceTypeStable).MinValues, lo.Map(instanceTypes, func(i *cloudprovider.InstanceType, _ int) string {
+			return i.Name
+		})...))
+		if foundPriceOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsPricingOverlayApplied() }); foundPriceOverlay {
+			i.Annotations = lo.Assign(i.Annotations, map[string]string{
+				v1alpha1.PriceOverlayAppliedAnnotationKey: "true",
+			})
+		}
+		if foundCapacityOverlay := lo.ContainsBy(instanceTypes, func(it *cloudprovider.InstanceType) bool { return it.IsCapacityOverlayApplied() }); foundCapacityOverlay {
+			i.Annotations = lo.Assign(i.Annotations, map[string]string{
+				v1alpha1.CapacityOverlayAppliedAnnotationKey: "true",
+			})
+		}
+	}
 
 	nc := &v1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{

@@ -50,6 +50,7 @@ func NewMethodsWithNopValidator() []disruption.Method {
 	singleNodeConsolidation := disruption.NewSingleNodeConsolidation(c, disruption.WithValidator(NopValidator{}))
 	return []disruption.Method{
 		emptiness,
+		disruption.NewStaticDrift(cluster, prov, cloudProvider),
 		disruption.NewDrift(env.Client, cluster, prov, recorder),
 		multiNodeConsolidation,
 		singleNodeConsolidation,
@@ -162,7 +163,7 @@ func newTestConsolidationValidator(nodePool *v1.NodePool, c *disruption.Consolid
 }
 
 func (t *TestConsolidationValidator) Validate(ctx context.Context, cmd disruption.Command, _ time.Duration) (disruption.Command, error) {
-	stateNodes := t.cluster.Nodes()
+	stateNodes := t.cluster.DeepCopyNodes()
 	nodes := make([]*corev1.Node, len(stateNodes))
 	nodeClaims := make([]*v1.NodeClaim, len(stateNodes))
 	for i, stateNode := range stateNodes {
