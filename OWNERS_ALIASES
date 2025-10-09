@@ -14,5 +14,6 @@ aliases:
   karpenter-reviewers:
     - tallaxes
     - engedaam
+    - DerekFrank
   emeritus-karpenter-maintainers:
     - bwagner5
