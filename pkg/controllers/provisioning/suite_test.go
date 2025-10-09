@@ -681,6 +681,61 @@ var _ = Describe("Provisioning", func() {
 			corev1.ResourceMemory: resource.MustParse("5Gi"),
 		}, node.Status.Capacity)
 	})
+	It("should schedule based on the pod level resources requests", func() {
+		if env.Version.Minor() < 34 {
+			Skip("Pod level resources is only on by default starting in K8s version >= 1.34.x")
+		}
+
+		ExpectApplied(ctx, env.Client, test.NodePool())
+
+		// Add three instance types, one that's what we want, one that's slightly smaller, one that's slightly bigger.
+		// If we miscalculate resources, we'll schedule to the smaller instance type rather than the larger one
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 10)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 4)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 11)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 5)),
+		})
+		cloudProvider.InstanceTypes = AddInstanceResources(cloudProvider.InstanceTypes, corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", 12)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", 6)),
+		})
+
+		pod := test.UnschedulablePod(test.PodOptions{
+			PodResourceRequirements: corev1.ResourceRequirements{
+				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10"), corev1.ResourceMemory: resource.MustParse("4Gi")},
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("9.9"), corev1.ResourceMemory: resource.MustParse("3.9Gi")},
+			},
+			ResourceRequirements: corev1.ResourceRequirements{
+				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5"), corev1.ResourceMemory: resource.MustParse("1Gi")},
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("5"), corev1.ResourceMemory: resource.MustParse("1Gi")},
+			},
+			InitContainers: []corev1.Container{
+				{
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+					},
+				},
+				{
+					RestartPolicy: lo.ToPtr(corev1.ContainerRestartPolicyAlways),
+					Resources: corev1.ResourceRequirements{
+						Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+						Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("2Gi")},
+					},
+				},
+			},
+		})
+
+		ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+		node := ExpectScheduled(ctx, env.Client, pod)
+		ExpectResources(corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10"),
+			corev1.ResourceMemory: resource.MustParse("4Gi"),
+		}, node.Status.Capacity)
+	})
 
 	Context("Resource Limits", func() {
 		It("should not schedule when limits are exceeded", func() {
@@ -2564,6 +2619,7 @@ var _ = Describe("Provisioning", func() {
 			node := ExpectScheduled(ctx, env.Client, pod)
 			Expect(node.Labels[v1.NodePoolLabelKey]).ToNot(Equal(nodePool.Name))
 		})
+
 		Context("Weighted NodePools", func() {
 			It("should schedule to the nodepool with the highest priority always", func() {
 				nodePools := []client.Object{
@@ -2594,6 +2650,35 @@ var _ = Describe("Provisioning", func() {
 				node := ExpectScheduled(ctx, env.Client, pod)
 				Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
 			})
+		})
+	})
+
+	Context("StaticNodePool", func() {
+		It("should not create NodeClaims for StaticNodePool", func() {
+			ExpectApplied(ctx, env.Client, test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(2)),
+				}},
+			))
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+		})
+
+		It("should still provision dynamic NodeClaims when there are both Static and Dynamic NodePools", func() {
+			// Should contain both static and dynamic node pool
+			targetedNodePool := test.NodePool()
+			staticNodePool := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas: lo.ToPtr(int64(1)),
+				}})
+			ExpectApplied(ctx, env.Client, targetedNodePool, staticNodePool)
+
+			pod := test.UnschedulablePod()
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			node := ExpectScheduled(ctx, env.Client, pod)
+			Expect(node.Labels[v1.NodePoolLabelKey]).ToNot(Equal(staticNodePool.Name))
+			Expect(node.Labels[v1.NodePoolLabelKey]).To(Equal(targetedNodePool.Name))
 		})
 	})
 
