@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 var _ = Describe("DRA KWOK Driver", func() {
@@ -43,9 +42,11 @@ var _ = Describe("DRA KWOK Driver", func() {
 
 	BeforeEach(func() {
 		// Set up node pool for GPU nodes
+		gvk := nodeClass.GroupVersionKind()
 		nodePool.Spec.Template.Spec.NodeClassRef = &v1.NodeClassReference{
-			Kind: "NodeClass",
-			Name: "default",
+			Group: gvk.Group,
+			Kind:  nodeClass.GetKind(),
+			Name:  nodeClass.GetName(),
 		}
 		nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
 			{
@@ -56,6 +57,9 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 			},
 		}
+
+		// Create the NodeClass and NodePool for testing
+		env.ExpectCreated(nodeClass, nodePool)
 	})
 
 	AfterEach(func() {
@@ -158,11 +162,20 @@ mappings:
 									Resources: corev1.ResourceRequirements{
 										Requests: corev1.ResourceList{
 											"gpu.example.com/gpu": resource.MustParse("1"),
+											corev1.ResourceCPU:    resource.MustParse("100m"),
+											corev1.ResourceMemory: resource.MustParse("128Mi"),
+										},
+										Limits: corev1.ResourceList{
+											"gpu.example.com/gpu": resource.MustParse("1"),
+											corev1.ResourceCPU:    resource.MustParse("100m"),
+											corev1.ResourceMemory: resource.MustParse("128Mi"),
 										},
 									},
 								},
 							},
-							NodeSelector: testLabels,
+							NodeSelector: map[string]string{
+								"testing/cluster": "unspecified",
+							},
 						},
 					},
 				},
@@ -253,11 +266,20 @@ mappings:
 									Resources: corev1.ResourceRequirements{
 										Requests: corev1.ResourceList{
 											"gpu.example.com/gpu": resource.MustParse("1"),
+											corev1.ResourceCPU:    resource.MustParse("100m"),
+											corev1.ResourceMemory: resource.MustParse("128Mi"),
+										},
+										Limits: corev1.ResourceList{
+											"gpu.example.com/gpu": resource.MustParse("1"),
+											corev1.ResourceCPU:    resource.MustParse("100m"),
+											corev1.ResourceMemory: resource.MustParse("128Mi"),
 										},
 									},
 								},
 							},
-							NodeSelector: testLabels,
+							NodeSelector: map[string]string{
+								"testing/cluster": "unspecified",
+							},
 						},
 					},
 				},
@@ -333,7 +355,7 @@ mappings:
   - name: fpga-mapping
     nodeSelector:
       matchLabels:
-        accelerator-type: fpga
+        node.kubernetes.io/instance-type: m-8x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
       devices:
@@ -378,13 +400,19 @@ mappings:
 									Resources: corev1.ResourceRequirements{
 										Requests: corev1.ResourceList{
 											"fpga.example.com/fpga": resource.MustParse("1"),
+											corev1.ResourceCPU:      resource.MustParse("100m"),
+											corev1.ResourceMemory:   resource.MustParse("128Mi"),
+										},
+										Limits: corev1.ResourceList{
+											"fpga.example.com/fpga": resource.MustParse("1"),
+											corev1.ResourceCPU:      resource.MustParse("100m"),
+											corev1.ResourceMemory:   resource.MustParse("128Mi"),
 										},
 									},
 								},
 							},
 							NodeSelector: map[string]string{
-								"accelerator-type":  "fpga",
-								test.DiscoveryLabel: "owned",
+								"testing/cluster": "unspecified",
 							},
 						},
 					},
@@ -461,11 +489,20 @@ mappings: []
 									Resources: corev1.ResourceRequirements{
 										Requests: corev1.ResourceList{
 											"invalid.example.com/device": resource.MustParse("1"),
+											corev1.ResourceCPU:           resource.MustParse("100m"),
+											corev1.ResourceMemory:        resource.MustParse("128Mi"),
+										},
+										Limits: corev1.ResourceList{
+											"invalid.example.com/device": resource.MustParse("1"),
+											corev1.ResourceCPU:           resource.MustParse("100m"),
+											corev1.ResourceMemory:        resource.MustParse("128Mi"),
 										},
 									},
 								},
 							},
-							NodeSelector: testLabels,
+							NodeSelector: map[string]string{
+								"testing/cluster": "unspecified",
+							},
 						},
 					},
 				},
@@ -545,6 +582,12 @@ mappings:
 							},
 						},
 						Spec: corev1.PodSpec{
+							ResourceClaims: []corev1.PodResourceClaim{
+								{
+									Name:                      "gpu-claim",
+									ResourceClaimTemplateName: lo.ToPtr("gpu-claim-template"),
+								},
+							},
 							Containers: []corev1.Container{
 								{
 									Name:    "dra-container",
@@ -555,13 +598,19 @@ mappings:
 											corev1.ResourceCPU:    resource.MustParse("500m"),
 											corev1.ResourceMemory: resource.MustParse("512Mi"),
 										},
+										Limits: corev1.ResourceList{
+											corev1.ResourceCPU:    resource.MustParse("500m"),
+											corev1.ResourceMemory: resource.MustParse("512Mi"),
+										},
 										Claims: []corev1.ResourceClaim{
 											{Name: "gpu-claim"},
 										},
 									},
 								},
 							},
-							NodeSelector: testLabels,
+							NodeSelector: map[string]string{
+								"testing/cluster": "unspecified",
+							},
 						},
 					},
 				},
@@ -623,10 +672,16 @@ mappings:
 											corev1.ResourceCPU:    resource.MustParse("500m"),
 											corev1.ResourceMemory: resource.MustParse("512Mi"),
 										},
+										Limits: corev1.ResourceList{
+											corev1.ResourceCPU:    resource.MustParse("500m"),
+											corev1.ResourceMemory: resource.MustParse("512Mi"),
+										},
 									},
 								},
 							},
-							NodeSelector: testLabels,
+							NodeSelector: map[string]string{
+								"testing/cluster": "unspecified",
+							},
 						},
 					},
 				},
