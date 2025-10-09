@@ -169,20 +169,67 @@ go test ./dra-kwok-driver/pkg/config/... -v
 go test ./dra-kwok-driver/pkg/controllers/... -v
 ```
 
-### **Integration Tests** (Requires Kubernetes cluster) 
-TODO: add building+running driver into new make target
-no-kind-config-one-node
-```bash
-kind create cluster --image kindest/node:v1.34.0 --name <cluster-name>
+### **Integration Tests** (Requires Kubernetes cluster) IN PROGRESS
+
+<!-- ```bash
+kind create cluster --config kind-config.yaml --name <cluster-name>
 export KWOK_REPO=kind.local
-export KIND_CLUSTER_NAME=<cluster-name> 
-make install-kwok  
+export KIND_CLUSTER_NAME=<cluster-name> make install-kwok  
 make apply
-kubectl create namespace karpenter
 kubectl taint nodes <cluster-name>-control-plane CriticalAddonsOnly=true:NoSchedule
+kubectl taint nodes <cluster-name>-worker CriticalAddonsOnly=true:NoSchedule  
+kubectl taint nodes <cluster-name>-worker2 CriticalAddonsOnly=true:NoSchedulecd dra-kwok-driver
 cd dra-kwok-driver
 go build -o dra-kwok-driver main.go
 ./dra-kwok-driver &
 cd ..
+make e2etests TEST_SUITE=dra
+``` -->
+
+```bash
+# Create Kind cluster with Kubernetes 1.34 (required for DRA v1 GA)
+kind create cluster --image kindest/node:v1.34.0 --name labelfixed
+
+#tells build tools where to store images and which cluster to use
+export KWOK_REPO=kind.local
+export KIND_CLUSTER_NAME=labelfixed 
+
+# Install KWOK infra
+make install-kwok  
+
+# Build Karpenter image and load into Kind cluster
+make build-with-kind
+
+# Apply CRDs first
+kubectl apply -f kwok/charts/crds
+
+# Deploy Karpenter with KWOK provider using helm directly (disable ServiceMonitor to avoid CRD dependency issue)
+helm upgrade --install karpenter kwok/charts --namespace kube-system --skip-crds \
+  --set logLevel=debug \
+  --set controller.resources.requests.cpu=1 \
+  --set controller.resources.requests.memory=1Gi \
+  --set controller.resources.limits.cpu=1 \
+  --set controller.resources.limits.memory=1Gi \
+  --set settings.featureGates.nodeRepair=true \
+  --set settings.featureGates.staticCapacity=true \
+  --set controller.image.repository=kind.local/karpenter-kwok \
+  --set controller.image.tag=latest \
+  --set serviceMonitor.enabled=false \
+  --set-string 'controller.env[0].name=ENABLE_PROFILING' \
+  --set-string 'controller.env[0].value=true'
+
+# Taint control plane node to prevent scheduling (Karpenter deploys to kube-system, not separate karpenter namespace)
+kubectl taint nodes labelfixed-control-plane CriticalAddonsOnly=true:NoSchedule
+
+# Create karpenter namespace for DRA ConfigMaps (tests expect this namespace)
+kubectl create namespace karpenter
+
+# Build and start DRA KWOK driver
+cd dra-kwok-driver
+go build -o dra-kwok-driver main.go
+./dra-kwok-driver &
+cd ..
+
+# Run DRA integration tests
 make e2etests TEST_SUITE=dra
 ```

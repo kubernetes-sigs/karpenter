@@ -4371,7 +4371,8 @@
             "cpu": "4",
             "ephemeral-storage": "20Gi",
             "memory": "8Gi",
-            "pods": "64"
+            "pods": "64",
+            "gpu.example.com/gpu": "1"
         }
     },
     {
@@ -7871,7 +7872,8 @@
             "cpu": "8",
             "ephemeral-storage": "20Gi",
             "memory": "64Gi",
-            "pods": "128"
+            "pods": "128",
+            "gpu.example.com/gpu": "1"
         }
     },
     {
