@@ -24,13 +24,14 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	// Import DRA API types
 	resourcev1 "k8s.io/api/resource/v1"
 
-	// Import our controllers
+	// Import our controllers and config
+	"sigs.k8s.io/karpenter/dra-kwok-driver/pkg/config"
 	"sigs.k8s.io/karpenter/dra-kwok-driver/pkg/controllers"
 )
 
@@ -42,7 +43,13 @@ func init() {
 }
 
 func main() {
+	// Setup logging
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
 	ctx := context.Background()
+	logger := ctrl.Log.WithName("dra-kwok-driver")
+
+	logger.Info("Starting DRA KWOK Driver")
 
 	// Create simple manager
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -53,54 +60,69 @@ func main() {
 		HealthProbeBindAddress: ":8081",
 	})
 	if err != nil {
-		log.FromContext(ctx).Error(err, "unable to start manager")
+		logger.Error(err, "unable to start manager")
 		panic(err)
 	}
 
 	// Add health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		log.FromContext(ctx).Error(err, "unable to set up health check")
+		logger.Error(err, "unable to set up health check")
 		panic(err)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		log.FromContext(ctx).Error(err, "unable to set up ready check")
+		logger.Error(err, "unable to set up ready check")
 		panic(err)
 	}
 
-	// Initialize controllers with simple defaults
+	// Initialize ResourceSlice controller first
+	resourceSliceController := controllers.NewResourceSliceController(
+		mgr.GetClient(),
+		"karpenter.sh.dra-kwok-driver",
+		nil, // Will be set after ConfigMap controller is created
+	)
+
+	// Initialize ConfigMap controller with callback to trigger ResourceSlice reconciliation
 	configMapController := controllers.NewConfigMapController(
 		mgr.GetClient(),
 		"dra-kwok-configmap",
 		"karpenter",
-		nil,
+		func(cfg *config.Config) {
+			if cfg != nil {
+				logger.Info("Configuration updated, reconciling all nodes", "driver", cfg.Driver, "mappings", len(cfg.Mappings))
+				if err := resourceSliceController.ReconcileAllNodes(ctx); err != nil {
+					logger.Error(err, "Failed to reconcile nodes after configuration change")
+				}
+			} else {
+				logger.Info("Configuration cleared")
+			}
+		},
 	)
 
-	resourceSliceController := controllers.NewResourceSliceController(
-		mgr.GetClient(),
-		"karpenter.sh/dra-kwok-driver",
-		configMapController,
-	)
+	// Update ResourceSlice controller with ConfigMap controller reference
+	resourceSliceController.SetConfigController(configMapController)
 
 	// Register controllers
+	logger.Info("Registering controllers")
 	if err := configMapController.Register(ctx, mgr); err != nil {
-		log.FromContext(ctx).Error(err, "unable to register configmap controller")
+		logger.Error(err, "unable to register configmap controller")
 		panic(err)
 	}
 
 	if err := resourceSliceController.Register(ctx, mgr); err != nil {
-		log.FromContext(ctx).Error(err, "unable to register resourceslice controller")
+		logger.Error(err, "unable to register resourceslice controller")
 		panic(err)
 	}
 
 	// Load initial configuration
+	logger.Info("Loading initial configuration")
 	if err := configMapController.LoadInitialConfig(ctx); err != nil {
-		log.FromContext(ctx).Error(err, "failed to load initial configuration")
-		// Don't panic here - configuration might be added later
+		logger.Info("No initial configuration found (this is normal if ConfigMap doesn't exist yet)", "error", err)
 	}
 
 	// Start manager
+	logger.Info("Starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		log.FromContext(ctx).Error(err, "problem running manager")
+		logger.Error(err, "problem running manager")
 		panic(err)
 	}
 }

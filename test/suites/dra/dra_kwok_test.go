@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
@@ -95,7 +94,7 @@ mappings:
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
       devices:
-        - name: nvidia-t4-0
+        - name: nvidia-t4
           count: 1
           attributes:
             type: nvidia-tesla-t4
@@ -111,7 +110,7 @@ mappings:
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
       devices:
-        - name: nvidia-v100-0
+        - name: nvidia-v100
           count: 1
           attributes:
             type: nvidia-tesla-v100
@@ -197,38 +196,43 @@ mappings:
 			Expect([]string{"c-4x-amd64-linux", "m-8x-amd64-linux"}).To(ContainElement(node.Labels["node.kubernetes.io/instance-type"]))
 
 			By("Checking that ResourceSlices are created for the GPU node")
+			var resourceSlices resourcev1.ResourceSliceList
 			Eventually(func() []resourcev1.ResourceSlice {
-				var resourceSlices resourcev1.ResourceSliceList
-				err := env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
-					"spec.nodeName": node.Name,
-				})
+				// List all ResourceSlices and filter by nodeName
+				var allResourceSlices resourcev1.ResourceSliceList
+				err := env.Client.List(env.Context, &allResourceSlices)
 				if err != nil {
 					return nil
 				}
-				return resourceSlices.Items
+
+				// Filter ResourceSlices for this specific node
+				var filteredSlices []resourcev1.ResourceSlice
+				for _, slice := range allResourceSlices.Items {
+					if slice.Spec.NodeName != nil && *slice.Spec.NodeName == node.Name {
+						filteredSlices = append(filteredSlices, slice)
+					}
+				}
+				resourceSlices.Items = filteredSlices
+				return filteredSlices
 			}, 30*time.Second, 1*time.Second).Should(Not(BeEmpty()))
 
-			// Get the ResourceSlice for verification
-			var resourceSlices resourcev1.ResourceSliceList
-			Expect(env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
-				"spec.nodeName": node.Name,
-			})).To(Succeed())
-
+			By("Verifying ResourceSlice content while node exists")
+			// The resourceSlices should already be populated from the Eventually check above
 			Expect(resourceSlices.Items).To(HaveLen(1))
 			resourceSlice = &resourceSlices.Items[0]
 
 			// Verify ResourceSlice has correct driver and devices
-			Expect(resourceSlice.Spec.Driver).To(Equal("karpenter.sh/dra-kwok-driver"))
+			Expect(resourceSlice.Spec.Driver).To(Equal("karpenter.sh.dra-kwok-driver"))
 			Expect(resourceSlice.Spec.Devices).To(HaveLen(1))
 
 			device := resourceSlice.Spec.Devices[0]
 			switch node.Labels["node.kubernetes.io/instance-type"] {
 			case "c-4x-amd64-linux":
 				Expect(device.Name).To(Equal("nvidia-t4-0"))
-				Expect(device.Attributes[resourcev1.QualifiedName("type")].StringValue).To(Equal("nvidia-tesla-t4"))
+				Expect(*device.Attributes[resourcev1.QualifiedName("type")].StringValue).To(Equal("nvidia-tesla-t4"))
 			case "m-8x-amd64-linux":
 				Expect(device.Name).To(Equal("nvidia-v100-0"))
-				Expect(device.Attributes[resourcev1.QualifiedName("type")].StringValue).To(Equal("nvidia-tesla-v100"))
+				Expect(*device.Attributes[resourcev1.QualifiedName("type")].StringValue).To(Equal("nvidia-tesla-v100"))
 			}
 		})
 
@@ -309,13 +313,13 @@ mappings:
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
       devices:
-        - name: nvidia-t4-0
+        - name: nvidia-t4
           count: 1
           attributes:
             type: nvidia-tesla-t4
             memory: 16Gi
             compute-capability: "7.5"
-        - name: nvidia-t4-1  # Added second GPU
+        - name: nvidia-t4-2  # Added second GPU device
           count: 1
           attributes:
             type: nvidia-tesla-t4
@@ -328,14 +332,20 @@ mappings:
 			By("Verifying ResourceSlices are updated with new configuration")
 			if node.Labels["node.kubernetes.io/instance-type"] == "c-4x-amd64-linux" {
 				Eventually(func() int {
-					var resourceSlices resourcev1.ResourceSliceList
-					err := env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
-						"spec.nodeName": node.Name,
-					})
-					if err != nil || len(resourceSlices.Items) == 0 {
+					// List all ResourceSlices and filter by nodeName
+					var allResourceSlices resourcev1.ResourceSliceList
+					err := env.Client.List(env.Context, &allResourceSlices)
+					if err != nil {
 						return 0
 					}
-					return len(resourceSlices.Items[0].Spec.Devices)
+
+					// Filter ResourceSlices for this specific node
+					for _, slice := range allResourceSlices.Items {
+						if slice.Spec.NodeName != nil && *slice.Spec.NodeName == node.Name {
+							return len(slice.Spec.Devices)
+						}
+					}
+					return 0
 				}, 30*time.Second, 1*time.Second).Should(Equal(2)) // Should now have 2 GPUs
 			}
 		})
@@ -431,14 +441,21 @@ mappings:
 			Expect(nodes).To(HaveLen(1))
 
 			Eventually(func() []resourcev1.ResourceSlice {
-				var resourceSlices resourcev1.ResourceSliceList
-				err := env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
-					"spec.nodeName": nodes[0].Name,
-				})
+				// List all ResourceSlices and filter by nodeName
+				var allResourceSlices resourcev1.ResourceSliceList
+				err := env.Client.List(env.Context, &allResourceSlices)
 				if err != nil {
 					return nil
 				}
-				return resourceSlices.Items
+
+				// Filter ResourceSlices for this specific node
+				var filteredSlices []resourcev1.ResourceSlice
+				for _, slice := range allResourceSlices.Items {
+					if slice.Spec.NodeName != nil && *slice.Spec.NodeName == nodes[0].Name {
+						filteredSlices = append(filteredSlices, slice)
+					}
+				}
+				return filteredSlices
 			}, 30*time.Second).Should(HaveLen(1))
 		})
 	})
@@ -708,13 +725,20 @@ mappings:
 			// The DRA KWOK driver should create ResourceSlices that will enable DRA testing
 			if env.IsDefaultNodeClassKWOK() {
 				Eventually(func() []resourcev1.ResourceSlice {
-					var resourceSlices resourcev1.ResourceSliceList
-					if err := env.Client.List(env.Context, &resourceSlices, client.MatchingFields{
-						"spec.nodeName": nodes[0].Name,
-					}); err != nil {
+					// List all ResourceSlices and filter by nodeName
+					var allResourceSlices resourcev1.ResourceSliceList
+					if err := env.Client.List(env.Context, &allResourceSlices); err != nil {
 						return nil
 					}
-					return resourceSlices.Items
+
+					// Filter ResourceSlices for this specific node
+					var filteredSlices []resourcev1.ResourceSlice
+					for _, slice := range allResourceSlices.Items {
+						if slice.Spec.NodeName != nil && *slice.Spec.NodeName == nodes[0].Name {
+							filteredSlices = append(filteredSlices, slice)
+						}
+					}
+					return filteredSlices
 				}, 30*time.Second, 1*time.Second).Should(Not(BeEmpty()), "DRA KWOK driver should create ResourceSlices for future DRA testing when Karpenter DRA support is implemented")
 			}
 
