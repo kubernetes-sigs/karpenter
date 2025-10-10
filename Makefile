@@ -81,6 +81,15 @@ test: ## Run tests
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
+test-dra: ## Run DRA tests
+	go test ./dra-kwok-driver/pkg/... \
+		-race \
+		-timeout 20m \
+		--ginkgo.focus="${FOCUS}" \
+		--ginkgo.randomize-all \
+		--ginkgo.v \
+		-cover
+
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	ginkgo \
 		--race \
