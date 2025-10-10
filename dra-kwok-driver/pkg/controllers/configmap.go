@@ -120,7 +120,7 @@ func (r *ConfigMapController) Reconcile(ctx context.Context, req reconcile.Reque
 	return reconcile.Result{}, nil
 }
 
-// parseConfigFromConfigMap extracts configuration from the ConfigMap
+// parseConfigFromConfigMap extracts configuration from the ConfigMap and sanitizes it
 func (r *ConfigMapController) parseConfigFromConfigMap(cm *corev1.ConfigMap) (*config.Config, error) {
 	// Get configuration from config.yaml key (as defined in tests)
 	configData, exists := cm.Data["config.yaml"]
@@ -134,7 +134,44 @@ func (r *ConfigMapController) parseConfigFromConfigMap(cm *corev1.ConfigMap) (*c
 		return nil, fmt.Errorf("failed to parse YAML configuration: %w", err)
 	}
 
+	// Sanitize configuration to ensure Kubernetes compliance
+	r.sanitizeConfig(cfg)
+
 	return cfg, nil
+}
+
+// sanitizeConfig modifies the configuration to ensure all values are Kubernetes-compliant
+func (r *ConfigMapController) sanitizeConfig(cfg *config.Config) {
+	log := ctrl.Log.WithName("configmap-sanitizer")
+
+	// Sanitize driver name
+	originalDriverName := cfg.Driver
+	cfg.Driver = config.SanitizeDriverName(cfg.Driver)
+	if originalDriverName != cfg.Driver {
+		log.Info("sanitized driver name", "original", originalDriverName, "sanitized", cfg.Driver)
+	}
+
+	// Sanitize device attribute names in all mappings
+	for i := range cfg.Mappings {
+		for j := range cfg.Mappings[i].ResourceSlice.Devices {
+			device := &cfg.Mappings[i].ResourceSlice.Devices[j]
+
+			// Create new attributes map with sanitized keys
+			sanitizedAttrs := make(map[string]string)
+			for key, value := range device.Attributes {
+				sanitizedKey := config.SanitizeAttributeName(key)
+				if key != sanitizedKey {
+					log.Info("sanitized attribute name",
+						"device", device.Name,
+						"original", key,
+						"sanitized", sanitizedKey,
+					)
+				}
+				sanitizedAttrs[sanitizedKey] = value
+			}
+			device.Attributes = sanitizedAttrs
+		}
+	}
 }
 
 // GetConfig returns the current configuration

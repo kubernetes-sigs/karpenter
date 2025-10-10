@@ -35,10 +35,6 @@ var nodePool *v1.NodePool
 var nodeClass *unstructured.Unstructured
 var env *common.Environment
 
-var testLabels = map[string]string{
-	test.DiscoveryLabel: "owned",
-}
-
 func TestDRA(t *testing.T) {
 	RegisterFailHandler(Fail)
 	BeforeSuite(func() {

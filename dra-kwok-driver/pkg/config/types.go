@@ -17,6 +17,10 @@ limitations under the License.
 package config
 
 import (
+	"fmt"
+	"regexp"
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -60,6 +64,14 @@ func (c *Config) Validate() error {
 		return &ValidationError{Field: "driver", Message: "driver name cannot be empty"}
 	}
 
+	// Validate driver name against Kubernetes RFC 1123 subdomain requirements
+	if !isValidRFC1123Subdomain(c.Driver) {
+		return &ValidationError{
+			Field:   "driver",
+			Message: fmt.Sprintf("driver name '%s' must be a valid RFC 1123 subdomain (lowercase alphanumeric characters, '-' or '.', starting and ending with alphanumeric)", c.Driver),
+		}
+	}
+
 	if len(c.Mappings) == 0 {
 		return &ValidationError{Field: "mappings", Message: "at least one mapping must be defined"}
 	}
@@ -67,7 +79,7 @@ func (c *Config) Validate() error {
 	for i, mapping := range c.Mappings {
 		if err := mapping.Validate(); err != nil {
 			return &ValidationError{
-				Field:   "mappings[" + string(rune(i)) + "]",
+				Field:   fmt.Sprintf("mappings[%d]", i),
 				Message: err.Error(),
 			}
 		}
@@ -120,6 +132,16 @@ func (d *DeviceConfig) Validate() error {
 		return &ValidationError{Field: "count", Message: "device count must be greater than zero"}
 	}
 
+	// Validate attribute names are valid C identifiers for Kubernetes
+	for attrName := range d.Attributes {
+		if !isValidCIdentifier(attrName) {
+			return &ValidationError{
+				Field:   "attributes",
+				Message: fmt.Sprintf("attribute name '%s' must be a valid C identifier (alphanumeric and underscore only, starting with letter or underscore)", attrName),
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -131,4 +153,82 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string {
 	return e.Field + ": " + e.Message
+}
+
+// isValidRFC1123Subdomain validates that a string is a valid RFC 1123 subdomain
+// (lowercase alphanumeric characters, '-' or '.', starting and ending with alphanumeric)
+func isValidRFC1123Subdomain(name string) bool {
+	// RFC 1123 subdomain regex pattern
+	rfc1123SubdomainRegex := regexp.MustCompile(`^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$`)
+
+	// Additional constraints: max 253 characters total, labels max 63 characters
+	if len(name) > 253 {
+		return false
+	}
+
+	// Check each label (between dots) is max 63 characters
+	for _, label := range strings.Split(name, ".") {
+		if len(label) > 63 || len(label) == 0 {
+			return false
+		}
+	}
+
+	return rfc1123SubdomainRegex.MatchString(name)
+}
+
+// isValidCIdentifier validates that a string is a valid C identifier
+// (alphanumeric and underscore only, starting with letter or underscore)
+func isValidCIdentifier(name string) bool {
+	// C identifier regex: starts with letter or underscore, followed by alphanumeric or underscore
+	cIdentifierRegex := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	return cIdentifierRegex.MatchString(name)
+}
+
+// SanitizeDriverName converts a driver name to be RFC 1123 subdomain compliant
+func SanitizeDriverName(name string) string {
+	// Convert to lowercase (though it may already be lowercase)
+	sanitized := strings.ToLower(name)
+
+	// Replace slashes and other invalid characters with dots (more semantic for driver names)
+	sanitized = strings.ReplaceAll(sanitized, "/", ".")
+
+	// Replace any remaining invalid characters with hyphens
+	sanitized = regexp.MustCompile(`[^a-z0-9\.\-]`).ReplaceAllString(sanitized, "-")
+
+	// Remove leading/trailing non-alphanumeric characters
+	sanitized = regexp.MustCompile(`^[^a-z0-9]+|[^a-z0-9]+$`).ReplaceAllString(sanitized, "")
+
+	// Collapse multiple consecutive hyphens/dots
+	sanitized = regexp.MustCompile(`[\.\-]{2,}`).ReplaceAllString(sanitized, ".")
+
+	// Ensure it's not empty and doesn't exceed length limits
+	if len(sanitized) == 0 {
+		sanitized = "dra-driver"
+	}
+	if len(sanitized) > 253 {
+		sanitized = sanitized[:253]
+	}
+
+	return sanitized
+}
+
+// SanitizeAttributeName converts an attribute name to be C identifier compliant
+func SanitizeAttributeName(name string) string {
+	// Replace hyphens and other invalid characters with underscores
+	sanitized := regexp.MustCompile(`[^A-Za-z0-9_]`).ReplaceAllString(name, "_")
+
+	// Ensure it starts with letter or underscore
+	if len(sanitized) > 0 && regexp.MustCompile(`^[0-9]`).MatchString(sanitized) {
+		sanitized = "_" + sanitized
+	}
+
+	// Collapse multiple consecutive underscores
+	sanitized = regexp.MustCompile(`_{2,}`).ReplaceAllString(sanitized, "_")
+
+	// Ensure it's not empty
+	if len(sanitized) == 0 {
+		sanitized = "_attr"
+	}
+
+	return sanitized
 }

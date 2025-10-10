@@ -81,13 +81,12 @@ test: ## Run tests
 		--ginkgo.v \
 		-cover -coverprofile=coverage.out -outputdir=. -coverpkg=./...
 
-<<<<<<< HEAD
 test-memory: ## Run memory usage tests for node overlay store
 	go test -v ./pkg/controllers/nodeoverlay/... -run TestMemoryUsage
 
 benchmark: ## Run benchmark tests for node overlay store
 	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
-=======
+	
 test-dra: ## Run DRA tests
 	go test ./dra-kwok-driver/pkg/... \
 		-race \
@@ -96,7 +95,6 @@ test-dra: ## Run DRA tests
 		--ginkgo.randomize-all \
 		--ginkgo.v \
 		-cover
->>>>>>> 463fe988 (seperate makefile target)
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
 	go tool -modfile=go.tools.mod ginkgo \

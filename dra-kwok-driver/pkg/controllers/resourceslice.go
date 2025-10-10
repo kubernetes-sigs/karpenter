@@ -51,6 +51,11 @@ func NewResourceSliceController(client client.Client, driverName string, configC
 	}
 }
 
+// SetConfigController sets the config controller reference (used when controllers are initialized in sequence)
+func (r *ResourceSliceController) SetConfigController(configController *ConfigMapController) {
+	r.configController = configController
+}
+
 // Register registers the controller with the manager
 func (r *ResourceSliceController) Register(ctx context.Context, mgr manager.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -275,4 +280,43 @@ func (r *ResourceSliceController) GetResourceSlicesForNode(ctx context.Context, 
 		result[i] = &resourceSlices.Items[i]
 	}
 	return result, nil
+}
+
+// ReconcileAllNodes triggers reconciliation for all existing KWOK nodes
+// This is called when the driver configuration changes to update ResourceSlices
+func (r *ResourceSliceController) ReconcileAllNodes(ctx context.Context) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	log.Info("reconciling all nodes due to configuration change")
+
+	// List all KWOK nodes
+	nodes := &corev1.NodeList{}
+	err := r.List(ctx, nodes)
+	if err != nil {
+		log.Error(err, "failed to list nodes for configuration update")
+		return err
+	}
+
+	// Count nodes that will be reconciled
+	reconciledCount := 0
+	for _, node := range nodes.Items {
+		if r.isKWOKNode(&node) {
+			// Trigger reconciliation for this node
+			_, err := r.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      node.Name,
+					Namespace: node.Namespace,
+				},
+			})
+			if err != nil {
+				log.Error(err, "failed to reconcile node during configuration update", "node", node.Name)
+				// Continue with other nodes even if one fails
+			} else {
+				reconciledCount++
+			}
+		}
+	}
+
+	log.Info("completed configuration update reconciliation", "nodes_reconciled", reconciledCount)
+	return nil
 }
