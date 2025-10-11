@@ -63,6 +63,7 @@ var _ = Describe("Options", func() {
 		"BATCH_IDLE_DURATION",
 		"PREFERENCE_POLICY",
 		"MIN_VALUES_POLICY",
+		"CONSOLIDATION_PRICE_IMPROVEMENT_FACTOR",
 		"FEATURE_GATES",
 	}
 
@@ -125,7 +126,8 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             lo.ToPtr(false),
 					StaticCapacity:          lo.ToPtr(false),
 				},
-				IgnoreDRARequests: lo.ToPtr(true),
+				ConsolidationPriceImprovementFactor: lo.ToPtr(1.0),
+				IgnoreDRARequests:                   lo.ToPtr(true),
 			}))
 		})
 
@@ -204,6 +206,7 @@ var _ = Describe("Options", func() {
 			os.Setenv("BATCH_IDLE_DURATION", "5s")
 			os.Setenv("PREFERENCE_POLICY", "Ignore")
 			os.Setenv("MIN_VALUES_POLICY", "BestEffort")
+			os.Setenv("CONSOLIDATION_PRICE_IMPROVEMENT_FACTOR", "0.5")
 			os.Setenv("FEATURE_GATES", "ReservedCapacity=false,SpotToSpotConsolidation=true,NodeRepair=true,NodeOverlay=true,StaticCapacity=true")
 			fs = &options.FlagSet{
 				FlagSet: flag.NewFlagSet("karpenter", flag.ContinueOnError),
@@ -237,7 +240,8 @@ var _ = Describe("Options", func() {
 					NodeOverlay:             lo.ToPtr(true),
 					StaticCapacity:          lo.ToPtr(true),
 				},
-				IgnoreDRARequests: lo.ToPtr(true),
+				ConsolidationPriceImprovementFactor: lo.ToPtr(0.5),
+				IgnoreDRARequests:                   lo.ToPtr(true),
 			}))
 		})
 
@@ -364,6 +368,25 @@ var _ = Describe("Options", func() {
 			Entry("zero is provided", "0"),
 			Entry("negative value is provided", "-50"),
 		)
+		DescribeTable(
+			"should validate consolidation price improvement factor",
+			func(value string, expectedError bool) {
+				err := opts.Parse(fs, "--consolidation-price-improvement-factor", value)
+				if expectedError {
+					Expect(err).ToNot(BeNil())
+					Expect(err.Error()).To(ContainSubstring("CONSOLIDATION_PRICE_IMPROVEMENT_FACTOR"))
+				} else {
+					Expect(err).To(BeNil())
+				}
+			},
+			Entry("valid value 0.0", "0.0", false),
+			Entry("valid value 0.5", "0.5", false),
+			Entry("valid value 0.8 (default)", "0.8", false),
+			Entry("valid value 1.0", "1.0", false),
+			Entry("invalid negative value", "-0.1", true),
+			Entry("invalid value > 1.0", "1.1", true),
+			Entry("invalid value 2.0", "2.0", true),
+		)
 	})
 
 })
@@ -396,5 +419,6 @@ func expectOptionsMatch(optsA, optsB *options.Options) {
 	Expect(optsA.FeatureGates.NodeOverlay).To(Equal(optsB.FeatureGates.NodeOverlay))
 	Expect(optsA.FeatureGates.StaticCapacity).To(Equal(optsB.FeatureGates.StaticCapacity))
 	Expect(optsA.FeatureGates.SpotToSpotConsolidation).To(Equal(optsB.FeatureGates.SpotToSpotConsolidation))
+	Expect(optsA.ConsolidationPriceImprovementFactor).To(Equal(optsB.ConsolidationPriceImprovementFactor))
 	Expect(optsA.IgnoreDRARequests).To(Equal(optsB.IgnoreDRARequests))
 }
