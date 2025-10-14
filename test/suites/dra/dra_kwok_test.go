@@ -575,7 +575,7 @@ mappings:
 			}
 		})
 
-		It("should ignore DRA pods when Karpenter DRA support is disabled (current behavior)", func() {
+		It("should ignore DRA pods when IgnoreDRARequests is enabled (default behavior)", func() {
 			By("Creating the DRA ConfigMap to simulate DRA infrastructure")
 			env.ExpectCreated(draConfigMap)
 

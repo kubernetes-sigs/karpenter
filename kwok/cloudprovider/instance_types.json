@@ -7873,7 +7873,8 @@
             "ephemeral-storage": "20Gi",
             "memory": "64Gi",
             "pods": "128",
-            "gpu.example.com/gpu": "1"
+            "gpu.example.com/gpu": "1",
+            "fpga.example.com/fpga": "1"
         }
     },
     {
@@ -8047,6 +8048,7 @@
         "resources": {
             "cpu": "8",
             "ephemeral-storage": "20Gi",
+            "fpga.example.com/fpga": "2",
             "memory": "64Gi",
             "pods": "128"
         }

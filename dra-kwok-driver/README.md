@@ -188,42 +188,23 @@ make e2etests TEST_SUITE=dra
 
 ```bash
 # Create Kind cluster with Kubernetes 1.34 (required for DRA v1 GA)
-kind create cluster --image kindest/node:v1.34.0 --name imagepullpolicynever
+kind create cluster --image kindest/node:v1.34.0 --name <your-cluster-name>
 
 #tells build tools where to store images and which cluster to use
 export KWOK_REPO=kind.local
-export KIND_CLUSTER_NAME=imagepullpolicynever 
+export KIND_CLUSTER_NAME=<your-cluster-name> 
 
 # Install KWOK infra
 make install-kwok  
 
 # Build image first
-export KWOK_REPO=kind.local
 make build-with-kind
 
-# Extract the actual image name from kind cluster (ko outputs ko.local but image is stored as kind.local)
-IMG_REPOSITORY=$(docker exec ${KIND_CLUSTER_NAME}-control-plane crictl images 
-IMG_TAG="latest"
-echo "Using Repository: $IMG_REPOSITORY, Tag: $IMG_TAG"
+# Extract the actual image name from kind cluster
+make get-kind-image
 
-# Apply CRDs and deploy Karpenter
-helm upgrade --install karpenter kwok/charts --namespace kube-system --skip-crds \
-  --set logLevel=info \
-  --set controller.resources.requests.cpu=500m \
-  --set controller.resources.requests.memory=512Mi \
-  --set controller.resources.limits.cpu=1 \
-  --set controller.resources.limits.memory=1Gi \
-  --set settings.featureGates.nodeRepair=true \
-  --set settings.featureGates.staticCapacity=true \
-  --set controller.image.repository=$IMG_REPOSITORY \
-  --set controller.image.tag=$IMG_TAG \
-  --set controller.image.pullPolicy=Never \
-  --set serviceMonitor.enabled=false \
-  --set webhook.enabled=false \
-  --set 'controller.env[0].name=ENABLE_PROFILING' \
-  --set 'controller.env[0].value="true"' \
-  --set 'controller.env[1].name=MEMORY_LIMIT' \
-  --set 'controller.env[1].value="1Gi"'
+# Deploy Karpenter with DRA-friendly settings (uses extracted image variables from get-kind-image)
+make dra-apply-with-kind
 
 # Verify Karpenter deployment is ready (CRITICAL - wait for this before running tests)
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=karpenter -n kube-system --timeout=300s
@@ -232,7 +213,7 @@ kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=karpenter -n ku
 kubectl logs -l app.kubernetes.io/name=karpenter -n kube-system --tail=50
 
 # Taint control plane node to prevent scheduling (Karpenter deploys to kube-system, not separate karpenter namespace)
-kubectl taint nodes imagepullpolicynever-control-plane CriticalAddonsOnly=true:NoSchedule
+kubectl taint nodes <your-cluster-name>-control-plane CriticalAddonsOnly=true:NoSchedule
 
 # Create karpenter namespace for DRA ConfigMaps (tests expect this namespace)
 kubectl create namespace karpenter
