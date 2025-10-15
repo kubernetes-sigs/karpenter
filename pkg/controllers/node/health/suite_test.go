@@ -18,7 +18,6 @@ package health_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -172,7 +171,7 @@ var _ = Describe("Node Health", func() {
 			Expect(nodeClaim.Annotations).To(HaveKeyWithValue(v1.NodeClaimTerminationTimestampAnnotationKey, fakeClock.Now().Format(time.RFC3339)))
 		})
 		It("should not respect termination grace period if set on the nodepool", func() {
-			nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: fakeClock.Now().Add(120 * time.Minute).Format(time.RFC3339)})
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: fakeClock.Now().Add(120 * time.Minute).Format(time.RFC3339)})
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
@@ -189,7 +188,7 @@ var _ = Describe("Node Health", func() {
 		})
 		It("should not update termination grace period if set before the current time", func() {
 			terminationTime := fakeClock.Now().Add(-3 * time.Minute).Format(time.RFC3339)
-			nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
+			nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 			node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
 				Type:   "BadNode",
 				Status: corev1.ConditionFalse,
@@ -233,7 +232,6 @@ var _ = Describe("Node Health", func() {
 			fakeClock.Step(27 * time.Minute)
 
 			result := ExpectObjectReconciled(ctx, env.Client, healthController, node)
-			fmt.Println(result.RequeueAfter.String())
 			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*3, time.Second))
 		})
 		It("should return the requeue interval for the time between now and when the nodeClaim termination time", func() {
@@ -290,34 +288,76 @@ var _ = Describe("Node Health", func() {
 			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nodeClaim.DeletionTimestamp).ToNot(BeNil())
 		})
-		It("should ignore unhealthy nodes if more then 20% of the nodes are unhealthy", func() {
+		It("should ignore unhealthy nodes if more then 20% of the nodes are unhealthy in a nodepool", func() {
 			ExpectApplied(ctx, env.Client, nodePool)
-			nodeClaims := []*v1.NodeClaim{}
-			nodes := []*corev1.Node{}
+			nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+			for i := range 3 {
+				nodes[i].Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+					Type:               "BadNode",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+				})
+			}
+			for i := range nodes {
+				nodes[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+				nodeClaims[i].Labels[v1.NodePoolLabelKey] = nodePool.Name
+			}
 			for i := range 10 {
-				nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
-				if i < 3 {
-					node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
-						Type:               "BadNode",
-						Status:             corev1.ConditionFalse,
-						LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
-					})
-				}
-				node.Labels[v1.NodePoolLabelKey] = nodePool.Name
-				nodeClaim.Labels[v1.NodePoolLabelKey] = nodePool.Name
-				nodeClaims = append(nodeClaims, nodeClaim)
-				nodes = append(nodes, node)
-				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
+			}
+			fakeClock.Step(60 * time.Minute)
+
+			// Determine if we should delete unhealthy nodes
+			nodeOne := nodes[0]
+			nodeClaimOne := nodeClaims[0]
+			result := ExpectObjectReconciled(ctx, env.Client, healthController, nodeOne)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimOne)
+			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+
+			nodeTwo := nodes[1]
+			nodeClaimTwo := nodeClaims[1]
+			result = ExpectObjectReconciled(ctx, env.Client, healthController, nodeTwo)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimTwo)
+			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+		})
+		It("should ignore unhealthy nodes if more then 20% of the nodes are unhealthy in a cluster", func() {
+			nodeClaims, nodes := test.NodeClaimsAndNodes(10, v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{v1.TerminationFinalizer}}})
+			for i := range 3 {
+				nodes[i].Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+					Type:               "BadNode",
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: metav1.Time{Time: fakeClock.Now()},
+				})
+			}
+			for i := range 10 {
+				ExpectApplied(ctx, env.Client, nodeClaims[i], nodes[i])
 			}
 
 			fakeClock.Step(60 * time.Minute)
 
-			// Determine to delete unhealthy nodes
-			for i := range 4 {
-				ExpectObjectReconciled(ctx, env.Client, healthController, nodes[i])
-				nodeClaim = ExpectExists(ctx, env.Client, nodeClaims[i])
-				Expect(nodeClaim.DeletionTimestamp).To(BeNil())
-			}
+			// Determine if we should delete unhealthy nodes
+			nodeOne := nodes[0]
+			nodeClaimOne := nodeClaims[0]
+			result := ExpectObjectReconciled(ctx, env.Client, healthController, nodeOne)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimOne)
+			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+
+			nodeTwo := nodes[1]
+			nodeClaimTwo := nodeClaims[1]
+			result = ExpectObjectReconciled(ctx, env.Client, healthController, nodeTwo)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimTwo)
+			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
+
+			nodeThree := nodes[2]
+			nodeClaimThree := nodeClaims[2]
+			result = ExpectObjectReconciled(ctx, env.Client, healthController, nodeThree)
+			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*5, time.Second))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaimThree)
+			Expect(nodeClaim.DeletionTimestamp).To(BeNil())
 		})
 		It("should consider round up when there is a low number of nodes for a nodepool", func() {
 			nodeClaims := []*v1.NodeClaim{}

@@ -55,14 +55,17 @@ func (t TopologyType) String() string {
 // TopologyGroup is used to track pod counts that match a selector by the topology domain (e.g. SELECT COUNT(*) FROM pods GROUP BY(topology_ke
 type TopologyGroup struct {
 	// Hashed Fields
-	Key         string
-	Type        TopologyType
-	maxSkew     int32
-	minDomains  *int32
-	namespaces  sets.Set[string]
-	selector    labels.Selector
+	Key        string
+	Type       TopologyType
+	maxSkew    int32
+	minDomains *int32
+	namespaces sets.Set[string]
+	selector   labels.Selector
+
+	// NOTE: This is actually nillable since there's no API server validation to require it on affinity / TSC terms. A term without it is a no-op.
 	rawSelector *metav1.LabelSelector
 	nodeFilter  TopologyNodeFilter
+
 	// Index
 	owners       map[types.UID]struct{} // Pods that have this topology as a scheduling rule
 	domains      map[string]int32       // TODO(ellistarn) explore replacing with a minheap
@@ -182,20 +185,38 @@ func (t *TopologyGroup) IsOwnedBy(key types.UID) bool {
 // with self anti-affinity, we track that as a single topology with 100 owners instead of 100x topologies.
 func (t *TopologyGroup) Hash() uint64 {
 	return lo.Must(hashstructure.Hash(struct {
-		TopologyKey string
-		Type        TopologyType
-		Namespaces  sets.Set[string]
-		RawSelector *metav1.LabelSelector
-		MaxSkew     int32
-		NodeFilter  TopologyNodeFilter
+		TopologyKey  string
+		Type         TopologyType
+		Namespaces   sets.Set[string]
+		MaxSkew      int32
+		NodeFilter   TopologyNodeFilter
+		SelectorHash uint64
 	}{
-		TopologyKey: t.Key,
-		Type:        t.Type,
-		Namespaces:  t.namespaces,
-		RawSelector: t.rawSelector,
-		MaxSkew:     t.maxSkew,
-		NodeFilter:  t.nodeFilter,
+		TopologyKey:  t.Key,
+		Type:         t.Type,
+		Namespaces:   t.namespaces,
+		MaxSkew:      t.maxSkew,
+		NodeFilter:   t.nodeFilter,
+		SelectorHash: hashSelector(t.rawSelector),
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
+}
+
+// hashSelector is a specialized hash function for a metav1.LabelSelector. Due to https://github.com/mitchellh/hashstructure/issues/36
+// repeated requirements inside a label selector can result in hash collisions when using SlicesAsSets. This function provides the same
+// behavior while avoiding that bug by storing the individual expression hashes in a set, ensuring there aren't repeated elements.
+//
+// NOTE: Although repeated elements typically won't occur, they can occur on k8s 1.34+ when using matchLabelKeys since both Karpenter
+// and the API server inject an expression.
+func hashSelector(selector *metav1.LabelSelector) uint64 {
+	expressionHashes := sets.New[uint64]()
+	var selectorHash uint64
+	if selector != nil {
+		for i := range selector.MatchExpressions {
+			expressionHashes.Insert(lo.Must(hashstructure.Hash(selector.MatchExpressions[i], hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})))
+		}
+		selectorHash = lo.Must(hashstructure.Hash(selector.MatchLabels, hashstructure.FormatV2, nil))
+	}
+	return lo.Must(hashstructure.Hash([]interface{}{expressionHashes, selectorHash}, hashstructure.FormatV2, nil))
 }
 
 // nextDomainTopologySpread returns a scheduling.Requirement that includes a node domain that a pod should be scheduled to.

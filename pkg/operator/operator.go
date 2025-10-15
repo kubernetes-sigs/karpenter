@@ -28,6 +28,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/controller"
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/go-logr/zapr"
 	"github.com/prometheus/client_golang/prometheus"
@@ -54,6 +55,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -62,10 +64,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
-const (
-	appName   = "karpenter"
-	component = "controller"
-)
+var AppName = "karpenter"
 
 var (
 	BuildInfo = opmetrics.NewPrometheusGauge(
@@ -100,10 +99,24 @@ type Operator struct {
 	KubernetesInterface kubernetes.Interface
 	EventRecorder       events.Recorder
 	Clock               clock.Clock
+	InstanceTypeStore   *nodeoverlay.InstanceTypeStore
+}
+
+type Options struct {
+	LeaderElectionLabels map[string]string
+}
+
+// Adds LeaderElectionLabels to the underlying manager's LeaderElectionOptions
+func WithLeaderElectionLabels(labels map[string]string) option.Function[Options] {
+	return func(opts *Options) {
+		opts.LeaderElectionLabels = labels
+	}
 }
 
 // NewOperator instantiates a controller manager or panics
-func NewOperator() (context.Context, *Operator) {
+func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
+	opts := option.Resolve(o...)
+
 	// Root Context
 	ctx := context.Background()
 
@@ -118,7 +131,7 @@ func NewOperator() (context.Context, *Operator) {
 	}
 
 	// Logging
-	logger := serrors.NewLogger(zapr.NewLogger(logging.NewLogger(ctx, component)))
+	logger := serrors.NewLogger(zapr.NewLogger(logging.NewLogger(ctx, "controller")))
 	log.SetLogger(logger)
 	klog.SetLogger(logger)
 
@@ -133,7 +146,7 @@ func NewOperator() (context.Context, *Operator) {
 	leaderConfig := rest.CopyConfig(config)
 	config.QPS = float32(options.FromContext(ctx).KubeClientQPS)
 	config.Burst = options.FromContext(ctx).KubeClientBurst
-	config.UserAgent = fmt.Sprintf("%s/%s", appName, Version)
+	config.UserAgent = fmt.Sprintf("%s/%s", AppName, Version)
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
@@ -149,6 +162,7 @@ func NewOperator() (context.Context, *Operator) {
 		LeaderElectionResourceLock:    resourcelock.LeasesResourceLock,
 		LeaderElectionReleaseOnCancel: true,
 		LeaderElectionConfig:          leaderConfig,
+		LeaderElectionLabels:          opts.LeaderElectionLabels,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf(":%d", options.FromContext(ctx).MetricsPort),
 		},
@@ -206,12 +220,14 @@ func NewOperator() (context.Context, *Operator) {
 	}))
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
+	instanceTypeStore := nodeoverlay.NewInstanceTypeStore()
 
 	return ctx, &Operator{
 		Manager:             mgr,
 		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(appName)),
+		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)),
 		Clock:               clock.RealClock{},
+		InstanceTypeStore:   instanceTypeStore,
 	}
 }
 

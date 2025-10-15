@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,9 +34,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
+
+//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 
 var (
 	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
@@ -45,6 +50,10 @@ var (
 	// reservation. For example, a reservation could be shared across multiple NodePools, and the value encoded in this
 	// requirement is used to inform the scheduler that a reservation for one should affect the other.
 	ReservationIDLabel string
+
+	// ReservedCapacityLabels is the set of additional labels that are associated with reserved offerings. Each reserved
+	// offering should define a requirement for these labels, and all other offerings should define a DoesNotExist requirement.
+	ReservedCapacityLabels = sets.New[string]()
 )
 
 type DriftReason string
@@ -92,6 +101,7 @@ type CloudProvider interface {
 
 // InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
 // or supported options in the case of arrays)
+// +k8s:deepcopy-gen=true
 type InstanceType struct {
 	// Name of the instance type, must correspond to corev1.LabelInstanceTypeStable
 	Name string
@@ -104,18 +114,103 @@ type InstanceType struct {
 	Capacity corev1.ResourceList
 	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
 	// of Kubernetes.
-	Overhead *InstanceTypeOverhead
-
-	once        sync.Once
-	allocatable corev1.ResourceList
+	Overhead               *InstanceTypeOverhead
+	once                   sync.Once
+	allocatable            corev1.ResourceList
+	capacityOverlayApplied bool
 }
 
 type InstanceTypes []*InstanceType
+
+// Since we have a no copy the sync.Once field, we need to maintain a custom
+// DeepCopyInto function.
+//
+//nolint:gocyclo
+func (in *InstanceType) DeepCopyInto(out *InstanceType) {
+	out.Name = in.Name
+	if in.Requirements != nil {
+		in, out := &in.Requirements, &out.Requirements
+		*out = make(scheduling.Requirements, len(*in))
+		for key, val := range *in {
+			var outVal *scheduling.Requirement
+			if val == nil {
+				(*out)[key] = nil
+			} else {
+				inVal := (*in)[key]
+				in, out := &inVal, &outVal
+				*out = new(scheduling.Requirement)
+				(*in).DeepCopyInto(*out)
+			}
+			(*out)[key] = outVal
+		}
+	}
+	if in.Offerings != nil {
+		in, out := &in.Offerings, &out.Offerings
+		*out = make(Offerings, len(*in))
+		for i := range *in {
+			if (*in)[i] != nil {
+				in, out := &(*in)[i], &(*out)[i]
+				*out = new(Offering)
+				(*in).DeepCopyInto(*out)
+			}
+		}
+	}
+	if in.Capacity != nil {
+		in, out := &in.Capacity, &out.Capacity
+		*out = make(corev1.ResourceList, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val.DeepCopy()
+		}
+	}
+	if in.Overhead != nil {
+		in, out := &in.Overhead, &out.Overhead
+		*out = new(InstanceTypeOverhead)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.allocatable != nil {
+		in, out := &in.allocatable, &out.allocatable
+		*out = make(corev1.ResourceList, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val.DeepCopy()
+		}
+	}
+}
 
 // precompute is used to ensure we only compute the allocatable resources onces as its called many times
 // and the operation is fairly expensive.
 func (i *InstanceType) precompute() {
 	i.allocatable = resources.Subtract(i.Capacity, i.Overhead.Total())
+
+	// Adjust allocatable memory to account for hugepage reservations. Hugepages are a
+	// special memory resource that is reserved directly from the system, reducing the
+	// amount of memory available for general application use. Since hugepages are a
+	// Kubernetes well-known resource, we implement first-class accounting for their
+	// allocation impact.
+	for name, quantity := range i.Capacity {
+		if strings.HasPrefix(string(name), corev1.ResourceHugePagesPrefix) {
+			current := i.allocatable.Memory()
+			current.Sub(quantity)
+			if current.Sign() == -1 {
+				current.Set(0)
+			}
+			i.allocatable[corev1.ResourceMemory] = lo.FromPtr(current)
+		}
+	}
+}
+
+func (i *InstanceType) IsPricingOverlayApplied() bool {
+	return lo.ContainsBy(i.Offerings, func(of *Offering) bool {
+		return of.IsPriceOverlaid()
+	})
+}
+
+func (i *InstanceType) ApplyCapacityOverlay(updatedCapacity corev1.ResourceList) {
+	i.Capacity = lo.Assign(i.Capacity, updatedCapacity)
+	i.capacityOverlayApplied = true
+}
+
+func (i *InstanceType) IsCapacityOverlayApplied() bool {
+	return i.capacityOverlayApplied
 }
 
 func (i *InstanceType) Allocatable() corev1.ResourceList {
@@ -156,7 +251,7 @@ func (its InstanceTypes) Compatible(requirements scheduling.Requirements) Instan
 }
 
 // SatisfiesMinValues validates whether the InstanceTypes satisfies the minValues requirements
-// It returns the minimum number of needed instance types to satisfy the minValues requirement and an error
+// It returns the minimum number of needed instance types to satisfy the minValues requirement, and if min values isn't satisfied, a map containing the keys which don't satisfy min values and an error
 // that indicates whether the InstanceTypes satisfy the passed-in requirements
 // This minNeededInstanceTypes value is dependent on the ordering of instance types, so relying on this value in a
 // deterministic way implies that the instance types are sorted ahead of using this method
@@ -186,14 +281,14 @@ func (its InstanceTypes) Compatible(requirements scheduling.Requirements) Instan
 //			karpenter.k8s.aws/instance-family: ["c4","c5"] // minimum requirement failed for this.
 //		}
 //	  so it returns 3 and a non-nil error to indicate that the instance types weren't able to fulfill the minValues requirements
-func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements) (minNeededInstanceTypes int, err error) {
+func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements) (minNeededInstanceTypes int, unsatisfiableMinValues map[string]int, err error) {
 	if !requirements.HasMinValues() {
-		return 0, nil
+		return 0, nil, nil
 	}
+	incompatibleKeys := map[string]int{}
 	valuesForKey := map[string]sets.Set[string]{}
 	// We validate if sorting by price and truncating the number of instance types to minItems breaks the minValue requirement.
 	// If minValue requirement fails, we return an error that indicates the first requirement key that couldn't be satisfied.
-	var incompatibleKey string
 	for i, it := range its {
 		for _, req := range requirements {
 			if req.MinValues != nil {
@@ -203,38 +298,42 @@ func (its InstanceTypes) SatisfiesMinValues(requirements scheduling.Requirements
 				valuesForKey[req.Key] = valuesForKey[req.Key].Insert(it.Requirements.Get(req.Key).Values()...)
 			}
 		}
-		incompatibleKey = func() string {
-			for k, v := range valuesForKey {
-				// Break if any of the MinValues of requirement is not honored
-				if len(v) < lo.FromPtr(requirements.Get(k).MinValues) {
-					return k
-				}
+		for k, v := range valuesForKey {
+			// Collect all the min values that are violated
+			if len(v) < lo.FromPtr(requirements.Get(k).MinValues) {
+				incompatibleKeys[k] = len(v)
+			} else {
+				// If the key now satisfies min values, remove it from the map.
+				delete(incompatibleKeys, k)
 			}
-			return ""
-		}()
-		if incompatibleKey == "" {
-			return i + 1, nil
+		}
+		if len(incompatibleKeys) == 0 {
+			return i + 1, nil, nil
 		}
 	}
-	if incompatibleKey != "" {
-		return len(its), serrors.Wrap(fmt.Errorf("minValues requirement is not met for label"), "label", incompatibleKey)
+	if len(incompatibleKeys) != 0 {
+		return len(its), incompatibleKeys, serrors.Wrap(fmt.Errorf("minValues requirement is not met for label(s)"), "label(s)", lo.Keys(incompatibleKeys))
 	}
-	return len(its), nil
+	return len(its), nil, nil
 }
 
 // Truncate truncates the InstanceTypes based on the passed-in requirements
 // It returns an error if it isn't possible to truncate the instance types on maxItems without violating minValues
-func (its InstanceTypes) Truncate(requirements scheduling.Requirements, maxItems int) (InstanceTypes, error) {
+func (its InstanceTypes) Truncate(ctx context.Context, requirements scheduling.Requirements, maxItems int) (InstanceTypes, error) {
 	truncatedInstanceTypes := lo.Slice(its.OrderByPrice(requirements), 0, maxItems)
 	// Only check for a validity of NodeClaim if its requirement has minValues in it.
 	if requirements.HasMinValues() {
-		if _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil {
-			return its, fmt.Errorf("validating minValues, %w", err)
+		// If minValues is NOT met for any of the requirement across InstanceTypes, then only allow it if min values policy is set to BestEffort.
+		if options.FromContext(ctx).MinValuesPolicy != options.MinValuesPolicyBestEffort {
+			if _, _, err := truncatedInstanceTypes.SatisfiesMinValues(requirements); err != nil {
+				return its, fmt.Errorf("validating minValues, %w", err)
+			}
 		}
 	}
 	return truncatedInstanceTypes, nil
 }
 
+// +k8s:deepcopy-gen=true
 type InstanceTypeOverhead struct {
 	// KubeReserved returns the default resources allocated to kubernetes system daemons by default
 	KubeReserved corev1.ResourceList
@@ -252,11 +351,57 @@ func (i InstanceTypeOverhead) Total() corev1.ResourceList {
 // may be tightly coupled (e.g. the availability of an instance type in some zone is scoped to a capacity type) and
 // these properties are captured with labels in Requirements.
 // Requirements are required to contain the keys v1.CapacityTypeLabelKey and corev1.LabelTopologyZone.
+// +k8s:deepcopy-gen=true
 type Offering struct {
 	Requirements        scheduling.Requirements
 	Price               float64
 	Available           bool
 	ReservationCapacity int
+
+	priceOverlayApplied bool
+}
+
+func (o *Offering) ApplyPriceOverlay(UpdatedPrice string) {
+	o.Price = AdjustedPrice(o.Price, UpdatedPrice)
+	o.priceOverlayApplied = true
+}
+
+func AdjustedPrice(instanceTypePrice float64, change string) float64 {
+	// if price or price adjustment is not defined, then we will return the same price
+	if change == "" {
+		return instanceTypePrice
+	}
+
+	// if price is defined, then we will return the value given in the overlay
+	if !strings.HasPrefix(change, "+") && !strings.HasPrefix(change, "-") {
+		return lo.Must(strconv.ParseFloat(change, 64))
+	}
+
+	// Check if adjustment is a percentage
+	isPercentage := strings.HasSuffix(change, "%")
+	adjustment := change
+
+	var adjustedPrice float64
+	if isPercentage {
+		adjustment = strings.TrimSuffix(change, "%")
+		// Parse the adjustment value
+		// Due to the CEL validation we can assume that
+		// there will always be a valid float provided into the spec
+		adjustedPrice = instanceTypePrice * (1 + (lo.Must(strconv.ParseFloat(adjustment, 64)) / 100))
+	} else {
+		adjustedPrice = instanceTypePrice + lo.Must(strconv.ParseFloat(adjustment, 64))
+	}
+
+	// Parse the adjustment value
+	// Due to the CEL validation we can assume that
+	// there will always be a valid float provided into the spec
+
+	// Apply the adjustment
+	return lo.Ternary(adjustedPrice >= 0, adjustedPrice, 0)
+}
+
+func (o *Offering) IsPriceOverlaid() bool {
+	return o.priceOverlayApplied
 }
 
 func (o *Offering) CapacityType() string {
@@ -271,6 +416,7 @@ func (o *Offering) ReservationID() string {
 	return o.Requirements.Get(ReservationIDLabel).Any()
 }
 
+// +k8s:deepcopy-gen=true
 type Offerings []*Offering
 
 // Available filters the available offerings from the returned offerings

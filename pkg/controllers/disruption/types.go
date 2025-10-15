@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/awslabs/operatorpkg/serrors"
 	"github.com/google/uuid"
 	"github.com/samber/lo"
@@ -47,9 +48,19 @@ const (
 	EventualDisruptionClass = "eventual" // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
 )
 
+type MethodOptions struct {
+	validator Validator
+}
+
+func WithValidator(v Validator) option.Function[MethodOptions] {
+	return func(o *MethodOptions) {
+		o.validator = v
+	}
+}
+
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
-	ComputeCommand(context.Context, map[string]int, ...*Candidate) (Command, error)
+	ComputeCommands(context.Context, map[string]int, ...*Candidate) ([]Command, error)
 	Reason() v1.DisruptionReason
 	Class() string
 	ConsolidationType() string
@@ -67,6 +78,10 @@ type Candidate struct {
 	capacityType      string
 	DisruptionCost    float64
 	reschedulablePods []*corev1.Pod
+}
+
+func (c *Candidate) OwnedByStaticNodePool() bool {
+	return c.NodePool.Spec.Replicas != nil
 }
 
 //nolint:gocyclo

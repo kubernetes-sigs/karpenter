@@ -17,6 +17,7 @@ limitations under the License.
 package disruption_test
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -101,7 +102,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -135,7 +136,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -160,7 +161,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -191,7 +192,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -221,7 +222,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -274,7 +275,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -318,7 +319,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      nil,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -355,7 +356,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode, NodePool: nodePool}},
 				Replacements:      replacements,
 			}
 			Expect(queue.StartCommand(ctx, cmd)).To(BeNil())
@@ -364,7 +365,7 @@ var _ = Describe("Queue", func() {
 				CreationTimestamp: fakeClock.Now(),
 				ID:                uuid.New(),
 				Results:           scheduling.Results{},
-				Candidates:        []*disruption.Candidate{{StateNode: stateNode2}},
+				Candidates:        []*disruption.Candidate{{StateNode: stateNode2, NodePool: nodePool}},
 				Replacements:      replacements2,
 			}
 			Expect(queue.StartCommand(ctx, cmd2)).To(BeNil())
@@ -412,6 +413,26 @@ var _ = Describe("Queue", func() {
 			ExpectNodeClaimsCascadeDeletion(ctx, env.Client, nodeClaim2)
 			// And expect the nodeClaim and node to be deleted
 			ExpectNotFound(ctx, env.Client, nodeClaim2, node2)
+		})
+		Context("CalculateRetryDuration", func() {
+			DescribeTable("should calculate correct timeout based on queue length",
+				func(numCommands int, expectedDuration time.Duration) {
+					q := disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov)
+					q.Lock()
+					for i := range numCommands {
+						q.ProviderIDToCommand[strconv.Itoa(i)] = &disruption.Command{}
+					}
+					q.Unlock()
+					actualDuration := q.GetMaxRetryDuration()
+					Expect(actualDuration).To(Equal(expectedDuration))
+				},
+				Entry("very small queue - 100 commands", 100, 10*time.Minute),                  // max(100*80ms, 10min) = 10min
+				Entry("small queue - 4000 commands", 4000, 10*time.Minute),                     // max(4000*80ms, 10min) = 10min
+				Entry("medium queue - 10000 commands", 10000, 13*time.Minute+20*time.Second),   // 10000*80ms = 13min 20sec
+				Entry("large queue - 40000 commands", 40000, 53*time.Minute+20*time.Second),    // 40000*80ms = 53min 20sec
+				Entry("very large queue - 80000 commands (capped)", 80000, 1*time.Hour),        // min(80000*80ms, 1hr) = 1hr
+				Entry("extremely large queue - 100000 commands (capped)", 100000, 1*time.Hour), // min(100000*80ms, 1hr) = 1hr
+			)
 		})
 	})
 })

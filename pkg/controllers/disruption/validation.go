@@ -91,7 +91,14 @@ func NewEmptinessValidator(c consolidation) *EmptinessValidator {
 	}
 }
 
-func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command, _ time.Duration) (Command, error) {
+func (e *EmptinessValidator) Validate(ctx context.Context, cmd Command, validationPeriod time.Duration) (Command, error) {
+	if validationPeriod > 0 {
+		select {
+		case <-ctx.Done():
+			return Command{}, errors.New("interrupted")
+		case <-e.clock.After(validationPeriod):
+		}
+	}
 	validatedCandidates, err := e.validateCandidates(ctx, cmd.Candidates...)
 	if err != nil {
 		return Command{}, err
@@ -150,8 +157,6 @@ func (c *ConsolidationValidator) Validate(ctx context.Context, cmd Command, vali
 }
 
 func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, validationPeriod time.Duration) error {
-	var err error
-	// TODO: see if this check can be removed, as written, consolidation tests begin hanging with its removal
 	if validationPeriod > 0 {
 		select {
 		case <-ctx.Done():

@@ -53,6 +53,7 @@ const (
 	NodePoolHashAnnotationKey                  = apis.Group + "/nodepool-hash"
 	NodePoolHashVersionAnnotationKey           = apis.Group + "/nodepool-hash-version"
 	NodeClaimTerminationTimestampAnnotationKey = apis.Group + "/nodeclaim-termination-timestamp"
+	NodeClaimMinValuesRelaxedAnnotationKey     = apis.Group + "/nodeclaim-min-values-relaxed"
 )
 
 // Karpenter specific finalizers
@@ -90,6 +91,15 @@ var (
 		v1.LabelWindowsBuild,
 	)
 
+	// WellKnownResources are resources that are expected from the instance types
+	// provided by cloud providers.
+	WellKnownResources = sets.New[v1.ResourceName](
+		v1.ResourceCPU,
+		v1.ResourceMemory,
+		v1.ResourceEphemeralStorage,
+		v1.ResourcePods,
+	)
+
 	// WellKnownValuesForRequirements are for requirements where a known set of values
 	// is expected to be used for that requirement. For example, in the AWS provider,
 	// only on-demand, spot, and reserved make sense as values for the capacity type requirement
@@ -100,6 +110,13 @@ var (
 			CapacityTypeReserved,
 		),
 	}
+
+	// WellKnownLabelsForOfferings are for requirements where a known labels that will be used in the
+	// offerings passed back by the provider
+	WellKnownLabelsForOfferings = sets.New(
+		v1.LabelTopologyZone,
+		CapacityTypeLabelKey,
+	)
 
 	// RestrictedLabels are labels that should not be used
 	// because they may interfere with the internal provisioning logic.

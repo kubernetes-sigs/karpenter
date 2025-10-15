@@ -37,6 +37,13 @@ const (
 	PreferencePolicyRespect PreferencePolicy = "Respect"
 )
 
+type MinValuesPolicy string
+
+const (
+	MinValuesPolicyStrict     MinValuesPolicy = "Strict"
+	MinValuesPolicyBestEffort MinValuesPolicy = "BestEffort"
+)
+
 var (
 	validLogLevels          = []string{"", "debug", "info", "error"}
 	validPreferencePolicies = []PreferencePolicy{PreferencePolicyIgnore, PreferencePolicyRespect}
@@ -52,29 +59,35 @@ type FeatureGates struct {
 	NodeRepair              bool
 	ReservedCapacity        bool
 	SpotToSpotConsolidation bool
+	NodeOverlay             bool
+	StaticCapacity          bool
 }
 
 // Options contains all CLI flags / env vars for karpenter-core. It adheres to the options.Injectable interface.
 type Options struct {
-	ServiceName             string
-	MetricsPort             int
-	HealthProbePort         int
-	KubeClientQPS           int
-	KubeClientBurst         int
-	EnableProfiling         bool
-	DisableLeaderElection   bool
-	LeaderElectionName      string
-	LeaderElectionNamespace string
-	MemoryLimit             int64
-	CPURequests             int64
-	LogLevel                string
-	LogOutputPaths          string
-	LogErrorOutputPaths     string
-	BatchMaxDuration        time.Duration
-	BatchIdleDuration       time.Duration
-	preferencePolicyRaw     string
-	PreferencePolicy        PreferencePolicy
-	FeatureGates            FeatureGates
+	ServiceName                      string
+	MetricsPort                      int
+	HealthProbePort                  int
+	KubeClientQPS                    int
+	KubeClientBurst                  int
+	EnableProfiling                  bool
+	DisableLeaderElection            bool
+	DisableClusterStateObservability bool
+	LeaderElectionName               string
+	LeaderElectionNamespace          string
+	MemoryLimit                      int64
+	CPURequests                      int64
+	LogLevel                         string
+	LogOutputPaths                   string
+	LogErrorOutputPaths              string
+	BatchMaxDuration                 time.Duration
+	BatchIdleDuration                time.Duration
+	preferencePolicyRaw              string
+	PreferencePolicy                 PreferencePolicy
+	minValuesPolicyRaw               string
+	MinValuesPolicy                  MinValuesPolicy
+	IgnoreDRARequests                bool // NOTE: This flag will be removed once formal DRA support is GA in Karpenter.
+	FeatureGates                     FeatureGates
 }
 
 type FlagSet struct {
@@ -102,6 +115,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.IntVar(&o.KubeClientBurst, "kube-client-burst", env.WithDefaultInt("KUBE_CLIENT_BURST", 300), "The maximum allowed burst of queries to the kube-apiserver")
 	fs.BoolVarWithEnv(&o.EnableProfiling, "enable-profiling", "ENABLE_PROFILING", false, "Enable the profiling on the metric endpoint")
 	fs.BoolVarWithEnv(&o.DisableLeaderElection, "disable-leader-election", "DISABLE_LEADER_ELECTION", false, "Disable the leader election client before executing the main loop. Disable when running replicated components for high availability is not desired.")
+	fs.BoolVarWithEnv(&o.DisableClusterStateObservability, "disable-cluster-state-observability", "DISABLE_CLUSTER_STATE_OBSERVABILITY", false, "Disable cluster state metrics and events")
 	fs.StringVar(&o.LeaderElectionName, "leader-election-name", env.WithDefaultString("LEADER_ELECTION_NAME", "karpenter-leader-election"), "Leader election name to create and monitor the lease if running outside the cluster")
 	fs.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", env.WithDefaultString("LEADER_ELECTION_NAMESPACE", ""), "Leader election namespace to create and monitor the lease if running outside the cluster")
 	fs.Int64Var(&o.MemoryLimit, "memory-limit", env.WithDefaultInt64("MEMORY_LIMIT", -1), "Memory limit on the container running the controller. The GC soft memory limit is set to 90% of this value.")
@@ -112,7 +126,9 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.DurationVar(&o.BatchMaxDuration, "batch-max-duration", env.WithDefaultDuration("BATCH_MAX_DURATION", 10*time.Second), "The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes.")
 	fs.DurationVar(&o.BatchIdleDuration, "batch-idle-duration", env.WithDefaultDuration("BATCH_IDLE_DURATION", time.Second), "The maximum amount of time with no new pending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately.")
 	fs.StringVar(&o.preferencePolicyRaw, "preference-policy", env.WithDefaultString("PREFERENCE_POLICY", string(PreferencePolicyRespect)), "How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect'")
-	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=false,SpotToSpotConsolidation=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, and SpotToSpotConsolidation")
+	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
+	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
+	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, and StaticCapacity.")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
@@ -128,8 +144,11 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	if !lo.Contains(validPreferencePolicies, PreferencePolicy(o.preferencePolicyRaw)) {
 		return fmt.Errorf("validating cli flags / env vars, invalid PREFERENCE_POLICY %q", o.preferencePolicyRaw)
 	}
+	if !lo.Contains([]MinValuesPolicy{MinValuesPolicyStrict, MinValuesPolicyBestEffort}, MinValuesPolicy(o.minValuesPolicyRaw)) {
+		return fmt.Errorf("validating cli flags / env vars, invalid MIN_VALUES_POLICY %q", o.minValuesPolicyRaw)
+	}
 	if o.CPURequests <= 0 {
-		return fmt.Errorf("validating cli flags / env vars, invalid CPU_REQUESTS %d, must be positive", o.CPURequests)
+		o.CPURequests = 1000
 	}
 	gates, err := ParseFeatureGates(o.FeatureGates.inputStr)
 	if err != nil {
@@ -137,6 +156,7 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	}
 	o.FeatureGates = gates
 	o.PreferencePolicy = PreferencePolicy(o.preferencePolicyRaw)
+	o.MinValuesPolicy = MinValuesPolicy(o.minValuesPolicyRaw)
 	return nil
 }
 
@@ -144,9 +164,19 @@ func (o *Options) ToContext(ctx context.Context) context.Context {
 	return ToContext(ctx, o)
 }
 
+func DefaultFeatureGates() FeatureGates {
+	return FeatureGates{
+		NodeRepair:              false,
+		ReservedCapacity:        true,
+		SpotToSpotConsolidation: false,
+		NodeOverlay:             false,
+		StaticCapacity:          false,
+	}
+}
+
 func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	gateMap := map[string]bool{}
-	gates := FeatureGates{}
+	gates := DefaultFeatureGates()
 
 	// Parses feature gates with the upstream mechanism. This is meant to be used with flag directly but this enables
 	// simple merging with environment vars.
@@ -161,6 +191,12 @@ func ParseFeatureGates(gateStr string) (FeatureGates, error) {
 	}
 	if val, ok := gateMap["ReservedCapacity"]; ok {
 		gates.ReservedCapacity = val
+	}
+	if val, ok := gateMap["NodeOverlay"]; ok {
+		gates.NodeOverlay = val
+	}
+	if val, ok := gateMap["StaticCapacity"]; ok {
+		gates.StaticCapacity = val
 	}
 
 	return gates, nil

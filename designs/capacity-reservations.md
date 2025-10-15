@@ -10,6 +10,7 @@ Cloud providers including GCP, Azure, and AWS allow you to pre-reserve VM (or ba
 > 1. GCP: Reservations - https://cloud.google.com/compute/docs/instances/reservations-overview
 > 2. Azure: Capacity Reservations - https://learn.microsoft.com/en-us/azure/virtual-machines/capacity-reservation-overview
 > 3. AWS: Capacity Reservations - https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-capacity-reservations.html
+> 4. Oracle Cloud Infrastructure (OCI): Capacity Reservations - https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/reserve-capacity.htm
 
 Karpenter doesn't currently support reasoning about this capacity type. Karpenter may need to be aware about this as a separate capacity type from on-demand for a few reasons:
 1. Reservations are pre-paid -- meaning that if a user opts-in to Karpenter using that instance type, it's always preferable to use the reservation before launching capacity outside the reservation

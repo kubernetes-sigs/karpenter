@@ -445,7 +445,7 @@ var _ = Describe("Drift", Ordered, func() {
 			env.EventuallyExpectCreatedNodeCount("==", int(numPods))
 
 			// Drift the nodeClaim with bad configuration that will not register a NodeClaim
-			nodePool.Spec.Template.ObjectMeta.Labels = lo.Assign(nodePool.Spec.Template.ObjectMeta.Labels, map[string]string{
+			nodePool.Spec.Template.Labels = lo.Assign(nodePool.Spec.Template.Labels, map[string]string{
 				"registration": "fail",
 			})
 			env.ExpectCreatedOrUpdated(nodePool)
