@@ -75,7 +75,7 @@ func (i *Initialization) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim)
 	}
 	stored := node.DeepCopy()
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1.NodeInitializedLabelKey: "true"})
-	if !equality.Semantic.DeepEqual(stored, node) {
+	if !equality.Semantic.DeepEqual(stored.Labels, node.Labels) {
 		if err = i.kubeClient.Patch(ctx, node, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, err
 		}

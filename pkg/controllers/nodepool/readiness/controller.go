@@ -71,7 +71,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 		c.setReadyCondition(nodePool, nodeClass)
 	}
 
-	if !equality.Semantic.DeepEqual(stored, nodePool) {
+	if !equality.Semantic.DeepEqual(stored.Status, nodePool.Status) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
 		// Here, we are updating the status condition list
