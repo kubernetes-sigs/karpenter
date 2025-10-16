@@ -313,36 +313,104 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 // Apply the price improvement factor to require cost savings threshold before consolidation.
 // Returns true if filtering succeeded, false if it failed (caller should not proceed with consolidation).
 // getPriceImprovementFactor resolves the price improvement factor with the following precedence:
-// 1. NodePool-level (if set and valid)
+// 1. NodePool-level (if set and valid) - for multi-node consolidation, uses the most conservative (minimum) factor
 // 2. Operator-level
 // 3. Default (1.0)
 func (c *consolidation) getPriceImprovementFactor(ctx context.Context, candidates []*Candidate) float64 {
-	// For multi-node consolidation, use the first candidate's NodePool
-	if len(candidates) > 0 && candidates[0].NodePool != nil {
-		if candidates[0].NodePool.Spec.Disruption.ConsolidationPriceImprovementFactor != nil {
-			factorStr := *candidates[0].NodePool.Spec.Disruption.ConsolidationPriceImprovementFactor
-			if factor, err := strconv.ParseFloat(factorStr, 64); err != nil {
-				log.FromContext(ctx).Error(err, "Invalid NodePool consolidationPriceImprovementFactor, falling back to operator-level setting",
-					"nodePool", candidates[0].NodePool.Name, "value", factorStr)
-			} else if factor < 0.0 || factor > 1.0 {
-				log.FromContext(ctx).Info("NodePool consolidationPriceImprovementFactor out of range, falling back to operator-level setting",
-					"nodePool", candidates[0].NodePool.Name, "value", factor)
-			} else {
-				log.FromContext(ctx).V(1).Info("Using NodePool-level consolidation price improvement factor",
-					"nodePool", candidates[0].NodePool.Name, "value", factor)
-				return factor
+	// For multi-node consolidation, use the most conservative (minimum) factor across all candidates
+	var minFactor *float64
+	var minFactorNodePool string
+
+	// Cache parsed factors to avoid repeated parsing for same NodePool
+	factorCache := make(map[string]float64)
+
+	for _, candidate := range candidates {
+		if candidate.NodePool == nil || candidate.NodePool.Spec.Disruption.ConsolidationPriceImprovementFactor == nil {
+			continue
+		}
+
+		nodePoolName := candidate.NodePool.Name
+
+		// Check cache first
+		if cachedFactor, ok := factorCache[nodePoolName]; ok {
+			if minFactor == nil || cachedFactor < *minFactor {
+				minFactor = &cachedFactor
+				minFactorNodePool = nodePoolName
+			}
+			continue
+		}
+
+		// Parse and cache the factor
+		factorStr := *candidate.NodePool.Spec.Disruption.ConsolidationPriceImprovementFactor
+		if factor, err := strconv.ParseFloat(factorStr, 64); err != nil {
+			log.FromContext(ctx).Error(err, "Invalid NodePool consolidationPriceImprovementFactor, skipping",
+				"nodePool", nodePoolName, "value", factorStr)
+		} else if factor < 0.0 || factor > 1.0 {
+			log.FromContext(ctx).Info("NodePool consolidationPriceImprovementFactor out of range, skipping",
+				"nodePool", nodePoolName, "value", factor)
+		} else {
+			factorCache[nodePoolName] = factor
+			if minFactor == nil || factor < *minFactor {
+				minFactor = &factor
+				minFactorNodePool = nodePoolName
 			}
 		}
 	}
+
+	if minFactor != nil {
+		log.FromContext(ctx).V(1).Info("Using most conservative NodePool-level consolidation price improvement factor",
+			"nodePool", minFactorNodePool, "value", *minFactor, "candidateCount", len(candidates))
+		return *minFactor
+	}
+
 	// Fall back to operator-level setting
 	operatorFactor := options.FromContext(ctx).ConsolidationPriceImprovementFactor
 	log.FromContext(ctx).V(1).Info("Using operator-level consolidation price improvement factor",
-		"value", operatorFactor)
+		"value", operatorFactor, "candidateCount", len(candidates))
 	return operatorFactor
+}
+
+// calculateSavingsPercentage calculates the cost savings percentage for consolidation.
+// Returns the savings as a decimal (e.g., 0.10 for 10% savings).
+// Returns 0.0 if replacement is more expensive than current.
+func calculateSavingsPercentage(currentPrice, replacementPrice float64) float64 {
+	if currentPrice <= 0.0 {
+		return 0.0
+	}
+	if replacementPrice >= currentPrice {
+		return 0.0
+	}
+	return (currentPrice - replacementPrice) / currentPrice
 }
 
 func (c *consolidation) filterByPrice(ctx context.Context, candidates []*Candidate, results pscheduling.Results, candidatePrice float64) bool {
 	priceImprovementFactor := c.getPriceImprovementFactor(ctx, candidates)
+
+	// Determine factor source and nodepool name for metrics
+	factorSource := "operator"
+	nodePoolName := ""
+	// Check if any candidate has a NodePool-level factor
+	for _, candidate := range candidates {
+		if candidate.NodePool != nil && candidate.NodePool.Spec.Disruption.ConsolidationPriceImprovementFactor != nil {
+			factorSource = "nodepool"
+			nodePoolName = candidate.NodePool.Name
+			break
+		}
+	}
+
+	// Get cheapest replacement price before filtering
+	instanceTypesBefore := len(results.NewNodeClaims[0].InstanceTypeOptions)
+	var cheapestReplacementPrice float64
+	if instanceTypesBefore > 0 {
+		// Instance types are already sorted by price, so get the cheapest offering from the first instance type
+		orderedTypes := results.NewNodeClaims[0].InstanceTypeOptions.OrderByPrice(results.NewNodeClaims[0].Requirements)
+		if len(orderedTypes) > 0 {
+			cheapestOffering := orderedTypes[0].Offerings.Cheapest()
+			if cheapestOffering != nil && cheapestOffering.Available {
+				cheapestReplacementPrice = cheapestOffering.Price
+			}
+		}
+	}
 
 	// Apply price improvement factor to require cost savings (1.0 = legacy behavior, < 1.0 = require cost savings percentage)
 	var err error
@@ -353,7 +421,51 @@ func (c *consolidation) filterByPrice(ctx context.Context, candidates []*Candida
 		}
 		return false
 	}
-	if len(results.NewNodeClaims[0].InstanceTypeOptions) == 0 {
+
+	instanceTypesAfter := len(results.NewNodeClaims[0].InstanceTypeOptions)
+	blocked := instanceTypesAfter == 0
+
+	// Calculate actual savings percentage for metrics and logging
+	actualSavingsPct := calculateSavingsPercentage(candidatePrice, cheapestReplacementPrice)
+	requiredSavingsPct := 1.0 - priceImprovementFactor
+
+	// Record metrics
+	ConsolidationPriceSavingsActual.Observe(actualSavingsPct, map[string]string{
+		"blocked":       fmt.Sprintf("%t", blocked),
+		"factor_source": factorSource,
+	})
+	ConsolidationPriceSavingsRequired.Observe(requiredSavingsPct, map[string]string{
+		"blocked":       fmt.Sprintf("%t", blocked),
+		"factor_source": factorSource,
+	})
+	ConsolidationPriceFactorUsed.Set(priceImprovementFactor, map[string]string{
+		"factor_source":       factorSource,
+		"nodepool": nodePoolName,
+	})
+
+	if blocked {
+		// Use "underutilized" as the reason - this covers both empty and underutilized consolidation
+		// The specific consolidation method (Emptiness vs SingleNode/MultiNode) will already be tracked separately
+		ConsolidationPriceFactorBlocksTotal.Inc(map[string]string{
+			"reason":       "underutilized",
+			"factor_source":     factorSource,
+			"nodepool": nodePoolName,
+		})
+
+		// Enhanced logging for blocked consolidations
+		log.FromContext(ctx).Info("Consolidation blocked by price improvement factor",
+			"actual_savings_pct", fmt.Sprintf("%.1f%%", actualSavingsPct*100),
+			"required_savings_pct", fmt.Sprintf("%.1f%%", requiredSavingsPct*100),
+			"decision", "blocked",
+			"factor_source", factorSource,
+			"nodepool", nodePoolName,
+			"candidate_price", fmt.Sprintf("$%.2f", candidatePrice),
+			"cheapest_replacement_price", fmt.Sprintf("$%.2f", cheapestReplacementPrice),
+			"instance_types_before", instanceTypesBefore,
+			"instance_types_after", instanceTypesAfter,
+			"candidate_count", len(candidates),
+		)
+
 		if len(candidates) == 1 {
 			if priceImprovementFactor == 1.0 {
 				c.recorder.Publish(disruptionevents.Unconsolidatable(candidates[0].Node, candidates[0].NodeClaim, "Can't replace with a cheaper node")...)
@@ -364,5 +476,20 @@ func (c *consolidation) filterByPrice(ctx context.Context, candidates []*Candida
 		}
 		return false
 	}
+
+	// Enhanced logging for allowed consolidations
+	log.FromContext(ctx).V(1).Info("Consolidation allowed by price improvement factor",
+		"actual_savings_pct", fmt.Sprintf("%.1f%%", actualSavingsPct*100),
+		"required_savings_pct", fmt.Sprintf("%.1f%%", requiredSavingsPct*100),
+		"decision", "allowed",
+		"factor_source", factorSource,
+		"nodepool", nodePoolName,
+		"candidate_price", fmt.Sprintf("$%.2f", candidatePrice),
+		"cheapest_replacement_price", fmt.Sprintf("$%.2f", cheapestReplacementPrice),
+		"instance_types_before", instanceTypesBefore,
+		"instance_types_after", instanceTypesAfter,
+		"candidate_count", len(candidates),
+	)
+
 	return true
 }

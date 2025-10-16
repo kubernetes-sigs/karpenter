@@ -5479,6 +5479,162 @@ var _ = Describe("Consolidation", func() {
 					Expect(env.Client.Delete(ctx, testNodePool)).To(Succeed())
 				}
 			})
+
+			It("should use most conservative (minimum) price improvement factor for multi-node consolidation", func() {
+				// Create two NodePools with different price improvement factors
+				// NodePool A: 10% savings required (factor 0.9)
+				// NodePool B: 5% savings required (factor 0.95)
+				nodePoolA := test.NodePool(v1.NodePool{
+					ObjectMeta: metav1.ObjectMeta{Name: "nodepool-a"},
+					Spec: v1.NodePoolSpec{
+						Disruption: v1.Disruption{
+							ConsolidationPolicy:                 v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+							ConsolidateAfter:                    v1.MustParseNillableDuration("0s"),
+							ConsolidationPriceImprovementFactor: lo.ToPtr("0.9"), // Require 10% savings
+						},
+					},
+				})
+				nodePoolB := test.NodePool(v1.NodePool{
+					ObjectMeta: metav1.ObjectMeta{Name: "nodepool-b"},
+					Spec: v1.NodePoolSpec{
+						Disruption: v1.Disruption{
+							ConsolidationPolicy:                 v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+							ConsolidateAfter:                    v1.MustParseNillableDuration("0s"),
+							ConsolidationPriceImprovementFactor: lo.ToPtr("0.95"), // Require 5% savings
+						},
+					},
+				})
+
+				// Create instance types with specific pricing
+				// Current expensive instances: 2 CPU, cost $1.00 each = $2.00 total
+				// Replacement instance: 4 CPU, costs $1.88 (6% cheaper, should NOT consolidate with 10% threshold)
+				expensiveInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "expensive-instance",
+					Offerings: []*cloudprovider.Offering{
+						{
+							Requirements: scheduling.NewRequirements(
+								scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "expensive-instance"),
+								scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
+								scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-1a"),
+							),
+							Price:     1.00,
+							Available: true,
+						},
+					},
+					Resources: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("2Gi"),
+						corev1.ResourcePods:   resource.MustParse("100"),
+					},
+				})
+				// Replacement is 6% cheaper: $1.88 vs $2.00, with 4 CPU to hold all pods
+				replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
+					Name: "replacement-instance",
+					Offerings: []*cloudprovider.Offering{
+						{
+							Requirements: scheduling.NewRequirements(
+								scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "replacement-instance"),
+								scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeOnDemand),
+								scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "test-zone-1a"),
+							),
+							Price:     1.88,
+							Available: true,
+						},
+					},
+					Resources: map[corev1.ResourceName]resource.Quantity{
+						corev1.ResourceCPU:    resource.MustParse("4"),
+						corev1.ResourceMemory: resource.MustParse("4Gi"),
+						corev1.ResourcePods:   resource.MustParse("100"),
+					},
+				})
+				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{expensiveInstance, replacementInstance}
+
+				// Create two nodes, one from each NodePool
+				nodeClaimA, nodeA := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePoolA.Name,
+							corev1.LabelInstanceTypeStable: expensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("2Gi"),
+							corev1.ResourcePods:   resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaimA.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				nodeClaimB, nodeB := test.NodeClaimAndNode(v1.NodeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							v1.NodePoolLabelKey:            nodePoolB.Name,
+							corev1.LabelInstanceTypeStable: expensiveInstance.Name,
+							v1.CapacityTypeLabelKey:        v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone:       "test-zone-1a",
+						},
+					},
+					Status: v1.NodeClaimStatus{
+						Allocatable: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("2Gi"),
+							corev1.ResourcePods:   resource.MustParse("100"),
+						},
+					},
+				})
+				nodeClaimB.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
+
+				ExpectApplied(ctx, env.Client, nodePoolA, nodePoolB, nodeClaimA, nodeA, nodeClaimB, nodeB)
+
+				// Create pods on both nodes with high CPU requests
+				// Each pod requests 1.5 CPU on a 2 CPU node (75% utilized)
+				// This prevents individual node consolidation but allows multi-node consolidation
+				podA := test.Pod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1500m"),
+							corev1.ResourceMemory: resource.MustParse("1Gi"),
+						},
+					},
+				})
+				podB := test.Pod(test.PodOptions{
+					ResourceRequirements: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1500m"),
+							corev1.ResourceMemory: resource.MustParse("1Gi"),
+						},
+					},
+				})
+				ExpectApplied(ctx, env.Client, podA, podB)
+				ExpectManualBinding(ctx, env.Client, podA, nodeA)
+				ExpectManualBinding(ctx, env.Client, podB, nodeB)
+
+				// Inform cluster state about nodes and nodeclaims
+				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController,
+					[]*corev1.Node{nodeA, nodeB}, []*v1.NodeClaim{nodeClaimA, nodeClaimB})
+
+				// Trigger consolidation
+				ExpectSingletonReconciled(ctx, disruptionController)
+
+				// Should NOT consolidate because:
+				// - Combined current cost: $2.00
+				// - Replacement cost: $1.88 (6% savings)
+				// - Most conservative factor: 0.9 (NodePool A requires 10% savings)
+				// - 6% < 10%, so consolidation should be blocked
+				cmds := queue.GetCommands()
+				Expect(cmds).To(HaveLen(0))
+
+				// Both nodes should still exist
+				Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(2))
+				Expect(ExpectNodes(ctx, env.Client)).To(HaveLen(2))
+
+				// Verify in events that consolidation was blocked due to insufficient savings
+				Expect(recorder.Calls(events.Unconsolidatable)).To(BeNumerically(">", 0))
+			})
 		})
 	})
 })
