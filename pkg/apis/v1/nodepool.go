@@ -101,21 +101,21 @@ type Disruption struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
-	// ConsolidationPriceImprovementFactor is the minimum cost savings required for consolidation
-	// to occur. Only consolidate when replacement nodes cost less than (current_price × factor).
-	// If not specified, the operator-level consolidation-price-improvement-factor setting is used.
+	// ConsolidationPriceImprovementPercentage is the minimum cost savings percentage required for consolidation.
+	// Only consolidate when replacement nodes cost at least this percentage less than current nodes.
+	// If not specified, uses the operator-level consolidation-price-improvement-percentage setting.
 	//
 	// Examples:
-	//   "1.0" = Consolidate for any cost savings (legacy behavior)
-	//   "0.8" = Require 20% cost savings
-	//   "0.5" = Require 50% cost savings (very conservative)
-	//   "0.0" = Disable price-based consolidation
+	//   0  = Consolidate for any cost savings (legacy behavior)
+	//   10 = Require 10% cost savings
+	//   20 = Require 20% cost savings
+	//   50 = Require 50% cost savings (very conservative)
+	//   100 = Disable price-based consolidation
 	//
-	// +kubebuilder:validation:Pattern: `^(0(\.[0-9]+)?|1(\.0)?)$`
-	// +kubebuilder:validation:Type="string"
-	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
 	// +optional
-	ConsolidationPriceImprovementFactor *string `json:"consolidationPriceImprovementFactor,omitempty"`
+	ConsolidationPriceImprovementPercentage *int32 `json:"consolidationPriceImprovementPercentage,omitempty"`
 }
 
 // Budget defines when Karpenter will restrict the

@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -309,27 +308,25 @@ func getCandidatePrices(candidates []*Candidate) (float64, error) {
 	return price, nil
 }
 
-// parsePriceFactorFromNodePool parses and validates the consolidation price improvement factor from a NodePool.
-// Returns (factor, true) if valid, (0.0, false) if invalid or out of range [0.0, 1.0].
+// parsePriceFactorFromNodePool parses and validates the consolidation price improvement percentage from a NodePool.
+// Converts percentage (0-100) to factor (0.0-1.0) using: factor = 1.0 - (percentage / 100.0)
+// Returns (factor, true) if valid, (0.0, false) if invalid or out of range [0, 100].
 func parsePriceFactorFromNodePool(ctx context.Context, nodePool *v1.NodePool) (float64, bool) {
-	if nodePool == nil || nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor == nil {
+	if nodePool == nil || nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage == nil {
 		return 0.0, false
 	}
 
-	factorStr := *nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor
-	factor, err := strconv.ParseFloat(factorStr, 64)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "Invalid NodePool consolidationPriceImprovementFactor, skipping",
-			"nodePool", nodePool.Name, "value", factorStr)
+	pct := *nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage
+
+	if pct < 0 || pct > 100 {
+		log.FromContext(ctx).Info("NodePool consolidationPriceImprovementPercentage out of range, skipping",
+			"nodePool", nodePool.Name, "value", pct)
 		return 0.0, false
 	}
 
-	if factor < 0.0 || factor > 1.0 {
-		log.FromContext(ctx).Info("NodePool consolidationPriceImprovementFactor out of range, skipping",
-			"nodePool", nodePool.Name, "value", factor)
-		return 0.0, false
-	}
-
+	// Convert percentage to factor: factor = 1.0 - (percentage / 100.0)
+	// Examples: 10% → 0.9, 20% → 0.8, 0% → 1.0, 100% → 0.0
+	factor := 1.0 - (float64(pct) / 100.0)
 	return factor, true
 }
 
@@ -372,9 +369,11 @@ func (c *consolidation) getPriceImprovementFactor(ctx context.Context, candidate
 	}
 
 	// Fall back to operator-level setting
-	operatorFactor := options.FromContext(ctx).ConsolidationPriceImprovementFactor
+	// Convert percentage (0-100) to factor (0.0-1.0): factor = 1.0 - (percentage / 100.0)
+	operatorPct := options.FromContext(ctx).ConsolidationPriceImprovementPercentage
+	operatorFactor := 1.0 - (float64(operatorPct) / 100.0)
 	log.FromContext(ctx).V(1).Info("Using operator-level consolidation price improvement factor",
-		"value", operatorFactor, "candidateCount", len(candidates))
+		"percentage", operatorPct, "factor", operatorFactor, "candidateCount", len(candidates))
 	return operatorFactor
 }
 
@@ -395,7 +394,7 @@ func calculateSavingsPercentage(currentPrice, replacementPrice float64) float64 
 // the factor source ("nodepool" or "operator") and the nodepool name if applicable.
 func determineFactorSource(candidates []*Candidate) (string, string) {
 	for _, candidate := range candidates {
-		if candidate.NodePool != nil && candidate.NodePool.Spec.Disruption.ConsolidationPriceImprovementFactor != nil {
+		if candidate.NodePool != nil && candidate.NodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage != nil {
 			return "nodepool", candidate.NodePool.Name
 		}
 	}

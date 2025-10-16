@@ -69,9 +69,9 @@ func (in *Disruption) DeepCopyInto(out *Disruption) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.ConsolidationPriceImprovementFactor != nil {
-		in, out := &in.ConsolidationPriceImprovementFactor, &out.ConsolidationPriceImprovementFactor
-		*out = new(string)
+	if in.ConsolidationPriceImprovementPercentage != nil {
+		in, out := &in.ConsolidationPriceImprovementPercentage, &out.ConsolidationPriceImprovementPercentage
+		*out = new(int32)
 		**out = **in
 	}
 }

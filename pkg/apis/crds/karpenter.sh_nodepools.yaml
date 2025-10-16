@@ -158,18 +158,22 @@ spec:
                         - WhenEmpty
                         - WhenEmptyOrUnderutilized
                       type: string
-                    consolidationPriceImprovementFactor:
+                    consolidationPriceImprovementPercentage:
                       description: |-
-                        ConsolidationPriceImprovementFactor is the minimum cost savings required for consolidation
-                        to occur. Only consolidate when replacement nodes cost less than (current_price × factor).
-                        If not specified, the operator-level consolidation-price-improvement-factor setting is used.
+                        ConsolidationPriceImprovementPercentage is the minimum cost savings percentage required for consolidation.
+                        Only consolidate when replacement nodes cost at least this percentage less than current nodes.
+                        If not specified, uses the operator-level consolidation-price-improvement-percentage setting.
 
                         Examples:
-                          "1.0" = Consolidate for any cost savings (legacy behavior)
-                          "0.8" = Require 20% cost savings
-                          "0.5" = Require 50% cost savings (very conservative)
-                          "0.0" = Disable price-based consolidation
-                      type: string
+                          0  = Consolidate for any cost savings (legacy behavior)
+                          10 = Require 10% cost savings
+                          20 = Require 20% cost savings
+                          50 = Require 50% cost savings (very conservative)
+                          100 = Disable price-based consolidation
+                      format: int32
+                      maximum: 100
+                      minimum: 0
+                      type: integer
                   required:
                     - consolidateAfter
                   type: object

@@ -1216,7 +1216,7 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("spot to spot consolidation should order the instance types by price before enforcing minimum flexibility.", func() {
 			ctx = options.ToContext(ctx, &options.Options{
-				ConsolidationPriceImprovementFactor: 1.0, // Allow any cost savings for spot-to-spot consolidation tests
+				ConsolidationPriceImprovementPercentage: 0, // Allow any cost savings for spot-to-spot consolidation tests
 				FeatureGates: options.FeatureGates{
 					SpotToSpotConsolidation: true, // Enable spot-to-spot consolidation
 				},
@@ -1332,7 +1332,7 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("spot to spot consolidation should consider the max of default and minimum number of instanceTypeOptions from minValues in requirement for truncation if minimum number of instanceTypeOptions from minValues in requirement is greater than 15.", func() {
 			ctx = options.ToContext(ctx, &options.Options{
-				ConsolidationPriceImprovementFactor: 1.0, // Allow any cost savings for spot-to-spot consolidation tests
+				ConsolidationPriceImprovementPercentage: 0, // Allow any cost savings for spot-to-spot consolidation tests
 				FeatureGates: options.FeatureGates{
 					SpotToSpotConsolidation: true, // Enable spot-to-spot consolidation
 				},
@@ -1559,7 +1559,7 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("spot to spot consolidation should consider the default for truncation if minimum number of instanceTypeOptions from minValues in requirement is less than 15.", func() {
 			ctx = options.ToContext(ctx, &options.Options{
-				ConsolidationPriceImprovementFactor: 1.0, // Allow any cost savings for spot-to-spot consolidation tests
+				ConsolidationPriceImprovementPercentage: 0, // Allow any cost savings for spot-to-spot consolidation tests
 				FeatureGates: options.FeatureGates{
 					SpotToSpotConsolidation: true, // Enable spot-to-spot consolidation
 				},
@@ -4941,7 +4941,7 @@ var _ = Describe("Consolidation", func() {
 
 			It("should consolidate when replacement meets price improvement factor", func() {
 				ctx = options.ToContext(ctx, &options.Options{
-					ConsolidationPriceImprovementFactor: 0.5, // Require 50% cost savings
+					ConsolidationPriceImprovementPercentage: 50, // Require 50% cost savings
 				})
 
 				// Create expensive node
@@ -4986,7 +4986,7 @@ var _ = Describe("Consolidation", func() {
 
 			It("should not consolidate when replacement doesn't meet price improvement factor", func() {
 				ctx = options.ToContext(ctx, &options.Options{
-					ConsolidationPriceImprovementFactor: 0.4, // Require 60% cost savings (0.8 * 0.4 = 0.32)
+					ConsolidationPriceImprovementPercentage: 60, // Require 60% cost savings
 				})
 
 				// Create medium-priced node (price 0.8)
@@ -5029,7 +5029,7 @@ var _ = Describe("Consolidation", func() {
 
 			It("should use legacy behavior when price improvement factor is 1.0", func() {
 				ctx = options.ToContext(ctx, &options.Options{
-					ConsolidationPriceImprovementFactor: 1.0, // Legacy behavior
+					ConsolidationPriceImprovementPercentage: 0, // Legacy behavior (any savings)
 				})
 
 				// Create medium node - should consolidate to small (any cost savings)
@@ -5073,7 +5073,7 @@ var _ = Describe("Consolidation", func() {
 
 			It("should not consolidate when price improvement factor is 0.0", func() {
 				ctx = options.ToContext(ctx, &options.Options{
-					ConsolidationPriceImprovementFactor: 0.0, // Disable price-based consolidation
+					ConsolidationPriceImprovementPercentage: 100, // Disable price-based consolidation
 				})
 
 				// Create most expensive node
@@ -5155,7 +5155,7 @@ var _ = Describe("Consolidation", func() {
 					FeatureGates: options.FeatureGates{
 						SpotToSpotConsolidation: true,
 					},
-					ConsolidationPriceImprovementFactor: 0.85, // Require 15% cost savings (1.0 * 0.85 = 0.85)
+					ConsolidationPriceImprovementPercentage: 15, // Require 15% cost savings
 				})
 
 				// Create expensive spot node (price 1.0)
@@ -5202,7 +5202,7 @@ var _ = Describe("Consolidation", func() {
 					FeatureGates: options.FeatureGates{
 						SpotToSpotConsolidation: true,
 					},
-					ConsolidationPriceImprovementFactor: 0.9, // Require 90% cost savings
+					ConsolidationPriceImprovementPercentage: 10, // Require 10% cost savings
 				})
 
 				// Create moderately expensive spot node (price 0.55)
@@ -5248,7 +5248,7 @@ var _ = Describe("Consolidation", func() {
 					FeatureGates: options.FeatureGates{
 						SpotToSpotConsolidation: true,
 					},
-					ConsolidationPriceImprovementFactor: 0.9, // Require 10% cost savings (0.85 * 0.9 = 0.765)
+					ConsolidationPriceImprovementPercentage: 10, // Require 10% cost savings
 				})
 
 				// Create spot node that has many cheaper options (spot-instance-16 has price 0.85)
@@ -5333,7 +5333,7 @@ var _ = Describe("Consolidation", func() {
 
 			It("should emit specific savings percentage in error messages", func() {
 				ctx = options.ToContext(ctx, &options.Options{
-					ConsolidationPriceImprovementFactor: 0.5, // Require 50% cost savings
+					ConsolidationPriceImprovementPercentage: 50, // Require 50% cost savings
 				})
 
 				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -5386,7 +5386,7 @@ var _ = Describe("Consolidation", func() {
 
 			It("should use legacy message when price improvement factor is 1.0", func() {
 				ctx = options.ToContext(ctx, &options.Options{
-					ConsolidationPriceImprovementFactor: 1.0,
+					ConsolidationPriceImprovementPercentage: 0, // Legacy behavior (any savings)
 				})
 
 				nodeClaim, node := test.NodeClaimAndNode(v1.NodeClaim{
@@ -5443,37 +5443,36 @@ var _ = Describe("Consolidation", func() {
 			})
 		})
 
-		Describe("NodePool-level Price Improvement Factor", func() {
-			It("should parse NodePool-level price improvement factor from string", func() {
-				// Test that the NodePool API accepts string values
-				customFactor := "0.8"
-				nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor = &customFactor
+		Describe("NodePool-level Price Improvement Percentage", func() {
+			It("should accept NodePool-level price improvement percentage as int32", func() {
+				// Test that the NodePool API accepts int32 values
+				customPercentage := int32(20)
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = &customPercentage
 
-				Expect(nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor).ToNot(BeNil())
-				Expect(*nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor).To(Equal("0.8"))
+				Expect(nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage).ToNot(BeNil())
+				Expect(*nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage).To(Equal(int32(20)))
 			})
 
-			It("should handle nil NodePool price improvement factor", func() {
-				// Test that consolidation works when NodePool factor is not set
-				Expect(nodePool.Spec.Disruption.ConsolidationPriceImprovementFactor).To(BeNil())
+			It("should handle nil NodePool price improvement percentage", func() {
+				// Test that consolidation works when NodePool percentage is not set
+				Expect(nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage).To(BeNil())
 			})
 
-			It("should handle various valid NodePool price improvement factor formats", func() {
-				testCases := []string{"0.0", "0.5", "1.0", ".5", "0.8", "0.01"}
+			It("should handle various valid NodePool price improvement percentage values", func() {
+				testCases := []int32{0, 5, 10, 20, 50, 100}
 
-				for _, factorStr := range testCases {
+				for _, pct := range testCases {
 					// Create a fresh NodePool for each test case to avoid resourceVersion conflicts
 					testNodePool := test.NodePool()
-					customFactor := factorStr
-					testNodePool.Spec.Disruption.ConsolidationPriceImprovementFactor = &customFactor
+					testNodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = &pct
 
 					// Should pass runtime validation
 					Expect(testNodePool.RuntimeValidate(ctx)).To(Succeed(),
-						fmt.Sprintf("Factor %s should pass runtime validation", factorStr))
+						fmt.Sprintf("Percentage %d should pass runtime validation", pct))
 
 					// Should be accepted by Kubernetes API
 					Expect(env.Client.Create(ctx, testNodePool)).To(Succeed(),
-						fmt.Sprintf("Factor %s should be accepted by Kubernetes API", factorStr))
+						fmt.Sprintf("Percentage %d should be accepted by Kubernetes API", pct))
 
 					// Clean up for next iteration
 					Expect(env.Client.Delete(ctx, testNodePool)).To(Succeed())
@@ -5481,16 +5480,16 @@ var _ = Describe("Consolidation", func() {
 			})
 
 			It("should use most conservative (minimum) price improvement factor for multi-node consolidation", func() {
-				// Create two NodePools with different price improvement factors
-				// NodePool A: 10% savings required (factor 0.9)
-				// NodePool B: 5% savings required (factor 0.95)
+				// Create two NodePools with different price improvement percentages
+				// NodePool A: 10% savings required
+				// NodePool B: 5% savings required
 				nodePoolA := test.NodePool(v1.NodePool{
 					ObjectMeta: metav1.ObjectMeta{Name: "nodepool-a"},
 					Spec: v1.NodePoolSpec{
 						Disruption: v1.Disruption{
-							ConsolidationPolicy:                 v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-							ConsolidateAfter:                    v1.MustParseNillableDuration("0s"),
-							ConsolidationPriceImprovementFactor: lo.ToPtr("0.9"), // Require 10% savings
+							ConsolidationPolicy:                     v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+							ConsolidateAfter:                        v1.MustParseNillableDuration("0s"),
+							ConsolidationPriceImprovementPercentage: lo.ToPtr(int32(10)), // Require 10% savings
 						},
 					},
 				})
@@ -5498,9 +5497,9 @@ var _ = Describe("Consolidation", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "nodepool-b"},
 					Spec: v1.NodePoolSpec{
 						Disruption: v1.Disruption{
-							ConsolidationPolicy:                 v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
-							ConsolidateAfter:                    v1.MustParseNillableDuration("0s"),
-							ConsolidationPriceImprovementFactor: lo.ToPtr("0.95"), // Require 5% savings
+							ConsolidationPolicy:                     v1.ConsolidationPolicyWhenEmptyOrUnderutilized,
+							ConsolidateAfter:                        v1.MustParseNillableDuration("0s"),
+							ConsolidationPriceImprovementPercentage: lo.ToPtr(int32(5)), // Require 5% savings
 						},
 					},
 				})
