@@ -26,7 +26,7 @@ import (
 
 // RuntimeValidate will be used to validate any part of the CRD that can not be validated at CRD creation
 func (in *NodePool) RuntimeValidate(ctx context.Context) (errs error) {
-	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist())
+	errs = multierr.Combine(in.Spec.Template.validateLabels(), in.Spec.Template.Spec.validateTaints(), in.Spec.Template.Spec.validateRequirements(ctx), in.Spec.Template.validateRequirementsNodePoolKeyDoesNotExist(), in.Spec.Disruption.validateConsolidationPriceImprovementPercentage())
 	return errs
 }
 
@@ -52,6 +52,16 @@ func (in *NodeClaimTemplate) validateRequirementsNodePoolKeyDoesNotExist() (errs
 	for _, requirement := range in.Spec.Requirements {
 		if requirement.Key == NodePoolLabelKey {
 			errs = multierr.Append(errs, fmt.Errorf("invalid key: %q in requirements, restricted", requirement.Key))
+		}
+	}
+	return errs
+}
+
+func (in *Disruption) validateConsolidationPriceImprovementPercentage() (errs error) {
+	if in.ConsolidationPriceImprovementPercentage != nil {
+		pct := *in.ConsolidationPriceImprovementPercentage
+		if pct < 0 || pct > 100 {
+			errs = multierr.Append(errs, fmt.Errorf("invalid consolidationPriceImprovementPercentage %d: must be between 0 and 100", pct))
 		}
 	}
 	return errs
