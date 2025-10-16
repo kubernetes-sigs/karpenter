@@ -1,192 +1,190 @@
 # NodeOverlay Integration for Dynamic Resource Allocation
 
-## TODO
+## Overview
 
-- [ ] Concrete schema example
-- [ ] NodeOverlay conflict resolution definition
-- [ ] Integration with NodeClaim initialization check
-
-## Background
-
-When Karpenter constructs a NodeClaim for a given set of pods, it uses information from the CloudProvider to determine
+When Karpenter constructs a NodeClaim for a given set of pods, it uses information from the cloudprovider to determine
 the resources that will exist on a Node if one is created for a given instance type. That is then used to determine
-which instance types will satisfy a given set of requests. CloudProviders can get this information from any number of
-sources, for example EC2's `DescribeInstanceTypes` API, and they use their knowledge of well-known device plugins to
-determine the resulting Node's allocatable resources. The drawback of this approach is that each CloudProvider needs to
-build integrations for specific drivers, and users are limited to those integrations. `NodeOverlays` were introduced to
-close that gap by allowing end users to explicitly inform Karpenter of the resources that will be made available for a
-given instance type. For example, the following `NodeOverlay` will add the `smarter-device/fuse` device to `c5.large`
-instances from the NodePool `fuse-np`.
+which instance types will satisfy a given set of requests. Cloudprovider implementations can get this information from
+any number of sources, for example AWS EC2's `DescribeInstanceTypes` API, and they use their knowledge of well-known
+device plugins to determine the resulting nodes' allocatable resources. The drawback of this approach is that each
+cloudprovider needs to build integrations for specific drivers, and users are limited by those integrations.
+`NodeOverlays` were introduced to close that gap by allowing end users to explicitly inform Karpenter of the resources
+that will be made available for a given instance type. For example, the following `NodeOverlay` will add the
+`smarter-device/fuse` device to `c5.large` instances from the NodePool `fuse-np`.
 
 ```yaml
 kind: NodeOverlay
 apiVersion: karpenter.sh/v1alpha1
 spec:
   requirements:
-  - key: karpenter.sh/nodepool
-    operator: In
-    values: ['fuse-np']
-  - key: node.kubernetes.io/instance-type
-    operator: In
-    values: ['c5.large']
+    - key: karpenter.sh/nodepool
+      operator: In
+      values: ["fuse-np"]
+    - key: node.kubernetes.io/instance-type
+      operator: In
+      values: ["c5.large"]
   capacity:
     smarter-device/fuse: 1
 ```
 
 We face the same challenge with DRA: CloudProviders will need to be made aware of the `ResourceSlices` that will be
 published when a given instance type registers with the cluster as a node. This RFC proposes extending the existing
-NodeOverlay API to support specifying `ResourceSlices`  in addition to conventional extended resources.
+`NodeOverlay` API to support specifying `ResourceSlices` in addition to conventional extended resources.
 
-## Non-goals
-- Support for provisioning devices which aren't associated directly with a node
-	- As a node autoscaler, I would consider this out-of-scope for Karpenter initial support. The integration in Karpenter's
-      scheduler should be able to support any `ResourceSlice` which has already been provisioned, but that's a separate
-      matter from supporting the provisioning of new devices.
+**Note:** `NodeOverlays` are an advanced Karpenter feature and are not intended to be the primary way for users to use
+DRA. The expecation is that cloudproviders will build integrations for common use-cases and that the `NodeOverlay`
+extension will serve advanced users with specific requirements. `NodeOverlays` are being used for initial implementation
+since they are cloudprovider agnostic and enable the development / use of DRA while awaiting native cloudprovider
+integrations.
 
-## General API Shape
+### Goals
 
-At a high level, we will want to add a new field to `NodeOverlay`, `resourceSlices`, which will be a list of
-`ResourceSlices` to associate with any matching instance types. This wouldn't be a breaking change to the API, so it
-would remain `v1alpha1`.
+- Enable end users to use DRA drivers with Karpenter without cloudprovider specific integrations
+- Enable the description of complex topological relationships between nodes and `ResourceSlices`
+- Define how `ResourceSlices` integrate with the rest of the `NodeOverlay` API (e.g. conflict resolution)
+- Decouple the development of Karpenter's DRA featureset from cloudprovider integrations
 
+### Non-goals
 
-There is some nuance to they type of the `resourceSlices` field. There are three options:
-- A list of unstructured objects
-- The upstream v1 schema
-- A custom `ResourceSlice` schema
+- Support for describing non-node-local devices
+- Defining the scheduling integration and internal Karpenter interfaces. This will be defined in a follow-up RFC.
 
-A list of unstructured objects has the advantage of not tying the CRD to a particular version of the `ResourceSlice`
-schema. We have considered changing other fields to accept an unstructured object, namely `spec.kubelet` and `spec.userData`
-(Bottlerocket) on the `EC2NodeClass`, for this reason. However, the advantages it provides for those fields don't extend to
-`ResourceSlices`. Both of those fields are passed through umutated to a separate process, Kubelet and the Bottlerocket
-bootstrapper respectively. Karpenter is not coupled to a particular version of either of those processes. Since Karpenter
-won't be passing through this `ResourceSlice` object to any other process and is processing it itself there isn't an
-advantage to decoupling the version of the schema.
+### User Experience
+
+- Determine `ResourceSlice` shape
+  - Might be able to just "guess" all of the relavent details, otherwise can provision instances out-of-band (e.g. using
+    static capacity) to discover it that way.
+- Encode `ResourceSlice` information into one or more `NodeOverlay` resources
+  - Simplest workflow would be to create one `NodeOverlay` per-instance, this could be collapsed further though (e.g.
+    overlay for all instance types with 2 GPUs)
+  - We might want to introduce a mechanism to allow users to specify a "scaling" parameter. Cloudproviders could surface
+    additional metadata about an instance type (e.g. it has this many of this "key") that we could scale off of. I don't
+    think this is necessary for this first revision.
+- When creating new `NodeClaims` as part of its scheduling simulation, Karpenter will use the `ResourceSlices` embedded
+  into the `NodeOverlay` objects for the instance types compatible with the `NodeClaim`.
+
+## API Design
+
+Although we know we need to embed `ResourceSlices` into the `NodeOverlay` object, there are sevaral options available
+with regards to typing. The following three options are considered in this proposal:
+
+- A slice of unstructured objects
+- A slice of unmutated, upstream `ResourceSlice` objects
+- A slice of custom `ResourceSlice` objects (referred to as `ResourceSliceTemplates` going forward)
+
+A list of unstructured objects has the advantage of not coupling the `NodeOverlay` CRD to a particular version of the
+`ResourceSlice` schema. We have considered changing other fields in Karpenter to accept an unstructured object
+(`spec.kubelet` and `spec.userData` (Bottlerocket) on the `EC2NodeClass`) for this reason. This would provide an
+advantage in those cases because Karpenter passes those fields unmutated to other processes, e.g. Kubelet. Since
+Karpenter's version is not coupled to those processess' versions, coupling the configuration schema can cause
+unnecessary compatiblity issues. On the other hand Karpenter won't be passing the `ResourceSlices` embedded in
+`NodeOverlays` to any other process. Additionally, Karpenter is coupled to the version of the schema supported by its
+scheduler. Including a concrete schema in the `NodeOverlay` CRD definition self-documents the supported subset of DRA's
+functionality.
 
 Using the upstream schema is the next obvious solution. Users are already familiar with this schema, and it simplifies
-the onboarding process by allowing existing manifests to be copied into the `NodeOverlay`. However, this also comes with
-some notable drawbacks:
+the onboarding process by allowing existing manifests to be copied into the `NodeOverlay` directly. However, this also
+comes with some notable drawbacks:
+
 - Karpenter won't support all of the fields that are present in the upstream schema, for example those backed by alpha
   features.
 - Some of the fields are redundant, e.g. `spec.nodeName`, since it will be implicitly associated with the instance
   that's launched. Additionally, in this case it's impossible to know the concrete value ahead of launch.
 - Some of the required fields don't provide useful information for Karpenter, e.g. `spec.pool`. Requiring users to
-  configure these values would be confusing, so we would minimally need to change CEL validation rules.
+  configure these values would be confusing.
 
-For these reasons, my recommendation is that we make a custom type in Karpenter. This custom `ResourceSlice` type will
-only exist as part of the `NodeOverlay` schema and it will only surface the fields supported by Karpenter. This helps to
-self-document the subset of the DRA feature-set that's supported on a given Karpenter version. Additionally, this gives
-us the flexibility to add additional field when necessary (as proposed in "Supporting Relative Topology Requirements").
+For these reasons, this proposal recommends the third option, `ResourceSliceTemplates`. The following principles would
+be used to determine if fields should be included in Karpenter's `ResourceSliceTemplate` schema:
 
-```yaml
-kind: NodeOverlay
-apiVersion: karpenter.sh/v1alpha1
-spec:
-  # ...
-  resourceSlices: []ResourceSliceTemplate
-```
+- Fields which don't influence scheduling should be excluded
+- Fields backing feature gates unsupported by Karpenter should be excluded
 
-### Supported Fields
-
-The following principles should be used to determine if fields should be included in Karpenter's `ResourceSlice` schema:
-- Alpha features should be excluded
-- Only fields which impact Karpenter's scheduling simulation should be included
-
-The following fields from the `v1` API in Kubernetes 1.34 would be **excluded**:
+Based on these principles, the following fields from the `v1` API in Kubernetes 1.34 would be **excluded**:
 
 | Field                                     | Rationale                                                                                                                                                                                |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `spec.nodeName`                           | The concrete value for this field can't be known when creating the template. If no other selector is specified in the template, we should assume the `ResourceSlice` will be node local. |
+| `spec.perDeviceNodeSelection`             | Alpha (Partitionable Devices)                                                                                                                                                            |
 | `spec.pool`                               | Irrelevant to Karpenter's scheduling simulation                                                                                                                                          |
-| `spec.sharedCounters`                     | Alpha                                                                                                                                                                                    |
-| `spec.devices[].bindingConditions`        | Alpha. Shouldn't be required even when the feature goes beta / GA since it's not relevant to instance type selection.                                                                    |
-| `spec.devices[].bindingFailureConditions` | Alpha. Shouldn't be required even when the feature goes beta / GA since it's not relevant to instance type selection.                                                                    |
-| `spec.devices[].bindsToNode`              | Alpha. Shouldn't be required even when the feature goes beta / GA since it's not relevant to instance type selection.                                                                    |
-| `spec.devices[].capacity`                 | Alpha                                                                                                                                                                                    |
-| `spec.devices[].consumesCounters`         | Alpha                                                                                                                                                                                    |
-| `spec.devices[].taints`                   | Alpha                                                                                                                                                                                    |
+| `spec.sharedCounters`                     | Alpha (Partitionable Devices)                                                                                                                                                            |
+| `spec.devices[].allNodes`                 | Alpha (Partitionable Devices)                                                                                                                                                            |
+| `spec.devices[].allowMultipleAllocations` | Alpha (Consumable Capacity)                                                                                                                                                              |
+| `spec.devices[].bindingConditions`        | Alpha (Device Binding Conditions). Shouldn't be required even when the feature goes beta / GA since it's not relevant to instance type selection.                                        |
+| `spec.devices[].bindingFailureConditions` | Alpha (Device Binding Conditions). Shouldn't be required even when the feature goes beta / GA since it's not relevant to instance type selection.                                        |
+| `spec.devices[].bindsToNode`              | Alpha (Device Binding Conditions). Shouldn't be required even when the feature goes beta / GA since it's not relevant to instance type selection.                                        |
+| `spec.devices[].consumesCounters`         | Alpha (Consumable Capacity)                                                                                                                                                              |
+| `spec.devices[].nodeName`                 | Alpha (Partitionable Devices). Wouldn't be supported regardless due to it being an unresolvable value.                                                                                   |
+| `spec.devices[].nodeSelector`             | Alpha (Partitionable Devices)                                                                                                                                                            |
+| `spec.devices[].taints`                   | Alpha (Device Taints)                                                                                                                                                                    |
 
-New fields would be evaluated on a case-by-case basis as they are added to the spec.
+New fields would be evaluated on a case-by-case basis as they are added to the upstream schema. Additionally, new fields
+may be introduced to support functionality specific to Karpenter. An example of this can be found in the section on
+[supporting relative topology requirements](#supporting-relative-topology-requirements). A complete description of the
+proposed `ResourceSliceTemplate` schema can be found in the [Appendix](#proposed-schema).
 
-## Supporting Relative Topology Requirements
+### Supporting Relative Topology Requirements
 
-One of the goals is that we should be able to express **relative requirements**. When Karpenter creates a NodeClaim
-object, the topology of the final Node hasn't been resolved yet. For example, a NodeClaim may be compatible with three
-zones and it is up to the cloudprovider implementation to select one of those zones. In the AWS provider, this is
-dictated by `CreateFleet`.
+One of the main additional capabilities that DRA enables is non-node local device consumption. Drivers can define the
+set of nodes a device can be consumed from using `spec.nodeSelector` on the `ResourceSlice`. Generally speaking, this
+topology requirement is going to be **relative** to the device's "host node." Going forward, we'll consider an example
+of a device which is only available within the same zone as the host node.
 
-The challenge this poses with DRA is simple: if a ResourceSlice has a requirement that is relative to it's host (the
-instance Karpenter launches), we need a way for users to express these requirements. We'll need some way for the user to
-express that they don't know they don't know the concrete value, but it will be the same value as the created NodeClaim.
-There is some prior art for this scenario: `matchLabelKeys` for pod affinity and topology spread constraints
-([ref](https://kubernetes.io/blog/2024/08/16/matchlabelkeys-podaffinity/)). The motivating example for this feature was
-that users wanted to specify requirements based on `pod-template-hash`, the concrete value of which isn't resolved until
-the pods are created. This is more or less the same scenario, and I recommend we mirror that API direction:
+When a DRA driver creates `ResourceSlices` for such a device, it already knows the zone the node has been provisioned in
+and can inject that zonal requirement into the `ResourceSlice's` selector. On the other hand, the user does not
+necessarily know the zone that Karpenter will provision the node into. They could create a `NodeOverlay` per topology
+domain, but this becomes untennable with a large number of domains. This problem statement can be generalized: how does
+a user express a topology constraint when the domain is unresolved?
 
-```yaml
-kind: NodeOverlay
-apiVersion: karpenter.sh/v1alpha1
-spec:
-  resourceSlices:
-  - kind: 'ResourceSlice'
-    apiVersion: 'resource.k8s.io/v1'
-    spec:
-      nodeSelector:
-        # nodeSelectorTerms is now optional
-        matchLabelKeys:
-        - 'topology.kubernetes.io/zone'
-```
+There is prior art in Kubernetes for expressing topological constraints based on unresolved domains:
+[`matchLabelKeys` for pod affinity and topology spread constraints](https://kubernetes.io/blog/2024/08/16/matchlabelkeys-podaffinity/).
+The motivating example for this feature was very similar: users need a way to express constraints based on a pod's
+template hash, but that hash won't be resolved until the pod is created. Therefore, the user can't express this directly
+in the pod template. This is the same issue we face with DRA: we know the topology we want to express the constraint on
+(zone) but won't know the domain until the node is provisioned. This RFC proposes adding `matchLabelKeys` to
+`spec.nodeSelector` on the `ResourceClaimTemplate` where it will serve the same purpose as it does in the pod spec.
 
-Another option I had been considering is using CEL in the existing API definition, but I believe the previous approach
-has a few key advantages:
-- It limits the scope of the feature, reducing possible edge conditions
-- There's prior art in the k8s API so users are already familiar with the semantic The main disadvantage is that it
-  increases the schema diff from the upstream `ResourceSlice` API, but this does not outweigh the advantages. This an
-  example of what that may have looked like:
+An example of configuring a zonal selector using `matchLabelKeys`:
 
 ```yaml
 kind: NodeOverlay
 apiVersion: karpenter.sh/v1alpha1
 spec:
   resourceSlices:
-  - kind: ResourceSlice
-    apiVersion: resource.k8s.io/v1
-    spec:
-      nodeSelector:
-        nodeSelectorTerms:
-        - matchFields:
-            topology.kubernetes.io/zone: "${resolvedLabel('topology.kubernetes.io/zone')}"
+    - spec:
+        nodeSelector:
+          nodeSelectorTerms:
+            - matchLabelKeys:
+                - "topology.kubernetes.io/zone"
 ```
 
-This decision is also not a one-way door. If a use-case presents itself where the flexibility of CEL based selectors is
-required we can add them at that time. However, the flexibility they provide is not required for current use-cases.
+**Note:** This RFC does **not** propose extending the upstream `ResourceSlice` schema with `matchLabelKeys`. Although we
+have the concept of a "host node" in Karpenter, this is not necessarily the case for all `ResourceSlices` in which case
+`matchLabelKeys` would not make sense semantically. Additionally, the drivers creating `ResourceSlices` will have been
+able to resolve these topology domains already. For this reason it only proposes extending `ResourceClaimTemplate`.
 
-Scheduling semantics of matchLabelKeys:
-- No difference while all pods are "bound" to the same NodeClaim since all pods are guaranteed to share the same domain.
-  For example, if we have a requirement on zone the NodeClaim's zonal requirement will still be compatible with the set
-  of zones from compatible instance types.
-- As soon as we have a pod that lands on a different node that consumes the same resource slice, we collapse that
-  requirement to a single value. This value needs to be part of the set intersection of the two hosts. We can choose
-  randomly, but we'll likely want to add some additional logic to choose the domain which minimizes cost (primary) and
-  maximizes flexibility (secondary).
-  - Alternatively, we could introduce a concept of "linked requirements". This would essentially be a way to say
-    "these two NodeClaims can be launched in any of these domains, but they must be launched in the same domain." The
-    advantage of this is that it could theoretically reduce pod creation to ready latency by minimizing the number of
-    scheduling simulations / NodeClaim creations required to find a satisfiable solution. That being said, this is
-    probably offset by the additional complexity that would need to be added to the launch path of the cloudproviders
-    (e.g. multiple batched CreateFleet calls or the need to launch serially for AWS).
-- In Karpenter's DRA allocator (future RFC) we'd have the concept of a "linked" ResourceSlice. This would be any
-  ResourceSlice which is non-node local but has dependent topology requirements. When evaluating it's NodeSelector, we
-  would evaluate the current requirements for the linked NodeClaim.
+An alternative approach can be found in the [appendix](#alternative-relative-topology-via-cel) which doesn't require
+mutation of the `ResourceSlice` schema by using CEL expressions in the exising `nodeSelectorTerms`. Avoiding mutating
+the existing schema seems like notable advantage due to user familiarity. However, these two factors indicate it isn't
+that important:
 
-## Supporting Inter-Device Topology Alignment
+- `ResourceSlices` aren't configured directly by the end user. An end user could use DRA without ever looking at a
+  `ResourceSlice` directly and just referring to driver docs. An example of this could be the `VolumeAttachment`
+  object - an important piece of the PV(C) lifecycle, but something rarely observed by the end user.
+- The CEL-based expression also isn't native to DRA. Either way an end user would need to reference Karpenter's
+  documentation to understand how to enforce this constraint.
 
-Reference:
+Additionally, it has it's own notable drawbacks:
 
-Motivating Example: Requesting GPUs and NICs with aligned topologies to ensure performance
+- The addition of a CEL-based expression implies broader support for CEL. Without a strong use-case for that
+  flexibility, we shouldn't open the API up at this time. It can always be extended in the future.
+- A CEL-based expression would be more difficult to staticly analyze (e.g. for validation policies)
+
+For these reasons, `matchLabelKeys` is the proposed approach for supporting relative topology requirements.
+
+### Supporting Inter-Device Topology Alignment
 
 One of the core capabilities that DRA provides is enabling users to specify a set of attributes that must match or be
-distinct across a set of devices. One of the motivating examples of this feature is to guaranteed topological allignment
+distinct across a set of devices. One of the motivating examples of this feature is to guaranteed topological alignment
 between accelerators and NICs to ensure certain performance characteristics. The problem this poses for Karpenter is
 that it isn't necessarily possible to know the concrete values of these attributes before launching an instance.
 
@@ -200,15 +198,15 @@ apiVersion: resource.k8s.io/v1
 spec:
   devices:
     requests:
-    - name: gpu
-      exactly:
-        deviceClassName: gpu.nvidia.com
-    - name: nic
-      exactly:
-        deviceClassName: rdma.nvidia.com
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+      - name: nic
+        exactly:
+          deviceClassName: rdma.nvidia.com
   constraints:
-  - requestNames: ['gpu', 'nic']
-    matchAttribute: resource.k8s.io/pcieRoot
+    - requestNames: ["gpu", "nic"]
+      matchAttribute: resource.k8s.io/pcieRoot
 ```
 
 The user will also need to create NodeOverlays for instance types which support this type of request. For this example,
@@ -223,182 +221,354 @@ a shared value. The naive approach would be to just use a shared static value:
 kind: NodeOverlay
 apiVersion: karpenter.sh/v1alpha1
 spec:
-  resourceSlices:
-  - apiVersion: resource.k8s.io/v1
-    kind: ResourceClaim
-    metadata:
-      name: 'nic-resource-slice'
-    spec:
-      driver: rdma.nvidia.com
-      devices:
-      - attributes:
-          resource.k8s.io/pcieRoot:
-              string: "pcie-root-1"
-          # ...
-      - attributes:
-          resource.k8s.io/pcieRoot:
-              string: "pcie-root-2"
-          # ...
-  - apiVersion: resource.k8s.io/v1
-    kind: ResourceClaim
-    metadata:
-      name: 'gpu-resource-slice'
-    spec:
-      driver: gpu.nvidia.com
-      devices:
-      - attributes:
-          resource.k8s.io/pcieRoot:
-              string: "pcie-root-1"
-          # ...
-      - attributes:
-          resource.k8s.io/pcieRoot:
-              string: "pcie-root-2"
-          # ...
+  resourceSlicesTemplates:
+    - spec:
+        driver: rdma.nvidia.com
+        devices:
+          - attributes:
+              resource.k8s.io/pcieRoot:
+                string: "pcie-root-1"
+              # ...
+          - attributes:
+              resource.k8s.io/pcieRoot:
+                string: "pcie-root-2"
+              # ...
+    - spec:
+        driver: gpu.nvidia.com
+        devices:
+          - attributes:
+              resource.k8s.io/pcieRoot:
+                string: "pcie-root-1"
+              # ...
+          - attributes:
+              resource.k8s.io/pcieRoot:
+                string: "pcie-root-2"
+              # ...
 ```
 
-This approach doesn't require any additional changes to the `ResourceSlice` schema and is relatively easy
-for an end-user to reason about. It does have a couple of notable downsides though:
+This approach doesn't require any additional changes to the `ResourceSlice` schema and is easy for an end user to reason
+about. However, since it doesn't distinguish between known values and placeholder values it has notable downsides:
 
-- The "placeholder" value can't overlap with resolved values on existing `ResourceSlices`
-- This adds additional complication when validating that the `ResourceSlices` produced for an instance match Karpenter's
-  expectations in the initialization check (see [NodeClaim Lifecycle Integration](#nodeclaim-lifecycle-integration))
+- The "placeholder" value can't overlap with resolved values on existing `ResourceSlices`.
+- There is additional complexity when validating that the `ResourceSlices` produced for an instance match Karpenter's
+  expectations during the initialization stage of the NodeClaim's lifecycle.
 
-To resolve these issues, a dedicated placeholder value could be used.
+To resolve these issues, a dedicated placeholder value could be used. This RFC proposes nesting the
+`ResourceSliceTemplates` in a new top-level field, `dynamicResources` and adding a `attributeBindings` field. This field
+can be thought of as the corollary to `spec.devices.constraints` on `ResourceClaim`. Each binding consists of a set of
+devices and a set of attributes. Karpenter assumes that each device specified will have the specified attributes and
+they will be the same value.
 
-In this example, we would expect that when we provision an instance it will have some number of GPUs, some number of
-NICs, and the topology of the instance will be deterministic. Consider the following instance topology. In this case, we
-know we have 2 GPUs and 2 NICs and each form a pair sharing a PCIe switch. A user may want to constain their application
-such that the GPU and NIC allocated to the allocation share a switch for performance.
-concrete values
+`DeviceAttribute` struct, `bindingKey`, to serve as this placeholder. This name was chosen to signify that any attribute
+which shares a key is "bound" together. This field would have the following properties:
 
+```yaml
+kind: NodeOverlay
+apiVersion: karpenter.sh/v1alpha1
+spec:
+  slices:
+    - spec:
+        driver: rdma.nvidia.com
+        devices:
+          - attributes:
+              resource.k8s.io/pcieRoot:
+                bindingKey: pcie-root-1
+              # ...
+    - spec:
+        driver: gpu.nvidia.com
+        devices:
+          - attributes:
+              resource.k8s.io/pcieRoot:
+                bindingKey: pcie-root-1
+              # ...
+```
+
+```yaml
+kind: NodeOverlay
+apiVersion: karpenter.sh/v1alpha1
+spec:
+  dynamicResources:
+    attributeBindings:
+      - deviceSelectors:
+          - resourceSliceTemplate: rdma-slice
+            device: rdma-device-0
+          - resourceSliceTemplate: gpu-slice
+            device: gpu-device-0
+        attributes:
+          - resource.k8s.io/pcieRoot
+    resourceSliceTemplates:
+      - metadata:
+          name: rdma-slice
+        spec:
+          driver: rdma.nvidia.com
+          devices:
+            - name: rdma-device-0
+      - metadata:
+          name: gpu-slice
+        spec:
+          driver: gpu.nvidia.com
+          devices:
+            - name: gpu-device-0
+```
+
+While this approach does satisfy today's requirements, driven by the `matchAttribute` constraint, it may not offer the
+flexibility required long-term. Specifically,
+[KEP-5254: Constraints with CEL](https://github.com/kubernetes/enhancements/pull/5391) proposes the addition of a CEL
+expression to `constraints`, enabling users to use arbitrarily complex CEL expressions when constraining devices. That
+being said, the proposed mechanism still supports the use-cases proposed in that KEP and others from existing drivers.
+This isn't a one-way door decision and we can increase the flexibility of this API as new use-cases present themselves.
+For this reason, `attributeBindings` is the recommended approach for initial DRA support in Karpenter.
+
+**Alternative Approach:** Top-level `boundAttributes` field ([Appendix](#alternative-bound-attributes))
+
+## Conflict Resolution
+
+Today `NodeOverlays` support two types of overrides, both of which have their own semantic for conflict resolution.
+Conflict resolution for price is handled based on the weight of the `NodeOverlays`. If two `NodeOverlays` apply to the
+same instance type and have different weights, the higher weighted overlay is used. If their weights are the same,
+they're marked as conflicting. The semantic for capacity is similar, but it isn't treated as an atomic unit. Instead,
+conflicts are handled separately per-resource.
+
+There are two approaches we could take to handling conflicts with `ResourceSlices`. The first is to treat the
+`ResourceSlices` in a NodeOverlay as an atomic unit. The `ResourceSlices` in the highest weight `NodeOverlay` for an
+instance type will be applied. If there are any `NodeOverlays` of equal weight that apply to the same instance type and
+have `ResourceSlices` specified, this will result in a conflict. The downside of this approach is that you can only
+specify a single `NodeOverlay` per instance type with `ResourceSlices`. This wouldn't prevent the use of the feature,
+but it reduces the APIs flexibility. This could be particularly burdensome in clusters with a large number of DRA
+drivers - separating the `ResourceSlices` for different drivers into separate `NodeOverlays` is useful from an
+organization standpoint.
+
+Alternatively, we could associate a key with each `ResourceSlice` that would be used for conflict resolution. This would
+be comparable to the use of the resource name as a key for extended resources. This would improve the flexibility of the
+API while ensuring it's easy to reason about conflict resolution. We could introduce a new field to serve as this key,
+but there are already two appropriate candidates.
+
+- `metadata.name`
+- `spec.driver`
+
+Out of the two, `spec.driver` is recommended. This field is already required to be set as part of the `ResourceSlice`
+definition and we don't currently anticipate use-cases for multiple `NodeOverlays` per instance type and driver. This
+may change as DRA adoption grows and the driver ecosystem evolves. This isn't a one-way door decision and we can
+evaluate mechanisms to introduce more granular conflict resolution when a use-case presents itself.
+
+## Appendix
+
+### Proposed Schema
+
+```go
+type NodeOverlaySpec struct {
+	// ...
+
+
+	// +optional
+	DynamicResources *DynamicResources `json:"dynamicResources,omitempty"`
+
+	// ResourceSliceTemplates lists the ResourceSliceTemplates that will be generated by DRA drivers when nodes selected
+	// by this NodeOverlay are provisioned.
+	//
+	// +optional
+	ResourceSliceTemplates []ResourceSliceTemplate `json:"resourceSliceTemplates,omitempty"`
+}
+
+type DynamicResources struct {
+	AttributeBindings []AttributeBinding `json:"attributeBindings,omitempty"`
+
+	// +required
+	Templates []ResourceSliceTemplate `json:"templates"`
+}
+
+type AttributeBinding struct {
+	// +required
+	Attributes []resourcev1.QualifiedName `json:"attributes"`
+
+	// +required
+	DeviceSelectors []DeviceSelectors `json:"deviceSelectors"`
+}
+
+type DeviceSelector struct {
+	// +required
+	Template string `json:"template"`
+
+	// +required
+	Device string `json:"device"`
+}
+
+type ResourceSliceTemplate struct {
+	// Contains the information published by the driver.
+	Spec ResourceSliceTemplateSpec `json:"spec"`
+}
+
+type ResourceSliceTemplateSpec struct {
+	// Driver identifies the DRA driver providing the capacity information.
+	// A field selector can be used to list only ResourceSlice
+	// objects with a certain driver name.
+	//
+	// Must be a DNS subdomain and should end with a DNS domain owned by the
+	// vendor of the driver. This field is immutable.
+	//
+	// +required
+	Driver string `json:"driver"`
+
+	// NodeSelector defines which nodes have access to the resources in the pool,
+	// when that pool is not limited to a single node.
+	//
+	// Must use exactly one term.
+	//
+	// Exactly one of NodeName, NodeSelector, AllNodes, and PerDeviceNodeSelection must be set.
+	//
+	// +optional
+	// +oneOf=NodeSelection
+	NodeSelector *v1.NodeSelector `json:"nodeSelector,omitempty"`
+
+	// AllNodes indicates that all nodes have access to the resources in the pool.
+	//
+	// Exactly one of NodeName, NodeSelector, AllNodes, and PerDeviceNodeSelection must be set.
+	//
+	// +optional
+	// +oneOf=NodeSelection
+	AllNodes *bool `json:"allNodes,omitempty"`
+
+	// Devices lists some or all of the devices in this pool.
+	//
+	// Must not have more than 128 entries.
+	//
+	// +optional
+	// +listType=atomic
+	Devices []Device `json:"devices"`
+}
+
+type NodeSelector struct {
+	// Required. A list of node selector terms. The terms are ORed.
+	// +listType=atomic
+	NodeSelectorTerms []NodeSelectorTerm `json:"nodeSelectorTerms"`
+}
+
+type NodeSelectorTerm struct {
+	// A list of label keys which must match the provisioned node's.
+	// +listType=atomic
+	// +optional
+	MatchLabelKeys []string `json:"matchLabelKeys,omitempty"`
+	// A list of node selector requirements by node's labels.
+	// +optional
+	// +listType=atomic
+	MatchExpressions []NodeSelectorRequirement `json:"matchExpressions,omitempty"`
+	// A list of node selector requirements by node's fields.
+	// +optional
+	// +listType=atomic
+	MatchFields []NodeSelectorRequirement `json:"matchFields,omitempty"`
+}
+
+type Device struct {
+	// Name is unique identifier among all devices managed by
+	// the driver in the pool. It must be a DNS label.
+	//
+	// +required
+  Name string `json:"name"`
+
+	// Attributes defines the set of attributes for this device.
+	// The name of each attribute must be unique in that set.
+	//
+	// The maximum number of attributes and capacities combined is 32.
+	//
+	// +optional
+	Attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute `json:"attributes,omitempty"`
+
+	// Capacity defines the set of capacities for this device.
+	// The name of each capacity must be unique in that set.
+	//
+	// The maximum number of attributes and capacities combined is 32.
+	//
+	// +optional
+	Capacity map[resourcev1.QualifiedName]DeviceCapacity `json:"capacity,omitempty"`
+}
+
+type DeviceAttribute struct {
+	resourcev1.DeviceAttribute
+
+	// BindingKey is a string. To indicate that two attributes across different devices will have the same resolved value,
+	// use the same BindingKey value. BindingKeys are scoped to a single NodeOverlay.
+	//
+	// +optional
+	// +oneOf=ValueType
+	BindingKey *string `json="bindingKey,omitempty"`
+}
+
+type DeviceCapacity struct {
+	// Value defines how much of a certain capacity that device has.
+	//
+	// This field reflects the fixed total capacity and does not change.
+	// The consumed amount is tracked separately by scheduler
+	// and does not affect this value.
+	//
+	// +required
+	Value resource.Quantity `json:"value"`
+}
+```
+
+To resolve these issues this RFC proposes nesting `ResourceSliceTemplates` in the `dynamicResources` field and including
+another field, `boundAttributes`. This field will be a slice of strings with the following properties:
+
+- Entries are attributes expected to be present on all `ResourceSlices`
+- Entries must be a qualified name, i.e. a C identifier or a DNS subdomain followed by a slash and a subidentifier.
+  These are the same requirements enforced for device attributes.
+
+```yaml
+kind: NodeOverlay
+apiVersion: karpenter.sh/v1alpha1
+spec:
+  dynamicResources:
+    boundAttributes:
+      - slices: ["nic-resource-slice", "gpu-resource-slice"]
+        attributes: ["resource.k8s.io/pcieRoot"]
+    slices:
+      - metadata:
+          name: "nic-resource-slice"
+        spec:
+          driver: rdma.nvidia.com
+          devices:
+            - attributes:
+                resource.k8s.io/pcieRoot:
+                  bindingKey: pcie-root-1
+                # ...
+      - metadata:
+          name: "gpu-resource-slice"
+        spec:
+          driver: gpu.nvidia.com
+          devices:
+            - attributes:
+                resource.k8s.io/pcieRoot:
+                  bindingKey: "pcie-root-1"
+                # ...
+```
+
+- It limits the scope of the feature, reducing possible edge conditions
+- There's prior art in the k8s API so users are already familiar with the semantic The main disadvantage is that it
+  increases the schema diff from the upstream `ResourceSlice` API, but this does not outweigh the advantages. This an
+  example of what that may have looked like:
 
 ```yaml
 kind: NodeOverlay
 apiVersion: karpenter.sh/v1alpha1
 spec:
   resourceSlices:
-  - apiVersion: resource.k8s.io/v1
-    kind: ResourceClaim
-    metadata:
-      name: 'nic-resource-slice'
-    spec:
-      driver: rdma.nvidia.com
-      devices:
-      - attributes:
-          resource.k8s.io/pcieRoot:
-              string: ${boundAttribute("pcie_root_1")}
-          # ...
-      - attributes:
-          resource.k8s.io/pcieRoot:
-              string: ${boundAttribute("pcie_root_2")}
-          # ...
-  - apiVersion: resource.k8s.io/v1
-    kind: ResourceClaim
-    metadata:
-      name: 'gpu-resource-slice'
-    spec:
-      driver: gpu.nvidia.com
-      devices:
-      - attributes:
-          resource.k8s.io/pcieRoot:
-              string: ${boundAttribute("pcie_root_1")}
-          # ...
-      - attributes:
-          resource.k8s.io/pcieRoot:
-              string: ${boundAttribute("pcie_root_2")}
-          # ...
+    - kind: ResourceSlice
+      apiVersion: resource.k8s.io/v1
+      spec:
+        nodeSelector:
+          nodeSelectorTerms:
+            - matchFields:
+                topology.kubernetes.io/zone: "${resolvedLabel('topology.kubernetes.io/zone')}"
 ```
 
-For additional context on this use case, reference the following Kubecon talk: https://www.youtube.com/watch?v=9CiEw1K0SwM
+To resolve these issues, a dedicated placeholder value could be used. This RFC proposes adding a new field to the
+`DeviceAttribute` struct, `bindingKey`, to serve as this placeholder. This name was chosen to signify that any attribute
+which shares a key is "bound" together. This field would have the following properties:
 
-Options:
-- Static, but "real" values. This is the simplest option, but poses issues if the placeholder values conflict with real
-values present on the cluster. For example,
+- It's mutually exclusive with the existing fields in `DeviceAttribute`. In other words, a user can't specify a
+  `bindingKey` with a concrete value.
+- Scope is limited to a single NodeOverlay. In other words, the same binding key can be used across multiple
+  `NodeOverlays` without creating inter-overlay bindings.
+- Scope is limited to a single `NodeClaim` during provisioning. If multiple `NodeClaims` are created which both have the
+  same `NodeOverlay` applied, the `ResourceClaims` associated with each `NodeClaim` will have unique attribute values.
 
-Question:
-- Are there any non-node local cases? I can't imagine a scenario where you can guarantee if you provision two different
-instances they will have an aligned set of attributes. This is potentially something we could explore if a need arises
-but isn't something that I think needs to be scoped into an initial implementation.
-
-
-
-## NodeClaim Lifecycle Integration
-
-This extension to NodeOverlay will need to integrate with the "initialization" phase of Karpenter's NodeClaim lifecycle.
-Before marking a NodeClaim as initialized, Karpenter waits for the following conditions:
-- The node must be marked as ready
-- All expected resources must be advertised via the node's status
-- All startup taints and "ephemeral" taints must be removed
-
-The second point, verifying that expected resources are advertised by the node, is what we'll need to extend. This poses
-two main challenges:
-- `ResourceSlices` don't need to be directly associated with a Node.
-- Karpenter's `ResourceSlice` definitions aren't guaranteed to be an exact match to those published by the DRA driver.
-
-The first issue is simplified when we're looking at
-
-Naive option: count the resource slices by driver (might need to aggregate by pool). If the count matches, mark as
-initialized.
-- Pros:
-  - Simple, low-compute cost implementation
-  - Covers the (hopefully) common case where Karpenter's `ResourceSlice` definitions match reality, ensuring that we
-    don't evaluate the node for consolidation until all `ResourceSlices` have been created.
-- Cons:
-  - Doesn't offer a solution for non-
-
-Extend `nodeClaim.spec.resources` to encode DRA details.
-- Currently just encodes standard requests and limits
-- Extension could go one of two ways
-
-## Scratch Notes (WIP)
-
-## Feature Gate Summary
-- Admin Access (Beta)
-- Consumable Capacity
-- Device Binding Conditions
-- Device Taints
-- Extended Resource
-- Partitionable Devices
-- Prioritized List (Beta)
-- ResourceClaim Device Status
-- Scheduler Filter Timeout
-
-
-```go
-// InstanceType describes the properties of a potential node (either concrete attributes of an instance of this type
-// or supported options in the case of arrays)
-// +k8s:deepcopy-gen=true
-type InstanceType struct {
-	// Name of the instance type, must correspond to corev1.LabelInstanceTypeStable
-	Name string
-	// Requirements returns a flexible set of properties that may be selected
-	// for scheduling. Must be defined for every well known label, even if empty.
-	Requirements scheduling.Requirements
-	// Note that though this is an array it is expected that all the Offerings are unique from one another
-	Offerings Offerings
-	// Resources are the full resource capacities for this instance type
-	Capacity corev1.ResourceList
-	// Overhead is the amount of resource overhead expected to be used by kubelet and any other system daemons outside
-	// of Kubernetes.
-	Overhead               *InstanceTypeOverhead
-	once                   sync.Once
-	allocatable            corev1.ResourceList
-	capacityOverlayApplied bool
-}
-
-// to
-
-type NodeShape interface {
-	ID() string
-	Matches(*corev1.Node) bool
-
-	Requirements() scheduling.Requirements
-	Allocatable() corev1.ResourceList
-	// Provides the custom Karpenter ResourceSlice. The upstream Karpenter
-	// implementation will decorate the cloudprovider provided slices to
-	// inject values from NodeOverlay
-	ResourceSlices() v1.ResourceSlice
-
-	Offerings() []Offering
-}
-```gg
+The following example demonstrates how a `NodeOverlay` could be configured using `bindingKeys`:
