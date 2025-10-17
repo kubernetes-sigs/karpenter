@@ -160,12 +160,10 @@ mappings:
 									},
 									Resources: corev1.ResourceRequirements{
 										Requests: corev1.ResourceList{
-											"gpu.example.com/gpu": resource.MustParse("1"),
 											corev1.ResourceCPU:    resource.MustParse("100m"),
 											corev1.ResourceMemory: resource.MustParse("128Mi"),
 										},
 										Limits: corev1.ResourceList{
-											"gpu.example.com/gpu": resource.MustParse("1"),
 											corev1.ResourceCPU:    resource.MustParse("100m"),
 											corev1.ResourceMemory: resource.MustParse("128Mi"),
 										},
@@ -269,12 +267,10 @@ mappings:
 									},
 									Resources: corev1.ResourceRequirements{
 										Requests: corev1.ResourceList{
-											"gpu.example.com/gpu": resource.MustParse("1"),
 											corev1.ResourceCPU:    resource.MustParse("100m"),
 											corev1.ResourceMemory: resource.MustParse("128Mi"),
 										},
 										Limits: corev1.ResourceList{
-											"gpu.example.com/gpu": resource.MustParse("1"),
 											corev1.ResourceCPU:    resource.MustParse("100m"),
 											corev1.ResourceMemory: resource.MustParse("128Mi"),
 										},
@@ -362,14 +358,31 @@ mappings:
 					"config.yaml": `
 driver: karpenter.sh/dra-kwok-driver
 mappings:
-  - name: fpga-mapping
+  # FPGA mapping for c-4x-amd64-linux nodes
+  - name: fpga-c4x-mapping
+    nodeSelector:
+      matchLabels:
+        node.kubernetes.io/instance-type: c-4x-amd64-linux
+        karpenter.sh/nodepool: ` + nodePool.Name + `
+    resourceSlice:
+      devices:
+        - name: xilinx-u250
+          count: 1
+          attributes:
+            type: xilinx-alveo-u250
+            memory: 32Gi
+            dsp-slices: "6144"
+            interface: pcie-gen3
+
+  # FPGA mapping for m-8x-amd64-linux nodes
+  - name: fpga-m8x-mapping
     nodeSelector:
       matchLabels:
         node.kubernetes.io/instance-type: m-8x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
       devices:
-        - name: xilinx-u250-0
+        - name: xilinx-u250
           count: 1
           attributes:
             type: xilinx-alveo-u250
@@ -409,14 +422,12 @@ mappings:
 									Command: []string{"sleep", "3600"},
 									Resources: corev1.ResourceRequirements{
 										Requests: corev1.ResourceList{
-											"fpga.example.com/fpga": resource.MustParse("1"),
-											corev1.ResourceCPU:      resource.MustParse("100m"),
-											corev1.ResourceMemory:   resource.MustParse("128Mi"),
+											corev1.ResourceCPU:    resource.MustParse("100m"),
+											corev1.ResourceMemory: resource.MustParse("128Mi"),
 										},
 										Limits: corev1.ResourceList{
-											"fpga.example.com/fpga": resource.MustParse("1"),
-											corev1.ResourceCPU:      resource.MustParse("100m"),
-											corev1.ResourceMemory:   resource.MustParse("128Mi"),
+											corev1.ResourceCPU:    resource.MustParse("100m"),
+											corev1.ResourceMemory: resource.MustParse("128Mi"),
 										},
 									},
 								},
