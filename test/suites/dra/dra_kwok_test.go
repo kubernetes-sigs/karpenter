@@ -17,6 +17,7 @@ limitations under the License.
 package dra_test
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -347,7 +348,7 @@ mappings:
 		})
 	})
 
-	Context("FPGA Configuration", func() {
+	Context("Advanced Device Configuration", func() {
 		It("should support FPGA device types", func() {
 			draConfigMap = &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -468,6 +469,165 @@ mappings:
 				}
 				return filteredSlices
 			}, 30*time.Second).Should(HaveLen(1))
+		})
+
+		It("should support multiple ResourceSlices for single instance type", func() {
+			draConfigMap = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dra-kwok-configmap",
+					Namespace: "karpenter",
+				},
+				Data: map[string]string{
+					"config.yaml": `
+driver: karpenter.sh/dra-kwok-driver
+mappings:
+  # First ResourceSlice: GPU devices for c-4x-amd64-linux
+  - name: gpu-mapping-c4x
+    nodeSelector:
+      matchLabels:
+        node.kubernetes.io/instance-type: c-4x-amd64-linux
+        karpenter.sh/nodepool: ` + nodePool.Name + `
+    resourceSlice:
+      devices:
+        - name: nvidia-t4
+          count: 2
+          attributes:
+            type: nvidia-tesla-t4
+            memory: 16Gi
+            device_class: gpu
+            
+  # Second ResourceSlice: FPGA devices for same instance type
+  - name: fpga-mapping-c4x
+    nodeSelector:
+      matchLabels:
+        node.kubernetes.io/instance-type: c-4x-amd64-linux
+        karpenter.sh/nodepool: ` + nodePool.Name + `
+    resourceSlice:
+      devices:
+        - name: xilinx-u250
+          count: 1
+          attributes:
+            type: xilinx-alveo-u250
+            memory: 32Gi
+            device_class: fpga
+`,
+				},
+			}
+
+			env.ExpectCreated(draConfigMap)
+
+			By("Creating workload for multi-device instance type")
+			deployment = &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "multi-device-workload",
+					Namespace: "default",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: lo.ToPtr(int32(1)),
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "multi-device-workload",
+						},
+					},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: map[string]string{
+								"app": "multi-device-workload",
+							},
+						},
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name:    "multi-device-container",
+									Image:   "ubuntu:20.04",
+									Command: []string{"sleep", "3600"},
+									Resources: corev1.ResourceRequirements{
+										Requests: corev1.ResourceList{
+											corev1.ResourceCPU:    resource.MustParse("200m"),
+											corev1.ResourceMemory: resource.MustParse("256Mi"),
+										},
+										Limits: corev1.ResourceList{
+											corev1.ResourceCPU:    resource.MustParse("200m"),
+											corev1.ResourceMemory: resource.MustParse("256Mi"),
+										},
+									},
+								},
+							},
+							NodeSelector: map[string]string{
+								"testing/cluster":                  "unspecified",
+								"node.kubernetes.io/instance-type": "c-4x-amd64-linux", // Force specific instance type
+							},
+						},
+					},
+				},
+			}
+
+			env.ExpectCreated(deployment)
+
+			By("Expecting node with multi-device support to be created")
+			env.EventuallyExpectHealthyPodCount(labels.SelectorFromSet(map[string]string{
+				"app": "multi-device-workload",
+			}), 1)
+
+			By("Verifying multiple ResourceSlices are created for single node")
+			nodes := env.Monitor.CreatedNodes()
+			Expect(nodes).To(HaveLen(1))
+			node := nodes[0]
+
+			var allResourceSlices []resourcev1.ResourceSlice
+			Eventually(func() []resourcev1.ResourceSlice {
+				var resourceSliceList resourcev1.ResourceSliceList
+				err := env.Client.List(env.Context, &resourceSliceList)
+				if err != nil {
+					return nil
+				}
+
+				var filteredSlices []resourcev1.ResourceSlice
+				for _, slice := range resourceSliceList.Items {
+					if slice.Spec.NodeName != nil && *slice.Spec.NodeName == node.Name {
+						filteredSlices = append(filteredSlices, slice)
+					}
+				}
+				allResourceSlices = filteredSlices
+				return filteredSlices
+			}, 30*time.Second, 1*time.Second).Should(HaveLen(2), "Should have exactly 2 ResourceSlices for single node")
+
+			By("Verifying device separation by type")
+			var gpuSlice, fpgaSlice *resourcev1.ResourceSlice
+			for i := range allResourceSlices {
+				slice := &allResourceSlices[i]
+				if len(slice.Spec.Devices) > 0 {
+					deviceClass, exists := slice.Spec.Devices[0].Attributes[resourcev1.QualifiedName("device_class")]
+					if exists && deviceClass.StringValue != nil {
+						switch *deviceClass.StringValue {
+						case "gpu":
+							gpuSlice = slice
+						case "fpga":
+							fpgaSlice = slice
+						}
+					}
+				}
+			}
+
+			Expect(gpuSlice).ToNot(BeNil(), "Should have GPU ResourceSlice")
+			Expect(fpgaSlice).ToNot(BeNil(), "Should have FPGA ResourceSlice")
+
+			By("Validating GPU devices")
+			Expect(gpuSlice.Spec.Devices).To(HaveLen(2), "Should have 2 GPU devices")
+			for i, device := range gpuSlice.Spec.Devices {
+				Expect(device.Name).To(Equal(fmt.Sprintf("nvidia-t4-%d", i)))
+				Expect(*device.Attributes[resourcev1.QualifiedName("device_class")].StringValue).To(Equal("gpu"))
+			}
+
+			By("Validating FPGA devices")
+			Expect(fpgaSlice.Spec.Devices).To(HaveLen(1), "Should have 1 FPGA device")
+			fpgaDevice := fpgaSlice.Spec.Devices[0]
+			Expect(fpgaDevice.Name).To(Equal("xilinx-u250-0"))
+			Expect(*fpgaDevice.Attributes[resourcev1.QualifiedName("device_class")].StringValue).To(Equal("fpga"))
+
+			By("Confirming both ResourceSlices reference same node")
+			Expect(*gpuSlice.Spec.NodeName).To(Equal(node.Name))
+			Expect(*fpgaSlice.Spec.NodeName).To(Equal(node.Name))
 		})
 	})
 
