@@ -96,7 +96,7 @@ var _ = Describe("ResourceSliceController", func() {
 		})
 	})
 
-	Describe("findMatchingMapping", func() {
+	Describe("findMatchingMappings", func() {
 		var mappings []config.Mapping
 
 		BeforeEach(func() {
@@ -131,7 +131,7 @@ var _ = Describe("ResourceSliceController", func() {
 			}
 		})
 
-		It("should find matching mapping by single label", func() {
+		It("should find matching mappings by single label", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -140,12 +140,12 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 			}
 
-			mapping := resourceController.findMatchingMapping(node, mappings)
-			Expect(mapping).ToNot(BeNil())
-			Expect(mapping.Name).To(Equal("gpu-mapping"))
+			matchingMappings := resourceController.findMatchingMappings(node, mappings)
+			Expect(matchingMappings).To(HaveLen(1))
+			Expect(matchingMappings[0].Name).To(Equal("gpu-mapping"))
 		})
 
-		It("should find matching mapping by multiple labels", func() {
+		It("should find matching mappings by multiple labels", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -156,12 +156,12 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 			}
 
-			mapping := resourceController.findMatchingMapping(node, mappings)
-			Expect(mapping).ToNot(BeNil())
-			Expect(mapping.Name).To(Equal("multi-gpu-mapping"))
+			matchingMappings := resourceController.findMatchingMappings(node, mappings)
+			Expect(matchingMappings).To(HaveLen(1))
+			Expect(matchingMappings[0].Name).To(Equal("multi-gpu-mapping"))
 		})
 
-		It("should return nil for non-matching node", func() {
+		It("should return empty slice for non-matching node", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -170,11 +170,11 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 			}
 
-			mapping := resourceController.findMatchingMapping(node, mappings)
-			Expect(mapping).To(BeNil())
+			matchingMappings := resourceController.findMatchingMappings(node, mappings)
+			Expect(matchingMappings).To(HaveLen(0))
 		})
 
-		It("should return first matching mapping when multiple match", func() {
+		It("should return all matching mappings when multiple match", func() {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -184,9 +184,9 @@ var _ = Describe("ResourceSliceController", func() {
 				},
 			}
 
-			mapping := resourceController.findMatchingMapping(node, mappings)
-			Expect(mapping).ToNot(BeNil())
-			Expect(mapping.Name).To(Equal("gpu-mapping"))
+			matchingMappings := resourceController.findMatchingMappings(node, mappings)
+			Expect(matchingMappings).To(HaveLen(1))
+			Expect(matchingMappings[0].Name).To(Equal("gpu-mapping"))
 		})
 	})
 

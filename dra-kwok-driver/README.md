@@ -144,19 +144,18 @@ When KWOK node is deleted automatically removes ResourceSlices
   - Should handle ConfigMap deletion
 
 #### **`dra_kwok_test.go`** - E2E DRA Integration Tests
-- **GPU Configuration**
-  - Should create and manage ResourceSlices based on ConfigMap
-  - Should handle ConfigMap updates dynamically
+**Context: GPU Configuration**
+- Should create and manage ResourceSlices based on ConfigMap
+- Should handle ConfigMap updates dynamically
 
-- **FPGA Configuration**
-  - Should support FPGA device types
+**Context: Advanced Device Configuration**
+- Should support FPGA device types
+- Should support multiple ResourceSlices for single instance type
 
-- **Configuration Validation**
-  - Should handle invalid ConfigMap gracefully
-
-- **DRA Pod Scheduling in KWOK Environment**
-  - Should ignore DRA pods when Karpenter DRA support is disabled (current behavior)
-  - Should prepare DRA testing infrastructure for future Karpenter DRA tests
+**Context: Configuration Validation**
+- Should handle invalid ConfigMap gracefully
+- Should ignore DRA pods when IgnoreDRARequests is enabled (default behavior)
+- Should prepare DRA testing infrastructure for future Karpenter DRA implementation
 
 ## Running the Tests
 
@@ -169,22 +168,7 @@ go test ./dra-kwok-driver/pkg/config/... -v
 go test ./dra-kwok-driver/pkg/controllers/... -v
 ```
 
-### **Integration Tests** (Requires Kubernetes cluster) IN PROGRESS
-
-<!-- ```bash
-kind create cluster --config kind-config.yaml --name <cluster-name>
-export KWOK_REPO=kind.local
-export KIND_CLUSTER_NAME=<cluster-name> make install-kwok  
-make apply
-kubectl taint nodes <cluster-name>-control-plane CriticalAddonsOnly=true:NoSchedule
-kubectl taint nodes <cluster-name>-worker CriticalAddonsOnly=true:NoSchedule  
-kubectl taint nodes <cluster-name>-worker2 CriticalAddonsOnly=true:NoSchedulecd dra-kwok-driver
-cd dra-kwok-driver
-go build -o dra-kwok-driver main.go
-./dra-kwok-driver &
-cd ..
-make e2etests TEST_SUITE=dra
-``` -->
+### **Integration Tests**
 
 ```bash
 # Create Kind cluster with Kubernetes 1.34 (required for DRA v1 GA)
@@ -206,9 +190,6 @@ make get-kind-image
 # Deploy Karpenter with DRA-friendly settings (uses extracted image variables from get-kind-image)
 make dra-apply-with-kind
 
-# Verify Karpenter deployment is ready (CRITICAL - wait for this before running tests)
-kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=karpenter -n kube-system --timeout=300s
-
 # Check Karpenter controller logs to ensure it started properly
 kubectl logs -l app.kubernetes.io/name=karpenter -n kube-system --tail=50
 
@@ -219,12 +200,11 @@ kubectl taint nodes <your-cluster-name>-control-plane CriticalAddonsOnly=true:No
 kubectl create namespace karpenter
 
 # Build and start DRA KWOK driver with proper logging 
-# pkill -f dra-kwok-driver     
+# pkill -f dra-kwok-driver do this if you had driver running before 
 cd dra-kwok-driver
 go build -o dra-kwok-driver main.go
 ./dra-kwok-driver
 
-
-# Run DRA integration tests seperate terminal karpenter/
+# Run DRA integration tests seperate terminal under karpenter/
 make e2etests TEST_SUITE=dra
 ```
