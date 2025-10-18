@@ -1,4 +1,4 @@
-# Karpenter DRA KWOK Driver 
+# KWOK DRA Driver Design
 
 ## Summary
 The upstream kubernetes/perf-tests repository includes a [DRA KWOK Driver](https://github.com/kubernetes/perf-tests/pull/3491/files), but it's designed for **ClusterLoader2 scale testing** with pre-created static nodes that cannot be used for Karpenter testing.
@@ -36,23 +36,23 @@ spec:
     operator: In
     values: ["g5.48xlarge"]
   capacity:
-    fake-gpu.kwok.x-k8s.io/device: "8"  # Custom extended resource for DRA devices
+    karpenter.sh.dra-kwok-driver/device: "8"  # Custom extended resource for DRA devices
   # TODO: Extend NodeOverlay API to embed ResourceSlice templates
   resourceSlices:  # FUTURE: Embedded ResourceSlice objects (not yet implemented)
-  - apiVersion: resource.k8s.io/v1alpha3
+  - apiVersion: resource.k8s.io/v1
     kind: ResourceSlice
     spec:
       # nodeName will be filled in by driver when node is created
-      driver: "fake-gpu.kwok.x-k8s.io"
+      driver: "karpenter.sh.dra-kwok-driver"
       devices:
       - name: "nvidia-h100-0"
-        driver: "fake-gpu.kwok.x-k8s.io"
+        driver: "karpenter.sh.dra-kwok-driver"
         attributes:
           memory: "80Gi"
           compute-capability: "9.0"
           vendor: "nvidia"
       - name: "nvidia-h100-1"
-        driver: "fake-gpu.kwok.x-k8s.io"
+        driver: "karpenter.sh.dra-kwok-driver"
         attributes:
           memory: "80Gi"
           compute-capability: "9.0"
@@ -75,10 +75,11 @@ Tests **DRA resource provisioning when no NodeOverlay configuration is found** -
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: kwok-dra-config
+  name: dra-kwok-configmap
+  namespace: karpenter
 data:
   config.yaml: |
-    driver: "fake-gpu.kwok.x-k8s.io"
+    driver: "karpenter.sh.dra-kwok-driver"
     mappings:
     - name: "h100-nodes"
       nodeSelector:
@@ -92,7 +93,7 @@ data:
           attributes:
             memory: "80Gi"
             compute-capability: "9.0" 
-            device-type: "gpu"
+            device_class: "gpu"
             vendor: "nvidia"
     - name: "fpga-nodes"
       nodeSelector:
@@ -105,7 +106,7 @@ data:
           count: 1
           attributes:
             memory: "16Gi"
-            device-type: "fpga"
+            device_class: "fpga"
             vendor: "xilinx"
 ```
 
