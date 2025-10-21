@@ -55,6 +55,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -63,10 +64,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
-const (
-	appName   = "karpenter"
-	component = "controller"
-)
+var AppName = "karpenter"
 
 var (
 	BuildInfo = opmetrics.NewPrometheusGauge(
@@ -101,6 +99,7 @@ type Operator struct {
 	KubernetesInterface kubernetes.Interface
 	EventRecorder       events.Recorder
 	Clock               clock.Clock
+	InstanceTypeStore   *nodeoverlay.InstanceTypeStore
 }
 
 type Options struct {
@@ -132,7 +131,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	}
 
 	// Logging
-	logger := serrors.NewLogger(zapr.NewLogger(logging.NewLogger(ctx, component)))
+	logger := serrors.NewLogger(zapr.NewLogger(logging.NewLogger(ctx, "controller")))
 	log.SetLogger(logger)
 	klog.SetLogger(logger)
 
@@ -147,7 +146,7 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	leaderConfig := rest.CopyConfig(config)
 	config.QPS = float32(options.FromContext(ctx).KubeClientQPS)
 	config.Burst = options.FromContext(ctx).KubeClientBurst
-	config.UserAgent = fmt.Sprintf("%s/%s", appName, Version)
+	config.UserAgent = fmt.Sprintf("%s/%s", AppName, Version)
 
 	// Client
 	kubernetesInterface := kubernetes.NewForConfigOrDie(config)
@@ -221,12 +220,14 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	}))
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
+	instanceTypeStore := nodeoverlay.NewInstanceTypeStore()
 
 	return ctx, &Operator{
 		Manager:             mgr,
 		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(appName)),
+		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)),
 		Clock:               clock.RealClock{},
+		InstanceTypeStore:   instanceTypeStore,
 	}
 }
 

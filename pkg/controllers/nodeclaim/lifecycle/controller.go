@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -65,6 +66,7 @@ type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	recorder      events.Recorder
+	nodePoolState nodepoolhealth.State
 
 	launch         *Launch
 	registration   *Registration
@@ -72,23 +74,23 @@ type Controller struct {
 	liveness       *Liveness
 }
 
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recorder events.Recorder, nodePoolState nodepoolhealth.State) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		recorder:      recorder,
+		nodePoolState: nodePoolState,
 
 		launch:         &Launch{kubeClient: kubeClient, cloudProvider: cloudProvider, cache: cache.New(time.Hour, time.Minute), recorder: recorder},
-		registration:   &Registration{kubeClient: kubeClient, recorder: recorder},
+		registration:   &Registration{kubeClient: kubeClient, recorder: recorder, npState: nodePoolState},
 		initialization: &Initialization{kubeClient: kubeClient},
-		liveness:       &Liveness{clock: clk, kubeClient: kubeClient},
+		liveness:       &Liveness{clock: clk, kubeClient: kubeClient, npState: nodePoolState},
 	}
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 	// higher concurrency limit since we want fast reaction to node syncing and launch
 	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
-	log.FromContext(ctx).V(1).Info("nodeclaim.lifecycle maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	qps, bucketSize := utilscontroller.GetTypedBucketConfigs(10, minReconciles, maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
@@ -271,14 +273,14 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 
 func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	// if the expiration annotation is already set, we don't need to do anything
-	if _, exists := nodeClaim.ObjectMeta.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
+	if _, exists := nodeClaim.Annotations[v1.NodeClaimTerminationTimestampAnnotationKey]; exists {
 		return nil
 	}
 
 	// In Kubernetes, every object has a terminationGracePeriodSeconds, defaulted to and un-changeable from 0. There is an additional TerminationGracePeriodSeconds in the PodSpec which can be configured.
 	// We use the kubernetes object TerminationGracePeriod to infer that the DeletionTimestamp is always equal to the time the NodeClaim is deleted.
 	// This should not be confused with the NodeClaim.spec.terminationGracePeriod field introduced in Karpenter Custom Resources.
-	if nodeClaim.Spec.TerminationGracePeriod != nil && !nodeClaim.ObjectMeta.DeletionTimestamp.IsZero() {
+	if nodeClaim.Spec.TerminationGracePeriod != nil && !nodeClaim.DeletionTimestamp.IsZero() {
 		terminationTimeString := nodeClaim.DeletionTimestamp.Time.Add(nodeClaim.Spec.TerminationGracePeriod.Duration).Format(time.RFC3339)
 		return c.annotateTerminationGracePeriodTerminationTime(ctx, nodeClaim, terminationTimeString)
 	}
@@ -288,7 +290,7 @@ func (c *Controller) ensureTerminationGracePeriodTerminationTimeAnnotation(ctx c
 
 func (c *Controller) annotateTerminationGracePeriodTerminationTime(ctx context.Context, nodeClaim *v1.NodeClaim, terminationTime string) error {
 	stored := nodeClaim.DeepCopy()
-	nodeClaim.ObjectMeta.Annotations = lo.Assign(nodeClaim.ObjectMeta.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
+	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 
 	// We use client.MergeFromWithOptimisticLock because patching a terminationGracePeriod annotation
 	// can cause races with the health controller, as that controller sets the current time as the terminationGracePeriod annotation

@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -66,8 +65,6 @@ func (c *DaemonSetController) Reconcile(ctx context.Context, req reconcile.Reque
 }
 
 func (c *DaemonSetController) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)
-	log.FromContext(ctx).V(1).Info("state.daemonset maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("state.daemonset").
 		For(&appsv1.DaemonSet{}).
@@ -86,6 +83,6 @@ func (c *DaemonSetController) Register(ctx context.Context, m manager.Manager) e
 				return false
 			},
 		}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(c)
 }

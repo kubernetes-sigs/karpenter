@@ -47,6 +47,7 @@ import (
 	nodeclaimhydration "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/hydration"
 	nodeclaimlifecycle "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/podevents"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	nodepoolcounter "sigs.k8s.io/karpenter/pkg/controllers/nodepool/counter"
 	nodepoolhash "sigs.k8s.io/karpenter/pkg/controllers/nodepool/hash"
 	nodepoolreadiness "sigs.k8s.io/karpenter/pkg/controllers/nodepool/readiness"
@@ -55,8 +56,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	staticdeprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/deprovisioning"
+	staticprovisioning "sigs.k8s.io/karpenter/pkg/controllers/static/provisioning"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 )
 
 func NewControllers(
@@ -66,11 +70,14 @@ func NewControllers(
 	kubeClient client.Client,
 	recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
+	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
+	instanceTypeStore *nodeoverlay.InstanceTypeStore,
 ) []controller.Controller {
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
+	npState := make(nodepoolhealth.State)
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
@@ -86,12 +93,12 @@ func NewControllers(
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
-		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider),
+		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider, npState),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
 		nodepoolvalidation.NewController(kubeClient, cloudProvider),
 		podevents.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
-		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder),
+		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
@@ -127,6 +134,15 @@ func NewControllers(
 	// The cloud provider must define status conditions for the node repair controller to use to detect unhealthy nodes
 	if len(cloudProvider.RepairPolicies()) != 0 && options.FromContext(ctx).FeatureGates.NodeRepair {
 		controllers = append(controllers, health.NewController(kubeClient, cloudProvider, clock, recorder))
+	}
+
+	if options.FromContext(ctx).FeatureGates.StaticCapacity {
+		controllers = append(controllers, staticprovisioning.NewController(kubeClient, cluster, recorder, cloudProvider, p, clock))
+		controllers = append(controllers, staticdeprovisioning.NewController(kubeClient, cluster, cloudProvider, clock))
+	}
+
+	if options.FromContext(ctx).FeatureGates.NodeOverlay {
+		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
 	}
 
 	return controllers

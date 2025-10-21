@@ -20,10 +20,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,12 +37,14 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
 
 type Registration struct {
 	kubeClient client.Client
 	recorder   events.Recorder
+	npState    nodepoolhealth.State
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
@@ -93,8 +97,8 @@ func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (
 	return reconcile.Result{}, nil
 }
 
-// updateNodePoolRegistrationHealth sets the NodeRegistrationHealthy=True
-// on the NodePool if the nodeClaim that registered is owned by a NodePool
+// updateNodePoolRegistrationHealth adds a positive value to the nodepool buffer that stores node
+// registration results and sets NodeRegistrationHealthy=True on the NodePool if IsHealthy() > 0
 func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	nodePoolName := nodeClaim.Labels[v1.NodePoolLabelKey]
 	if nodePoolName != "" {
@@ -102,8 +106,13 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 		if err := r.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 			return err
 		}
+		if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+			return o.Kind == object.GVK(nodePool).Kind && o.UID == nodePool.UID
+		}); !found {
+			return nil
+		}
 		stored := nodePool.DeepCopy()
-		if nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy) {
+		if r.npState.DryRun(nodePool.UID, true).Status() == nodepoolhealth.StatusHealthy && nodePool.StatusConditions().SetTrue(v1.ConditionTypeNodeRegistrationHealthy) {
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 			// can cause races due to the fact that it fully replaces the list on a change
 			// Here, we are updating the status condition list
@@ -111,6 +120,7 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 				return err
 			}
 		}
+		r.npState.Update(nodePool.UID, true)
 	}
 	return nil
 }

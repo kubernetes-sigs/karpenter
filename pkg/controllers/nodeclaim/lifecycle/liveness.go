@@ -20,10 +20,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/api/errors"
 
 	"k8s.io/apimachinery/pkg/types"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"k8s.io/utils/clock"
@@ -32,11 +35,13 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
 )
 
 type Liveness struct {
 	clock      clock.Clock
 	kubeClient client.Client
+	npState    nodepoolhealth.State
 }
 
 // registrationTimeout is a heuristic time that we expect the node to register within
@@ -81,6 +86,12 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 			// This should never occur because if we failed to launch we requeue the object with error instead of this requeueAfter
 			return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
 		}
+		if err := l.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, err
+		}
 		if err := l.deleteNodeClaimForTimeout(ctx, LaunchTimeout, nodeClaim); err != nil {
 			if client.IgnoreNotFound(err) != nil {
 				return reconcile.Result{}, err
@@ -121,8 +132,13 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 		if err := l.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
 			return err
 		}
-		if nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsUnknown() {
-			stored := nodePool.DeepCopy()
+		if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
+			return o.Kind == object.GVK(nodePool).Kind && o.UID == nodePool.UID
+		}); !found {
+			return nil
+		}
+		stored := nodePool.DeepCopy()
+		if l.npState.DryRun(nodePool.UID, false).Status() == nodepoolhealth.StatusUnhealthy && !nodePool.StatusConditions().Get(v1.ConditionTypeNodeRegistrationHealthy).IsFalse() {
 			// If the nodeClaim failed to register during the timeout set NodeRegistrationHealthy status condition on
 			// NodePool to False. If the launch failed get the launch failure reason and message from nodeClaim.
 			if launchCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeLaunched); launchCondition.IsTrue() {
@@ -137,6 +153,7 @@ func (l *Liveness) updateNodePoolRegistrationHealth(ctx context.Context, nodeCla
 				return err
 			}
 		}
+		l.npState.Update(nodePool.UID, false)
 	}
 	return nil
 }

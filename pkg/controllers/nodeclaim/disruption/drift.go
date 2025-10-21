@@ -96,10 +96,12 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 		if err != nil {
 			return "", err
 		}
-		d.instanceTypeNotFoundCheckCache.SetDefault(string(nodeClaim.UID), nil)
 		if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
 			return reason, nil
 		}
+		// Only add a cache entry once we've validated that an instance type exists. We only cache a successful check rather
+		// that the result to ensure we respond quickly to transient abnormalities in the GetInstanceTypes response.
+		d.instanceTypeNotFoundCheckCache.SetDefault(string(nodeClaim.UID), nil)
 	}
 	// Then check if it's drifted from the cloud provider side.
 	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
@@ -135,7 +137,9 @@ func instanceTypeNotFound(its []*cloudprovider.InstanceType, nodeClaim *v1.NodeC
 	// reason we don't compare against the reservation ID and leave that to the provider to implement.
 	if nodeClaim.Labels[v1.CapacityTypeLabelKey] == v1.CapacityTypeReserved {
 		reqs[v1.CapacityTypeLabelKey] = scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeReserved, v1.CapacityTypeOnDemand)
-		delete(reqs, cloudprovider.ReservationIDLabel)
+		for label := range cloudprovider.ReservedCapacityLabels {
+			delete(reqs, label)
+		}
 	}
 	if !it.Offerings.HasCompatible(reqs) {
 		return InstanceTypeNotFound

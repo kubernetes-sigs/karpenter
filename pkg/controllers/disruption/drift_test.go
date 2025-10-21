@@ -982,4 +982,44 @@ var _ = Describe("Drift", func() {
 			ExpectExists(ctx, env.Client, node)
 		})
 	})
+
+	Context("Static NodePool", func() {
+		It("should not consider static nodepool for drift", func() {
+			staticNp := test.StaticNodePool(v1.NodePool{
+				Spec: v1.NodePoolSpec{
+					Replicas:   lo.ToPtr(int64(2)), // Static nodepool with 2 desired replica
+					Disruption: v1.Disruption{},
+				},
+			})
+
+			nodeClaims, nodes := test.NodeClaimsAndNodes(2, v1.NodeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						v1.NodePoolLabelKey:        staticNp.Name,
+						v1.NodeInitializedLabelKey: "true",
+					},
+				},
+				Status: v1.NodeClaimStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10"),
+						corev1.ResourceMemory: resource.MustParse("1000Mi"),
+						corev1.ResourcePods:   resource.MustParse("2"),
+					},
+				},
+			})
+			for _, nc := range nodeClaims {
+				nc.StatusConditions().SetTrue(v1.ConditionTypeDrifted)
+			}
+			drift := disruption.NewDrift(env.Client, cluster, prov, recorder)
+
+			ExpectApplied(ctx, env.Client, staticNp, nodeClaims[0], nodeClaims[1], nodes[0], nodes[1])
+
+			// inform cluster state about nodes and nodeClaims
+			ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{nodes[0], nodes[1]}, []*v1.NodeClaim{nodeClaims[0], nodeClaims[1]})
+
+			candidates, err := disruption.GetCandidates(ctx, cluster, env.Client, recorder, fakeClock, cloudProvider, drift.ShouldDisrupt, drift.Class(), queue)
+			Expect(err).To(Succeed())
+			Expect(candidates).To(HaveLen(0))
+		})
+	})
 })

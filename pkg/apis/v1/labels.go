@@ -111,6 +111,13 @@ var (
 		),
 	}
 
+	// WellKnownLabelsForOfferings are for requirements where a known labels that will be used in the
+	// offerings passed back by the provider
+	WellKnownLabelsForOfferings = sets.New(
+		v1.LabelTopologyZone,
+		CapacityTypeLabelKey,
+	)
+
 	// RestrictedLabels are labels that should not be used
 	// because they may interfere with the internal provisioning logic.
 	RestrictedLabels = sets.New(

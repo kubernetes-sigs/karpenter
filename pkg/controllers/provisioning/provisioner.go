@@ -47,12 +47,14 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/daemonset"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
@@ -155,6 +157,14 @@ func (p *Provisioner) CreateNodeClaims(ctx context.Context, nodeClaims []*schedu
 		} else {
 			nodeClaimNames[i] = name
 		}
+
+		// Regardless of if we successfully created the NodeClaim or not, we should release the reservation. If the NodeClaim
+		// was successfully created, we've updated the active node count in Create already. If we failed, we should release
+		// the reservation and allow the provisioner to create new NodeClaims in a subsequent attempt.
+		// NOTE: Only applies to static NodePools since node limits are not supported for dynamic NodePools
+		if nodeClaims[i].IsStaticNodeClaim {
+			p.cluster.NodePoolState.ReleaseNodeCount(nodeClaims[i].NodePoolName, 1)
+		}
 	})
 	return nodeClaimNames, multierr.Combine(errs...)
 }
@@ -171,6 +181,10 @@ func (p *Provisioner) GetPendingPods(ctx context.Context) ([]*corev1.Pod, error)
 			// Mark in memory that this pod is unschedulable
 			p.cluster.MarkPodSchedulingDecisions(ctx, map[*corev1.Pod]error{po: fmt.Errorf("ignoring pod, %w", err)}, nil, nil)
 			log.FromContext(ctx).WithValues("Pod", klog.KObj(po)).V(1).Info(fmt.Sprintf("ignoring pod, %s", err))
+			// Don't create pod events for pods that are specifically avoiding scheduling to Karpenter-managed capacity
+			if !errors.Is(err, KarpenterManagedLabelDoesNotExistError) {
+				p.recorder.Publish(scheduler.PodFailedToScheduleEvent(po, err))
+			}
 			return true
 		}
 		return false
@@ -229,6 +243,9 @@ func (p *Provisioner) NewScheduler(
 		return nil, fmt.Errorf("listing nodepools, %w", err)
 	}
 	nodePools = lo.Filter(nodePools, func(np *v1.NodePool, _ int) bool {
+		if nodepoolutils.IsStatic(np) {
+			return false
+		}
 		if !np.StatusConditions().IsTrue(status.ConditionReady) {
 			log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).Error(err, "ignoring nodepool, not ready")
 			return false
@@ -248,6 +265,10 @@ func (p *Provisioner) NewScheduler(
 	for _, np := range nodePools {
 		its, err := p.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
+			if nodeoverlay.IsUnevaluatedNodePoolError(err) {
+				log.FromContext(ctx).WithValues("NodePool", klog.KObj(np)).V(1).Info("skipping, awaiting nodeoverlay evaluation")
+				continue
+			}
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, fmt.Errorf("getting instance types, %w", err)
 			}
@@ -292,7 +313,7 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	// We don't consider the nodes that are MarkedForDeletion since this capacity shouldn't be considered
 	// as persistent capacity for the cluster (since it will soon be removed). Additionally, we are scheduling for
 	// the pods that are on these nodes so the MarkedForDeletion node capacity can't be considered.
-	nodes := p.cluster.Nodes()
+	nodes := p.cluster.DeepCopyNodes()
 
 	// Get pods, exit if nothing to do
 	pendingPods, err := p.GetPendingPods(ctx)
@@ -462,7 +483,7 @@ func (p *Provisioner) getDaemonSetPods(ctx context.Context) ([]*corev1.Pod, erro
 	return lo.Map(daemonSetList.Items, func(d appsv1.DaemonSet, _ int) *corev1.Pod {
 		pod := p.cluster.GetDaemonSetPod(&d)
 		if pod == nil {
-			pod = &corev1.Pod{Spec: d.Spec.Template.Spec}
+			pod = daemonset.PodForDaemonSet(&d)
 		}
 		// Replacing retrieved pod affinity with daemonset pod template required node affinity since this is overridden
 		// by the daemonset controller during pod creation
@@ -489,12 +510,14 @@ func (p *Provisioner) Validate(ctx context.Context, pod *corev1.Pod) error {
 	)
 }
 
+var KarpenterManagedLabelDoesNotExistError = serrors.Wrap(fmt.Errorf("configured to not run on a Karpenter provisioned node"), "requirement", fmt.Sprintf("%s %s", v1.NodePoolLabelKey, corev1.NodeSelectorOpDoesNotExist))
+
 // validateKarpenterManagedLabelCanExist provides a more clear error message in the event of scheduling a pod that specifically doesn't
 // want to run on a Karpenter node (e.g. a Karpenter controller replica).
 func validateKarpenterManagedLabelCanExist(p *corev1.Pod) error {
 	for _, req := range scheduling.NewPodRequirements(p) {
 		if req.Key == v1.NodePoolLabelKey && req.Operator() == corev1.NodeSelectorOpDoesNotExist {
-			return serrors.Wrap(fmt.Errorf("configured to not run on a Karpenter provisioned node"), "requirement", fmt.Sprintf("%s %s", v1.NodePoolLabelKey, corev1.NodeSelectorOpDoesNotExist))
+			return KarpenterManagedLabelDoesNotExistError
 		}
 	}
 	return nil

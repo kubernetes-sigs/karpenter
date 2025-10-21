@@ -18,7 +18,6 @@ package consistency
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -133,7 +132,7 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 			return fmt.Errorf("checking node with %T, %w", check, err)
 		}
 		for _, issue := range issues {
-			log.FromContext(ctx).Error(stderrors.New(string(issue)), "consistency error")
+			log.FromContext(ctx).Info(fmt.Sprintf("failed consistency check, %s", string(issue)))
 			c.recorder.Publish(FailedConsistencyCheckEvent(nodeClaim, string(issue)))
 		}
 		hasIssues = hasIssues || (len(issues) > 0)
@@ -150,8 +149,6 @@ func (c *Controller) checkConsistency(ctx context.Context, nodeClaim *v1.NodeCla
 }
 
 func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
-	maxConcurrentReconciles := utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)
-	log.FromContext(ctx).V(1).Info("nodeclaim.consistency maxConcurrentReconciles set", "maxConcurrentReconciles", maxConcurrentReconciles)
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclaim.consistency").
 		For(&v1.NodeClaim{}, builder.WithPredicates(nodeclaimutils.IsManagedPredicateFuncs(c.cloudProvider))).
@@ -159,6 +156,6 @@ func (c *Controller) Register(ctx context.Context, m manager.Manager) error {
 			&corev1.Node{},
 			nodeclaimutils.NodeEventHandler(c.kubeClient, c.cloudProvider),
 		).
-		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), 10, 1000)}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
