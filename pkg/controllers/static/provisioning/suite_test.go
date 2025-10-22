@@ -71,6 +71,7 @@ var (
 	env                      *test.Environment
 	nodeClaimStateController *informer.NodeClaimController
 	prov                     *provisioning.Provisioner
+	clusterCost              *state.ClusterCost
 )
 
 func TestAPIs(t *testing.T) {
@@ -85,7 +86,8 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	controller = static.NewController(env.Client, cluster, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, prov, fakeClock)

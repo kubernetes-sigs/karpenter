@@ -61,6 +61,7 @@ var (
 	fakeClock             *clock.FakeClock
 	nodeOverlayController *nodeoverlay.Controller
 	store                 *nodeoverlay.InstanceTypeStore
+	clusterCost           *state.ClusterCost
 )
 
 func TestNodeOverlay(t *testing.T) {
@@ -74,8 +75,9 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	store = nodeoverlay.NewInstanceTypeStore()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
-	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, store, cluster)
+	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider, clusterCost)
+	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, store, cluster, clusterCost)
 })
 
 var _ = BeforeEach(func() {

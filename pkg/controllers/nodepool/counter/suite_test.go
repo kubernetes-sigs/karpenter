@@ -49,6 +49,7 @@ var nodeClaimController *informer.NodeClaimController
 var nodeController *informer.NodeController
 var ctx context.Context
 var env *test.Environment
+var clusterCost *state.ClusterCost
 var cluster *state.Cluster
 var fakeClock *clock.FakeClock
 var cloudProvider *fake.CloudProvider
@@ -64,7 +65,8 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider, clusterCost)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	nodePoolInformerController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)

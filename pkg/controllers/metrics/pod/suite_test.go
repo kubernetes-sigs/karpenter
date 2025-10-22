@@ -42,6 +42,7 @@ var podController *pod.Controller
 var ctx context.Context
 var env *test.Environment
 var cluster *state.Cluster
+var clusterCost *state.ClusterCost
 var cloudProvider *fake.CloudProvider
 var fakeClock *clock.FakeClock
 
@@ -55,7 +56,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment()
 	fakeClock = clock.NewFakeClock(time.Now())
 	cloudProvider = fake.NewCloudProvider()
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider, clusterCost)
 	podController = pod.NewController(env.Client, cluster)
 })
 

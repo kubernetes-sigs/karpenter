@@ -35,7 +35,8 @@ func main() {
 
 	overlayUndecoratedCloudProvider := kwok.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
 	cloudProvider := overlay.Decorate(overlayUndecoratedCloudProvider, op.GetClient(), op.InstanceTypeStore)
-	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
+	clusterCost := state.NewClusterCost(ctx, cloudProvider, op.GetClient())
+	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider, clusterCost)
 	op.
 		WithControllers(ctx, controllers.NewControllers(
 			ctx,
@@ -47,5 +48,6 @@ func main() {
 			overlayUndecoratedCloudProvider,
 			clusterState,
 			op.InstanceTypeStore,
+			clusterCost,
 		)...).Start(ctx)
 }

@@ -49,6 +49,7 @@ type Controller struct {
 	cloudProvider     cloudprovider.CloudProvider
 	clusterState      *state.Cluster
 	instanceTypeStore *InstanceTypeStore
+	clusterCost       *state.ClusterCost
 }
 
 func (c *Controller) Name() string {
@@ -56,16 +57,19 @@ func (c *Controller) Name() string {
 }
 
 // NewController constructs a controller for node overlay validation
-func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeStore *InstanceTypeStore, clusterState *state.Cluster) *Controller {
+func NewController(kubeClient client.Client, cp cloudprovider.CloudProvider, instanceTypeStore *InstanceTypeStore, clusterState *state.Cluster, clusterCost *state.ClusterCost) *Controller {
 	return &Controller{
 		kubeClient:        kubeClient,
 		cloudProvider:     cp,
 		instanceTypeStore: instanceTypeStore,
 		clusterState:      clusterState,
+		clusterCost:       clusterCost,
 	}
 }
 
 // Reconcile validates that all node overlays don't have conflicting requirements
+//
+//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
@@ -112,9 +116,26 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("updating nodeoverlay statuses, %w", err)
 	}
-
 	c.instanceTypeStore.UpdateStore(temporaryStore)
 	c.clusterState.MarkUnconsolidated()
+
+	var errs error
+	for _, np := range nodePoolList.Items {
+		instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
+		if err != nil {
+			errs = multierr.Append(errs, err)
+			continue
+		}
+		overlayedInstanceTypes, err := c.instanceTypeStore.ApplyAll(np.Name, instanceTypes)
+		if err != nil {
+			errs = multierr.Append(errs, err)
+			continue
+		}
+		c.clusterCost.UpdateOfferings(ctx, &np, overlayedInstanceTypes)
+	}
+	if errs != nil {
+		return reconcile.Result{}, fmt.Errorf("updating cluster cost, %w", err)
+	}
 	return reconcile.Result{RequeueAfter: 6 * time.Hour}, nil
 }
 

@@ -231,7 +231,8 @@ func setupScheduler(ctx context.Context, pods []*corev1.Pod, opts ...scheduling.
 
 	client := fakecr.NewFakeClient()
 	clock := &clock.RealClock{}
-	cluster = state.NewCluster(clock, client, cloudProvider)
+	clusterCost := state.NewClusterCost(ctx, cloudProvider, client)
+	cluster = state.NewCluster(clock, client, cloudProvider, clusterCost)
 	topology, err := scheduling.NewTopology(ctx, client, cluster, nil, []*v1.NodePool{nodePool}, map[string][]*cloudprovider.InstanceType{
 		nodePool.Name: instanceTypes,
 	}, pods, opts...)

@@ -33,6 +33,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/metrics/cost"
 	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
@@ -73,6 +74,7 @@ func NewControllers(
 	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
+	clusterCost *state.ClusterCost,
 ) []controller.Controller {
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
@@ -110,6 +112,7 @@ func NewControllers(
 			metricspod.NewController(kubeClient, cluster),
 			metricsnodepool.NewController(kubeClient, cloudProvider),
 			metricsnode.NewController(cluster),
+			cost.NewController(kubeClient, clusterCost),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
 				mgr.GetEventRecorderFor("karpenter"),
@@ -142,7 +145,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
-		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
+		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster, clusterCost))
 	}
 
 	return controllers

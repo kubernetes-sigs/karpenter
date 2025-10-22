@@ -63,6 +63,7 @@ import (
 
 var ctx context.Context
 var env *test.Environment
+var clusterCost *state.ClusterCost
 var cluster *state.Cluster
 var disruptionController *disruption.Controller
 var prov *provisioning.Provisioner
@@ -92,7 +93,8 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider, clusterCost)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
 	recorder = test.NewEventRecorder()

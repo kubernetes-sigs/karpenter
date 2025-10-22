@@ -56,6 +56,7 @@ var (
 	controller               *static.Controller
 	env                      *test.Environment
 	nodeClaimStateController *informer.NodeClaimController
+	clusterCost              *state.ClusterCost
 )
 
 type failingClient struct {
@@ -80,7 +81,8 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	controller = static.NewController(env.Client, cluster, cloudProvider, fakeClock)
