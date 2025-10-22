@@ -8,7 +8,7 @@
 
 Karpenter’s scheduling algorithm uses a well-known bin-packing algorithm ([First Fit Decreasing](https://en.wikipedia.org/wiki/First-fit-decreasing_bin_packing)) to pack as many pods onto a set of instance type options as possible. This algorithm will necessarily continue packing pods onto Preflight Nodes so long as you have at least one instance type option that can fulfill all the pod requests.
 
-This methodology works fine for on-demand instance types, but starts to break down when you are requesting spot capacity. If you are launching spot capacity and want to ensure that you will not launch an instance that will immediately get interrupted after launch, you need to make sure that you have enough launch options in your launch request that your likelihood for launching a low-availability instance will be slim. Karpenter currently has no mechanism to ensure that today.
+This methodology works fine for on-demand instance types, but starts to break down when you are requesting spot capacity. If you are launching spot capacity and want to ensure that you will not launch an instance that will immediately get interrupted after launch, you need to make sure that you have enough launch options in your launch request that your likelihood for launching a low-availability instance will be slim. For spot instances, you should specify `karpenter.sh/capacity-type: spot` in your requirements. Karpenter currently has no mechanism to ensure minimum flexibility today.
 
 This RFC proposes an additional key `minValues` in the NodePool requirements block, allowing Karpenter to be aware of user-specified flexibility minimums while scheduling pods to a cluster. If Karpenter cannot meet this minimum flexibility when scheduling a pod, it will fail the scheduling loop for that NodePool, either falling back to another NodePool which meets the pod requirements or failing scheduling the pod altogether.
 
@@ -19,6 +19,9 @@ spec:
   template:
     spec:
       requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot"]
         - key: karpenter.kwok.sh/instance-family
           operator: In
           values: ["c", "m", "r"]
@@ -30,8 +33,8 @@ spec:
 
 ## Use-Cases
 
-1. I want to configure Karpenter to enforce more flexibility when launching spot nodes, ensuring that I am constantly using enough instance types that I get a high-availability instance type
-2. want to ensure that application pods scheduling to this NodePool *must* be flexible to different instance types, architectures, etc.
+1. I want to configure Karpenter to enforce more flexibility when launching spot nodes, ensuring that I am constantly using enough instance families that I get a high-availability instance type.
+2. I want to ensure that application pods scheduling to this NodePool *must* be flexible to different instance types, architectures, etc.
 
 ## Solutions
 
@@ -44,13 +47,16 @@ spec:
   template:
     spec:
       requirements:
-      - key: karpenter.kwok.sh/instance-family
-        operator: In
-        values: ["c", "m", "r"]
-        minValues: 2
-      - key: node.kubernetes.io/instance-type
-        operator: Exists
-        minValues: 10
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot"]
+        - key: karpenter.kwok.sh/instance-family
+          operator: In
+          values: ["c", "m", "r"]
+          minValues: 2
+        - key: node.kubernetes.io/instance-type
+          operator: Exists
+          minValues: 10
 ```
 
 We would add a new `minValues` field to the requirements section of the NodeClaim template. By adding this section to the NodeClaim template, we inform the scheduler that it should stop continuing to bin-pack pods onto Preflight NodeClaims and should, instead, create another Preflight NodeClaim that will schedule that pod.
