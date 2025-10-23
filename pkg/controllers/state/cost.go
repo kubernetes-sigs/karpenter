@@ -70,13 +70,28 @@ func NewClusterCost(ctx context.Context, cloudprovider cloudprovider.CloudProvid
 func (cc *ClusterCost) UpdateOfferings(ctx context.Context, np *v1.NodePool, instanceTypes []*cloudprovider.InstanceType) {
 	cc.Lock()
 	defer cc.Unlock()
+	cc.internalUpdateOfferings(np, instanceTypes)
+}
+
+func (cc *ClusterCost) internalNodepoolUpdate(ctx context.Context, np *v1.NodePool) error {
+	cc.Lock()
+	defer cc.Unlock()
+	instanceTypes, err := cc.cloudProvider.GetInstanceTypes(ctx, np)
+	if err != nil {
+		return err
+	}
+	cc.internalUpdateOfferings(np, instanceTypes)
+	return nil
+}
+
+func (cc *ClusterCost) internalUpdateOfferings(np *v1.NodePool, instanceTypes []*cloudprovider.InstanceType) {
 	npCost, exists := cc.npCostMap[np.Name]
 
 	if !exists {
 		cc.createNewNodePoolCost(np, instanceTypes)
 	} else {
-		npCost.overlayedInstanceMap = lo.SliceToMap(instanceTypes, func(it *cloudprovider.InstanceType) (string, *cloudprovider.InstanceType) {
-			return it.Name, it
+		npCost.overlayedInstanceMap = lo.FilterSliceToMap(instanceTypes, func(it *cloudprovider.InstanceType) (string, *cloudprovider.InstanceType, bool) {
+			return it.Name, it, it != nil
 		})
 		// re-calculate the cost as the instances have changed
 		cc.npCostMap[np.Name].cost = npCost.UpdateCost()
@@ -132,14 +147,14 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim v1.NodeCla
 			log.FromContext(ctx).Error(fmt.Errorf("getting nodepool from nodeclaim"), "nodeclaim", nodeClaim.Name)
 			return
 		}
-		err = cc.AddOffering(ctx, np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone])
+		cc.Lock()
+		defer cc.Unlock()
+		err = cc.internalAddOffering(ctx, np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone], true)
 		if err != nil {
 			// todo
 			return
 		}
-		cc.Lock()
 		cc.nodeClaimMap[client.ObjectKeyFromObject(&nodeClaim).String()] = true
-		cc.Unlock()
 		return
 	}
 }
@@ -165,29 +180,26 @@ func (cc *ClusterCost) RemoveNodeClaim(ctx context.Context, nodeClaim v1.NodeCla
 			log.FromContext(ctx).Error(fmt.Errorf("getting nodepool from nodeclaim"), "nodeclaim", nodeClaim.Name)
 			return
 		}
-		err = cc.RemoveOffering(ctx, np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone])
+		cc.Lock()
+		defer cc.Unlock()
+		err = cc.internalRemoveOffering(np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone])
 		if err != nil {
 			//todo
 			return
 		}
-		cc.Lock()
 		delete(cc.nodeClaimMap, client.ObjectKeyFromObject(&nodeClaim).String())
-		cc.Unlock()
 		return
 	}
 }
 
-func (cc *ClusterCost) AddOffering(ctx context.Context, np *v1.NodePool, instanceName, capacityType, zone string) error {
-	cc.Lock()
-	defer cc.Unlock()
-
+func (cc *ClusterCost) internalAddOffering(ctx context.Context, np *v1.NodePool, instanceName, capacityType, zone string, firstTry bool) error {
 	_, exists := cc.npCostMap[np.Name]
 	if !exists {
 		// create the new npc
 		instanceTypes, err := cc.cloudProvider.GetInstanceTypes(ctx, np)
 		if err != nil {
 			//todo
-			return nil
+			return err
 		}
 		cc.createNewNodePoolCost(np, instanceTypes)
 
@@ -195,32 +207,32 @@ func (cc *ClusterCost) AddOffering(ctx context.Context, np *v1.NodePool, instanc
 	ok := OfferingKey{capacity: capacityType, zone: zone, instanceName: instanceName}
 	oc, exists := cc.npCostMap[np.Name].offeringCounts[ok]
 	if !exists {
-		foundOffering, exists := lo.Find(cc.npCostMap[np.Name].overlayedInstanceMap[instanceName].Offerings, func(o *cloudprovider.Offering) bool {
+		it, exists := cc.npCostMap[np.Name].overlayedInstanceMap[instanceName]
+		if !exists {
+			// our offerings must be out of date, we should update and retry
+			if !firstTry {
+				err := cc.internalNodepoolUpdate(ctx, np)
+				if err != nil {
+					return err
+				}
+				return cc.internalAddOffering(ctx, np, instanceName, capacityType, zone, false)
+			} else {
+				return fmt.Errorf("tried updating nodepool once already. nodepool: %s instanceName: %s capacityType: %s zone: %s", np.Name, instanceName, capacityType, zone)
+			}
+		}
+		foundOffering, exists := lo.Find(it.Offerings, func(o *cloudprovider.Offering) bool {
 			return capacityType == o.CapacityType() && zone == o.Zone()
 		})
 		if !exists {
-			// our offerings must be out of date, we should update
-			instanceTypes, err := cc.cloudProvider.GetInstanceTypes(ctx, np)
-			if err != nil {
-				//todo
-				return nil
-			}
-			cc.Unlock()
-			fmt.Printf("Updating Offerings\n")
-			cc.UpdateOfferings(ctx, np, instanceTypes)
-			cc.Lock()
-			// check again to see if it worked
-			_, exists := lo.Find(cc.npCostMap[np.Name].overlayedInstanceMap[instanceName].Offerings, func(o *cloudprovider.Offering) bool {
-				return o.CapacityType() == ok.capacity && o.Zone() == ok.zone
-			})
-			if !exists {
-				//throw irrecoverable error, we shouldn't be able to get here
-				return nil
+			// our offerings must be out of date, we should update and retry
+			if !firstTry {
+				err := cc.internalNodepoolUpdate(ctx, np)
+				if err != nil {
+					return err
+				}
+				return cc.internalAddOffering(ctx, np, instanceName, capacityType, zone, false)
 			} else {
-				// okay it now exists, lets retry
-				fmt.Printf("Retryin\n")
-				cc.Unlock()
-				return cc.AddOffering(ctx, np, instanceName, capacityType, zone)
+				return fmt.Errorf("tried updating nodepool once already. nodepool: %s instanceName: %s capacityType: %s zone: %s", np.Name, instanceName, capacityType, zone)
 			}
 		}
 		oc = OfferingCount{
@@ -235,21 +247,18 @@ func (cc *ClusterCost) AddOffering(ctx context.Context, np *v1.NodePool, instanc
 	return nil
 }
 
-func (cc *ClusterCost) RemoveOffering(ctx context.Context, np *v1.NodePool, instanceName, capacityType, zone string) error {
-	cc.Lock()
-	defer cc.Unlock()
-
+func (cc *ClusterCost) internalRemoveOffering(np *v1.NodePool, instanceName, capacityType, zone string) error {
 	npc, exists := cc.npCostMap[np.Name]
 	if !exists {
 		// throw irrecoverable error, we shouldn't be able to get here
-		return nil
+		return fmt.Errorf("tried to remove an offering from a nodepool that doesn't exist")
 
 	}
 	ok := OfferingKey{capacity: capacityType, zone: zone, instanceName: instanceName}
 	oc, exists := npc.offeringCounts[ok]
 	if !exists {
 		// throw irrecoverable error, we shouldn't be able to get here
-		return nil
+		return fmt.Errorf("tried to remove an offering from nodepool that doesn't have those offerings")
 	}
 	oc.Count -= 1
 	cc.npCostMap[np.Name].offeringCounts[ok] = oc
