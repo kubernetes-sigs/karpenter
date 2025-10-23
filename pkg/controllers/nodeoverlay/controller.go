@@ -131,10 +131,14 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 			errs = multierr.Append(errs, err)
 			continue
 		}
-		c.clusterCost.UpdateOfferings(ctx, &np, overlayedInstanceTypes)
+		err = c.clusterCost.UpdateOfferings(ctx, &np, overlayedInstanceTypes)
+		if err != nil {
+			errs = multierr.Append(errs, err)
+			continue
+		}
 	}
 	if errs != nil {
-		return reconcile.Result{}, fmt.Errorf("updating cluster cost, %w", err)
+		return reconcile.Result{}, fmt.Errorf("updating cluster cost, %w", errs)
 	}
 	return reconcile.Result{RequeueAfter: 6 * time.Hour}, nil
 }

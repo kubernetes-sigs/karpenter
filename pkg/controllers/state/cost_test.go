@@ -329,8 +329,8 @@ var _ = Describe("ClusterCost", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{updatedInstanceType}
 
 			// Call UpdateOfferings to trigger cost recalculation
-			clusterCost.UpdateOfferings(ctx, testNodePool, cloudProvider.InstanceTypes)
-			clusterCost.UpdateOfferings(ctx, testNodePool2, cloudProvider.InstanceTypes)
+			_ = clusterCost.UpdateOfferings(ctx, testNodePool, cloudProvider.InstanceTypes)
+			_ = clusterCost.UpdateOfferings(ctx, testNodePool2, cloudProvider.InstanceTypes)
 
 			// Verify costs have been updated across all nodepools
 			finalNodePool1Cost := clusterCost.GetNodepoolCost(testNodePool)
