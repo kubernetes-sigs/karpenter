@@ -212,7 +212,7 @@ func (c *Controller) annotateTerminationGracePeriod(ctx context.Context, nodeCla
 	terminationTime := c.clock.Now().Format(time.RFC3339)
 	nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{v1.NodeClaimTerminationTimestampAnnotationKey: terminationTime})
 
-	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+	if !equality.Semantic.DeepEqual(stored.Annotations, nodeClaim.Annotations) {
 		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFrom(stored)); err != nil {
 			return err
 		}

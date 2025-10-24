@@ -89,7 +89,7 @@ func (c *Controller) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.
 	// otherwise, set the pod event time to now
 	stored := nc.DeepCopy()
 	nc.Status.LastPodEventTime.Time = c.clock.Now()
-	if !equality.Semantic.DeepEqual(stored, nc) {
+	if !equality.Semantic.DeepEqual(stored.Status.LastPodEventTime, nc.Status.LastPodEventTime) {
 		if err = c.kubeClient.Status().Patch(ctx, nc, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
