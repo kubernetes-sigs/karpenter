@@ -125,8 +125,6 @@ func (cc *ClusterCost) UpdateOfferings(ctx context.Context, np *v1.NodePool, ins
 }
 
 func (cc *ClusterCost) internalNodepoolUpdate(ctx context.Context, np *v1.NodePool) error {
-	cc.Lock()
-	defer cc.Unlock()
 	instanceTypes, err := cc.cloudProvider.GetInstanceTypes(ctx, np)
 	if err != nil {
 		return fmt.Errorf("failed to get instance types for nodepool %q: %w", np.Name, err)
