@@ -69,6 +69,7 @@ var ctx context.Context
 var prov *provisioning.Provisioner
 var env *test.Environment
 var fakeClock *clock.FakeClock
+var clusterCost *state.ClusterCost
 var cluster *state.Cluster
 var cloudProvider *fake.CloudProvider
 var nodeStateController *informer.NodeController
@@ -95,9 +96,10 @@ var _ = BeforeSuite(func() {
 	// set these on the cloud provider, so we can manipulate them if needed
 	cloudProvider.InstanceTypes = instanceTypes
 	fakeClock = clock.NewFakeClock(time.Now())
+	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
-	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	podStateController = informer.NewPodController(env.Client, cluster)
 	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
