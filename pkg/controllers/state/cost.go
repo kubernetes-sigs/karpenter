@@ -189,9 +189,9 @@ func (cc *ClusterCost) createNewNodePoolCost(np *v1.NodePool, instanceTypes []*c
 
 // UpdateNodeClaim adds a NodeClaim to cost tracking. The NodeClaim must have
 // all required labels or it will be ignored and logged as an error.
-func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim v1.NodeClaim) {
+func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) {
 	cc.RLock()
-	_, exists := cc.nodeClaimMap[client.ObjectKeyFromObject(&nodeClaim).String()]
+	_, exists := cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim).String()]
 	cc.RUnlock()
 	if !exists {
 		// First lets check if the right labels are there
@@ -229,16 +229,16 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim v1.NodeCla
 			})
 			return
 		}
-		cc.nodeClaimMap[client.ObjectKeyFromObject(&nodeClaim).String()] = true
+		cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim).String()] = true
 		return
 	}
 }
 
-// RemoveNodeClaim removes a NodeClaim from cost tracking. If the NodeClaim
+// DeleteNodeClaim removes a NodeClaim from cost tracking. If the NodeClaim
 // was not being tracked, this operation is a no-op.
-func (cc *ClusterCost) RemoveNodeClaim(ctx context.Context, nodeClaim v1.NodeClaim) {
+func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) {
 	cc.RLock()
-	_, exists := cc.nodeClaimMap[client.ObjectKeyFromObject(&nodeClaim).String()]
+	_, exists := cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim).String()]
 	cc.RUnlock()
 	if !exists {
 		return
@@ -288,7 +288,7 @@ func (cc *ClusterCost) RemoveNodeClaim(ctx context.Context, nodeClaim v1.NodeCla
 		})
 		return
 	}
-	delete(cc.nodeClaimMap, client.ObjectKeyFromObject(&nodeClaim).String())
+	delete(cc.nodeClaimMap, client.ObjectKeyFromObject(nodeClaim).String())
 }
 
 func (cc *ClusterCost) internalAddOffering(ctx context.Context, np *v1.NodePool, instanceName, capacityType, zone string, firstTry bool) error {

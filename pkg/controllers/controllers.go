@@ -92,7 +92,7 @@ func NewControllers(
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster),
-		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster),
+		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider, npState),

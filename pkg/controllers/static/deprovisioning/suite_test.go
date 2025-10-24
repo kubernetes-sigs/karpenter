@@ -82,11 +82,11 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
 	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider, clusterCost)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
 	controller = static.NewController(env.Client, cluster, cloudProvider, fakeClock)
-	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster)
+	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 })
 
 var _ = BeforeEach(func() {

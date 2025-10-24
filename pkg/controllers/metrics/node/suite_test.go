@@ -44,7 +44,6 @@ var ctx context.Context
 var fakeClock *clock.FakeClock
 var env *test.Environment
 var cluster *state.Cluster
-var clusterCost *state.ClusterCost
 var nodeController *informer.NodeController
 var metricsStateController *node.Controller
 var cloudProvider *fake.CloudProvider
@@ -62,8 +61,7 @@ var _ = BeforeSuite(func() {
 	cloudProvider = fake.NewCloudProvider()
 	cloudProvider.InstanceTypes = fake.InstanceTypesAssorted()
 	fakeClock = clock.NewFakeClock(time.Now())
-	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
-	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider, clusterCost)
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	metricsStateController = node.NewController(cluster)
 })

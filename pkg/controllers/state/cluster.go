@@ -56,7 +56,6 @@ type Cluster struct {
 	cloudProvider cloudprovider.CloudProvider
 	clock         clock.Clock
 	hasSynced     atomic.Bool
-	clusterCost   *ClusterCost
 
 	mu                        sync.RWMutex
 	nodes                     map[string]*StateNode           // provider id -> cached node
@@ -88,12 +87,11 @@ type Cluster struct {
 	antiAffinityPods    sync.Map // pod namespaced name -> *corev1.Pod of pods that have required anti affinities
 }
 
-func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *ClusterCost) *Cluster {
+func NewCluster(clk clock.Clock, client client.Client, cloudProvider cloudprovider.CloudProvider) *Cluster {
 	return &Cluster{
 		clock:                     clk,
 		kubeClient:                client,
 		cloudProvider:             cloudProvider,
-		clusterCost:               clusterCost,
 		nodes:                     map[string]*StateNode{},
 		bindings:                  map[types.NamespacedName]string{},
 		daemonSetPods:             sync.Map{},
@@ -331,7 +329,6 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1.NodeClaim) {
 		markedForDel = n.MarkedForDeletion()
 	}
 	c.NodePoolState.UpdateNodeClaim(nodeClaim, markedForDel)
-	c.clusterCost.UpdateNodeClaim(context.Background(), *nodeClaim)
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
 	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID
@@ -666,7 +663,6 @@ func (c *Cluster) cleanupNodeClaim(name string) {
 			delete(c.nodes, id)
 		} else {
 			oldNode := c.nodes[id].ShallowCopy()
-			c.clusterCost.RemoveNodeClaim(context.Background(), *oldNode.NodeClaim)
 			c.nodes[id].NodeClaim = nil
 			c.updateNodePoolResources(oldNode, c.nodes[id])
 		}
