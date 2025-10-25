@@ -90,6 +90,20 @@ func WithDefaultDuration(key string, def time.Duration) time.Duration {
 	return parsedVal
 }
 
+// WithDefaultFloat64 returns the float64 value of the supplied environment variable or, if not present,
+// the supplied default value.
+func WithDefaultFloat64(key string, def float64) float64 {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return def
+	}
+	f, err := strconv.ParseFloat(val, 64)
+	if err != nil {
+		return def
+	}
+	return f
+}
+
 // GetRevision function is based on the function defined under https://pkg.go.dev/knative.dev/pkg@v0.0.0-20240815051656-89743d9bbf7c/changeset
 // at https://github.com/knative/pkg/blob/89743d9bbf7c/changeset/commit.go#L51
 func GetRevision() string {
