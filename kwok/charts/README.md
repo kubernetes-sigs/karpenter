@@ -1,4 +1,4 @@
-# karpenter
+# karpenter-kwok
 
 A Helm chart for Karpenter's KwoK Provider, integrated with https://github.com/kubernetes-sigs/kwok.
 
