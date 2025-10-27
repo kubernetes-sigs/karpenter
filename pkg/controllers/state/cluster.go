@@ -329,6 +329,7 @@ func (c *Cluster) UpdateNodeClaim(nodeClaim *v1.NodeClaim) {
 		markedForDel = n.MarkedForDeletion()
 	}
 	c.NodePoolState.UpdateNodeClaim(nodeClaim, markedForDel)
+
 	// If the nodeclaim hasn't launched yet, we want to add it into cluster state to ensure
 	// that we're not racing with the internal cache for the cluster, assuming the node doesn't exist.
 	c.nodeClaimNameToProviderID[nodeClaim.Name] = nodeClaim.Status.ProviderID

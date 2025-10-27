@@ -33,16 +33,10 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
-	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
 // These are alpha metrics, they may not stay. Do not rely on them.
 var (
-	ClusterCost opmetrics.GaugeMetric
-)
-
-// Initialize metrics at runtime to ensure proper initialization
-func initializeMetrics() {
 	ClusterCost = opmetrics.NewPrometheusGauge(
 		crmetrics.Registry,
 		prometheus.GaugeOpts{
@@ -53,7 +47,7 @@ func initializeMetrics() {
 		},
 		[]string{metrics.NodePoolLabel},
 	)
-}
+)
 
 type Controller struct {
 	client      client.Client
@@ -61,7 +55,6 @@ type Controller struct {
 }
 
 func NewController(client client.Client, clusterCost *state.ClusterCost) *Controller {
-	initializeMetrics()
 	return &Controller{
 		client:      client,
 		clusterCost: clusterCost,
@@ -69,8 +62,6 @@ func NewController(client client.Client, clusterCost *state.ClusterCost) *Contro
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
-	ctx = injection.WithControllerName(ctx, "metrics.cost") //nolint:ineffassign,staticcheck
-
 	// List all nodepools in the cluster
 	var nodepools v1.NodePoolList
 	if err := c.client.List(ctx, &nodepools); err != nil {
@@ -85,8 +76,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		})
 	}
 
-	// Requeue every 30 seconds for regular cost monitoring
-	return reconciler.Result{RequeueAfter: time.Second * 30}, nil
+	return reconciler.Result{RequeueAfter: time.Second * 10}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

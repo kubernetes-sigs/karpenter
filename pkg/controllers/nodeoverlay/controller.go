@@ -116,6 +116,7 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("updating nodeoverlay statuses, %w", err)
 	}
+
 	c.instanceTypeStore.UpdateStore(temporaryStore)
 	c.clusterState.MarkUnconsolidated()
 

@@ -47,7 +47,6 @@ var _ = Describe("ClusterCost", func() {
 	var spotOffering *cloudprovider.Offering
 	var onDemandOffering *cloudprovider.Offering
 	BeforeEach(func() {
-		//log.SetLogger(log.FromContext(ctx))
 		testNodePool = test.NodePool(v1.NodePool{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-nodepool"},
 		})
