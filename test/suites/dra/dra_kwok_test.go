@@ -82,7 +82,7 @@ var _ = Describe("DRA KWOK Driver", func() {
 				},
 				Data: map[string]string{
 					"config.yaml": `
-# GPU DRA Configuration for KWOK Mock Driver
+# GPU DRA Configuration for KWOK Mock Driver using upstream ResourceSlice spec
 driver: karpenter.sh/dra-kwok-driver
 
 # Device mappings for different GPU node types
@@ -94,14 +94,21 @@ mappings:
         node.kubernetes.io/instance-type: c-4x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
+      driver: karpenter.sh/dra-kwok-driver
+      pool:
+        name: t4-gpu-pool
+        resourceSliceCount: 1
       devices:
-        - name: nvidia-t4
-          count: 1
+        - name: nvidia-t4-0
           attributes:
-            type: nvidia-tesla-t4
-            memory: 16Gi
-            compute-capability: "7.5"
-            cuda-cores: "2560"
+            type:
+              String: nvidia-tesla-t4
+            memory:
+              String: 16Gi
+            compute_capability:
+              String: "7.5"
+            cuda_cores:
+              String: "2560"
 
   # NVIDIA V100 GPUs (m-8x-amd64-linux)  
   - name: gpu-v100-mapping
@@ -110,15 +117,23 @@ mappings:
         node.kubernetes.io/instance-type: m-8x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
+      driver: karpenter.sh/dra-kwok-driver
+      pool:
+        name: v100-gpu-pool
+        resourceSliceCount: 1
       devices:
-        - name: nvidia-v100
-          count: 1
+        - name: nvidia-v100-0
           attributes:
-            type: nvidia-tesla-v100
-            memory: 32Gi
-            compute-capability: "7.0"
-            cuda-cores: "5120"
-            nvlink: "true"
+            type:
+              String: nvidia-tesla-v100
+            memory:
+              String: 32Gi
+            compute_capability:
+              String: "7.0"
+            cuda_cores:
+              String: "5120"
+            nvlink:
+              string: "true"
 `,
 				},
 			}
@@ -309,19 +324,27 @@ mappings:
         node.kubernetes.io/instance-type: c-4x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
+      driver: karpenter.sh/dra-kwok-driver
+      pool:
+        name: t4-gpu-pool-updated
+        resourceSliceCount: 1
       devices:
-        - name: nvidia-t4
-          count: 1
+        - name: nvidia-t4-0
           attributes:
-            type: nvidia-tesla-t4
-            memory: 16Gi
-            compute-capability: "7.5"
-        - name: nvidia-t4-2  # Added second GPU device
-          count: 1
+            type:
+              String: nvidia-tesla-t4
+            memory:
+              String: 16Gi
+            compute_capability:
+              String: "7.5"
+        - name: nvidia-t4-1
           attributes:
-            type: nvidia-tesla-t4
-            memory: 16Gi
-            compute-capability: "7.5"
+            type:
+              String: nvidia-tesla-t4
+            memory:
+              String: 16Gi
+            compute_capability:
+              String: "7.5"
 `
 				return env.Client.Update(env.Context, draConfigMap)
 			}, 10*time.Second, 1*time.Second).Should(Succeed())
@@ -366,14 +389,21 @@ mappings:
         node.kubernetes.io/instance-type: c-4x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
+      driver: karpenter.sh/dra-kwok-driver
+      pool:
+        name: fpga-c4x-pool
+        resourceSliceCount: 1
       devices:
-        - name: xilinx-u250
-          count: 1
+        - name: xilinx-u250-0
           attributes:
-            type: xilinx-alveo-u250
-            memory: 32Gi
-            dsp-slices: "6144"
-            interface: pcie-gen3
+            type:
+              String: xilinx-alveo-u250
+            memory:
+              String: 32Gi
+            dsp_slices:
+              String: "6144"
+            interface:
+              String: pcie-gen3
 
   # FPGA mapping for m-8x-amd64-linux nodes
   - name: fpga-m8x-mapping
@@ -382,14 +412,21 @@ mappings:
         node.kubernetes.io/instance-type: m-8x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
+      driver: karpenter.sh/dra-kwok-driver
+      pool:
+        name: fpga-m8x-pool
+        resourceSliceCount: 1
       devices:
-        - name: xilinx-u250
-          count: 1
+        - name: xilinx-u250-0
           attributes:
-            type: xilinx-alveo-u250
-            memory: 64Gi
-            dsp-slices: "12288"
-            interface: pcie-gen3
+            type:
+              String: xilinx-alveo-u250
+            memory:
+              String: 64Gi
+            dsp_slices:
+              String: "12288"
+            interface:
+              String: pcie-gen3
 `,
 				},
 			}
@@ -488,13 +525,27 @@ mappings:
         node.kubernetes.io/instance-type: c-4x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
+      driver: karpenter.sh/dra-kwok-driver
+      pool:
+        name: multi-gpu-pool
+        resourceSliceCount: 1
       devices:
-        - name: nvidia-t4
-          count: 2
+        - name: nvidia-t4-0
           attributes:
-            type: nvidia-tesla-t4
-            memory: 16Gi
-            device_class: gpu
+            type:
+              string: nvidia-tesla-t4
+            memory:
+              string: 16Gi
+            device_class:
+              string: gpu
+        - name: nvidia-t4-1
+          attributes:
+            type:
+              string: nvidia-tesla-t4
+            memory:
+              string: 16Gi
+            device_class:
+              string: gpu
             
   # Second ResourceSlice: FPGA devices for same instance type
   - name: fpga-mapping-c4x
@@ -503,13 +554,19 @@ mappings:
         node.kubernetes.io/instance-type: c-4x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
+      driver: karpenter.sh/dra-kwok-driver
+      pool:
+        name: multi-fpga-pool
+        resourceSliceCount: 1
       devices:
-        - name: xilinx-u250
-          count: 1
+        - name: xilinx-u250-0
           attributes:
-            type: xilinx-alveo-u250
-            memory: 32Gi
-            device_class: fpga
+            type:
+              string: xilinx-alveo-u250
+            memory:
+              string: 32Gi
+            device_class:
+              string: fpga
 `,
 				},
 			}
@@ -735,12 +792,17 @@ mappings:
         node.kubernetes.io/instance-type: c-4x-amd64-linux
         karpenter.sh/nodepool: ` + nodePool.Name + `
     resourceSlice:
+      driver: karpenter.sh/dra-kwok-driver
+      pool:
+        name: test-gpu-pool
+        resourceSliceCount: 1
       devices:
         - name: nvidia-test-gpu
-          count: 1
           attributes:
-            type: nvidia-test-gpu
-            memory: 8Gi
+            type:
+              String: nvidia-test-gpu
+            memory:
+              String: 8Gi
 `,
 				},
 			}

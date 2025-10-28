@@ -113,12 +113,6 @@ func main() {
 		panic(err)
 	}
 
-	// Load initial configuration
-	logger.Info("Loading initial configuration")
-	if err := configMapController.LoadInitialConfig(ctx); err != nil {
-		logger.Info("No initial configuration found (this is normal if ConfigMap doesn't exist yet)", "error", err)
-	}
-
 	// Start manager
 	logger.Info("Starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
