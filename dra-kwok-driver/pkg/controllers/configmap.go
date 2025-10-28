@@ -151,27 +151,8 @@ func (r *ConfigMapController) sanitizeConfig(cfg *config.Config) {
 		log.Info("sanitized driver name", "original", originalDriverName, "sanitized", cfg.Driver)
 	}
 
-	// Sanitize device attribute names in all mappings
-	for i := range cfg.Mappings {
-		for j := range cfg.Mappings[i].ResourceSlice.Devices {
-			device := &cfg.Mappings[i].ResourceSlice.Devices[j]
-
-			// Create new attributes map with sanitized keys
-			sanitizedAttrs := make(map[string]string)
-			for key, value := range device.Attributes {
-				sanitizedKey := config.SanitizeAttributeName(key)
-				if key != sanitizedKey {
-					log.Info("sanitized attribute name",
-						"device", device.Name,
-						"original", key,
-						"sanitized", sanitizedKey,
-					)
-				}
-				sanitizedAttrs[sanitizedKey] = value
-			}
-			device.Attributes = sanitizedAttrs
-		}
-	}
+	// Device attribute sanitization removed - using upstream ResourceSlice types directly
+	// Kubernetes API server validation will handle attribute name validation
 }
 
 // GetConfig returns the current configuration

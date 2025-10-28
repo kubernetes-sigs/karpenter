@@ -108,9 +108,14 @@ var _ = Describe("ResourceSliceController", func() {
 							"node.kubernetes.io/instance-type": "g4dn.xlarge",
 						},
 					},
-					ResourceSlice: config.ResourceSliceConfig{
-						Devices: []config.DeviceConfig{
-							{Name: "nvidia-gpu", Count: 1},
+					ResourceSlice: resourcev1.ResourceSliceSpec{
+						Driver: "karpenter.sh/dra-kwok-driver",
+						Pool: resourcev1.ResourcePool{
+							Name:               "gpu-pool",
+							ResourceSliceCount: 1,
+						},
+						Devices: []resourcev1.Device{
+							{Name: "nvidia-gpu-0"},
 						},
 					},
 				},
@@ -122,9 +127,17 @@ var _ = Describe("ResourceSliceController", func() {
 							"accelerator":                      "nvidia-tesla-v100",
 						},
 					},
-					ResourceSlice: config.ResourceSliceConfig{
-						Devices: []config.DeviceConfig{
-							{Name: "nvidia-gpu", Count: 4},
+					ResourceSlice: resourcev1.ResourceSliceSpec{
+						Driver: "karpenter.sh/dra-kwok-driver",
+						Pool: resourcev1.ResourcePool{
+							Name:               "multi-gpu-pool",
+							ResourceSliceCount: 1,
+						},
+						Devices: []resourcev1.Device{
+							{Name: "nvidia-gpu-0"},
+							{Name: "nvidia-gpu-1"},
+							{Name: "nvidia-gpu-2"},
+							{Name: "nvidia-gpu-3"},
 						},
 					},
 				},
@@ -218,14 +231,25 @@ var _ = Describe("ResourceSliceController", func() {
 								"node.kubernetes.io/instance-type": "g4dn.xlarge",
 							},
 						},
-						ResourceSlice: config.ResourceSliceConfig{
-							Devices: []config.DeviceConfig{
+						ResourceSlice: resourcev1.ResourceSliceSpec{
+							Driver: "karpenter.sh/dra-kwok-driver",
+							Pool: resourcev1.ResourcePool{
+								Name:               "test-gpu-pool",
+								ResourceSliceCount: 1,
+							},
+							Devices: []resourcev1.Device{
 								{
-									Name:  "nvidia-gpu",
-									Count: 2,
-									Attributes: map[string]string{
-										"type":   "nvidia-tesla-v100",
-										"memory": "32Gi",
+									Name: "nvidia-gpu-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":   {StringValue: stringPtr("nvidia-tesla-v100")},
+										"memory": {StringValue: stringPtr("32Gi")},
+									},
+								},
+								{
+									Name: "nvidia-gpu-1",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										"type":   {StringValue: stringPtr("nvidia-tesla-v100")},
+										"memory": {StringValue: stringPtr("32Gi")},
 									},
 								},
 							},

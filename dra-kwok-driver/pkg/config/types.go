@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strings"
 
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -38,25 +39,11 @@ type Mapping struct {
 	Name string `yaml:"name" json:"name"`
 	// NodeSelector determines which nodes this mapping applies to
 	NodeSelector metav1.LabelSelector `yaml:"nodeSelector" json:"nodeSelector"`
-	// ResourceSlice defines the devices to create for matching nodes
-	ResourceSlice ResourceSliceConfig `yaml:"resourceSlice" json:"resourceSlice"`
+	// ResourceSlice defines the upstream ResourceSlice spec to create for matching nodes
+	ResourceSlice resourcev1.ResourceSliceSpec `yaml:"resourceSlice" json:"resourceSlice"`
 }
 
-// ResourceSliceConfig defines the configuration for creating ResourceSlices
-type ResourceSliceConfig struct {
-	// Devices specifies the device configurations to create
-	Devices []DeviceConfig `yaml:"devices" json:"devices"`
-}
-
-// DeviceConfig defines the configuration for a device type
-type DeviceConfig struct {
-	// Name is the base name for devices of this type
-	Name string `yaml:"name" json:"name"`
-	// Count specifies how many devices of this type to create
-	Count int `yaml:"count" json:"count"`
-	// Attributes defines the attributes for devices of this type
-	Attributes map[string]string `yaml:"attributes" json:"attributes"`
-}
+// ResourceSliceConfig and DeviceConfig types removed - using upstream resourcev1.ResourceSliceSpec directly
 
 // Validate validates the configuration and returns an error if invalid
 func (c *Config) Validate() error {
@@ -101,49 +88,26 @@ func (m *Mapping) Validate() error {
 		}
 	}
 
-	return m.ResourceSlice.Validate()
-}
-
-// Validate validates the ResourceSlice configuration
-func (r *ResourceSliceConfig) Validate() error {
-	if len(r.Devices) == 0 {
-		return &ValidationError{Field: "devices", Message: "at least one device must be defined"}
+	// Basic ResourceSlice validation - check required fields
+	if m.ResourceSlice.Driver == "" {
+		return &ValidationError{
+			Field:   "resourceSlice.driver",
+			Message: "driver name cannot be empty in ResourceSlice spec",
+		}
 	}
 
-	for i, device := range r.Devices {
-		if err := device.Validate(); err != nil {
-			return &ValidationError{
-				Field:   "devices[" + string(rune(i)) + "]",
-				Message: err.Error(),
-			}
+	if m.ResourceSlice.Pool.Name == "" {
+		return &ValidationError{
+			Field:   "resourceSlice.pool.name",
+			Message: "pool name cannot be empty in ResourceSlice spec",
 		}
 	}
 
 	return nil
 }
 
-// Validate validates the device configuration
-func (d *DeviceConfig) Validate() error {
-	if d.Name == "" {
-		return &ValidationError{Field: "name", Message: "device name cannot be empty"}
-	}
-
-	if d.Count <= 0 {
-		return &ValidationError{Field: "count", Message: "device count must be greater than zero"}
-	}
-
-	// Validate attribute names are valid C identifiers for Kubernetes
-	for attrName := range d.Attributes {
-		if !isValidCIdentifier(attrName) {
-			return &ValidationError{
-				Field:   "attributes",
-				Message: fmt.Sprintf("attribute name '%s' must be a valid C identifier (alphanumeric and underscore only, starting with letter or underscore)", attrName),
-			}
-		}
-	}
-
-	return nil
-}
+// Custom ResourceSliceConfig and DeviceConfig validation functions removed
+// Validation is now handled by upstream Kubernetes API validation
 
 // ValidationError represents a configuration validation error
 type ValidationError struct {
@@ -176,13 +140,7 @@ func isValidRFC1123Subdomain(name string) bool {
 	return rfc1123SubdomainRegex.MatchString(name)
 }
 
-// isValidCIdentifier validates that a string is a valid C identifier
-// (alphanumeric and underscore only, starting with letter or underscore)
-func isValidCIdentifier(name string) bool {
-	// C identifier regex: starts with letter or underscore, followed by alphanumeric or underscore
-	cIdentifierRegex := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	return cIdentifierRegex.MatchString(name)
-}
+// isValidCIdentifier function removed - no longer needed with upstream ResourceSlice types
 
 // SanitizeDriverName converts a driver name to be RFC 1123 subdomain compliant
 func SanitizeDriverName(name string) string {
@@ -212,23 +170,4 @@ func SanitizeDriverName(name string) string {
 	return sanitized
 }
 
-// SanitizeAttributeName converts an attribute name to be C identifier compliant
-func SanitizeAttributeName(name string) string {
-	// Replace hyphens and other invalid characters with underscores
-	sanitized := regexp.MustCompile(`[^A-Za-z0-9_]`).ReplaceAllString(name, "_")
-
-	// Ensure it starts with letter or underscore
-	if len(sanitized) > 0 && regexp.MustCompile(`^[0-9]`).MatchString(sanitized) {
-		sanitized = "_" + sanitized
-	}
-
-	// Collapse multiple consecutive underscores
-	sanitized = regexp.MustCompile(`_{2,}`).ReplaceAllString(sanitized, "_")
-
-	// Ensure it's not empty
-	if len(sanitized) == 0 {
-		sanitized = "_attr"
-	}
-
-	return sanitized
-}
+// SanitizeAttributeName function removed - no longer needed with upstream ResourceSlice types

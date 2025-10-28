@@ -60,12 +60,17 @@ mappings:
     matchLabels:
       node.kubernetes.io/instance-type: g4dn.xlarge
   resourceSlice:
+    driver: karpenter.sh/dra-kwok-driver
+    pool:
+      name: gpu-pool
+      resourceSliceCount: 1
     devices:
-    - name: nvidia-gpu
-      count: 1
+    - name: nvidia-gpu-0
       attributes:
-        type: nvidia-tesla-t4
-        memory: 16Gi
+        type:
+          string: nvidia-tesla-t4
+        memory:
+          string: 16Gi
 `,
 				},
 			}
@@ -74,11 +79,13 @@ mappings:
 
 			Expect(err).ToNot(HaveOccurred())
 			Expect(cfg).ToNot(BeNil())
-			Expect(cfg.Driver).To(Equal("karpenter.sh/dra-kwok-driver"))
+			Expect(cfg.Driver).To(Equal("karpenter.sh.dra-kwok-driver"))
 			Expect(cfg.Mappings).To(HaveLen(1))
 			Expect(cfg.Mappings[0].Name).To(Equal("gpu-mapping"))
 			Expect(cfg.Mappings[0].ResourceSlice.Devices).To(HaveLen(1))
-			Expect(cfg.Mappings[0].ResourceSlice.Devices[0].Name).To(Equal("nvidia-gpu"))
+			Expect(cfg.Mappings[0].ResourceSlice.Devices[0].Name).To(Equal("nvidia-gpu-0"))
+			Expect(cfg.Mappings[0].ResourceSlice.Driver).To(Equal("karpenter.sh/dra-kwok-driver"))
+			Expect(cfg.Mappings[0].ResourceSlice.Pool.Name).To(Equal("gpu-pool"))
 		})
 
 		It("should handle different config key names", func() {
@@ -95,16 +102,19 @@ mappings:
     matchLabels:
       test: value
   resourceSlice:
+    driver: test.example.com/device
+    pool:
+      name: test-pool
+      resourceSliceCount: 1
     devices:
-    - name: test-device
-      count: 1
+    - name: test-device-0
 `,
 					},
 				}
 
 				cfg, err := controller.parseConfigFromConfigMap(configMap)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(cfg.Driver).To(Equal("test.example.com/device"))
+				Expect(cfg.Driver).To(Equal("test.example.com.device"))
 			}
 		})
 

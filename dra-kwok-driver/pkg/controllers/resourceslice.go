@@ -145,10 +145,11 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 	log := ctrl.LoggerFrom(ctx)
 
 	// Create one ResourceSlice per mapping
-	for i, mapping := range mappings {
+	for _, mapping := range mappings {
 		// Create a unique ResourceSlice name for each mapping
 		resourceSliceName := fmt.Sprintf("%s-devices-%s", node.Name, mapping.Name)
 
+		// Use upstream ResourceSlice spec directly from configuration
 		resourceSlice := &resourcev1.ResourceSlice{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: resourceSliceName,
@@ -166,40 +167,13 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 					},
 				},
 			},
-			Spec: resourcev1.ResourceSliceSpec{
-				NodeName: &node.Name,
-				Driver:   driverName,
-				Pool: resourcev1.ResourcePool{
-					Name:               fmt.Sprintf("%s-device-pool-%d", node.Name, i),
-					ResourceSliceCount: 1,
-				},
-			},
+			// Use the ResourceSlice spec directly from configuration
+			Spec: mapping.ResourceSlice,
 		}
 
-		// Collect devices from this specific mapping only
-		var devices []resourcev1.Device
-		for _, deviceConfig := range mapping.ResourceSlice.Devices {
-			// Create devices for this device type
-			for j := 0; j < deviceConfig.Count; j++ {
-				deviceName := fmt.Sprintf("%s-%d", deviceConfig.Name, j)
-
-				// Convert attributes map to device attributes with QualifiedName keys
-				deviceAttributes := make(map[resourcev1.QualifiedName]resourcev1.DeviceAttribute)
-				for key, value := range deviceConfig.Attributes {
-					// Use StringValue for attributes
-					deviceAttributes[resourcev1.QualifiedName(key)] = resourcev1.DeviceAttribute{
-						StringValue: &value,
-					}
-				}
-
-				device := resourcev1.Device{
-					Name:       deviceName,
-					Attributes: deviceAttributes,
-				}
-				devices = append(devices, device)
-			}
-		}
-		resourceSlice.Spec.Devices = devices
+		// Override node-specific fields - NodeName and Driver come from runtime context
+		resourceSlice.Spec.NodeName = &node.Name
+		resourceSlice.Spec.Driver = driverName
 
 		// Create or update the ResourceSlice for this mapping
 		existing := &resourcev1.ResourceSlice{}
@@ -211,7 +185,7 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 					"resourceslice", resourceSliceName,
 					"node", node.Name,
 					"mapping", mapping.Name,
-					"devices", len(devices),
+					"devices", len(resourceSlice.Spec.Devices),
 				)
 				if err := r.Create(ctx, resourceSlice); err != nil {
 					log.Error(err, "failed to create resourceslice", "resourceslice", resourceSliceName)
@@ -230,7 +204,7 @@ func (r *ResourceSliceController) reconcileResourceSlicesForNode(ctx context.Con
 				"resourceslice", resourceSliceName,
 				"node", node.Name,
 				"mapping", mapping.Name,
-				"devices", len(devices),
+				"devices", len(resourceSlice.Spec.Devices),
 			)
 			if err := r.Update(ctx, existing); err != nil {
 				log.Error(err, "failed to update resourceslice", "resourceslice", resourceSliceName)

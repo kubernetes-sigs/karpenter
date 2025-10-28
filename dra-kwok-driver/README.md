@@ -26,9 +26,8 @@ Sets up the controller-runtime manager and initializes both controllers.
 Defines the complete data structure for ConfigMap configuration with validation.
 **Key Structures:**
 - **Config**: Top-level configuration with driver name and mappings array
-- **Mapping**: Links node selectors to device configurations  
-- **ResourceSliceConfig**: Defines devices to create for matching nodes
-- **DeviceConfig**: Individual device specification with attributes
+- **Mapping**: Links node selectors to upstream ResourceSlice specifications  
+- **ResourceSliceSpec**: Uses upstream Kubernetes ResourceSlice spec directly for complete API coverage
 
 ### **`pkg/controllers/configmap.go`** - Configuration Management
 Watches ConfigMap changes, parses YAML configuration, validates it, and makes it available to other controllers.
@@ -58,7 +57,7 @@ Watches Node events, detects KWOK nodes, matches them against configuration, and
 ### **Configuration** 
 When ConfigMap is created or updated:
 1. **ConfigMapController** receives ConfigMap event
-2. Extracts `config.yaml` data and parses YAML into Go structs
+2. Extracts `config.yaml` data and parses YAML into Go structs using upstream ResourceSlice spec
 3. Validates configuration structure and rules  
 4. Stores validated configuration internally
 5. **ResourceSliceController** can now access configuration via shared reference
@@ -69,11 +68,157 @@ When Karpenter creates a KWOK node:
 2. Checks for `kwok.x-k8s.io/node` annotation to identify KWOK nodes
 3. Gets current configuration from **ConfigMapController**
 4. Iterates through configuration mappings to find matching nodeSelector
-5. If match found: Creates ResourceSlice with devices from mapping configuration
-6. ResourceSlice includes proper metadata, owner references, and device specifications
+5. If match found: Creates ResourceSlice 
+6. Only adds node-specific metadata (NodeName, owner references, labels) - all other fields come from config
 
 ### **Cleanup**
 When KWOK node is deleted automatically removes ResourceSlices
+
+## ConfigMap Examples
+
+### **GPU Configuration**
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dra-kwok-configmap
+  namespace: karpenter
+data:
+  config.yaml: |
+    driver: karpenter.sh/dra-kwok-driver
+    mappings:
+      - name: gpu-t4-mapping
+        nodeSelector:
+          matchLabels:
+            node.kubernetes.io/instance-type: c-4x-amd64-linux
+        resourceSlice:
+          driver: karpenter.sh/dra-kwok-driver
+          pool:
+            name: t4-gpu-pool
+            resourceSliceCount: 1
+          devices:
+            - name: nvidia-t4-0
+              attributes:
+                type:
+                  String: nvidia-tesla-t4
+                memory:
+                  String: 16Gi
+                compute_capability:
+                  String: "7.5"
+                cuda_cores:
+                  String: "2560"
+```
+
+### **FPGA Configuration**
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dra-kwok-configmap
+  namespace: karpenter
+data:
+  config.yaml: |
+    driver: karpenter.sh/dra-kwok-driver
+    mappings:
+      - name: fpga-mapping
+        nodeSelector:
+          matchLabels:
+            node.kubernetes.io/instance-type: f1.2xlarge
+        resourceSlice:
+          driver: karpenter.sh/dra-kwok-driver
+          pool:
+            name: fpga-pool
+            resourceSliceCount: 1
+          devices:
+            - name: xilinx-u250-0
+              attributes:
+                type:
+                  String: xilinx-alveo-u250
+                memory:
+                  String: 64Gi
+                dsp_slices:
+                  String: "12288"
+                interface:
+                  String: pcie-gen3
+```
+
+### **Multiple Device Types**
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dra-kwok-configmap
+  namespace: karpenter
+data:
+  config.yaml: |
+    driver: karpenter.sh/dra-kwok-driver
+    mappings:
+      # GPU devices
+      - name: gpu-mapping
+        nodeSelector:
+          matchLabels:
+            accelerator-type: gpu
+        resourceSlice:
+          driver: karpenter.sh/dra-kwok-driver
+          pool:
+            name: gpu-pool
+            resourceSliceCount: 1
+          devices:
+            - name: nvidia-gpu-0
+              attributes:
+                type:
+                  String: nvidia-tesla-v100
+            - name: nvidia-gpu-1
+              attributes:
+                type:
+                  String: nvidia-tesla-v100
+      
+      # FPGA devices on same nodes
+      - name: fpga-mapping
+        nodeSelector:
+          matchLabels:
+            accelerator-type: gpu  # Same selector - creates multiple ResourceSlices per node
+        resourceSlice:
+          driver: karpenter.sh/dra-kwok-driver
+          pool:
+            name: fpga-pool
+            resourceSliceCount: 1
+          devices:
+            - name: fpga-0
+              attributes:
+                type:
+                  String: xilinx-fpga
+```
+
+### **Cluster-Wide Resources**
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dra-kwok-configmap
+  namespace: karpenter
+data:
+  config.yaml: |
+    driver: karpenter.sh/dra-kwok-driver
+    mappings:
+      - name: cluster-wide-resource
+        nodeSelector:
+          matchLabels:
+            has-shared-storage: "true"
+        resourceSlice:
+          driver: karpenter.sh/dra-kwok-driver
+          allNodes: true  # Available cluster-wide
+          pool:
+            name: shared-storage-pool
+            resourceSliceCount: 3
+          devices:
+            - name: shared-nvme-0
+              attributes:
+                type:
+                  String: shared-nvme
+                capacity:
+                  String: 1TB
+```
 
 ## Test Coverage
 
@@ -81,22 +226,8 @@ When KWOK node is deleted automatically removes ResourceSlices
 
 #### **`pkg/config/types_test.go`** - Configuration Validation
 - **Config Validation**
-  - Should validate a complete config
   - Should return error for empty driver
   - Should return error for no mappings
-
-- **DeviceConfig** 
-  - Should support device configuration with attributes
-  - Should validate device name is required
-  - Should validate device count is positive
-
-- **Mapping**
-  - Should validate mapping correctly
-  - Should return error for empty name
-  - Should return error for empty node selector
-
-- **ResourceSliceConfig**
-  - Should return error for no devices
 
 #### **`pkg/controllers/configmap_test.go`** - ConfigMap Controller
 - **parseConfigFromConfigMap**
