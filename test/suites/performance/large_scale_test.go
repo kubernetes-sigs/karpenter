@@ -196,9 +196,9 @@ var _ = Describe("Performance", func() {
 			// Create structured performance report
 			report := PerformanceReport{
 				TestName:                "Large Scale Deployment Performance Test",
-				TotalPods:               800,
-				SmallPods:               400,
-				LargePods:               400,
+				TotalPods:               1000,
+				SmallPods:               500,
+				LargePods:               500,
 				TotalTime:               totalTime,
 				PodSchedulingTime:       podSchedulingTime,
 				NodeProvisioningTime:    nodeProvisioningTime,
