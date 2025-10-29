@@ -88,8 +88,8 @@ var _ = Describe("Performance", func() {
 					GinkgoWriter.Printf("🚨 EMERGENCY CLEANUP: Removing any remaining test resources...\n")
 
 					// Force delete deployments if they still exist
-					env.Client.Delete(env.Context, smallDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))})
-					env.Client.Delete(env.Context, largeDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))})
+					client.IgnoreNotFound(env.Client.Delete(env.Context, smallDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
+					client.IgnoreNotFound(env.Client.Delete(env.Context, largeDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
 
 					// Wait briefly for cleanup
 					time.Sleep(30 * time.Second)
