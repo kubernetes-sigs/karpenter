@@ -93,7 +93,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with small resource requirements
 			smallDeployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(50),
+				Replicas: int32(100),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -108,7 +108,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with large resource requirements
 			largeDeployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(50),
+				Replicas: int32(100),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -141,7 +141,7 @@ var _ = Describe("Performance", func() {
 
 			// Wait for all pods to become healthy with a 15-minute timeout
 			// This covers both scheduling and readiness
-			env.EventuallyExpectHealthyPodCountWithTimeout(15*time.Minute, allPodsSelector, 100)
+			env.EventuallyExpectHealthyPodCountWithTimeout(15*time.Minute, allPodsSelector, 200)
 
 			env.TimeIntervalCollector.End("waiting_for_pods")
 			env.TimeIntervalCollector.End("test_start")
@@ -196,9 +196,9 @@ var _ = Describe("Performance", func() {
 			// Create structured performance report
 			report := PerformanceReport{
 				TestName:                "Large Scale Deployment Performance Test",
-				TotalPods:               1000,
-				SmallPods:               500,
-				LargePods:               500,
+				TotalPods:               200,
+				SmallPods:               100,
+				LargePods:               100,
 				TotalTime:               totalTime,
 				PodSchedulingTime:       podSchedulingTime,
 				NodeProvisioningTime:    nodeProvisioningTime,
