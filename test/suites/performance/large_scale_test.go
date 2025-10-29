@@ -273,7 +273,7 @@ var _ = Describe("Performance", func() {
 				reportFile := filepath.Join(outputDir, "large_scale_performance_report.json")
 				reportJSON, err := json.MarshalIndent(report, "", "  ")
 				if err == nil {
-					if err := os.WriteFile(reportFile, reportJSON, 0644); err == nil {
+					if err := os.WriteFile(reportFile, reportJSON, 0600); err == nil {
 						GinkgoWriter.Printf("\n📄 Detailed JSON report written to: %s\n", reportFile)
 					}
 				}
