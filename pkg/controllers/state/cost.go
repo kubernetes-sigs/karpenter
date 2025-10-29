@@ -84,7 +84,7 @@ type NodePoolCost struct {
 // OfferingKey uniquely identifies a specific compute offering by its zone,
 // capacity type (e.g., spot/on-demand), and instance type name.
 type OfferingKey struct {
-	zone, capacity, instanceName string
+	Zone, Capacity, InstanceName string
 }
 
 // OfferingCount tracks the number and cost of instances for a specific offering.
@@ -155,16 +155,16 @@ func (cc *ClusterCost) internalUpdateOfferings(np *v1.NodePool, instanceTypes []
 func (npc *NodePoolCost) updateCost() (float64, error) {
 	cost := 0.0
 	for ok, oc := range npc.offeringCounts {
-		overlayedInstanceType := npc.overlayedInstanceMap[ok.instanceName]
+		overlayedInstanceType := npc.overlayedInstanceMap[ok.InstanceName]
 		if overlayedInstanceType == nil {
-			return 0, fmt.Errorf("instance type %q not found in overlayed instance map for offering in zone %q with capacity %q", ok.instanceName, ok.zone, ok.capacity)
+			return 0, fmt.Errorf("instance type %q not found in overlayed instance map for offering in zone %q with capacity %q", ok.InstanceName, ok.Zone, ok.Capacity)
 		}
 		// get the offering price from the overlayed instance type
 		newOffering, exists := lo.Find(overlayedInstanceType.Offerings, func(o *cloudprovider.Offering) bool {
-			return o.CapacityType() == ok.capacity && o.Zone() == ok.zone
+			return o.CapacityType() == ok.Capacity && o.Zone() == ok.Zone
 		})
 		if !exists {
-			return 0, fmt.Errorf("offering not found for instance type %q in zone %q with capacity type %q", ok.instanceName, ok.zone, ok.capacity)
+			return 0, fmt.Errorf("offering not found for instance type %q in zone %q with capacity type %q", ok.InstanceName, ok.Zone, ok.Capacity)
 		}
 		// add the new price times the count of that offering
 		cost = cost + (float64(oc.Count) * newOffering.Price)
@@ -290,7 +290,7 @@ func (cc *ClusterCost) internalAddOffering(ctx context.Context, np *v1.NodePool,
 		cc.createNewNodePoolCost(np, instanceTypes)
 	}
 
-	ok := OfferingKey{capacity: capacityType, zone: zone, instanceName: instanceName}
+	ok := OfferingKey{Capacity: capacityType, Zone: zone, InstanceName: instanceName}
 	oc, exists := cc.npCostMap[np.Name].offeringCounts[ok]
 	if !exists {
 		var foundOffering *cloudprovider.Offering
@@ -330,7 +330,7 @@ func (cc *ClusterCost) internalRemoveOffering(np *v1.NodePool, instanceName, cap
 		return fmt.Errorf("attempted to remove offering from nonexistent nodepool %q (instance: %q, zone: %q, capacity: %q)", np.Name, instanceName, zone, capacityType)
 	}
 
-	ok := OfferingKey{capacity: capacityType, zone: zone, instanceName: instanceName}
+	ok := OfferingKey{Capacity: capacityType, Zone: zone, InstanceName: instanceName}
 	oc, exists := npc.offeringCounts[ok]
 	if !exists {
 		return fmt.Errorf("attempted to remove nonexistent offering from nodepool %q (instance: %q, zone: %q, capacity: %q)", np.Name, instanceName, zone, capacityType)

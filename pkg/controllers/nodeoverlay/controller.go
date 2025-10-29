@@ -122,9 +122,9 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 
 	var errs error
 	for _, np := range nodePoolList.Items {
-		instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, &np)
-		if err != nil {
-			errs = multierr.Append(errs, err)
+		instanceTypes, exists := nodePoolToInstanceTypes[np.Name]
+		if !exists {
+			errs = multierr.Append(errs, fmt.Errorf("frinding instance types for nodepool: %s", np.Name))
 			continue
 		}
 		overlayedInstanceTypes, err := c.instanceTypeStore.ApplyAll(np.Name, instanceTypes)
