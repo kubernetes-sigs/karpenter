@@ -26,11 +26,14 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -69,9 +72,39 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
 			GinkgoWriter.Printf("CREATING DEPLOYMENTS" + "\n")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
+
 			// Record test start time
 			testStartTime := time.Now()
 			env.TimeIntervalCollector.Start("test_start")
+
+			// Declare variables that will be used in DeferCleanup
+			var smallDeployment, largeDeployment *appsv1.Deployment
+			var allPodsSelector labels.Selector
+
+			// Set up cleanup that runs regardless of test outcome
+			DeferCleanup(func() {
+				if smallDeployment != nil && largeDeployment != nil {
+					By("Emergency cleanup - ensuring test resources are removed")
+					GinkgoWriter.Printf("🚨 EMERGENCY CLEANUP: Removing any remaining test resources...\n")
+
+					// Force delete deployments if they still exist
+					env.Client.Delete(env.Context, smallDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))})
+					env.Client.Delete(env.Context, largeDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))})
+
+					// Wait briefly for cleanup
+					time.Sleep(30 * time.Second)
+
+					// Verify cleanup
+					if allPodsSelector != nil {
+						remainingPods := env.Monitor.RunningPods(allPodsSelector)
+						if len(remainingPods) > 0 {
+							GinkgoWriter.Printf("⚠️  WARNING: %d test pods may still be running\n", len(remainingPods))
+						}
+					}
+
+					GinkgoWriter.Printf("🧹 Emergency cleanup completed\n")
+				}
+			})
 
 			// Define resource requirements for small pods (500 pods)
 			// 0.95 vCPU and 3900 MB memory each
@@ -92,7 +125,7 @@ var _ = Describe("Performance", func() {
 			}
 
 			// Create deployment with small resource requirements
-			smallDeployment := test.Deployment(test.DeploymentOptions{
+			smallDeployment = test.Deployment(test.DeploymentOptions{
 				Replicas: int32(500),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
@@ -107,7 +140,7 @@ var _ = Describe("Performance", func() {
 			})
 
 			// Create deployment with large resource requirements
-			largeDeployment := test.Deployment(test.DeploymentOptions{
+			largeDeployment = test.Deployment(test.DeploymentOptions{
 				Replicas: int32(500),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
@@ -134,7 +167,7 @@ var _ = Describe("Performance", func() {
 			// Create selectors for monitoring pods
 			smallPodSelector := labels.SelectorFromSet(smallDeployment.Spec.Selector.MatchLabels)
 			largePodSelector := labels.SelectorFromSet(largeDeployment.Spec.Selector.MatchLabels)
-			allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
+			allPodsSelector = labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 
 			By("Waiting for all 1000 pods to be scheduled and ready")
 			env.TimeIntervalCollector.Start("waiting_for_pods")
@@ -149,6 +182,12 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
 			GinkgoWriter.Printf("SCALE OUT COMPLETED!" + "\n")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
+
+			// Allow logs to catch up before collecting metrics
+			By("Waiting for system logs and metrics to stabilize")
+			GinkgoWriter.Printf("⏳ Allowing 30 seconds for logs to catch up...\n")
+			time.Sleep(5 * time.Second)
+
 			By("Collecting performance metrics")
 
 			// Get node and resource utilization metrics
@@ -305,6 +344,36 @@ var _ = Describe("Performance", func() {
 			// Verify all pods are actually running
 			env.EventuallyExpectHealthyPodCount(smallPodSelector, 500)
 			env.EventuallyExpectHealthyPodCount(largePodSelector, 500)
+
+			By("Performing comprehensive cleanup and verification")
+			GinkgoWriter.Printf("\n🧹 CLEANUP: Starting resource cleanup...\n")
+
+			// 1. Delete the deployments
+			env.ExpectDeleted(smallDeployment, largeDeployment)
+			GinkgoWriter.Printf("   • Deployments deleted\n")
+
+			// 2. Wait for all pods to be terminated
+			Eventually(func(g Gomega) {
+				pods := env.Monitor.RunningPods(allPodsSelector)
+				g.Expect(pods).To(HaveLen(0), "All test pods should be terminated")
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+			GinkgoWriter.Printf("   • All pods terminated\n")
+
+			// 3. Wait for nodes to be cleaned up by Karpenter
+			Eventually(func(g Gomega) {
+				createdNodes := env.Monitor.CreatedNodes()
+				g.Expect(createdNodes).To(HaveLen(0), "All provisioned nodes should be cleaned up")
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+			GinkgoWriter.Printf("   • All nodes cleaned up\n")
+
+			// 4. Final cluster state verification
+			By("Verifying cluster is ready for subsequent tests")
+			finalNodeCount := env.Monitor.NodeCount()
+			Expect(finalNodeCount).To(Equal(env.StartingNodeCount),
+				fmt.Sprintf("Node count should return to starting count (%d), but is %d",
+					env.StartingNodeCount, finalNodeCount))
+
+			GinkgoWriter.Printf("✅ CLEANUP: Completed successfully - cluster ready for next test\n")
 
 			By("Performance test completed successfully")
 		})
