@@ -303,8 +303,8 @@ var _ = Describe("Performance", func() {
 				"Average memory utilization should be greater than 70%")
 
 			// Verify all pods are actually running
-			env.EventuallyExpectHealthyPodCount(smallPodSelector, 200)
-			env.EventuallyExpectHealthyPodCount(largePodSelector, 200)
+			env.EventuallyExpectHealthyPodCount(smallPodSelector, 400)
+			env.EventuallyExpectHealthyPodCount(largePodSelector, 400)
 
 			By("Performance test completed successfully")
 		})
