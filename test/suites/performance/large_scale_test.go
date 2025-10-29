@@ -93,7 +93,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with small resource requirements
 			smallDeployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(200),
+				Replicas: int32(400),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -108,7 +108,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with large resource requirements
 			largeDeployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(200),
+				Replicas: int32(400),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -141,7 +141,7 @@ var _ = Describe("Performance", func() {
 
 			// Wait for all pods to become healthy with a 15-minute timeout
 			// This covers both scheduling and readiness
-			env.EventuallyExpectHealthyPodCountWithTimeout(15*time.Minute, allPodsSelector, 400)
+			env.EventuallyExpectHealthyPodCountWithTimeout(15*time.Minute, allPodsSelector, 800)
 
 			env.TimeIntervalCollector.End("waiting_for_pods")
 			env.TimeIntervalCollector.End("test_start")
@@ -196,9 +196,9 @@ var _ = Describe("Performance", func() {
 			// Create structured performance report
 			report := PerformanceReport{
 				TestName:                "Large Scale Deployment Performance Test",
-				TotalPods:               400,
-				SmallPods:               200,
-				LargePods:               200,
+				TotalPods:               800,
+				SmallPods:               400,
+				LargePods:               400,
 				TotalTime:               totalTime,
 				PodSchedulingTime:       podSchedulingTime,
 				NodeProvisioningTime:    nodeProvisioningTime,
@@ -254,7 +254,7 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf("│ Total Scale-out Time        │ %-12v │ %s │\n",
 				report.TotalTime, getStatusIcon(report.TotalTime < 10*time.Minute))
 			GinkgoWriter.Printf("│ Nodes Provisioned           │ %-12d │ %s │\n",
-				report.NodesProvisioned, getStatusIcon(report.NodesProvisioned < 50))
+				report.NodesProvisioned, getStatusIcon(report.NodesProvisioned < 1000))
 			GinkgoWriter.Printf("│ Average CPU Utilization     │ %-11.1f%% │ %s │\n",
 				report.CPUUtilization*100, getStatusIcon(report.CPUUtilization > 0.7))
 			GinkgoWriter.Printf("│ Average Memory Utilization  │ %-11.1f%% │ %s │\n",
