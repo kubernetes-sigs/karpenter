@@ -213,6 +213,9 @@ var _ = Describe("Performance", func() {
 				Warnings:                warnings,
 			}
 
+			// Add sleep here to allow logs to catch up
+			By("Allowing logs to catch up before collecting metrics")
+			time.Sleep(30 * time.Second) // Adjust duration as needed
 			// Output detailed performance report to console
 			By("=== PERFORMANCE TEST REPORT ===")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
