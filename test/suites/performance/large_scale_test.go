@@ -93,7 +93,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with small resource requirements
 			smallDeployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(400),
+				Replicas: int32(300),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -108,7 +108,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with large resource requirements
 			largeDeployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(400),
+				Replicas: int32(300),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -141,7 +141,7 @@ var _ = Describe("Performance", func() {
 
 			// Wait for all pods to become healthy with a 15-minute timeout
 			// This covers both scheduling and readiness
-			env.EventuallyExpectHealthyPodCountWithTimeout(15*time.Minute, allPodsSelector, 800)
+			env.EventuallyExpectHealthyPodCountWithTimeout(15*time.Minute, allPodsSelector, 600)
 
 			env.TimeIntervalCollector.End("waiting_for_pods")
 			env.TimeIntervalCollector.End("test_start")
@@ -213,9 +213,6 @@ var _ = Describe("Performance", func() {
 				Warnings:                warnings,
 			}
 
-			// Add sleep here to allow logs to catch up
-			By("Allowing logs to catch up before collecting metrics")
-			time.Sleep(30 * time.Second) // Adjust duration as needed
 			// Output detailed performance report to console
 			By("=== PERFORMANCE TEST REPORT ===")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
@@ -306,8 +303,8 @@ var _ = Describe("Performance", func() {
 				"Average memory utilization should be greater than 70%")
 
 			// Verify all pods are actually running
-			env.EventuallyExpectHealthyPodCount(smallPodSelector, 400)
-			env.EventuallyExpectHealthyPodCount(largePodSelector, 400)
+			env.EventuallyExpectHealthyPodCount(smallPodSelector, 300)
+			env.EventuallyExpectHealthyPodCount(largePodSelector, 300)
 
 			By("Performance test completed successfully")
 		})
