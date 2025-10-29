@@ -54,7 +54,7 @@ e2etests: ## Run the e2e suite against your local cluster
 		--ginkgo.skip="${SKIP}" \
 		--ginkgo.timeout=2h \
 		--ginkgo.grace-period=15m \
-		--ginkgo.v
+		--ginkgo.vv
 
 # Run make install-kwok to install the kwok controller in your cluster first
 # Webhooks are currently not supported in the kwok provider.
