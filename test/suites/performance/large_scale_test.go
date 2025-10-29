@@ -93,7 +93,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with small resource requirements
 			smallDeployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(100),
+				Replicas: int32(200),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -108,7 +108,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with large resource requirements
 			largeDeployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(100),
+				Replicas: int32(200),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -141,7 +141,7 @@ var _ = Describe("Performance", func() {
 
 			// Wait for all pods to become healthy with a 15-minute timeout
 			// This covers both scheduling and readiness
-			env.EventuallyExpectHealthyPodCountWithTimeout(15*time.Minute, allPodsSelector, 200)
+			env.EventuallyExpectHealthyPodCountWithTimeout(15*time.Minute, allPodsSelector, 400)
 
 			env.TimeIntervalCollector.End("waiting_for_pods")
 			env.TimeIntervalCollector.End("test_start")
@@ -196,9 +196,9 @@ var _ = Describe("Performance", func() {
 			// Create structured performance report
 			report := PerformanceReport{
 				TestName:                "Large Scale Deployment Performance Test",
-				TotalPods:               200,
-				SmallPods:               100,
-				LargePods:               100,
+				TotalPods:               400,
+				SmallPods:               200,
+				LargePods:               200,
 				TotalTime:               totalTime,
 				PodSchedulingTime:       podSchedulingTime,
 				NodeProvisioningTime:    nodeProvisioningTime,
@@ -303,8 +303,8 @@ var _ = Describe("Performance", func() {
 				"Average memory utilization should be greater than 70%")
 
 			// Verify all pods are actually running
-			env.EventuallyExpectHealthyPodCount(smallPodSelector, 500)
-			env.EventuallyExpectHealthyPodCount(largePodSelector, 500)
+			env.EventuallyExpectHealthyPodCount(smallPodSelector, 200)
+			env.EventuallyExpectHealthyPodCount(largePodSelector, 200)
 
 			By("Performance test completed successfully")
 		})
