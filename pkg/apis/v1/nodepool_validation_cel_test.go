@@ -449,9 +449,9 @@ var _ = Describe("CEL/Validation", func() {
 				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
 			}
 		})
-		It("should allow restricted domains exceptions", func() {
+		It("should allow kubernetes domains", func() {
 			oldNodePool := nodePool.DeepCopy()
-			for label := range LabelDomainExceptions {
+			for label := range K8sLabelDomains {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 				}
@@ -461,9 +461,9 @@ var _ = Describe("CEL/Validation", func() {
 				nodePool = oldNodePool.DeepCopy()
 			}
 		})
-		It("should allow restricted subdomains exceptions", func() {
+		It("should allow kubernetes subdomains exceptions", func() {
 			oldNodePool := nodePool.DeepCopy()
-			for label := range LabelDomainExceptions {
+			for label := range K8sLabelDomains {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{NodeSelectorRequirement: v1.NodeSelectorRequirement{Key: "subdomain." + label + "/test", Operator: v1.NodeSelectorOpIn, Values: []string{"test"}}},
 				}
@@ -597,9 +597,9 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 			Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
 		})
-		It("should allow labels in restricted domains exceptions list", func() {
+		It("should allow labels in kubernetes domains", func() {
 			oldNodePool := nodePool.DeepCopy()
-			for label := range LabelDomainExceptions {
+			for label := range K8sLabelDomains {
 				nodePool.Spec.Template.Labels = map[string]string{
 					label: "test-value",
 				}
@@ -609,9 +609,9 @@ var _ = Describe("CEL/Validation", func() {
 				nodePool = oldNodePool.DeepCopy()
 			}
 		})
-		It("should allow labels prefixed with the restricted domain exceptions", func() {
+		It("should allow labels prefixed with the kubernetes domain", func() {
 			oldNodePool := nodePool.DeepCopy()
-			for label := range LabelDomainExceptions {
+			for label := range K8sLabelDomains {
 				nodePool.Spec.Template.Labels = map[string]string{
 					fmt.Sprintf("%s/key", label): "test-value",
 				}
@@ -623,7 +623,7 @@ var _ = Describe("CEL/Validation", func() {
 		})
 		It("should allow subdomain labels in restricted domains exceptions list", func() {
 			oldNodePool := nodePool.DeepCopy()
-			for label := range LabelDomainExceptions {
+			for label := range K8sLabelDomains {
 				nodePool.Spec.Template.Labels = map[string]string{
 					fmt.Sprintf("subdomain.%s", label): "test-value",
 				}
@@ -633,9 +633,9 @@ var _ = Describe("CEL/Validation", func() {
 				nodePool = oldNodePool.DeepCopy()
 			}
 		})
-		It("should allow subdomain labels prefixed with the restricted domain exceptions", func() {
+		It("should allow subdomain labels prefixed with the kubernetes domain", func() {
 			oldNodePool := nodePool.DeepCopy()
-			for label := range LabelDomainExceptions {
+			for label := range K8sLabelDomains {
 				nodePool.Spec.Template.Labels = map[string]string{
 					fmt.Sprintf("subdomain.%s/key", label): "test-value",
 				}
