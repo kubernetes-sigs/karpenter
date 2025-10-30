@@ -37,6 +37,16 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
+// ConsolidationRound represents a single round of consolidation
+type ConsolidationRound struct {
+	RoundNumber   int           `json:"round_number"`
+	StartTime     time.Time     `json:"start_time"`
+	Duration      time.Duration `json:"duration"`
+	NodesRemoved  int           `json:"nodes_removed"`
+	StartingNodes int           `json:"starting_nodes"`
+	EndingNodes   int           `json:"ending_nodes"`
+}
+
 // PerformanceReport represents the structured performance test results
 type PerformanceReport struct {
 	TestName                string        `json:"test_name"`
@@ -48,13 +58,22 @@ type PerformanceReport struct {
 	NodeProvisioningTime    time.Duration `json:"node_provisioning_time"`
 	PodReadyTime            time.Duration `json:"pod_ready_time"`
 	NodesProvisioned        int           `json:"nodes_provisioned"`
-	CPUUtilization          float64       `json:"cpu_utilization"`
-	MemoryUtilization       float64       `json:"memory_utilization"`
+	TotalReservedCPUUtil    float64       `json:"total_reserved_cpu_utilization"`
+	TotalReservedMemoryUtil float64       `json:"total_reserved_memory_utilization"`
 	ResourceEfficiencyScore float64       `json:"resource_efficiency_score"`
 	PodsPerNode             float64       `json:"pods_per_node"`
-	Timestamp               time.Time     `json:"timestamp"`
-	TestPassed              bool          `json:"test_passed"`
-	Warnings                []string      `json:"warnings,omitempty"`
+	// Scale-in metrics
+	ScaleInEnabled             bool                 `json:"scale_in_enabled"`
+	ScaleInPods                int                  `json:"scale_in_pods"`
+	ConsolidationTime          time.Duration        `json:"consolidation_time"`
+	ConsolidationRounds        []ConsolidationRound `json:"consolidation_rounds"`
+	PostScaleInNodes           int                  `json:"post_scale_in_nodes"`
+	PostScaleInCPUUtil         float64              `json:"post_scale_in_cpu_utilization"`
+	PostScaleInMemoryUtil      float64              `json:"post_scale_in_memory_utilization"`
+	PostScaleInEfficiencyScore float64              `json:"post_scale_in_efficiency_score"`
+	Timestamp                  time.Time            `json:"timestamp"`
+	TestPassed                 bool                 `json:"test_passed"`
+	Warnings                   []string             `json:"warnings,omitempty"`
 }
 
 // getStatusIcon returns a visual indicator for pass/fail status
@@ -257,10 +276,11 @@ var _ = Describe("Performance", func() {
 				NodeProvisioningTime:    nodeProvisioningTime,
 				PodReadyTime:            podReadyTime,
 				NodesProvisioned:        nodeCount,
-				CPUUtilization:          avgCPUUtil,
-				MemoryUtilization:       avgMemUtil,
+				TotalReservedCPUUtil:    avgCPUUtil,
+				TotalReservedMemoryUtil: avgMemUtil,
 				ResourceEfficiencyScore: resourceEfficiencyScore,
 				PodsPerNode:             podsPerNode,
+				ScaleInEnabled:          false, // Will be updated if scale-in is performed
 				Timestamp:               time.Now(),
 				TestPassed:              testPassed,
 				Warnings:                warnings,
@@ -288,8 +308,8 @@ var _ = Describe("Performance", func() {
 
 			// Resource Utilization
 			GinkgoWriter.Printf("\n💻 RESOURCE UTILIZATION:\n")
-			GinkgoWriter.Printf("  • Average CPU Utilization: %.2f%%\n", report.CPUUtilization*100)
-			GinkgoWriter.Printf("  • Average Memory Utilization: %.2f%%\n", report.MemoryUtilization*100)
+			GinkgoWriter.Printf("  • Total Reserved CPU Utilization: %.2f%%\n", report.TotalReservedCPUUtil*100)
+			GinkgoWriter.Printf("  • Total Reserved Memory Utilization: %.2f%%\n", report.TotalReservedMemoryUtil*100)
 			GinkgoWriter.Printf("  • Minimum CPU Utilization: %.2f%%\n", minCPUUtil*100)
 			GinkgoWriter.Printf("  • Minimum Memory Utilization: %.2f%%\n", minMemUtil*100)
 
@@ -308,10 +328,10 @@ var _ = Describe("Performance", func() {
 				report.TotalTime, getStatusIcon(report.TotalTime < 10*time.Minute))
 			GinkgoWriter.Printf("│ Nodes Provisioned           │ %-12d │ %s │\n",
 				report.NodesProvisioned, getStatusIcon(report.NodesProvisioned < 1000))
-			GinkgoWriter.Printf("│ Average CPU Utilization     │ %-11.1f%% │ %s │\n",
-				report.CPUUtilization*100, getStatusIcon(report.CPUUtilization > 0.7))
-			GinkgoWriter.Printf("│ Average Memory Utilization  │ %-11.1f%% │ %s │\n",
-				report.MemoryUtilization*100, getStatusIcon(report.MemoryUtilization > 0.7))
+			GinkgoWriter.Printf("│ Total Reserved CPU Util     │ %-11.1f%% │ %s │\n",
+				report.TotalReservedCPUUtil*100, getStatusIcon(report.TotalReservedCPUUtil > 0.7))
+			GinkgoWriter.Printf("│ Total Reserved Memory Util  │ %-11.1f%% │ %s │\n",
+				report.TotalReservedMemoryUtil*100, getStatusIcon(report.TotalReservedMemoryUtil > 0.7))
 			GinkgoWriter.Printf("│ Resource Efficiency Score   │ %-11.1f%% │ %s │\n",
 				report.ResourceEfficiencyScore, getStatusIcon(report.ResourceEfficiencyScore > 70))
 			GinkgoWriter.Printf("└─────────────────────────────┴──────────────┴──────────┘\n")
@@ -324,6 +344,27 @@ var _ = Describe("Performance", func() {
 				GinkgoWriter.Printf("\n⚠️  PERFORMANCE TEST: ATTENTION NEEDED\n")
 				for _, warning := range report.Warnings {
 					GinkgoWriter.Printf("   • %s\n", warning)
+				}
+			}
+
+			// Add scale-in metrics to the final report if scale-in was performed
+			if report.ScaleInEnabled {
+				GinkgoWriter.Printf("\n🔽 SCALE-IN PERFORMANCE:\n")
+				GinkgoWriter.Printf("  • Scale-in pods: %d\n", report.ScaleInPods)
+				GinkgoWriter.Printf("  • Consolidation rounds: %d\n", len(report.ConsolidationRounds))
+				GinkgoWriter.Printf("  • Total consolidation time: %v\n", report.ConsolidationTime)
+				GinkgoWriter.Printf("  • Post-scale-in nodes: %d\n", report.PostScaleInNodes)
+				GinkgoWriter.Printf("  • Post-scale-in CPU utilization: %.2f%%\n", report.PostScaleInCPUUtil*100)
+				GinkgoWriter.Printf("  • Post-scale-in memory utilization: %.2f%%\n", report.PostScaleInMemoryUtil*100)
+				GinkgoWriter.Printf("  • Post-scale-in efficiency score: %.1f%%\n", report.PostScaleInEfficiencyScore)
+
+				if len(report.ConsolidationRounds) > 0 {
+					GinkgoWriter.Printf("\n📊 CONSOLIDATION ROUNDS DETAIL:\n")
+					for _, round := range report.ConsolidationRounds {
+						GinkgoWriter.Printf("  • Round %d: %d nodes removed in %v (from %d to %d nodes)\n",
+							round.RoundNumber, round.NodesRemoved, round.Duration,
+							round.StartingNodes, round.EndingNodes)
+					}
 				}
 			}
 
@@ -358,6 +399,146 @@ var _ = Describe("Performance", func() {
 			// Verify all pods are actually running
 			env.EventuallyExpectHealthyPodCount(smallPodSelector, 500)
 			env.EventuallyExpectHealthyPodCount(largePodSelector, 500)
+
+			// ========== SCALE-IN PERFORMANCE TEST ==========
+			By("Starting scale-in performance test")
+			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
+			GinkgoWriter.Printf("🔽 SCALE-IN PERFORMANCE TEST: Scaling down to 70%% (700 pods)\n")
+			GinkgoWriter.Printf(strings.Repeat("=", 70) + "\n")
+
+			// Record pre-scale-in state
+			preScaleInNodes := env.Monitor.CreatedNodeCount()
+
+			// Scale down deployments to 70% (350 each)
+			By("Scaling deployments down to 350 pods each (700 total)")
+			smallDeployment.Spec.Replicas = lo.ToPtr(int32(350))
+			largeDeployment.Spec.Replicas = lo.ToPtr(int32(350))
+
+			env.ExpectUpdated(smallDeployment, largeDeployment)
+			GinkgoWriter.Printf("   • Deployments scaled down to 350 replicas each\n")
+
+			// Wait for pods to be terminated
+			By("Waiting for pods to scale down")
+			Eventually(func(g Gomega) {
+				pods := env.Monitor.RunningPods(allPodsSelector)
+				g.Expect(pods).To(HaveLen(700), "Should have exactly 700 pods after scale-in")
+			}).WithTimeout(5 * time.Minute).Should(Succeed())
+			GinkgoWriter.Printf("   • Pod count reduced to 700\n")
+
+			// Monitor consolidation rounds
+			By("Monitoring node consolidation")
+			var consolidationRounds []ConsolidationRound
+			roundNumber := 1
+			lastDrainingTime := time.Now()
+			consolidationStartTime := time.Now()
+
+			// Track consolidation with 15-minute timeout
+			consolidationComplete := false
+			consolidationTimeout := 15 * time.Minute
+
+			for time.Since(consolidationStartTime) < consolidationTimeout && !consolidationComplete {
+				currentNodes := env.Monitor.CreatedNodeCount()
+
+				// Check if nodes are draining/terminating
+				var drainingNodes []corev1.Node
+				allNodes := env.Monitor.CreatedNodes()
+				for _, node := range allNodes {
+					// Check if node has draining taint or is being deleted
+					if node.DeletionTimestamp != nil {
+						drainingNodes = append(drainingNodes, *node)
+					}
+					for _, taint := range node.Spec.Taints {
+						if taint.Key == "karpenter.sh/disruption" {
+							drainingNodes = append(drainingNodes, *node)
+							break
+						}
+					}
+				}
+
+				// If we detect draining nodes, record this as a consolidation round
+				if len(drainingNodes) > 0 {
+					lastDrainingTime = time.Now()
+					GinkgoWriter.Printf("   • Round %d: Detected %d nodes draining/terminating\n", roundNumber, len(drainingNodes))
+
+					// Wait for this round to complete
+					roundStartTime := time.Now()
+					Eventually(func(g Gomega) {
+						newNodeCount := env.Monitor.CreatedNodeCount()
+						g.Expect(newNodeCount).To(BeNumerically("<", currentNodes), "Node count should decrease")
+					}).WithTimeout(5 * time.Minute).Should(Succeed())
+
+					finalNodeCount := env.Monitor.CreatedNodeCount()
+					roundDuration := time.Since(roundStartTime)
+
+					round := ConsolidationRound{
+						RoundNumber:   roundNumber,
+						StartTime:     roundStartTime,
+						Duration:      roundDuration,
+						NodesRemoved:  currentNodes - finalNodeCount,
+						StartingNodes: currentNodes,
+						EndingNodes:   finalNodeCount,
+					}
+					consolidationRounds = append(consolidationRounds, round)
+
+					GinkgoWriter.Printf("   • Round %d completed: %d nodes removed in %v\n",
+						roundNumber, round.NodesRemoved, roundDuration)
+					roundNumber++
+				}
+
+				// Check for stability (no draining for 3 minutes)
+				if time.Since(lastDrainingTime) >= 3*time.Minute {
+					consolidationComplete = true
+					GinkgoWriter.Printf("   • Consolidation complete: No draining activity for 3 minutes\n")
+					break
+				}
+
+				// Wait before next check
+				time.Sleep(30 * time.Second)
+			}
+
+			totalConsolidationTime := time.Since(lastDrainingTime)
+			if !consolidationComplete {
+				GinkgoWriter.Printf("   ⚠️  Consolidation timeout reached after %v\n", consolidationTimeout)
+			}
+
+			// Collect post-scale-in metrics
+			By("Collecting post-scale-in metrics")
+			postScaleInNodes := env.Monitor.CreatedNodeCount()
+			postScaleInCPUUtil := env.Monitor.AvgUtilization(corev1.ResourceCPU)
+			postScaleInMemUtil := env.Monitor.AvgUtilization(corev1.ResourceMemory)
+			postScaleInEfficiencyScore := (postScaleInCPUUtil + postScaleInMemUtil) * 50
+
+			// Update report with scale-in metrics
+			report.ScaleInEnabled = true
+			report.ScaleInPods = 700
+			report.ConsolidationTime = totalConsolidationTime
+			report.ConsolidationRounds = consolidationRounds
+			report.PostScaleInNodes = postScaleInNodes
+			report.PostScaleInCPUUtil = postScaleInCPUUtil
+			report.PostScaleInMemoryUtil = postScaleInMemUtil
+			report.PostScaleInEfficiencyScore = postScaleInEfficiencyScore
+
+			// Report scale-in results
+			GinkgoWriter.Printf("\n📊 SCALE-IN RESULTS:\n")
+			GinkgoWriter.Printf("  • Pre-scale-in nodes: %d\n", preScaleInNodes)
+			GinkgoWriter.Printf("  • Post-scale-in nodes: %d\n", postScaleInNodes)
+			GinkgoWriter.Printf("  • Nodes consolidated: %d\n", preScaleInNodes-postScaleInNodes)
+			GinkgoWriter.Printf("  • Consolidation rounds: %d\n", len(consolidationRounds))
+			GinkgoWriter.Printf("  • Total consolidation time: %v\n", totalConsolidationTime)
+			GinkgoWriter.Printf("  • Post-scale-in CPU utilization: %.2f%%\n", postScaleInCPUUtil*100)
+			GinkgoWriter.Printf("  • Post-scale-in memory utilization: %.2f%%\n", postScaleInMemUtil*100)
+			GinkgoWriter.Printf("  • Post-scale-in efficiency score: %.1f%%\n", postScaleInEfficiencyScore)
+
+			// Scale-in assertions
+			By("Validating scale-in performance")
+			Expect(postScaleInNodes).To(BeNumerically("<", preScaleInNodes),
+				"Node count should decrease after scale-in")
+
+			Expect(totalConsolidationTime).To(BeNumerically("<", 15*time.Minute),
+				"Consolidation should complete within 15 minutes")
+
+			GinkgoWriter.Printf("✅ SCALE-IN TEST: Completed successfully\n")
+			GinkgoWriter.Printf(strings.Repeat("=", 70) + "\n")
 
 			By("Performing comprehensive cleanup and verification")
 			GinkgoWriter.Printf("\n🧹 CLEANUP: Starting resource cleanup...\n")
