@@ -43,7 +43,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
+	kwok "sigs.k8s.io/karpenter/kwok/cloudprovider"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing" //nolint:stylecheck,staticcheck
@@ -75,6 +77,7 @@ type Environment struct {
 	KubeClient            kubernetes.Interface
 	Monitor               *Monitor
 	DefaultNodeClass      *unstructured.Unstructured
+	InstanceTypes         map[string]*cloudprovider.InstanceType
 
 	OutputDir         string
 	StartingNodeCount int
@@ -92,6 +95,15 @@ func NewEnvironment(t *testing.T) *Environment {
 	// Get the output dir if it's set
 	outputDir, _ := os.LookupEnv("OUTPUT_DIR")
 
+	instanceTypes, err := kwok.ConstructInstanceTypes(ctx)
+	if err != nil {
+		log.Default().Printf("failed constructing instance types: %v", err)
+	}
+	// Create lookup map for faster instance type searches
+	instanceTypeMap := lo.KeyBy(instanceTypes, func(it *cloudprovider.InstanceType) string {
+		return it.Name
+	})
+
 	gomega.SetDefaultEventuallyTimeout(10 * time.Minute)
 	gomega.SetDefaultEventuallyPollingInterval(1 * time.Second)
 	return &Environment{
@@ -104,6 +116,7 @@ func NewEnvironment(t *testing.T) *Environment {
 		TimeIntervalCollector: debug.NewTimestampCollector(),
 		OutputDir:             outputDir,
 		DefaultNodeClass:      decodeNodeClass(),
+		InstanceTypes:         instanceTypeMap,
 	}
 }
 
