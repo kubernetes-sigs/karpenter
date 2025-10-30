@@ -438,7 +438,9 @@ var _ = Describe("Performance", func() {
 
 			for time.Since(consolidationStartTime) < consolidationTimeout && !consolidationComplete {
 				currentNodes := env.Monitor.CreatedNodeCount()
-
+				GinkgoWriter.Printf("Checking for consolidation activity")
+				GinkgoWriter.Printf("  • Pre-scale-in nodes: %d\n", preScaleInNodes)
+				GinkgoWriter.Printf("  • Current nodes: %d\n", currentNodes)
 				// Check if nodes are draining/terminating
 				var drainingNodes []corev1.Node
 				allNodes := env.Monitor.CreatedNodes()
