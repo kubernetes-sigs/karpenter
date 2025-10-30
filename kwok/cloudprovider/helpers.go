@@ -20,6 +20,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"regexp"
@@ -63,8 +64,11 @@ type InstanceTypeOptions struct {
 	instanceTypeLabels map[string]string
 }
 
-//go:embed instance_types.json
-var defaultRawInstanceTypes []byte
+var (
+	//go:embed instance_types.json
+	defaultRawInstanceTypes     []byte
+	defaultRawInstanceTypesPath = flag.String("default-raw-instance-types", "", "Pass in default cloud provider specific instance types")
+)
 
 // ConstructInstanceTypes create many instance types based on the embedded instance type data
 func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType, error) {
@@ -72,12 +76,19 @@ func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType,
 	var instanceTypeOptions []InstanceTypeOptions
 
 	rawInstanceTypes := defaultRawInstanceTypes
-	if customInstanceTypes := options.FromContext(ctx).InstanceTypesFilePath; customInstanceTypes != "" {
-		customRawInstanceTypes, err := os.ReadFile(customInstanceTypes)
-		if err != nil {
-			return nil, fmt.Errorf("could not read custom instance types file: %w", err)
+	paths := []string{lo.FromPtr(defaultRawInstanceTypesPath)}
+	if opts := options.FromContext(ctx); opts != nil {
+		paths = append(paths, opts.InstanceTypesFilePath)
+	}
+
+	for _, path := range paths {
+		if path != "" {
+			if data, err := os.ReadFile(path); err != nil {
+				return nil, fmt.Errorf("could not read instance types file %s: %w", path, err)
+			} else {
+				rawInstanceTypes = data
+			}
 		}
-		rawInstanceTypes = customRawInstanceTypes
 	}
 
 	if err := json.Unmarshal(rawInstanceTypes, &instanceTypeOptions); err != nil {

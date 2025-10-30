@@ -27,25 +27,23 @@ import (
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
-var _ = Describe("Performance", func() {
-	Context("Provisioning", func() {
-		It("should provision a node for a pending pod", func() {
-			var replicas = 1
-			deployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(replicas),
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: testLabels,
+var _ = Describe("Provisioning", func() {
+	It("should provision a node for a pending pod", func() {
+		var replicas = 1
+		deployment := test.Deployment(test.DeploymentOptions{
+			Replicas: int32(replicas),
+			PodOptions: test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: testLabels,
+				},
+				ResourceRequirements: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("1"),
 					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU: resource.MustParse("1"),
-						},
-					},
-				}})
-			env.ExpectCreated(deployment)
-			env.ExpectCreated(nodePool, nodeClass)
-			env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, replicas)
-		})
+				},
+			}})
+		env.ExpectCreated(deployment)
+		env.ExpectCreated(nodePool, nodeClass)
+		env.EventuallyExpectHealthyPodCountWithTimeout(10*time.Minute, labelSelector, replicas)
 	})
 })
