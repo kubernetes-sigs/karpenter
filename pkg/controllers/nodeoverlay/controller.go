@@ -253,7 +253,7 @@ func (c *Controller) updateOverlayStatuses(ctx context.Context, overlayList []v1
 			overlayList[i].StatusConditions().SetFalse(v1alpha1.ConditionTypeValidationSucceeded, "Conflict", "conflict with another overlay")
 		}
 
-		if !equality.Semantic.DeepEqual(stored, overlayList[i]) {
+		if !equality.Semantic.DeepEqual(stored.Status, overlayList[i].Status) {
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 			// can cause races due to the fact that it fully replaces the list on a change
 			// Here, we are updating the status condition list
