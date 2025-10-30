@@ -45,7 +45,7 @@ var (
 			Name:      "cost_total",
 			Help:      "ALPHA METRIC. Total cost of the nodepool from Karpenter's perspective. Units are determined by the cloud provider. Not an authoritative source for billing. Includes modifications due to NodeOverlays",
 		},
-		[]string{metrics.NodePoolLabel},
+		[]string{},
 	)
 )
 
@@ -67,14 +67,16 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	if err := c.client.List(ctx, &nodepools); err != nil {
 		return reconciler.Result{}, err
 	}
-
+	sum := 0.0
 	// Update cost metrics for each nodepool
 	for _, np := range nodepools.Items {
 		cost := c.clusterCost.GetNodepoolCost(&np)
 		ClusterCost.Set(cost, map[string]string{
 			metrics.NodePoolLabel: np.Name,
 		})
+		sum += cost
 	}
+	ClusterCost.Set(sum, nil)
 
 	return reconciler.Result{RequeueAfter: time.Second * 10}, nil
 }

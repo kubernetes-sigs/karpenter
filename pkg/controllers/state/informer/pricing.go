@@ -34,6 +34,10 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 )
 
+// This whole pricing controller only exists because CP's surface InstanceType information
+// via a poll-method. Long term, this controller should likely be removed in favor of refactoring the
+// cloudprovider interface to a push model for instance type information:
+// https://github.com/kubernetes-sigs/karpenter/issues/2605
 type PricingController struct {
 	client        client.Client
 	cloudProvider cloudprovider.CloudProvider
