@@ -33,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 
@@ -89,6 +90,20 @@ var _ = Describe("Performance", func() {
 					// Force delete deployments if they still exist
 					_ = client.IgnoreNotFound(env.Client.Delete(env.Context, smallDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
 					_ = client.IgnoreNotFound(env.Client.Delete(env.Context, largeDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
+
+					// Force delete any remaining nodes
+					createdNodes := env.Monitor.CreatedNodes()
+					for _, node := range createdNodes {
+						_ = client.IgnoreNotFound(env.Client.Delete(env.Context, node, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
+					}
+
+					// Force delete any remaining nodeclaims
+					var nodeClaims v1.NodeClaimList
+					if err := env.Client.List(env.Context, &nodeClaims, client.MatchingLabels{test.DiscoveryLabel: "unspecified"}); err == nil {
+						for _, nodeClaim := range nodeClaims.Items {
+							_ = client.IgnoreNotFound(env.Client.Delete(env.Context, &nodeClaim, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
+						}
+					}
 
 					// Wait briefly for cleanup
 					time.Sleep(30 * time.Second)
@@ -358,14 +373,63 @@ var _ = Describe("Performance", func() {
 			}).WithTimeout(5 * time.Minute).Should(Succeed())
 			GinkgoWriter.Printf("   • All pods terminated\n")
 
-			// 3. Wait for nodes to be cleaned up by Karpenter
+			// 3. Force delete all nodes and nodeclaims created during the test
+			By("Force deleting all test-created nodes and nodeclaims")
+
+			// Get all nodes created during the test
+			createdNodes := env.Monitor.CreatedNodes()
+			GinkgoWriter.Printf("   • Found %d nodes to delete\n", len(createdNodes))
+
+			// Force delete all created nodes
+			for _, node := range createdNodes {
+				err := env.Client.Delete(env.Context, node, &client.DeleteOptions{
+					GracePeriodSeconds: lo.ToPtr(int64(0)),
+				})
+				if err != nil && client.IgnoreNotFound(err) != nil {
+					GinkgoWriter.Printf("   ⚠️  Warning: Failed to delete node %s: %v\n", node.Name, err)
+				}
+			}
+
+			// Get all nodeclaims with the test discovery label
+			var nodeClaims v1.NodeClaimList
+			err := env.Client.List(env.Context, &nodeClaims, client.MatchingLabels{
+				test.DiscoveryLabel: "unspecified",
+			})
+			if err == nil {
+				GinkgoWriter.Printf("   • Found %d nodeclaims to delete\n", len(nodeClaims.Items))
+
+				// Force delete all test nodeclaims
+				for _, nodeClaim := range nodeClaims.Items {
+					err := env.Client.Delete(env.Context, &nodeClaim, &client.DeleteOptions{
+						GracePeriodSeconds: lo.ToPtr(int64(0)),
+					})
+					if err != nil && client.IgnoreNotFound(err) != nil {
+						GinkgoWriter.Printf("   ⚠️  Warning: Failed to delete nodeclaim %s: %v\n", nodeClaim.Name, err)
+					}
+				}
+			}
+
+			GinkgoWriter.Printf("   • Force deletion commands issued\n")
+
+			// 4. Wait for nodes to be actually removed (shorter timeout since we're forcing deletion)
 			Eventually(func(g Gomega) {
 				createdNodes := env.Monitor.CreatedNodes()
 				g.Expect(createdNodes).To(HaveLen(0), "All provisioned nodes should be cleaned up")
-			}).WithTimeout(10 * time.Minute).Should(Succeed())
+			}).WithTimeout(3 * time.Minute).Should(Succeed())
 			GinkgoWriter.Printf("   • All nodes cleaned up\n")
 
-			// 4. Final cluster state verification
+			// 5. Verify nodeclaims are also cleaned up
+			Eventually(func(g Gomega) {
+				var remainingNodeClaims v1.NodeClaimList
+				err := env.Client.List(env.Context, &remainingNodeClaims, client.MatchingLabels{
+					test.DiscoveryLabel: "unspecified",
+				})
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(remainingNodeClaims.Items).To(HaveLen(0), "All test nodeclaims should be cleaned up")
+			}).WithTimeout(2 * time.Minute).Should(Succeed())
+			GinkgoWriter.Printf("   • All nodeclaims cleaned up\n")
+
+			// 6. Final cluster state verification
 			By("Verifying cluster is ready for subsequent tests")
 			finalNodeCount := env.Monitor.NodeCount()
 			Expect(finalNodeCount).To(Equal(env.StartingNodeCount),
