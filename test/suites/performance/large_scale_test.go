@@ -361,7 +361,7 @@ var _ = Describe("Performance", func() {
 			// 3. Wait for nodes to be cleaned up by Karpenter
 			Eventually(func(g Gomega) {
 				createdNodes := env.Monitor.CreatedNodes()
-				g.Expect(createdNodes).To(HaveLen(1), "All provisioned nodes should be cleaned up")
+				g.Expect(createdNodes).To(HaveLen(0), "All provisioned nodes should be cleaned up")
 			}).WithTimeout(10 * time.Minute).Should(Succeed())
 			GinkgoWriter.Printf("   • All nodes cleaned up\n")
 
