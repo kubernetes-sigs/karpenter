@@ -1,0 +1,6 @@
+version: v1.61.0
+name: golangci-kube-api-linter
+destination: ./bin
+plugins:
+  - module: 'sigs.k8s.io/kube-api-linter'
+    version: 'v0.0.0-20250808120943-48643eb2563d'

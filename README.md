@@ -27,6 +27,31 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [Proxmox](https://github.com/sergelogvinov/karpenter-provider-proxmox)
 - [Oracle Cloud Infrastructure (OCI)](https://github.com/zoom/karpenter-oci)
 
+## Development
+
+### API Quality Checks
+
+This project uses [kube-api-linter](https://github.com/kubernetes-sigs/kube-api-linter) to ensure Kubernetes API types follow established conventions. The linter checks for:
+
+- Proper field documentation (comments starting with field names in lowercase)
+- Required vs optional field marking  
+- Proper status field structure
+- Kubernetes API convention compliance
+
+To run the API linter locally:
+
+```bash
+# Build the custom golangci-lint with kube-api-linter
+golangci-lint custom
+
+# Run on specific API packages
+./bin/golangci-kube-api-linter run pkg/apis/v1/ --config .golangci-kal.yml
+./bin/golangci-kube-api-linter run pkg/apis/v1alpha1/ --config .golangci-kal.yml  
+./bin/golangci-kube-api-linter run kwok/apis/v1alpha1/ --config .golangci-kal.yml
+```
+
+The kube-api-linter is integrated into the `make verify` target and runs automatically in CI for all pull requests that modify API files.
+
 ## Community, discussion, contribution, and support
 
 If you have any questions or want to get the latest project news, you can connect with us in the following ways:
