@@ -37,9 +37,9 @@ import (
 )
 
 var _ = Describe("Performance", func() {
-	Context("Large Scale Deployment", func() {
-		It("should efficiently scale two deployments with different resource profiles", func() {
-			By("Setting up performance test with 1000 pods across two resource profiles")
+	Context("Host Name Spreading Deployment", func() {
+		It("should efficiently scale two deployments with host name topology spreading", func() {
+			By("Setting up performance test with 1000 pods - small deployment with host name spreading")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
 			GinkgoWriter.Printf("CREATING DEPLOYMENTS" + "\n")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
@@ -81,7 +81,7 @@ var _ = Describe("Performance", func() {
 				},
 			}
 
-			// Create deployment with small resource requirements
+			// Create deployment with small resource requirements and host name topology spread constraints
 			smallDeployment = test.Deployment(test.DeploymentOptions{
 				Replicas: int32(500),
 				PodOptions: test.PodOptions{
@@ -93,6 +93,19 @@ var _ = Describe("Performance", func() {
 						},
 					},
 					ResourceRequirements: smallPodResources,
+					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+						{
+							MaxSkew:           1,
+							TopologyKey:       corev1.LabelHostname,
+							WhenUnsatisfiable: corev1.DoNotSchedule,
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app":           "small-resource-app",
+									"resource-type": "small",
+								},
+							},
+						},
+					},
 				},
 			})
 
@@ -191,7 +204,7 @@ var _ = Describe("Performance", func() {
 
 			// Create structured performance report
 			report := PerformanceReport{
-				TestName:                "Large Scale Deployment Performance Test",
+				TestName:                "Host Name Spreading Performance Test",
 				TotalPods:               1000,
 				SmallPods:               500,
 				LargePods:               500,
@@ -213,7 +226,7 @@ var _ = Describe("Performance", func() {
 			// Output detailed performance report to console
 			By("=== PERFORMANCE TEST REPORT ===")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
-			GinkgoWriter.Printf("🚀 LARGE SCALE DEPLOYMENT PERFORMANCE REPORT\n")
+			GinkgoWriter.Printf("🚀 HOST NAME SPREADING PERFORMANCE REPORT\n")
 			GinkgoWriter.Printf(strings.Repeat("=", 70) + "\n")
 
 			// Test Configuration
@@ -294,7 +307,7 @@ var _ = Describe("Performance", func() {
 
 			// Write detailed report to file if OUTPUT_DIR is set
 			if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
-				reportFile := filepath.Join(outputDir, "large_scale_performance_report.json")
+				reportFile := filepath.Join(outputDir, "host_name_spreading_performance_report.json")
 				reportJSON, err := json.MarshalIndent(report, "", "  ")
 				if err == nil {
 					if err := os.WriteFile(reportFile, reportJSON, 0600); err == nil {
