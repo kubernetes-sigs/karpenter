@@ -67,6 +67,8 @@ var _ = BeforeEach(func() {
 		})
 	}
 	nodePool.Spec.Limits = v1.Limits{}
+	nodePool.Spec.Disruption.ConsolidationPolicy = v1.ConsolidationPolicyWhenEmptyOrUnderutilized
+	nodePool.Spec.Disruption.ConsolidateAfter = v1.MustParseNillableDuration("30s")
 	nodePool.Spec.Disruption.Budgets = []v1.Budget{{Nodes: "100%"}}
 })
 
