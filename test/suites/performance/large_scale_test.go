@@ -32,9 +32,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 // ConsolidationRound represents a single round of consolidation
@@ -104,38 +103,10 @@ var _ = Describe("Performance", func() {
 			DeferCleanup(func() {
 				if smallDeployment != nil && largeDeployment != nil {
 					By("Emergency cleanup - ensuring test resources are removed")
-					GinkgoWriter.Printf("🚨 EMERGENCY CLEANUP: Removing any remaining test resources...\n")
-
-					// Force delete deployments if they still exist
-					_ = client.IgnoreNotFound(env.Client.Delete(env.Context, smallDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
-					_ = client.IgnoreNotFound(env.Client.Delete(env.Context, largeDeployment, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
-
-					// Force delete any remaining nodes
-					createdNodes := env.Monitor.CreatedNodes()
-					for _, node := range createdNodes {
-						_ = client.IgnoreNotFound(env.Client.Delete(env.Context, node, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
-					}
-
-					// Force delete any remaining nodeclaims
-					var nodeClaims v1.NodeClaimList
-					if err := env.Client.List(env.Context, &nodeClaims, client.MatchingLabels{test.DiscoveryLabel: "unspecified"}); err == nil {
-						for _, nodeClaim := range nodeClaims.Items {
-							_ = client.IgnoreNotFound(env.Client.Delete(env.Context, &nodeClaim, &client.DeleteOptions{GracePeriodSeconds: lo.ToPtr(int64(0))}))
-						}
-					}
-
-					// Wait briefly for cleanup
-					time.Sleep(30 * time.Second)
-
-					// Verify cleanup
-					if allPodsSelector != nil {
-						remainingPods := env.Monitor.RunningPods(allPodsSelector)
-						if len(remainingPods) > 0 {
-							GinkgoWriter.Printf("⚠️  WARNING: %d test pods may still be running\n", len(remainingPods))
-						}
-					}
-
-					GinkgoWriter.Printf("🧹 Emergency cleanup completed\n")
+					opts := common.DefaultCleanupOptions()
+					opts.Deployments = []*appsv1.Deployment{smallDeployment, largeDeployment}
+					opts.PodSelector = allPodsSelector
+					_ = env.ForceCleanupTestResources(opts)
 				}
 			})
 
@@ -543,83 +514,13 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf(strings.Repeat("=", 70) + "\n")
 
 			By("Performing comprehensive cleanup and verification")
-			GinkgoWriter.Printf("\n🧹 CLEANUP: Starting resource cleanup...\n")
+			cleanupOpts := common.DefaultCleanupOptions()
+			cleanupOpts.Deployments = []*appsv1.Deployment{smallDeployment, largeDeployment}
+			cleanupOpts.PodSelector = allPodsSelector
+			cleanupOpts.WaitTimeout = 5 * time.Minute
 
-			// 1. Delete the deployments
-			env.ExpectDeleted(smallDeployment, largeDeployment)
-			GinkgoWriter.Printf("   • Deployments deleted\n")
-
-			// 2. Wait for all pods to be terminated
-			Eventually(func(g Gomega) {
-				pods := env.Monitor.RunningPods(allPodsSelector)
-				g.Expect(pods).To(HaveLen(0), "All test pods should be terminated")
-			}).WithTimeout(5 * time.Minute).Should(Succeed())
-			GinkgoWriter.Printf("   • All pods terminated\n")
-
-			// 3. Force delete all nodes and nodeclaims created during the test
-			By("Force deleting all test-created nodes and nodeclaims")
-
-			// Get all nodes created during the test
-			createdNodes := env.Monitor.CreatedNodes()
-			GinkgoWriter.Printf("   • Found %d nodes to delete\n", len(createdNodes))
-
-			// Force delete all created nodes
-			for _, node := range createdNodes {
-				err := env.Client.Delete(env.Context, node, &client.DeleteOptions{
-					GracePeriodSeconds: lo.ToPtr(int64(0)),
-				})
-				if err != nil && client.IgnoreNotFound(err) != nil {
-					GinkgoWriter.Printf("   ⚠️  Warning: Failed to delete node %s: %v\n", node.Name, err)
-				}
-			}
-
-			// Get all nodeclaims with the test discovery label
-			var nodeClaims v1.NodeClaimList
-			err := env.Client.List(env.Context, &nodeClaims, client.MatchingLabels{
-				test.DiscoveryLabel: "unspecified",
-			})
-			if err == nil {
-				GinkgoWriter.Printf("   • Found %d nodeclaims to delete\n", len(nodeClaims.Items))
-
-				// Force delete all test nodeclaims
-				for _, nodeClaim := range nodeClaims.Items {
-					err := env.Client.Delete(env.Context, &nodeClaim, &client.DeleteOptions{
-						GracePeriodSeconds: lo.ToPtr(int64(0)),
-					})
-					if err != nil && client.IgnoreNotFound(err) != nil {
-						GinkgoWriter.Printf("   ⚠️  Warning: Failed to delete nodeclaim %s: %v\n", nodeClaim.Name, err)
-					}
-				}
-			}
-
-			GinkgoWriter.Printf("   • Force deletion commands issued\n")
-
-			// 4. Wait for nodes to be actually removed (shorter timeout since we're forcing deletion)
-			Eventually(func(g Gomega) {
-				createdNodes := env.Monitor.CreatedNodes()
-				g.Expect(createdNodes).To(HaveLen(0), "All provisioned nodes should be cleaned up")
-			}).WithTimeout(3 * time.Minute).Should(Succeed())
-			GinkgoWriter.Printf("   • All nodes cleaned up\n")
-
-			// 5. Verify nodeclaims are also cleaned up
-			Eventually(func(g Gomega) {
-				var remainingNodeClaims v1.NodeClaimList
-				err := env.Client.List(env.Context, &remainingNodeClaims, client.MatchingLabels{
-					test.DiscoveryLabel: "unspecified",
-				})
-				g.Expect(err).ToNot(HaveOccurred())
-				g.Expect(remainingNodeClaims.Items).To(HaveLen(0), "All test nodeclaims should be cleaned up")
-			}).WithTimeout(2 * time.Minute).Should(Succeed())
-			GinkgoWriter.Printf("   • All nodeclaims cleaned up\n")
-
-			// 6. Final cluster state verification
-			By("Verifying cluster is ready for subsequent tests")
-			finalNodeCount := env.Monitor.NodeCount()
-			Expect(finalNodeCount).To(Equal(env.StartingNodeCount),
-				fmt.Sprintf("Node count should return to starting count (%d), but is %d",
-					env.StartingNodeCount, finalNodeCount))
-
-			GinkgoWriter.Printf("✅ CLEANUP: Completed successfully - cluster ready for next test\n")
+			err := env.PerformComprehensiveCleanup(cleanupOpts)
+			Expect(err).ToNot(HaveOccurred(), "Comprehensive cleanup should succeed")
 
 			By("Performance test completed successfully")
 		})
