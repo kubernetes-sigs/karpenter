@@ -171,14 +171,6 @@ var _ = Describe("Performance", func() {
 			resourceEfficiencyScore := (avgCPUUtil + avgMemUtil) * 50 // Scale to 0-100%
 			podsPerNode := float64(1000) / float64(nodeCount)
 
-			// Collect timing breakdown (if available from TimeIntervalCollector)
-			var podSchedulingTime, nodeProvisioningTime, podReadyTime time.Duration
-
-			// Estimate timing phases (these would be more accurate with detailed instrumentation)
-			podSchedulingTime = totalTime / 4    // Rough estimate: 25% of total time
-			nodeProvisioningTime = totalTime / 2 // Rough estimate: 50% of total time
-			podReadyTime = totalTime / 4         // Rough estimate: 25% of total time
-
 			By("Generating performance report")
 
 			// Determine test status and collect warnings
@@ -204,14 +196,14 @@ var _ = Describe("Performance", func() {
 
 			// Create structured performance report
 			report := PerformanceReport{
-				TestName:                "Host Name Spreading Performance Test",
-				TotalPods:               2000,
-				SmallPods:               1000,
-				LargePods:               1000,
-				TotalTime:               totalTime,
-				PodSchedulingTime:       podSchedulingTime,
-				NodeProvisioningTime:    nodeProvisioningTime,
-				PodReadyTime:            podReadyTime,
+				TestName:  "Host Name Spreading Performance Test",
+				TotalPods: 2000,
+				SmallPods: 1000,
+				LargePods: 1000,
+				TotalTime: totalTime,
+				//PodSchedulingTime:       podSchedulingTime,
+				//NodeProvisioningTime:    nodeProvisioningTime,
+				//PodReadyTime:            podReadyTime,
 				NodesProvisioned:        nodeCount,
 				TotalReservedCPUUtil:    avgCPUUtil,
 				TotalReservedMemoryUtil: avgMemUtil,
@@ -239,9 +231,6 @@ var _ = Describe("Performance", func() {
 			// Timing Metrics
 			GinkgoWriter.Printf("\n⏱️  TIMING METRICS:\n")
 			GinkgoWriter.Printf("  • Total Scale-out Time: %v\n", report.TotalTime)
-			GinkgoWriter.Printf("  • Est. Pod Scheduling Time: %v\n", report.PodSchedulingTime)
-			GinkgoWriter.Printf("  • Est. Node Provisioning Time: %v\n", report.NodeProvisioningTime)
-			GinkgoWriter.Printf("  • Est. Pod Ready Time: %v\n", report.PodReadyTime)
 
 			// Resource Utilization
 			GinkgoWriter.Printf("\n💻 RESOURCE UTILIZATION:\n")

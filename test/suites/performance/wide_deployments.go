@@ -53,15 +53,15 @@ func getDeterministicDeploymentConfigs() []DeploymentConfig {
 	// Deterministic CPU values (0.25 - 8.0 vCPU range)
 	cpuValues := []string{
 		"250m", "500m", "750m", "1000m", "1500m", "2000m", "2500m", "3000m", "3500m", "4000m", // 1-10
-		"4500m", "5000m", "5500m", "6000m", "6500m", "7000m", "7500m", "8000m", "250m", "500m", // 11-20
-		"750m", "1000m", "1500m", "2000m", "2500m", "3000m", "3500m", "4000m", "4500m", "5000m", // 21-30
+		"2500m", "1000m", "1500m", "3000m", "1800m", "2000m", "3500m", "4000m", "250m", "500m", // 11-20
+		"750m", "1000m", "1500m", "2000m", "2500m", "3000m", "3500m", "4000m", "3500m", "3000m", // 21-30
 	}
 
 	// Deterministic memory values (300MB - 160GB range)
 	memoryValues := []string{
-		"300Mi", "500Mi", "750Mi", "1Gi", "2Gi", "4Gi", "8Gi", "16Gi", "32Gi", "48Gi", // 1-10
-		"64Gi", "80Gi", "96Gi", "112Gi", "128Gi", "144Gi", "160Gi", "300Mi", "500Mi", "750Mi", // 11-20
-		"1Gi", "2Gi", "4Gi", "8Gi", "16Gi", "32Gi", "48Gi", "64Gi", "80Gi", "96Gi", // 21-30
+		"300Mi", "500Mi", "750Mi", "1Gi", "2Gi", "4Gi", "8Gi", "4Gi", "16Gi", "10Gi", // 1-10
+		"64Gi", "30Gi", "32Gi", "32Gi", "30Gi", "20Gi", "30Gi", "300Mi", "500Mi", "750Mi", // 11-20
+		"1Gi", "2Gi", "4Gi", "8Gi", "16Gi", "32Gi", "28Gi", "64Gi", "13Gi", "24Gi", // 21-30
 	}
 
 	// Deterministic pod counts - sum to exactly 1000 initially, 700 after scale-in
@@ -312,14 +312,6 @@ var _ = Describe("Performance", func() {
 			resourceEfficiencyScore := (avgCPUUtil + avgMemUtil) * 50 // Scale to 0-100%
 			podsPerNode := float64(1000) / float64(nodeCount)
 
-			// Collect timing breakdown (if available from TimeIntervalCollector)
-			var podSchedulingTime, nodeProvisioningTime, podReadyTime time.Duration
-
-			// Estimate timing phases (these would be more accurate with detailed instrumentation)
-			podSchedulingTime = totalTime / 4    // Rough estimate: 25% of total time
-			nodeProvisioningTime = totalTime / 2 // Rough estimate: 50% of total time
-			podReadyTime = totalTime / 4         // Rough estimate: 25% of total time
-
 			By("Generating performance report")
 
 			// Determine test status and collect warnings
@@ -350,9 +342,6 @@ var _ = Describe("Performance", func() {
 				SmallPods:               0, // Will be calculated based on resource ranges
 				LargePods:               0, // Will be calculated based on resource ranges
 				TotalTime:               totalTime,
-				PodSchedulingTime:       podSchedulingTime,
-				NodeProvisioningTime:    nodeProvisioningTime,
-				PodReadyTime:            podReadyTime,
 				NodesProvisioned:        nodeCount,
 				TotalReservedCPUUtil:    avgCPUUtil,
 				TotalReservedMemoryUtil: avgMemUtil,
@@ -399,9 +388,6 @@ var _ = Describe("Performance", func() {
 			// Timing Metrics
 			GinkgoWriter.Printf("\n⏱️  TIMING METRICS:\n")
 			GinkgoWriter.Printf("  • Total Scale-out Time: %v\n", report.TotalTime)
-			GinkgoWriter.Printf("  • Est. Pod Scheduling Time: %v\n", report.PodSchedulingTime)
-			GinkgoWriter.Printf("  • Est. Node Provisioning Time: %v\n", report.NodeProvisioningTime)
-			GinkgoWriter.Printf("  • Est. Pod Ready Time: %v\n", report.PodReadyTime)
 
 			// Resource Utilization
 			GinkgoWriter.Printf("\n💻 RESOURCE UTILIZATION:\n")

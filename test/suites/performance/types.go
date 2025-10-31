@@ -32,19 +32,19 @@ type ConsolidationRound struct {
 
 // PerformanceReport represents the structured performance test results
 type PerformanceReport struct {
-	TestName                string        `json:"test_name"`
-	TotalPods               int           `json:"total_pods"`
-	SmallPods               int           `json:"small_pods"`
-	LargePods               int           `json:"large_pods"`
-	TotalTime               time.Duration `json:"total_time"`
-	PodSchedulingTime       time.Duration `json:"pod_scheduling_time"`
-	NodeProvisioningTime    time.Duration `json:"node_provisioning_time"`
-	PodReadyTime            time.Duration `json:"pod_ready_time"`
-	NodesProvisioned        int           `json:"nodes_provisioned"`
-	TotalReservedCPUUtil    float64       `json:"total_reserved_cpu_utilization"`
-	TotalReservedMemoryUtil float64       `json:"total_reserved_memory_utilization"`
-	ResourceEfficiencyScore float64       `json:"resource_efficiency_score"`
-	PodsPerNode             float64       `json:"pods_per_node"`
+	TestName  string        `json:"test_name"`
+	TotalPods int           `json:"total_pods"`
+	SmallPods int           `json:"small_pods"`
+	LargePods int           `json:"large_pods"`
+	TotalTime time.Duration `json:"total_time"`
+	//PodSchedulingTime       time.Duration `json:"pod_scheduling_time"`
+	//NodeProvisioningTime    time.Duration `json:"node_provisioning_time"`
+	//PodReadyTime            time.Duration `json:"pod_ready_time"`
+	NodesProvisioned        int     `json:"nodes_provisioned"`
+	TotalReservedCPUUtil    float64 `json:"total_reserved_cpu_utilization"`
+	TotalReservedMemoryUtil float64 `json:"total_reserved_memory_utilization"`
+	ResourceEfficiencyScore float64 `json:"resource_efficiency_score"`
+	PodsPerNode             float64 `json:"pods_per_node"`
 	// Scale-in metrics
 	ScaleInEnabled             bool                 `json:"scale_in_enabled"`
 	ScaleInPods                int                  `json:"scale_in_pods"`
