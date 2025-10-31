@@ -18,6 +18,7 @@ package performance
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -248,69 +250,32 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf("  • Memory Utilization: %.2f%%\n", preDriftMemUtil*100)
 
 			// ========== DRIFT TRIGGER ==========
-			By("Triggering drift by adding taint to individual NodeClaims and Nodes")
+			By("Triggering drift by updating NodePool template with annotation")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
-			GinkgoWriter.Printf("🔄 TRIGGERING DRIFT - Adding NoSchedule taint to existing NodeClaims and Nodes\n")
+			GinkgoWriter.Printf("🔄 TRIGGERING DRIFT - Adding annotation to NodePool template\n")
 			GinkgoWriter.Printf(strings.Repeat("=", 70) + "\n")
 
 			driftTriggerTime := time.Now()
 			env.TimeIntervalCollector.Start("drift_trigger")
 
-			// Add a taint to individual existing NodeClaims and Nodes to trigger drift
-			driftTaint := corev1.Taint{
-				Key:    "drift-test",
-				Value:  "true",
-				Effect: corev1.TaintEffectNoSchedule,
-			}
-
-			// Get all existing NodeClaims and taint them individually
+			// Get existing NodeClaims before triggering drift
 			existingNodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
-			taintedNodeClaimCount := 0
-			for _, nodeClaim := range existingNodeClaims {
-				// Create a copy of the NodeClaim to modify
-				nodeClaimCopy := nodeClaim.DeepCopy()
-				nodeClaimCopy.Spec.Taints = append(nodeClaimCopy.Spec.Taints, driftTaint)
-				env.ExpectUpdated(nodeClaimCopy)
-				taintedNodeClaimCount++
-			}
 
-			// Get all existing nodes and taint them individually
-			existingNodes := env.Monitor.CreatedNodes()
-			taintedNodeCount := 0
-			for _, node := range existingNodes {
-				// Create a copy of the node to modify
-				nodeCopy := node.DeepCopy()
-				nodeCopy.Spec.Taints = append(nodeCopy.Spec.Taints, driftTaint)
-				env.ExpectUpdated(nodeCopy)
-				taintedNodeCount++
-			}
+			// Trigger drift by adding an annotation to the NodePool template
+			// This will cause Karpenter to detect that existing NodeClaims are drifted
+			driftAnnotation := fmt.Sprintf("drift-test-triggered-%s", driftTriggerTime.Format("20060102-150405"))
+			nodePool.Spec.Template.Annotations = lo.Assign(nodePool.Spec.Template.Annotations, map[string]string{
+				"drift-test": driftAnnotation,
+			})
+			env.ExpectUpdated(nodePool)
 
-			GinkgoWriter.Printf("✅ Drift trigger applied: Added taint 'drift-test=true:NoSchedule' to %d NodeClaims and %d Nodes\n", taintedNodeClaimCount, taintedNodeCount)
+			GinkgoWriter.Printf("✅ Drift trigger applied: Added annotation 'drift-test=%s' to NodePool template\n", driftAnnotation)
 
-			// Monitor for drift detection (nodes getting disruption taint)
-			By("Monitoring for drift detection")
-			var driftDetectionTime time.Duration
-			var firstDriftDetected bool
-
-			Eventually(func(g Gomega) {
-				nodes := env.Monitor.CreatedNodes()
-				drainingNodes := 0
-				for _, node := range nodes {
-					for _, taint := range node.Spec.Taints {
-						if taint.Key == "karpenter.sh/disruption" {
-							drainingNodes++
-							break
-						}
-					}
-				}
-				if drainingNodes > 0 && !firstDriftDetected {
-					driftDetectionTime = time.Since(driftTriggerTime)
-					firstDriftDetected = true
-					GinkgoWriter.Printf("🔍 DRIFT DETECTED: %d nodes marked for disruption after %v\n",
-						drainingNodes, driftDetectionTime)
-				}
-				g.Expect(drainingNodes).To(BeNumerically(">", 0), "Should detect drifted nodes")
-			}).WithTimeout(5 * time.Minute).Should(Succeed())
+			// Wait for Karpenter to detect drift on the existing NodeClaims
+			By("Waiting for Karpenter to detect drift on existing NodeClaims")
+			env.EventuallyExpectDrifted(existingNodeClaims...)
+			driftDetectionTime := time.Since(driftTriggerTime)
+			GinkgoWriter.Printf("🔍 DRIFT DETECTED: NodeClaims marked as drifted after %v\n", driftDetectionTime)
 
 			// Monitor drift replacement process
 			By("Monitoring drift replacement process")
@@ -342,11 +307,10 @@ var _ = Describe("Performance", func() {
 						}
 					}
 
-					// Check if node is new (has the drift taint)
-					for _, taint := range node.Spec.Taints {
-						if taint.Key == "drift-test" && taint.Value == "true" {
+					// Check if node is new (has the drift annotation)
+					if node.Annotations != nil {
+						if annotationValue, exists := node.Annotations["drift-test"]; exists && annotationValue == driftAnnotation {
 							isNew = true
-							break
 						}
 					}
 
@@ -361,28 +325,23 @@ var _ = Describe("Performance", func() {
 				GinkgoWriter.Printf("📊 Drift Progress - Round %d:\n", roundNumber)
 				GinkgoWriter.Printf("  • Total nodes: %d\n", currentNodes)
 				GinkgoWriter.Printf("  • Draining nodes: %d\n", len(drainingNodes))
-				GinkgoWriter.Printf("  • New nodes (with drift taint): %d\n", len(newNodes))
+				GinkgoWriter.Printf("  • New nodes (with drift annotation): %d\n", len(newNodes))
 
 				// Check if drift is complete (no nodes are draining and we have replacement nodes)
 				if len(drainingNodes) == 0 && currentNodes > 0 {
-					// Verify that we have nodes without the drift taint (replacement nodes)
-					nodesWithoutDriftTaint := 0
+					// Verify that we have nodes with the drift annotation (replacement nodes)
+					nodesWithDriftAnnotation := 0
 					for _, node := range allNodes {
-						hasDriftTaint := false
-						for _, taint := range node.Spec.Taints {
-							if taint.Key == "drift-test" && taint.Value == "true" {
-								hasDriftTaint = true
-								break
+						if node.Annotations != nil {
+							if annotationValue, exists := node.Annotations["drift-test"]; exists && annotationValue == driftAnnotation {
+								nodesWithDriftAnnotation++
 							}
-						}
-						if !hasDriftTaint {
-							nodesWithoutDriftTaint++
 						}
 					}
 
-					if nodesWithoutDriftTaint == currentNodes {
+					if nodesWithDriftAnnotation == currentNodes {
 						driftComplete = true
-						GinkgoWriter.Printf("✅ DRIFT COMPLETE: All nodes replaced with untainted nodes\n")
+						GinkgoWriter.Printf("✅ DRIFT COMPLETE: All nodes replaced with nodes containing drift annotation\n")
 						break
 					}
 				}
@@ -476,7 +435,7 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf("  • Hostname Spread Pods: %d\n", driftReport.SmallPods)
 			GinkgoWriter.Printf("  • Standard Pods: %d\n", driftReport.LargePods)
 			GinkgoWriter.Printf("  • Pod Disruption Budgets: 50%% MinAvailable\n")
-			GinkgoWriter.Printf("  • Drift Trigger: NoSchedule taint added to individual NodeClaims and Nodes\n")
+			GinkgoWriter.Printf("  • Drift Trigger: Annotation added to NodePool template\n")
 
 			// Timing Metrics
 			GinkgoWriter.Printf("\n⏱️  TIMING METRICS:\n")
