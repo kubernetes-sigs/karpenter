@@ -248,19 +248,30 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf("  • Memory Utilization: %.2f%%\n", preDriftMemUtil*100)
 
 			// ========== DRIFT TRIGGER ==========
-			By("Triggering drift by adding taint to individual nodes")
+			By("Triggering drift by adding taint to individual NodeClaims and Nodes")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
-			GinkgoWriter.Printf("🔄 TRIGGERING DRIFT - Adding NoSchedule taint to existing nodes\n")
+			GinkgoWriter.Printf("🔄 TRIGGERING DRIFT - Adding NoSchedule taint to existing NodeClaims and Nodes\n")
 			GinkgoWriter.Printf(strings.Repeat("=", 70) + "\n")
 
 			driftTriggerTime := time.Now()
 			env.TimeIntervalCollector.Start("drift_trigger")
 
-			// Add a taint to individual existing nodes to trigger drift
+			// Add a taint to individual existing NodeClaims and Nodes to trigger drift
 			driftTaint := corev1.Taint{
 				Key:    "drift-test",
 				Value:  "true",
 				Effect: corev1.TaintEffectNoSchedule,
+			}
+
+			// Get all existing NodeClaims and taint them individually
+			existingNodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 1)
+			taintedNodeClaimCount := 0
+			for _, nodeClaim := range existingNodeClaims {
+				// Create a copy of the NodeClaim to modify
+				nodeClaimCopy := nodeClaim.DeepCopy()
+				nodeClaimCopy.Spec.Taints = append(nodeClaimCopy.Spec.Taints, driftTaint)
+				env.ExpectUpdated(nodeClaimCopy)
+				taintedNodeClaimCount++
 			}
 
 			// Get all existing nodes and taint them individually
@@ -274,7 +285,7 @@ var _ = Describe("Performance", func() {
 				taintedNodeCount++
 			}
 
-			GinkgoWriter.Printf("✅ Drift trigger applied: Added taint 'drift-test=true:NoSchedule' to %d existing nodes\n", taintedNodeCount)
+			GinkgoWriter.Printf("✅ Drift trigger applied: Added taint 'drift-test=true:NoSchedule' to %d NodeClaims and %d Nodes\n", taintedNodeClaimCount, taintedNodeCount)
 
 			// Monitor for drift detection (nodes getting disruption taint)
 			By("Monitoring for drift detection")
@@ -465,7 +476,7 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf("  • Hostname Spread Pods: %d\n", driftReport.SmallPods)
 			GinkgoWriter.Printf("  • Standard Pods: %d\n", driftReport.LargePods)
 			GinkgoWriter.Printf("  • Pod Disruption Budgets: 50%% MinAvailable\n")
-			GinkgoWriter.Printf("  • Drift Trigger: NoSchedule taint added to individual nodes\n")
+			GinkgoWriter.Printf("  • Drift Trigger: NoSchedule taint added to individual NodeClaims and Nodes\n")
 
 			// Timing Metrics
 			GinkgoWriter.Printf("\n⏱️  TIMING METRICS:\n")
