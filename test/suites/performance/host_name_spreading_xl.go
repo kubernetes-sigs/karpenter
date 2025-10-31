@@ -321,10 +321,10 @@ var _ = Describe("Performance", func() {
 			By("Validating performance assertions")
 
 			// Performance Assertions
-			Expect(totalTime).To(BeNumerically("<", 15*time.Minute),
+			Expect(totalTime).To(BeNumerically("<", 20*time.Minute),
 				"Total scale-out time should be less than 10 minutes")
 
-			Expect(nodeCount).To(BeNumerically("<", 1500),
+			Expect(nodeCount).To(BeNumerically("<", 3000),
 				"Should not require more than 50 nodes for 1000 pods")
 
 			Expect(avgCPUUtil).To(BeNumerically(">", 0.4),

@@ -20,7 +20,7 @@ jobs:
           - name: "Drift Performance"
             focus: "Drift Performance"
           - name: "Host Name Spreading"
-            focus: "Host Name Spreading Deployment"
+            focus: "Host Name Spreading Deployment Reg"
           - name: "Host Name Spreading XL"
             focus: "Host Name Spreading Deployment XL"
           - name: "Wide Deployments"

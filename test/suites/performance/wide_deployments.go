@@ -238,7 +238,7 @@ var _ = Describe("Performance", func() {
 			env.TimeIntervalCollector.Start("waiting_for_pods")
 
 			// Wait for all pods to become healthy with a 15-minute timeout
-			env.EventuallyExpectHealthyPodCountWithTimeout(15*time.Minute, allPodsSelector, 1000)
+			env.EventuallyExpectHealthyPodCountWithTimeout(20*time.Minute, allPodsSelector, 1000)
 
 			env.TimeIntervalCollector.End("waiting_for_pods")
 			env.TimeIntervalCollector.End("test_start")

@@ -37,7 +37,7 @@ import (
 )
 
 var _ = Describe("Performance", func() {
-	Context("Host Name Spreading Deployment", func() {
+	Context("Host Name Spreading Deployment Reg", func() {
 		It("should efficiently scale two deployments with host name topology spreading", func() {
 			By("Setting up performance test with 1000 pods - small deployment with host name spreading")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
