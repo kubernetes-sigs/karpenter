@@ -237,7 +237,53 @@ var _ = Describe("Performance", func() {
 			By("Waiting for all 1000 pods to be scheduled and ready")
 			env.TimeIntervalCollector.Start("waiting_for_pods")
 
-			// Wait for all pods to become healthy with a 15-minute timeout
+			// Add debugging information before the timeout
+			By("Adding debug information for pod/node status")
+			GinkgoWriter.Printf("\n🔍 DEBUGGING POD/NODE STATUS BEFORE WAITING:\n")
+
+			// Current pod status breakdown
+			runningPods := env.Monitor.RunningPods(allPodsSelector)
+			pendingPods := env.Monitor.PendingPods(allPodsSelector)
+			totalPods := len(runningPods) + len(pendingPods)
+
+			GinkgoWriter.Printf("  • Running pods: %d\n", len(runningPods))
+			GinkgoWriter.Printf("  • Pending pods: %d\n", len(pendingPods))
+			GinkgoWriter.Printf("  • Total pods found: %d\n", totalPods)
+			GinkgoWriter.Printf("  • Expected pods: 1000\n")
+
+			// Current node status
+			debugNodeCount := env.Monitor.CreatedNodeCount()
+			allNodes := env.Monitor.CreatedNodes()
+			readyNodes := 0
+			schedulableNodes := 0
+
+			for _, node := range allNodes {
+				// Check if node is ready
+				for _, condition := range node.Status.Conditions {
+					if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
+						readyNodes++
+						break
+					}
+				}
+				// Check if node is schedulable
+				if !node.Spec.Unschedulable {
+					schedulableNodes++
+				}
+			}
+
+			GinkgoWriter.Printf("  • Total nodes: %d\n", debugNodeCount)
+			GinkgoWriter.Printf("  • Ready nodes: %d\n", readyNodes)
+			GinkgoWriter.Printf("  • Schedulable nodes: %d\n", schedulableNodes)
+
+			// Resource utilization
+			if debugNodeCount > 0 {
+				avgCPU := env.Monitor.AvgUtilization(corev1.ResourceCPU)
+				avgMem := env.Monitor.AvgUtilization(corev1.ResourceMemory)
+				GinkgoWriter.Printf("  • Average CPU utilization: %.2f%%\n", avgCPU*100)
+				GinkgoWriter.Printf("  • Average Memory utilization: %.2f%%\n", avgMem*100)
+			}
+
+			// Wait for all pods to become healthy with a 20-minute timeout
 			env.EventuallyExpectHealthyPodCountWithTimeout(20*time.Minute, allPodsSelector, 1000)
 
 			env.TimeIntervalCollector.End("waiting_for_pods")
