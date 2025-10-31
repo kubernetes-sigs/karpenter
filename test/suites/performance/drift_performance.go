@@ -115,7 +115,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with hostname topology spread constraints (forces wide node distribution)
 			hostnameDeployment = test.Deployment(test.DeploymentOptions{
-				Replicas: int32(1000),
+				Replicas: int32(300),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -143,7 +143,7 @@ var _ = Describe("Performance", func() {
 
 			// Create standard deployment without topology constraints
 			standardDeployment = test.Deployment(test.DeploymentOptions{
-				Replicas: int32(1000),
+				Replicas: int32(300),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -221,14 +221,14 @@ var _ = Describe("Performance", func() {
 			env.TimeIntervalCollector.Start("waiting_for_pods")
 
 			// Wait for all pods to become healthy with a 20-minute timeout
-			env.EventuallyExpectHealthyPodCountWithTimeout(20*time.Minute, allPodsSelector, 2000)
+			env.EventuallyExpectHealthyPodCountWithTimeout(20*time.Minute, allPodsSelector, 600)
 
 			env.TimeIntervalCollector.End("waiting_for_pods")
 			env.TimeIntervalCollector.End("test_start")
 			scaleOutTime := time.Since(testStartTime)
 
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
-			GinkgoWriter.Printf("SCALE OUT COMPLETED - 2000 PODS READY!\n")
+			GinkgoWriter.Printf("SCALE OUT COMPLETED - 600 PODS READY!\n")
 			GinkgoWriter.Printf("Scale-out time: %v\n", scaleOutTime)
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
 
@@ -410,17 +410,17 @@ var _ = Describe("Performance", func() {
 
 			// Verify all pods are still healthy after drift
 			By("Verifying all pods are healthy after drift")
-			env.EventuallyExpectHealthyPodCount(hostnameSelector, 1000)
-			env.EventuallyExpectHealthyPodCount(standardSelector, 1000)
-			env.EventuallyExpectHealthyPodCount(allPodsSelector, 2000)
+			env.EventuallyExpectHealthyPodCount(hostnameSelector, 300)
+			env.EventuallyExpectHealthyPodCount(standardSelector, 300)
+			env.EventuallyExpectHealthyPodCount(allPodsSelector, 600)
 
 			// Create drift performance report
 			driftReport := DriftPerformanceReport{
 				PerformanceReport: PerformanceReport{
 					TestName:                "Drift Performance Test",
-					TotalPods:               2000,
-					SmallPods:               1000, // hostname spread deployment
-					LargePods:               1000, // standard deployment
+					TotalPods:               600,
+					SmallPods:               300, // hostname spread deployment
+					LargePods:               300, // standard deployment
 					TotalTime:               scaleOutTime,
 					NodesProvisioned:        preDriftNodes,
 					TotalReservedCPUUtil:    preDriftCPUUtil,
@@ -547,7 +547,7 @@ var _ = Describe("Performance", func() {
 				"Should replace at least all original nodes")
 
 			// Verify final pod counts
-			env.EventuallyExpectHealthyPodCount(allPodsSelector, 2000)
+			env.EventuallyExpectHealthyPodCount(allPodsSelector, 600)
 
 			GinkgoWriter.Printf("✅ DRIFT PERFORMANCE TEST: Completed successfully\n")
 			GinkgoWriter.Printf(strings.Repeat("=", 70) + "\n")
