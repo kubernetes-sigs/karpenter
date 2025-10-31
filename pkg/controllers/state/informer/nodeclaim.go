@@ -40,14 +40,16 @@ type NodeClaimController struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
+	clusterCost   *state.ClusterCost
 }
 
 // NewNodeClaimController constructs a controller instance
-func NewNodeClaimController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *NodeClaimController {
+func NewNodeClaimController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, clusterCost *state.ClusterCost) *NodeClaimController {
 	return &NodeClaimController{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		cluster:       cluster,
+		clusterCost:   clusterCost,
 	}
 }
 
@@ -59,6 +61,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 		if errors.IsNotFound(err) {
 			// notify cluster state of the node deletion
 			c.cluster.DeleteNodeClaim(req.Name)
+			c.clusterCost.DeleteNodeClaim(ctx, nodeClaim)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
@@ -66,6 +69,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 		return reconcile.Result{}, nil
 	}
 	c.cluster.UpdateNodeClaim(nodeClaim)
+	c.clusterCost.UpdateNodeClaim(ctx, nodeClaim)
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }

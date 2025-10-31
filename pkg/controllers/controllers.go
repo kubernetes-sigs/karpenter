@@ -33,6 +33,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
+	"sigs.k8s.io/karpenter/pkg/controllers/metrics/cost"
 	metricsnode "sigs.k8s.io/karpenter/pkg/controllers/metrics/node"
 	metricsnodepool "sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	metricspod "sigs.k8s.io/karpenter/pkg/controllers/metrics/pod"
@@ -78,6 +79,7 @@ func NewControllers(
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := make(nodepoolhealth.State)
+	clusterCost := state.NewClusterCost(ctx, cloudProvider, kubeClient)
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
@@ -90,7 +92,8 @@ func NewControllers(
 		informer.NewNodeController(kubeClient, cluster),
 		informer.NewPodController(kubeClient, cluster),
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster),
-		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster),
+		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
+		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
 		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider, npState),
@@ -110,6 +113,7 @@ func NewControllers(
 			metricspod.NewController(kubeClient, cluster),
 			metricsnodepool.NewController(kubeClient, cloudProvider),
 			metricsnode.NewController(cluster),
+			cost.NewController(kubeClient, clusterCost),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
 				mgr.GetEventRecorderFor("karpenter"),
@@ -142,7 +146,7 @@ func NewControllers(
 	}
 
 	if options.FromContext(ctx).FeatureGates.NodeOverlay {
-		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster))
+		controllers = append(controllers, nodeoverlay.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore, cluster, clusterCost))
 	}
 
 	return controllers
