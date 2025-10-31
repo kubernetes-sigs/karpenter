@@ -153,18 +153,18 @@ var _ = Describe("Performance", func() {
 				// Build topology spread constraints - all deployments get zone spreading
 				var topologyConstraints []corev1.TopologySpreadConstraint
 
-				// Zone topology spread (all deployments)
-				zoneConstraint := corev1.TopologySpreadConstraint{
-					MaxSkew:           1,
-					TopologyKey:       "topology.kubernetes.io/zone",
-					WhenUnsatisfiable: corev1.DoNotSchedule,
-					LabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"app": config.Name,
-						},
-					},
-				}
-				topologyConstraints = append(topologyConstraints, zoneConstraint)
+				//// Zone topology spread (all deployments)
+				//zoneConstraint := corev1.TopologySpreadConstraint{
+				//	MaxSkew:           1,
+				//	TopologyKey:       "topology.kubernetes.io/zone",
+				//	WhenUnsatisfiable: corev1.DoNotSchedule,
+				//	LabelSelector: &metav1.LabelSelector{
+				//		MatchLabels: map[string]string{
+				//			"app": config.Name,
+				//		},
+				//	},
+				//}
+				//topologyConstraints = append(topologyConstraints, zoneConstraint)
 
 				// Hostname topology spread (deployments 4, 5, 6)
 				if config.HasHostnameTopologySpread {
