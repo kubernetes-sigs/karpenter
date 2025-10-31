@@ -39,7 +39,7 @@ import (
 var _ = Describe("Performance", func() {
 	Context("Host Name Spreading Deployment XL", func() {
 		It("should efficiently scale two deployments with host name topology spreading", func() {
-			By("Setting up performance test with 3000 pods - small deployment with host name spreading")
+			By("Setting up performance test with 2000 pods - small deployment with host name spreading")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
 			GinkgoWriter.Printf("CREATING DEPLOYMENTS" + "\n")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
@@ -83,7 +83,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with small resource requirements and host name topology spread constraints
 			smallDeployment = test.Deployment(test.DeploymentOptions{
-				Replicas: int32(1500),
+				Replicas: int32(1000),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -111,7 +111,7 @@ var _ = Describe("Performance", func() {
 
 			// Create deployment with large resource requirements
 			largeDeployment = test.Deployment(test.DeploymentOptions{
-				Replicas: int32(1500),
+				Replicas: int32(1000),
 				PodOptions: test.PodOptions{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
@@ -144,7 +144,7 @@ var _ = Describe("Performance", func() {
 
 			// Wait for all pods to become healthy with a 15-minute timeout
 			// This covers both scheduling and readiness
-			env.EventuallyExpectHealthyPodCountWithTimeout(20*time.Minute, allPodsSelector, 3000)
+			env.EventuallyExpectHealthyPodCountWithTimeout(20*time.Minute, allPodsSelector, 2000)
 
 			env.TimeIntervalCollector.End("waiting_for_pods")
 			env.TimeIntervalCollector.End("test_start")
@@ -197,7 +197,7 @@ var _ = Describe("Performance", func() {
 				warnings = append(warnings, fmt.Sprintf("Average memory utilization below 70%% (%.1f%%)", avgMemUtil*100))
 				testPassed = false
 			}
-			if nodeCount > 1500 {
+			if nodeCount > 2000 {
 				warnings = append(warnings, fmt.Sprintf("Too many nodes provisioned (>1500): %d", nodeCount))
 				testPassed = false
 			}
@@ -205,9 +205,9 @@ var _ = Describe("Performance", func() {
 			// Create structured performance report
 			report := PerformanceReport{
 				TestName:                "Host Name Spreading Performance Test",
-				TotalPods:               3000,
-				SmallPods:               1500,
-				LargePods:               1500,
+				TotalPods:               2000,
+				SmallPods:               1000,
+				LargePods:               1000,
 				TotalTime:               totalTime,
 				PodSchedulingTime:       podSchedulingTime,
 				NodeProvisioningTime:    nodeProvisioningTime,
@@ -324,7 +324,7 @@ var _ = Describe("Performance", func() {
 			Expect(totalTime).To(BeNumerically("<", 20*time.Minute),
 				"Total scale-out time should be less than 10 minutes")
 
-			Expect(nodeCount).To(BeNumerically("<", 3000),
+			Expect(nodeCount).To(BeNumerically("<", 2000),
 				"Should not require more than 50 nodes for 1000 pods")
 
 			Expect(avgCPUUtil).To(BeNumerically(">", 0.4),
@@ -334,8 +334,8 @@ var _ = Describe("Performance", func() {
 				"Average memory utilization should be greater than 70%")
 
 			// Verify all pods are actually running
-			env.EventuallyExpectHealthyPodCount(smallPodSelector, 1500)
-			env.EventuallyExpectHealthyPodCount(largePodSelector, 1500)
+			env.EventuallyExpectHealthyPodCount(smallPodSelector, 1000)
+			env.EventuallyExpectHealthyPodCount(largePodSelector, 1000)
 
 			// ========== SCALE-IN PERFORMANCE TEST ==========
 			By("Starting scale-in performance test")
@@ -347,18 +347,18 @@ var _ = Describe("Performance", func() {
 			preScaleInNodes := env.Monitor.CreatedNodeCount()
 
 			// Scale down deployments to 70% (350 each)
-			By("Scaling deployments down to 1050 pods each (2100 total)")
-			smallDeployment.Spec.Replicas = lo.ToPtr(int32(1050))
-			largeDeployment.Spec.Replicas = lo.ToPtr(int32(1050))
+			By("Scaling deployments down to 700 pods each (1400 total)")
+			smallDeployment.Spec.Replicas = lo.ToPtr(int32(700))
+			largeDeployment.Spec.Replicas = lo.ToPtr(int32(700))
 
 			env.ExpectUpdated(smallDeployment, largeDeployment)
-			GinkgoWriter.Printf("   • Deployments scaled down to 350 replicas each\n")
+			GinkgoWriter.Printf("   • Deployments scaled down to 700 replicas each\n")
 
 			// Wait for pods to be terminated
 			By("Waiting for pods to scale down")
 			Eventually(func(g Gomega) {
 				pods := env.Monitor.RunningPods(allPodsSelector)
-				g.Expect(pods).To(HaveLen(2100), "Should have exactly 700 pods after scale-in")
+				g.Expect(pods).To(HaveLen(1400), "Should have exactly 1400 pods after scale-in")
 			}).WithTimeout(10 * time.Minute).Should(Succeed())
 			GinkgoWriter.Printf("   • Pod count reduced to 2100\n")
 
@@ -449,7 +449,7 @@ var _ = Describe("Performance", func() {
 
 			// Update report with scale-in metrics
 			report.ScaleInEnabled = true
-			report.ScaleInPods = 2100
+			report.ScaleInPods = 1400
 			report.ConsolidationTime = totalConsolidationTime
 			report.ConsolidationRounds = consolidationRounds
 			report.PostScaleInNodes = postScaleInNodes

@@ -248,26 +248,33 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf("  • Memory Utilization: %.2f%%\n", preDriftMemUtil*100)
 
 			// ========== DRIFT TRIGGER ==========
-			By("Triggering drift by adding taint to NodePool")
+			By("Triggering drift by adding taint to individual nodes")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
-			GinkgoWriter.Printf("🔄 TRIGGERING DRIFT - Adding NoSchedule taint\n")
+			GinkgoWriter.Printf("🔄 TRIGGERING DRIFT - Adding NoSchedule taint to existing nodes\n")
 			GinkgoWriter.Printf(strings.Repeat("=", 70) + "\n")
 
 			driftTriggerTime := time.Now()
 			env.TimeIntervalCollector.Start("drift_trigger")
 
-			// Add a taint to the NodePool to trigger drift
+			// Add a taint to individual existing nodes to trigger drift
 			driftTaint := corev1.Taint{
 				Key:    "drift-test",
 				Value:  "true",
 				Effect: corev1.TaintEffectNoSchedule,
 			}
 
-			// Update the NodePool with the new taint
-			nodePool.Spec.Template.Spec.Taints = append(nodePool.Spec.Template.Spec.Taints, driftTaint)
-			env.ExpectUpdated(nodePool)
+			// Get all existing nodes and taint them individually
+			existingNodes := env.Monitor.CreatedNodes()
+			taintedNodeCount := 0
+			for _, node := range existingNodes {
+				// Create a copy of the node to modify
+				nodeCopy := node.DeepCopy()
+				nodeCopy.Spec.Taints = append(nodeCopy.Spec.Taints, driftTaint)
+				env.ExpectUpdated(nodeCopy)
+				taintedNodeCount++
+			}
 
-			GinkgoWriter.Printf("✅ Drift trigger applied: Added taint 'drift-test=true:NoSchedule'\n")
+			GinkgoWriter.Printf("✅ Drift trigger applied: Added taint 'drift-test=true:NoSchedule' to %d existing nodes\n", taintedNodeCount)
 
 			// Monitor for drift detection (nodes getting disruption taint)
 			By("Monitoring for drift detection")
@@ -345,11 +352,28 @@ var _ = Describe("Performance", func() {
 				GinkgoWriter.Printf("  • Draining nodes: %d\n", len(drainingNodes))
 				GinkgoWriter.Printf("  • New nodes (with drift taint): %d\n", len(newNodes))
 
-				// Check if drift is complete (all nodes have the new taint, none are draining)
-				if len(drainingNodes) == 0 && len(newNodes) == currentNodes {
-					driftComplete = true
-					GinkgoWriter.Printf("✅ DRIFT COMPLETE: All nodes replaced\n")
-					break
+				// Check if drift is complete (no nodes are draining and we have replacement nodes)
+				if len(drainingNodes) == 0 && currentNodes > 0 {
+					// Verify that we have nodes without the drift taint (replacement nodes)
+					nodesWithoutDriftTaint := 0
+					for _, node := range allNodes {
+						hasDriftTaint := false
+						for _, taint := range node.Spec.Taints {
+							if taint.Key == "drift-test" && taint.Value == "true" {
+								hasDriftTaint = true
+								break
+							}
+						}
+						if !hasDriftTaint {
+							nodesWithoutDriftTaint++
+						}
+					}
+
+					if nodesWithoutDriftTaint == currentNodes {
+						driftComplete = true
+						GinkgoWriter.Printf("✅ DRIFT COMPLETE: All nodes replaced with untainted nodes\n")
+						break
+					}
 				}
 
 				// Record this round if there's activity
@@ -441,7 +465,7 @@ var _ = Describe("Performance", func() {
 			GinkgoWriter.Printf("  • Hostname Spread Pods: %d\n", driftReport.SmallPods)
 			GinkgoWriter.Printf("  • Standard Pods: %d\n", driftReport.LargePods)
 			GinkgoWriter.Printf("  • Pod Disruption Budgets: 50%% MinAvailable\n")
-			GinkgoWriter.Printf("  • Drift Trigger: NoSchedule taint added to NodePool\n")
+			GinkgoWriter.Printf("  • Drift Trigger: NoSchedule taint added to individual nodes\n")
 
 			// Timing Metrics
 			GinkgoWriter.Printf("\n⏱️  TIMING METRICS:\n")
