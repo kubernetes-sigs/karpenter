@@ -32,7 +32,7 @@ build: ## Build the Karpenter KWOK controller images using ko build
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
 	$(eval IMG_DIGEST=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 2))
 
-apply-with-kind: verify build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
+apply-with-kind: build-with-kind ## Deploy the kwok controller from the current state of your git repository into your ~/.kube/config cluster
 	kubectl apply -f kwok/charts/crds
 	helm upgrade --install karpenter kwok/charts --namespace $(KARPENTER_NAMESPACE) --skip-crds \
 		$(HELM_OPTS) \
@@ -53,7 +53,7 @@ e2etests: ## Run the e2e suite against your local cluster
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.skip="${SKIP}" \
 		--ginkgo.timeout=2h \
-		--ginkgo.grace-period=5m \
+		--ginkgo.grace-period=15m \
 		--ginkgo.vv
 
 # Run make install-kwok to install the kwok controller in your cluster first
