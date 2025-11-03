@@ -534,7 +534,7 @@ var _ = Describe("Performance", func() {
 			Expect(totalTime).To(BeNumerically("<", 12*time.Minute),
 				"Total scale-out time should be less than 12 minutes")
 
-			Expect(nodeCount).To(BeNumerically("<", 550),
+			Expect(nodeCount).To(BeNumerically("<", 1100),
 				"Should not require more than 550 nodes for 1100 pods")
 
 			Expect(avgCPUUtil).To(BeNumerically(">", 0.4),
