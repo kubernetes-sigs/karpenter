@@ -38,6 +38,32 @@ import (
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
+// Performance Test Criteria - Adjust these values to modify pass/fail conditions
+var wideDeploymentsCriteria = struct {
+	// Scale-out Performance Thresholds
+	MaxScaleOutTime      time.Duration // Maximum time allowed for initial pod deployment
+	MaxNodeCount         int           // Maximum nodes that should be provisioned for 1000 pods
+	MinCPUUtilization    float64       // Minimum average CPU utilization (0.0-1.0)
+	MinMemoryUtilization float64       // Minimum average memory utilization (0.0-1.0)
+	MinEfficiencyScore   float64       // Minimum resource efficiency score (0.0-100.0)
+
+	// Scale-in/Consolidation Thresholds
+	MaxConsolidationTime time.Duration // Maximum time for consolidation to complete
+
+	// Test Configuration
+	TotalPods        int // Total number of pods to deploy
+	TotalDeployments int // Number of deployments to create
+}{
+	MaxScaleOutTime:      15 * time.Minute, // Increased for complex 30-deployment scenario
+	MaxNodeCount:         1000,             // Should not require more than 1000 nodes for 1000 pods
+	MinCPUUtilization:    0.30,             // 30% minimum CPU utilization (lower due to varied workloads)
+	MinMemoryUtilization: 0.30,             // 30% minimum memory utilization (lower due to varied workloads)
+	MinEfficiencyScore:   40.0,             // 40% minimum efficiency score
+	MaxConsolidationTime: 15 * time.Minute,
+	TotalPods:            1000,
+	TotalDeployments:     30,
+}
+
 // DeploymentConfig holds the deterministic configuration for each deployment
 type DeploymentConfig struct {
 	Name                      string
@@ -315,24 +341,24 @@ var _ = Describe("Performance", func() {
 
 			By("Generating performance report")
 
-			// Determine test status and collect warnings
+			// Determine test status and collect warnings using criteria
 			var warnings []string
 			testPassed := true
 
-			if totalTime >= 15*time.Minute {
-				warnings = append(warnings, "Total scale-out time exceeded 15 minutes")
+			if totalTime >= wideDeploymentsCriteria.MaxScaleOutTime {
+				warnings = append(warnings, fmt.Sprintf("Total scale-out time exceeded %v", wideDeploymentsCriteria.MaxScaleOutTime))
 				testPassed = false
 			}
-			if avgCPUUtil < 0.4 {
-				warnings = append(warnings, fmt.Sprintf("Average CPU utilization below 40%% (%.1f%%)", avgCPUUtil*100))
+			if avgCPUUtil < wideDeploymentsCriteria.MinCPUUtilization {
+				warnings = append(warnings, fmt.Sprintf("Average CPU utilization below %.0f%% (%.1f%%)", wideDeploymentsCriteria.MinCPUUtilization*100, avgCPUUtil*100))
 				testPassed = false
 			}
-			if avgMemUtil < 0.4 {
-				warnings = append(warnings, fmt.Sprintf("Average memory utilization below 40%% (%.1f%%)", avgMemUtil*100))
+			if avgMemUtil < wideDeploymentsCriteria.MinMemoryUtilization {
+				warnings = append(warnings, fmt.Sprintf("Average memory utilization below %.0f%% (%.1f%%)", wideDeploymentsCriteria.MinMemoryUtilization*100, avgMemUtil*100))
 				testPassed = false
 			}
-			if nodeCount > 1000 {
-				warnings = append(warnings, fmt.Sprintf("Too many nodes provisioned (>1000): %d", nodeCount))
+			if nodeCount > wideDeploymentsCriteria.MaxNodeCount {
+				warnings = append(warnings, fmt.Sprintf("Too many nodes provisioned (>%d): %d", wideDeploymentsCriteria.MaxNodeCount, nodeCount))
 				testPassed = false
 			}
 
@@ -433,18 +459,18 @@ var _ = Describe("Performance", func() {
 
 			By("Validating performance assertions")
 
-			// Performance Assertions (adjusted for 30 deployments)
-			Expect(totalTime).To(BeNumerically("<", 15*time.Minute),
-				"Total scale-out time should be less than 15 minutes")
+			// Performance Assertions using criteria
+			Expect(totalTime).To(BeNumerically("<", wideDeploymentsCriteria.MaxScaleOutTime),
+				fmt.Sprintf("Total scale-out time should be less than %v", wideDeploymentsCriteria.MaxScaleOutTime))
 
-			Expect(nodeCount).To(BeNumerically("<", 1000),
-				"Should not require more than 1000 nodes for 1000 pods")
+			Expect(nodeCount).To(BeNumerically("<", wideDeploymentsCriteria.MaxNodeCount),
+				fmt.Sprintf("Should not require more than %d nodes for %d pods", wideDeploymentsCriteria.MaxNodeCount, wideDeploymentsCriteria.TotalPods))
 
-			Expect(avgCPUUtil).To(BeNumerically(">", 0.3),
-				"Average CPU utilization should be greater than 30%")
+			Expect(avgCPUUtil).To(BeNumerically(">", wideDeploymentsCriteria.MinCPUUtilization),
+				fmt.Sprintf("Average CPU utilization should be greater than %.0f%%", wideDeploymentsCriteria.MinCPUUtilization*100))
 
-			Expect(avgMemUtil).To(BeNumerically(">", 0.3),
-				"Average memory utilization should be greater than 30%")
+			Expect(avgMemUtil).To(BeNumerically(">", wideDeploymentsCriteria.MinMemoryUtilization),
+				fmt.Sprintf("Average memory utilization should be greater than %.0f%%", wideDeploymentsCriteria.MinMemoryUtilization*100))
 
 			// Verify all pods are actually running for each deployment
 			for i, deployment := range deployments {
@@ -630,8 +656,8 @@ var _ = Describe("Performance", func() {
 			Expect(postScaleInNodes).To(BeNumerically("<", preScaleInNodes),
 				"Node count should decrease after scale-in")
 
-			Expect(totalConsolidationTime).To(BeNumerically("<", 15*time.Minute),
-				"Consolidation should complete within 15 minutes")
+			Expect(totalConsolidationTime).To(BeNumerically("<", wideDeploymentsCriteria.MaxConsolidationTime),
+				fmt.Sprintf("Consolidation should complete within %v", wideDeploymentsCriteria.MaxConsolidationTime))
 
 			GinkgoWriter.Printf("✅ SCALE-IN TEST: Completed successfully\n")
 			GinkgoWriter.Printf(strings.Repeat("=", 70) + "\n")

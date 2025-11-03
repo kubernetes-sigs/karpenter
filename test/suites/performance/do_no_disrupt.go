@@ -38,6 +38,36 @@ import (
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
+// Performance Test Criteria - Adjust these values to modify pass/fail conditions
+var doNotDisruptCriteria = struct {
+	// Scale-out Performance Thresholds
+	MaxScaleOutTime      time.Duration // Maximum time allowed for initial pod deployment
+	MaxNodeCount         int           // Maximum nodes that should be provisioned for 1100 pods
+	MinCPUUtilization    float64       // Minimum average CPU utilization (0.0-1.0)
+	MinMemoryUtilization float64       // Minimum average memory utilization (0.0-1.0)
+	MinEfficiencyScore   float64       // Minimum resource efficiency score (0.0-100.0)
+
+	// Scale-in/Consolidation Thresholds
+	MaxConsolidationTime time.Duration // Maximum time for consolidation to complete
+
+	// Test Configuration
+	TotalPods        int // Total number of pods to deploy
+	SmallPods        int // Number of small resource pods
+	LargePods        int // Number of large resource pods
+	DoNotDisruptPods int // Number of do-not-disrupt pods
+}{
+	MaxScaleOutTime:      12 * time.Minute, // Increased for 1100 pods
+	MaxNodeCount:         550,              // Should not require more than 550 nodes for 1100 pods
+	MinCPUUtilization:    0.40,             // 40% minimum CPU utilization
+	MinMemoryUtilization: 0.40,             // 40% minimum memory utilization
+	MinEfficiencyScore:   40.0,             // 40% minimum efficiency score
+	MaxConsolidationTime: 15 * time.Minute,
+	TotalPods:            1100,
+	SmallPods:            500,
+	LargePods:            500,
+	DoNotDisruptPods:     100,
+}
+
 var _ = Describe("Performance", func() {
 	Context("Do Not Disrupt Performance Test", func() {
 		It("should efficiently scale three deployments and test disruption protection", func() {
@@ -204,24 +234,24 @@ var _ = Describe("Performance", func() {
 
 			By("Generating performance report")
 
-			// Determine test status and collect warnings
+			// Determine test status and collect warnings using criteria
 			var warnings []string
 			testPassed := true
 
-			if totalTime >= 12*time.Minute {
-				warnings = append(warnings, "Total scale-out time exceeded 12 minutes")
+			if totalTime >= doNotDisruptCriteria.MaxScaleOutTime {
+				warnings = append(warnings, fmt.Sprintf("Total scale-out time exceeded %v", doNotDisruptCriteria.MaxScaleOutTime))
 				testPassed = false
 			}
-			if avgCPUUtil < 0.4 {
-				warnings = append(warnings, fmt.Sprintf("Average CPU utilization below 40%% (%.1f%%)", avgCPUUtil*100))
+			if avgCPUUtil < doNotDisruptCriteria.MinCPUUtilization {
+				warnings = append(warnings, fmt.Sprintf("Average CPU utilization below %.0f%% (%.1f%%)", doNotDisruptCriteria.MinCPUUtilization*100, avgCPUUtil*100))
 				testPassed = false
 			}
-			if avgMemUtil < 0.4 {
-				warnings = append(warnings, fmt.Sprintf("Average memory utilization below 40%% (%.1f%%)", avgMemUtil*100))
+			if avgMemUtil < doNotDisruptCriteria.MinMemoryUtilization {
+				warnings = append(warnings, fmt.Sprintf("Average memory utilization below %.0f%% (%.1f%%)", doNotDisruptCriteria.MinMemoryUtilization*100, avgMemUtil*100))
 				testPassed = false
 			}
-			if nodeCount > 550 {
-				warnings = append(warnings, fmt.Sprintf("Too many nodes provisioned (>550): %d", nodeCount))
+			if nodeCount > doNotDisruptCriteria.MaxNodeCount {
+				warnings = append(warnings, fmt.Sprintf("Too many nodes provisioned (>%d): %d", doNotDisruptCriteria.MaxNodeCount, nodeCount))
 				testPassed = false
 			}
 
@@ -530,18 +560,18 @@ var _ = Describe("Performance", func() {
 
 			By("Validating performance assertions")
 
-			// Performance Assertions
-			Expect(totalTime).To(BeNumerically("<", 12*time.Minute),
-				"Total scale-out time should be less than 12 minutes")
+			// Performance Assertions using criteria
+			Expect(totalTime).To(BeNumerically("<", doNotDisruptCriteria.MaxScaleOutTime),
+				fmt.Sprintf("Total scale-out time should be less than %v", doNotDisruptCriteria.MaxScaleOutTime))
 
-			Expect(nodeCount).To(BeNumerically("<", 1100),
-				"Should not require more than 550 nodes for 1100 pods")
+			Expect(nodeCount).To(BeNumerically("<", doNotDisruptCriteria.MaxNodeCount),
+				fmt.Sprintf("Should not require more than %d nodes for %d pods", doNotDisruptCriteria.MaxNodeCount, doNotDisruptCriteria.TotalPods))
 
-			Expect(avgCPUUtil).To(BeNumerically(">", 0.4),
-				"Average CPU utilization should be greater than 40%")
+			Expect(avgCPUUtil).To(BeNumerically(">", doNotDisruptCriteria.MinCPUUtilization),
+				fmt.Sprintf("Average CPU utilization should be greater than %.0f%%", doNotDisruptCriteria.MinCPUUtilization*100))
 
-			Expect(avgMemUtil).To(BeNumerically(">", 0.4),
-				"Average memory utilization should be greater than 40%")
+			Expect(avgMemUtil).To(BeNumerically(">", doNotDisruptCriteria.MinMemoryUtilization),
+				fmt.Sprintf("Average memory utilization should be greater than %.0f%%", doNotDisruptCriteria.MinMemoryUtilization*100))
 
 			// Disruption protection assertions
 			Expect(protectedNodesStillPresent).To(BeNumerically(">", 0),
@@ -552,8 +582,8 @@ var _ = Describe("Performance", func() {
 				Expect(postConsolidationNodes).To(BeNumerically("<", preDisruptionNodes),
 					"Node count should decrease after removing do-not-disrupt protection")
 
-				Expect(totalConsolidationTime).To(BeNumerically("<", 15*time.Minute),
-					"Consolidation should complete within 15 minutes after removing protection")
+				Expect(totalConsolidationTime).To(BeNumerically("<", doNotDisruptCriteria.MaxConsolidationTime),
+					fmt.Sprintf("Consolidation should complete within %v after removing protection", doNotDisruptCriteria.MaxConsolidationTime))
 			}
 
 			GinkgoWriter.Printf("✅ DO-NOT-DISRUPT TEST: Completed successfully\n")
