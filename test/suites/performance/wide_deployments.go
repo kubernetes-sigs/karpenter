@@ -153,18 +153,18 @@ var _ = Describe("Performance", func() {
 				// Build topology spread constraints - all deployments get zone spreading
 				var topologyConstraints []corev1.TopologySpreadConstraint
 
-				//// Zone topology spread (all deployments)
-				//zoneConstraint := corev1.TopologySpreadConstraint{
-				//	MaxSkew:           1,
-				//	TopologyKey:       "topology.kubernetes.io/zone",
-				//	WhenUnsatisfiable: corev1.DoNotSchedule,
-				//	LabelSelector: &metav1.LabelSelector{
-				//		MatchLabels: map[string]string{
-				//			"app": config.Name,
-				//		},
-				//	},
-				//}
-				//topologyConstraints = append(topologyConstraints, zoneConstraint)
+				// Zone topology spread (all deployments)
+				zoneConstraint := corev1.TopologySpreadConstraint{
+					MaxSkew:           1,
+					TopologyKey:       "topology.kubernetes.io/zone",
+					WhenUnsatisfiable: corev1.DoNotSchedule,
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": config.Name,
+						},
+					},
+				}
+				topologyConstraints = append(topologyConstraints, zoneConstraint)
 
 				// Hostname topology spread (deployments 4, 5, 6)
 				if config.HasHostnameTopologySpread {
@@ -184,19 +184,19 @@ var _ = Describe("Performance", func() {
 
 				// Build pod anti-affinity requirements (deployments 1, 2, 3)
 				var podAntiRequirements []corev1.PodAffinityTerm
-				//if config.HasAntiAffinity {
-				//	podAntiRequirements = []corev1.PodAffinityTerm{
-				//		{
-				//			LabelSelector: &metav1.LabelSelector{
-				//				MatchLabels: map[string]string{
-				//					"has-anti-affinity": "true",
-				//				},
-				//			},
-				//			TopologyKey: corev1.LabelHostname,
-				//		},
-				//	}
-				//	labels["has-anti-affinity"] = "true"
-				//}
+				if config.HasAntiAffinity {
+					podAntiRequirements = []corev1.PodAffinityTerm{
+						{
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"has-anti-affinity": "true",
+								},
+							},
+							TopologyKey: corev1.LabelHostname,
+						},
+					}
+					labels["has-anti-affinity"] = "true"
+				}
 
 				// Create the deployment
 				deployment := test.Deployment(test.DeploymentOptions{
