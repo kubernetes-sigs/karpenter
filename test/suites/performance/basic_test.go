@@ -66,7 +66,7 @@ var largeScaleCriteria = struct {
 }
 
 var _ = Describe("Performance", func() {
-	Context("Large Scale Deployment", func() {
+	Context("Basic Deployment", func() {
 		It("should efficiently scale two deployments with different resource profiles", func() {
 			By("Setting up performance test with 1000 pods across two resource profiles")
 			GinkgoWriter.Printf("\n" + strings.Repeat("=", 70) + "\n")
