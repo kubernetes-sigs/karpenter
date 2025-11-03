@@ -27,6 +27,8 @@ jobs:
             focus: "Wide Deployments"
           - name: "Large Scale"
             focus: "Large Scale Deployment"
+          - name: "Do Not Disrupt Performance"
+            focus: "Do Not Disrupt Performance Test"
           - name: "Provisioning"
             focus: "Provisioning"
     uses: ./.github/workflows/e2e.yaml
