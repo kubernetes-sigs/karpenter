@@ -79,7 +79,7 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
 				"Node count should decrease after consolidation")
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
-				"Consolidation should complete within 20 minutes")
+				"Consolidation should complete within 10 minutes")
 
 			By("Outputting consolidation performance report")
 			OutputPerformanceReport(consolidationReport, "consolidation")

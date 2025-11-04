@@ -512,6 +512,7 @@ func MonitorConsolidationTest(env *common.Environment, initialPods, finalPods, i
 	if err != nil {
 		// Continue even if consolidation monitoring fails
 		consolidationRounds = []ConsolidationRound{}
+		GinkgoWriter.Printf("DEBUG: error while monitoring consolidation %s", err)
 	}
 
 	totalTime := time.Since(startTime)
@@ -539,7 +540,7 @@ func MonitorConsolidationTest(env *common.Environment, initialPods, finalPods, i
 		TotalReservedMemoryUtil: avgMemUtil,
 		ResourceEfficiencyScore: resourceEfficiencyScore,
 		PodsPerNode:             podsPerNode,
-		Rounds:                  float64(len(consolidationRounds)),
+		Rounds:                  len(consolidationRounds),
 		Timestamp:               time.Now(),
 	}, nil
 }
@@ -570,7 +571,7 @@ func MonitorDrift(env *common.Environment, expectedPods int, timeout time.Durati
 	}
 
 	// For drift, assume all nodes were replaced (simplified)
-	driftRounds := 1.0 // Simplified - real implementation would track actual drift rounds
+	driftRounds := 1 // Simplified - real implementation would track actual drift rounds
 
 	return &PerformanceReport{
 		TestType:                "drift",

@@ -43,6 +43,6 @@ type PerformanceReport struct {
 	TotalReservedMemoryUtil float64       `json:"total_reserved_memory_utilization"`
 	ResourceEfficiencyScore float64       `json:"resource_efficiency_score"`
 	PodsPerNode             float64       `json:"pods_per_node"`
-	Rounds                  float64       `json:"rounds"`
+	Rounds                  int           `json:"rounds"`
 	Timestamp               time.Time     `json:"timestamp"`
 }
