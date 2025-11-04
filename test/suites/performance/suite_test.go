@@ -73,6 +73,14 @@ var _ = BeforeEach(func() {
 })
 
 var _ = AfterEach(func() {
+	// Comprehensive cleanup for performance tests
+	allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
+	cleanupOpts := common.DefaultCleanupOptions()
+	cleanupOpts.PodSelector = allPodsSelector
+	cleanupOpts.WaitTimeout = 600 // 10 minutes in seconds
+	_ = env.PerformComprehensiveCleanup(cleanupOpts)
+
+	// Original cleanup
 	env.Cleanup()
 	env.AfterEach()
 })

@@ -32,31 +32,19 @@ type ConsolidationRound struct {
 
 // PerformanceReport represents the structured performance test results
 type PerformanceReport struct {
-	TestName  string        `json:"test_name"`
-	TotalPods int           `json:"total_pods"`
-	SmallPods int           `json:"small_pods"`
-	LargePods int           `json:"large_pods"`
-	TotalTime time.Duration `json:"total_time"`
-	//PodSchedulingTime       time.Duration `json:"pod_scheduling_time"`
-	//NodeProvisioningTime    time.Duration `json:"node_provisioning_time"`
-	//PodReadyTime            time.Duration `json:"pod_ready_time"`
-	NodesProvisioned        int     `json:"nodes_provisioned"`
-	TotalReservedCPUUtil    float64 `json:"total_reserved_cpu_utilization"`
-	TotalReservedMemoryUtil float64 `json:"total_reserved_memory_utilization"`
-	ResourceEfficiencyScore float64 `json:"resource_efficiency_score"`
-	PodsPerNode             float64 `json:"pods_per_node"`
-	// Scale-in metrics
-	ScaleInEnabled             bool                 `json:"scale_in_enabled"`
-	ScaleInPods                int                  `json:"scale_in_pods"`
-	ConsolidationTime          time.Duration        `json:"consolidation_time"`
-	ConsolidationRounds        []ConsolidationRound `json:"consolidation_rounds"`
-	PostScaleInNodes           int                  `json:"post_scale_in_nodes"`
-	PostScaleInCPUUtil         float64              `json:"post_scale_in_cpu_utilization"`
-	PostScaleInMemoryUtil      float64              `json:"post_scale_in_memory_utilization"`
-	PostScaleInEfficiencyScore float64              `json:"post_scale_in_efficiency_score"`
-	Timestamp                  time.Time            `json:"timestamp"`
-	TestPassed                 bool                 `json:"test_passed"`
-	Warnings                   []string             `json:"warnings,omitempty"`
+	TestName                string        `json:"test_name"`
+	TestType                string        `json:"test_type"`
+	TotalPods               int           `json:"total_pods"`
+	TotalNodes              int           `json:"total_nodes"`
+	TotalTime               time.Duration `json:"total_time"`
+	PodsNetChange           int           `json:"change_in_pod_count"`
+	NodesNetChange          int           `json:"change_in_node_count"`
+	TotalReservedCPUUtil    float64       `json:"total_reserved_cpu_utilization"`
+	TotalReservedMemoryUtil float64       `json:"total_reserved_memory_utilization"`
+	ResourceEfficiencyScore float64       `json:"resource_efficiency_score"`
+	PodsPerNode             float64       `json:"pods_per_node"`
+	Rounds                  float64       `json:"rounds"`
+	Timestamp               time.Time     `json:"timestamp"`
 }
 
 // getStatusIcon returns a visual indicator for pass/fail status
