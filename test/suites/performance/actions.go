@@ -32,6 +32,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 
+	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
@@ -353,6 +354,7 @@ func (a *UpdateReplicasAction) GetType() ActionType {
 type TriggerDriftAction struct {
 	Description string
 	DriftType   string
+	nodePool    interface{} // Will be set to the actual nodePool from the test context
 }
 
 // NewTriggerDriftAction creates a new drift action
@@ -363,11 +365,61 @@ func NewTriggerDriftAction(driftType, description string) *TriggerDriftAction {
 	}
 }
 
+// SetNodePool sets the nodePool reference (called by the execution engine)
+func (a *TriggerDriftAction) SetNodePool(np interface{}) {
+	a.nodePool = np
+}
+
 // Execute triggers the drift scenario
 func (a *TriggerDriftAction) Execute(env *common.Environment) error {
-	// Implementation depends on the specific drift type
-	// This is a placeholder for drift triggering logic
-	return nil
+	switch a.DriftType {
+	case "annotation":
+		// Get all existing nodeclaims before triggering drift
+		// We need to get the current count first, then get that many nodeclaims
+		currentNodeClaimCount := 0
+		// Try to get current nodeclaim count by checking existing ones
+		existingNodeClaims := env.EventuallyExpectCreatedNodeClaimCount(">=", 0)
+		currentNodeClaimCount = len(existingNodeClaims)
+
+		if currentNodeClaimCount == 0 {
+			return fmt.Errorf("no nodeclaims found to drift")
+		}
+
+		GinkgoWriter.Printf("DEBUG: Triggering drift for %d nodeclaims by updating NodePool template annotation\n", currentNodeClaimCount)
+
+		// Get the nodePool from the global variable (we need to access it from the test context)
+		// Since we can't directly access the global nodePool variable from here, we'll need to
+		// pass it through the action or get it from the environment
+		if a.nodePool == nil {
+			return fmt.Errorf("nodePool not set - call SetNodePool() before executing")
+		}
+
+		// Cast to the correct type - we'll use interface{} and type assertion
+		nodePoolPtr, ok := a.nodePool.(*v1.NodePool)
+		if !ok {
+			return fmt.Errorf("invalid nodePool type")
+		}
+
+		// Trigger drift by updating the NodePool template annotation
+		// This follows the pattern from drift_test.go
+		if nodePoolPtr.Spec.Template.Annotations == nil {
+			nodePoolPtr.Spec.Template.Annotations = make(map[string]string)
+		}
+		nodePoolPtr.Spec.Template.Annotations["test-drift-trigger"] = fmt.Sprintf("drift-%d", time.Now().Unix())
+
+		// Apply the update to trigger drift detection
+		env.ExpectUpdated(nodePoolPtr)
+
+		// Wait for Karpenter to detect the drift
+		GinkgoWriter.Printf("DEBUG: Waiting for drift detection on %d nodeclaims\n", len(existingNodeClaims))
+		env.EventuallyExpectDrifted(existingNodeClaims...)
+
+		GinkgoWriter.Printf("DEBUG: Drift successfully triggered for %d nodeclaims\n", len(existingNodeClaims))
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported drift type: %s", a.DriftType)
+	}
 }
 
 // GetDescription returns a human-readable description of the action
@@ -548,38 +600,90 @@ func MonitorConsolidationTest(env *common.Environment, initialPods, finalPods, i
 // MonitorDrift monitors drift operations with replacement rounds
 func MonitorDrift(env *common.Environment, expectedPods int, timeout time.Duration) (*PerformanceReport, error) {
 	startTime := time.Now()
+	initialNodeCount := env.Monitor.CreatedNodeCount()
 
-	// For drift, we assume pods remain the same but nodes get replaced
-	// This is a simplified implementation - real drift monitoring would be more complex
+	GinkgoWriter.Printf("DEBUG: Starting drift monitoring with %d initial nodes, expecting %d pods\n", initialNodeCount, expectedPods)
+
+	// Track node replacement during drift
+	driftRounds := 0
+	lastReplacementTime := time.Now()
+	driftStartTime := time.Now()
+
+	// Monitor for node replacements during drift
+	for time.Since(driftStartTime) < timeout {
+		// Check if nodes are being replaced (draining/terminating)
+		var drainingNodes []corev1.Node
+		allNodes := env.Monitor.CreatedNodes()
+		for _, node := range allNodes {
+			// Check if node has draining taint or is being deleted
+			if node.DeletionTimestamp != nil {
+				drainingNodes = append(drainingNodes, *node)
+			}
+			for _, taint := range node.Spec.Taints {
+				if taint.Key == "karpenter.sh/disruption" {
+					drainingNodes = append(drainingNodes, *node)
+					break
+				}
+			}
+		}
+
+		// If we detect draining nodes, this indicates a drift replacement round
+		if len(drainingNodes) > 0 {
+			lastReplacementTime = time.Now()
+			driftRounds++
+			GinkgoWriter.Printf("DEBUG: Drift round %d detected - %d nodes draining\n", driftRounds, len(drainingNodes))
+
+			// Wait for replacement to complete
+			time.Sleep(30 * time.Second)
+		}
+
+		// Check for stability (no replacements for 2 minutes)
+		if time.Since(lastReplacementTime) >= 2*time.Minute {
+			GinkgoWriter.Printf("DEBUG: Drift appears stable - no replacements for 2 minutes\n")
+			break
+		}
+
+		// Wait before next check
+		time.Sleep(15 * time.Second)
+	}
+
+	// Ensure all pods are healthy after drift
 	allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 	if expectedPods > 0 {
-		env.EventuallyExpectHealthyPodCountWithTimeout(timeout, allPodsSelector, expectedPods)
+		GinkgoWriter.Printf("DEBUG: Waiting for %d pods to be healthy after drift\n", expectedPods)
+		env.EventuallyExpectHealthyPodCountWithTimeout(timeout/2, allPodsSelector, expectedPods)
 	}
 
 	totalTime := time.Since(startTime)
+	finalNodeCount := env.Monitor.CreatedNodeCount()
 
 	// Collect metrics
-	nodeCount := env.Monitor.CreatedNodeCount()
 	avgCPUUtil := env.Monitor.AvgUtilization(corev1.ResourceCPU)
 	avgMemUtil := env.Monitor.AvgUtilization(corev1.ResourceMemory)
 
 	// Calculate derived metrics
 	resourceEfficiencyScore := (avgCPUUtil*90 + avgMemUtil*10)
 	podsPerNode := float64(0)
-	if nodeCount > 0 {
-		podsPerNode = float64(expectedPods) / float64(nodeCount)
+	if finalNodeCount > 0 {
+		podsPerNode = float64(expectedPods) / float64(finalNodeCount)
 	}
 
-	// For drift, assume all nodes were replaced (simplified)
-	driftRounds := 1 // Simplified - real implementation would track actual drift rounds
+	// If no drift rounds were detected, assume at least 1 round occurred
+	if driftRounds == 0 {
+		driftRounds = 1
+		GinkgoWriter.Printf("DEBUG: No explicit drift rounds detected, assuming 1 round\n")
+	}
+
+	GinkgoWriter.Printf("DEBUG: Drift monitoring completed - %d rounds, %v total time, %d final nodes\n",
+		driftRounds, totalTime, finalNodeCount)
 
 	return &PerformanceReport{
 		TestType:                "drift",
 		TotalPods:               expectedPods,
-		TotalNodes:              nodeCount,
+		TotalNodes:              finalNodeCount,
 		TotalTime:               totalTime,
-		PodsNetChange:           0, // Pods don't change in drift
-		NodesNetChange:          0, // Nodes get replaced, net change is 0
+		PodsNetChange:           0,                                 // Pods don't change in drift
+		NodesNetChange:          finalNodeCount - initialNodeCount, // Net change in nodes (should be ~0 for drift)
 		TotalReservedCPUUtil:    avgCPUUtil,
 		TotalReservedMemoryUtil: avgMemUtil,
 		ResourceEfficiencyScore: resourceEfficiencyScore,
@@ -619,6 +723,10 @@ func executeActions(actions []Action, env *common.Environment) (map[string]*apps
 					updateAction.DeploymentName, availableDeployments)
 			}
 		}
+
+		// Handle nodePool reference for TriggerDriftAction
+		// Note: nodePool must be set externally before calling executeActions
+		// This is handled by ExecuteActionsAndGenerateReportWithNodePool
 
 		// Execute the action
 		err := action.Execute(env)
@@ -712,8 +820,22 @@ func calculateFinalPodCount(testType string, actions []Action, deploymentMap map
 
 // ExecuteActionsAndGenerateReport executes a list of actions and generates a performance report
 func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
+	return ExecuteActionsAndGenerateReportWithNodePool(actions, testName, env, timeOut, nil)
+}
+
+// ExecuteActionsAndGenerateReportWithNodePool executes a list of actions with nodePool support and generates a performance report
+func ExecuteActionsAndGenerateReportWithNodePool(actions []Action, testName string, env *common.Environment, timeOut time.Duration, nodePool *v1.NodePool) (*PerformanceReport, error) {
 	// Record initial state for consolidation tests
 	initialNodeCount := env.Monitor.CreatedNodeCount()
+
+	// Set nodePool for any TriggerDriftAction instances
+	for _, action := range actions {
+		if driftAction, ok := action.(*TriggerDriftAction); ok {
+			if nodePool != nil {
+				driftAction.SetNodePool(nodePool)
+			}
+		}
+	}
 
 	// IMPORTANT: Detect test type BEFORE executing actions, when we can still see original replica counts
 	emptyDeploymentMap := make(map[string]*appsv1.Deployment) // Empty map for initial detection

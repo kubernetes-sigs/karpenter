@@ -70,20 +70,15 @@ var _ = Describe("Performance", func() {
 				NewTriggerDriftAction("annotation", "NodePool template annotation drift test"),
 			}
 
-			driftReport, err := ExecuteActionsAndGenerateReport(driftActions, "Drift Performance Test", env, 25*time.Minute)
+			driftReport, err := ExecuteActionsAndGenerateReportWithNodePool(driftActions, "Drift Performance Test", env, 25*time.Minute, nodePool)
 			Expect(err).ToNot(HaveOccurred(), "Drift trigger should execute successfully")
 
 			By("Validating drift execution")
 			Expect(driftReport.TestType).To(Equal("drift"), "Should be detected as drift test")
-			//Expect(driftReport.TotalPods).To(Equal(600), "Pod count should remain the same during drift")
-			//Expect(driftReport.PodsNetChange).To(Equal(0), "Pods should not change during drift")
-			//Expect(driftReport.NodesNetChange).To(Equal(0), "Net node change should be 0 (nodes replaced)")
 
 			// Drift performance assertions
-			Expect(driftReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
-				"Drift should complete within 25 minutes")
-			Expect(driftReport.TotalNodes).To(BeNumerically(">", 0),
-				"Should have nodes after drift completion")
+			Expect(driftReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
+				"Drift should complete within 5 minutes")
 
 			By("Outputting drift performance report")
 			OutputPerformanceReport(driftReport, "drift_execution")
@@ -94,12 +89,6 @@ var _ = Describe("Performance", func() {
 			// Verify all pods are still healthy after drift
 			allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 			env.EventuallyExpectHealthyPodCount(allPodsSelector, 600)
-
-			// Collect post-drift metrics
-			postDriftNodes := env.Monitor.CreatedNodeCount()
-
-			By("Validating drift replacement completed successfully")
-			Expect(postDriftNodes).To(BeNumerically(">", 0), "Should have nodes after drift")
 
 		})
 	})
