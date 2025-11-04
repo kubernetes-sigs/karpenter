@@ -679,10 +679,28 @@ func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *com
 	testType := detectTestType(actions, emptyDeploymentMap, env)
 	GinkgoWriter.Printf("DEBUG: Pre-execution test type detection: '%s'\n", testType)
 
+	// Calculate initial pod count for consolidation tests BEFORE executing actions
+	var initialPodCount int
+	if testType == "consolidation" {
+		// For consolidation, calculate initial pod count from cluster before updates
+		for _, action := range actions {
+			if updateAction, ok := action.(*UpdateReplicasAction); ok {
+				originalReplicas := lookupDeploymentReplicasInCluster(env, updateAction.DeploymentName)
+				initialPodCount += int(originalReplicas)
+			}
+		}
+		GinkgoWriter.Printf("DEBUG: Calculated initial pod count for consolidation from cluster: %d\n", initialPodCount)
+	}
+
 	// Execute actions and track deployments
-	deploymentMap, initialPodCount, err := executeActions(actions, env)
+	deploymentMap, executionInitialPodCount, err := executeActions(actions, env)
 	if err != nil {
 		return nil, err
+	}
+
+	// Use execution initial pod count for non-consolidation tests
+	if testType != "consolidation" {
+		initialPodCount = executionInitialPodCount
 	}
 
 	// Calculate final expected pods based on test type
@@ -704,6 +722,9 @@ func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *com
 		}
 		GinkgoWriter.Printf("DEBUG: Calculated final pod count from deployments: %d\n", finalPodCount)
 	}
+
+	GinkgoWriter.Printf("DEBUG: Pod count summary - Initial: %d, Final: %d, Net Change: %d\n",
+		initialPodCount, finalPodCount, finalPodCount-initialPodCount)
 
 	// Route to appropriate monitoring based on pre-determined test type
 	report, err := routeToMonitoringWithType(testType, initialPodCount, finalPodCount, initialNodeCount, env, timeOut)
