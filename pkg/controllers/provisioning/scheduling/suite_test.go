@@ -2457,16 +2457,15 @@ var _ = Context("Scheduling", func() {
 				ExpectDeleted(ctx, env.Client, initialPod)
 				ExpectReconcileSucceeded(ctx, nodeStateController, client.ObjectKeyFromObject(node1))
 
-				cluster.ForEachNode(func(f *state.StateNode) bool {
-					dsRequests := f.DaemonSetRequests()
-					available := f.Available()
+				for n := range cluster.Nodes() {
+					dsRequests := n.DaemonSetRequests()
+					available := n.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 0))
 					// When daemonOverhead is considered for both ds1 and ds2, a 16 CPU Node is launched,
 					// whereas when only one or neither is considered, only a 4 CPU Node is launched.
 					// no pods so we have the full (16 cpu - 100m overhead)
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 15.9))
-					return true
-				})
+				}
 
 				// manually bind the daemonset pods to the node
 				ExpectManualBinding(ctx, env.Client, ds1Pod, node1)
@@ -2475,16 +2474,14 @@ var _ = Context("Scheduling", func() {
 				ExpectManualBinding(ctx, env.Client, ds2Pod, node1)
 				ExpectReconcileSucceeded(ctx, podStateController, client.ObjectKeyFromObject(ds2Pod))
 
-				cluster.ForEachNode(func(f *state.StateNode) bool {
-					dsRequests := f.DaemonSetRequests()
-					available := f.Available()
+				for n := range cluster.Nodes() {
+					dsRequests := n.DaemonSetRequests()
+					available := n.Available()
 					Expect(dsRequests.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 2))
 					// only the DS pods are bound, so available is reduced by two and the DS requested is incremented by two
 					Expect(available.Cpu().AsApproximateFloat64()).To(BeNumerically("~", 13.9))
-					return true
-				})
+				}
 			})
-
 		})
 		// nolint:gosec
 		It("should pack in-flight nodes before launching new nodes", func() {
