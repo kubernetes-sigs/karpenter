@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/labels"
+
 	"sigs.k8s.io/karpenter/pkg/test"
 )
 

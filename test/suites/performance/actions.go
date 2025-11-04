@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	. "github.com/onsi/ginkgo/v2"
+
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
