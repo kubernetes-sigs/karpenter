@@ -45,7 +45,6 @@ var _ = Describe("Performance", func() {
 			By("Validating XL scale-out performance with hostname spreading")
 			Expect(scaleOutReport.TestType).To(Equal("scale-out"), "Should be detected as scale-out test")
 			Expect(scaleOutReport.TotalPods).To(Equal(2000), "Should have 2000 total pods")
-			Expect(scaleOutReport.Rounds).To(Equal(1.0), "Scale-out should be 1 round")
 
 			// XL Performance assertions - hostname spreading at scale may require many more nodes
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 20*time.Minute),

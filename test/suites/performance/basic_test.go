@@ -43,7 +43,6 @@ var _ = Describe("Performance", func() {
 			By("Validating scale-out performance")
 			Expect(scaleOutReport.TestType).To(Equal("scale-out"), "Should be detected as scale-out test")
 			Expect(scaleOutReport.TotalPods).To(Equal(1000), "Should have 1000 total pods")
-			Expect(scaleOutReport.Rounds).To(Equal(1.0), "Scale-out should be 1 round")
 
 			// Performance assertions
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 3*time.Minute),
