@@ -295,7 +295,33 @@ func (a *UpdateReplicasAction) SetDeployment(deployment *appsv1.Deployment) {
 // Execute updates the deployment replicas
 func (a *UpdateReplicasAction) Execute(env *common.Environment) error {
 	if a.deployment == nil {
-		return fmt.Errorf("deployment '%s' not set for UpdateReplicasAction - deployment reference was not found or not set by execution engine", a.DeploymentName)
+		// Try to find the deployment in the cluster by name
+		GinkgoWriter.Printf("DEBUG: Deployment '%s' not in map, looking up in cluster\n", a.DeploymentName)
+
+		deployments := &appsv1.DeploymentList{}
+		err := env.Client.List(env.Context, deployments)
+		if err != nil {
+			return fmt.Errorf("failed to list deployments while looking for '%s': %w", a.DeploymentName, err)
+		}
+
+		var foundDeployment *appsv1.Deployment
+		for i := range deployments.Items {
+			if deployments.Items[i].Name == a.DeploymentName {
+				foundDeployment = &deployments.Items[i]
+				break
+			}
+		}
+
+		if foundDeployment == nil {
+			deploymentNames := make([]string, len(deployments.Items))
+			for i, dep := range deployments.Items {
+				deploymentNames[i] = dep.Name
+			}
+			return fmt.Errorf("deployment '%s' not found in cluster - available deployments: %v", a.DeploymentName, deploymentNames)
+		}
+
+		a.deployment = foundDeployment
+		GinkgoWriter.Printf("DEBUG: Found deployment '%s' in cluster with %d replicas\n", a.DeploymentName, *foundDeployment.Spec.Replicas)
 	}
 
 	oldReplicas := int32(0)
