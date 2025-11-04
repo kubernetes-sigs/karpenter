@@ -895,7 +895,7 @@ func MonitorConsolidation(env *common.Environment, preScaleInNodes int, timeout 
 				drainingNodes = append(drainingNodes, *node)
 			}
 			for _, taint := range node.Spec.Taints {
-				if taint.Key == "karpenter.sh/disruption" {
+				if taint.Key == "karpenter.sh/disrupted" {
 					drainingNodes = append(drainingNodes, *node)
 					break
 				}
