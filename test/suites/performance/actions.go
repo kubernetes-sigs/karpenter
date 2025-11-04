@@ -685,12 +685,24 @@ func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *com
 		return nil, err
 	}
 
-	// Calculate final expected pods
+	// Calculate final expected pods based on test type
 	finalPodCount := 0
-	for _, deployment := range deploymentMap {
-		if deployment.Spec.Replicas != nil {
-			finalPodCount += int(*deployment.Spec.Replicas)
+	if testType == "consolidation" {
+		// For consolidation, calculate from the update actions since deploymentMap may be empty
+		for _, action := range actions {
+			if updateAction, ok := action.(*UpdateReplicasAction); ok {
+				finalPodCount += int(updateAction.NewReplicas)
+			}
 		}
+		GinkgoWriter.Printf("DEBUG: Calculated final pod count for consolidation: %d\n", finalPodCount)
+	} else {
+		// For scale-out and drift, use deployment map
+		for _, deployment := range deploymentMap {
+			if deployment.Spec.Replicas != nil {
+				finalPodCount += int(*deployment.Spec.Replicas)
+			}
+		}
+		GinkgoWriter.Printf("DEBUG: Calculated final pod count from deployments: %d\n", finalPodCount)
 	}
 
 	// Route to appropriate monitoring based on pre-determined test type
