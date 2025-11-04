@@ -669,20 +669,11 @@ func routeToMonitoringWithType(testType string, initialPodCount, finalPodCount, 
 	return report, nil
 }
 
-// ExecuteActionsAndGenerateReport executes a list of actions and generates a performance report
-func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
-	// Record initial state for consolidation tests
-	initialNodeCount := env.Monitor.CreatedNodeCount()
-
-	// IMPORTANT: Detect test type BEFORE executing actions, when we can still see original replica counts
-	emptyDeploymentMap := make(map[string]*appsv1.Deployment) // Empty map for initial detection
-	testType := detectTestType(actions, emptyDeploymentMap, env)
-	GinkgoWriter.Printf("DEBUG: Pre-execution test type detection: '%s'\n", testType)
-
-	// Calculate initial pod count for consolidation tests BEFORE executing actions
-	var initialPodCount int
+// calculateInitialPodCount calculates the initial pod count based on test type
+func calculateInitialPodCount(testType string, actions []Action, env *common.Environment) int {
 	if testType == "consolidation" {
 		// For consolidation, calculate initial pod count from cluster before updates
+		initialPodCount := 0
 		for _, action := range actions {
 			if updateAction, ok := action.(*UpdateReplicasAction); ok {
 				originalReplicas := lookupDeploymentReplicasInCluster(env, updateAction.DeploymentName)
@@ -690,20 +681,13 @@ func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *com
 			}
 		}
 		GinkgoWriter.Printf("DEBUG: Calculated initial pod count for consolidation from cluster: %d\n", initialPodCount)
+		return initialPodCount
 	}
+	return 0 // Will be set from executeActions for other test types
+}
 
-	// Execute actions and track deployments
-	deploymentMap, executionInitialPodCount, err := executeActions(actions, env)
-	if err != nil {
-		return nil, err
-	}
-
-	// Use execution initial pod count for non-consolidation tests
-	if testType != "consolidation" {
-		initialPodCount = executionInitialPodCount
-	}
-
-	// Calculate final expected pods based on test type
+// calculateFinalPodCount calculates the final expected pod count based on test type
+func calculateFinalPodCount(testType string, actions []Action, deploymentMap map[string]*appsv1.Deployment) int {
 	finalPodCount := 0
 	if testType == "consolidation" {
 		// For consolidation, calculate from the update actions since deploymentMap may be empty
@@ -722,6 +706,35 @@ func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *com
 		}
 		GinkgoWriter.Printf("DEBUG: Calculated final pod count from deployments: %d\n", finalPodCount)
 	}
+	return finalPodCount
+}
+
+// ExecuteActionsAndGenerateReport executes a list of actions and generates a performance report
+func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
+	// Record initial state for consolidation tests
+	initialNodeCount := env.Monitor.CreatedNodeCount()
+
+	// IMPORTANT: Detect test type BEFORE executing actions, when we can still see original replica counts
+	emptyDeploymentMap := make(map[string]*appsv1.Deployment) // Empty map for initial detection
+	testType := detectTestType(actions, emptyDeploymentMap, env)
+	GinkgoWriter.Printf("DEBUG: Pre-execution test type detection: '%s'\n", testType)
+
+	// Calculate initial pod count for consolidation tests BEFORE executing actions
+	initialPodCount := calculateInitialPodCount(testType, actions, env)
+
+	// Execute actions and track deployments
+	deploymentMap, executionInitialPodCount, err := executeActions(actions, env)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use execution initial pod count for non-consolidation tests
+	if testType != "consolidation" {
+		initialPodCount = executionInitialPodCount
+	}
+
+	// Calculate final expected pods based on test type
+	finalPodCount := calculateFinalPodCount(testType, actions, deploymentMap)
 
 	GinkgoWriter.Printf("DEBUG: Pod count summary - Initial: %d, Final: %d, Net Change: %d\n",
 		initialPodCount, finalPodCount, finalPodCount-initialPodCount)
