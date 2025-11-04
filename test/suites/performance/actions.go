@@ -512,22 +512,12 @@ func MonitorDrift(env *common.Environment, expectedPods int, timeout time.Durati
 	}, nil
 }
 
-// ExecuteActionsAndGenerateReport executes a list of actions and generates a performance report
-func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
-	// Track deployments created for monitoring and cleanup
-	var deployments []*appsv1.Deployment
+// executeActions executes a list of actions and tracks deployments
+func executeActions(actions []Action, env *common.Environment) (map[string]*appsv1.Deployment, int, error) {
 	deploymentMap := make(map[string]*appsv1.Deployment)
-
-	// Record initial state for consolidation tests
-	initialNodeCount := env.Monitor.CreatedNodeCount()
 	initialPodCount := 0
 
-	// Execute actions sequentially
-	var actionResults []ActionExecutionResult
-
 	for _, action := range actions {
-		actionStart := time.Now()
-
 		// Handle deployment references for UpdateReplicasAction
 		if updateAction, ok := action.(*UpdateReplicasAction); ok {
 			if deployment, exists := deploymentMap[updateAction.DeploymentName]; exists {
@@ -537,59 +527,60 @@ func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *com
 
 		// Execute the action
 		err := action.Execute(env)
-		actionEnd := time.Now()
-
-		result := ActionExecutionResult{
-			Action:      action,
-			StartTime:   actionStart,
-			EndTime:     actionEnd,
-			Duration:    actionEnd.Sub(actionStart),
-			Error:       err,
-			Description: action.GetDescription(),
-		}
-		actionResults = append(actionResults, result)
-
 		if err != nil {
-			return nil, fmt.Errorf("action failed: %s - %w", action.GetDescription(), err)
+			return nil, 0, fmt.Errorf("action failed: %s - %w", action.GetDescription(), err)
 		}
 
 		// Track deployments for monitoring
 		if createAction, ok := action.(*CreateDeploymentAction); ok {
 			deployment := createAction.GetDeployment()
-			deployments = append(deployments, deployment)
 			deploymentMap[createAction.Name] = deployment
 			initialPodCount += int(createAction.Replicas)
 		}
 	}
 
+	return deploymentMap, initialPodCount, nil
+}
+
+// routeToMonitoring detects test type and routes to appropriate monitoring function
+func routeToMonitoring(actions []Action, deploymentMap map[string]*appsv1.Deployment, initialPodCount, finalPodCount, initialNodeCount int, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
+	testType := detectTestType(actions, deploymentMap)
+
+	switch testType {
+	case "scale-out":
+		return MonitorScaleOut(env, finalPodCount, timeOut)
+	case "consolidation":
+		return MonitorConsolidationTest(env, initialPodCount, finalPodCount, initialNodeCount, timeOut)
+	case "drift":
+		return MonitorDrift(env, finalPodCount, timeOut)
+	default:
+		return MonitorScaleOut(env, finalPodCount, timeOut)
+	}
+}
+
+// ExecuteActionsAndGenerateReport executes a list of actions and generates a performance report
+func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
+	// Record initial state for consolidation tests
+	initialNodeCount := env.Monitor.CreatedNodeCount()
+
+	// Execute actions and track deployments
+	deploymentMap, initialPodCount, err := executeActions(actions, env)
+	if err != nil {
+		return nil, err
+	}
+
 	// Calculate final expected pods
 	finalPodCount := 0
-	for _, deployment := range deployments {
+	for _, deployment := range deploymentMap {
 		if deployment.Spec.Replicas != nil {
 			finalPodCount += int(*deployment.Spec.Replicas)
 		}
 	}
 
-	// Detect test type and route to appropriate monitoring
-	testType := detectTestType(actions, deploymentMap)
-
-	var report *PerformanceReport
-	var err error
-
-	switch testType {
-	case "scale-out":
-		report, err = MonitorScaleOut(env, finalPodCount, timeOut)
-	case "consolidation":
-		report, err = MonitorConsolidationTest(env, initialPodCount, finalPodCount, initialNodeCount, timeOut)
-	case "drift":
-		report, err = MonitorDrift(env, finalPodCount, timeOut)
-	default:
-		// Fallback to scale-out monitoring
-		report, err = MonitorScaleOut(env, finalPodCount, timeOut)
-	}
-
+	// Route to appropriate monitoring based on test type
+	report, err := routeToMonitoring(actions, deploymentMap, initialPodCount, finalPodCount, initialNodeCount, env, timeOut)
 	if err != nil {
-		return nil, fmt.Errorf("monitoring failed for test type %s: %w", testType, err)
+		return nil, err
 	}
 
 	// Set the test name

@@ -46,11 +46,3 @@ type PerformanceReport struct {
 	Rounds                  float64       `json:"rounds"`
 	Timestamp               time.Time     `json:"timestamp"`
 }
-
-// getStatusIcon returns a visual indicator for pass/fail status
-func getStatusIcon(passed bool) string {
-	if passed {
-		return "✅ PASS"
-	}
-	return "❌ FAIL"
-}
