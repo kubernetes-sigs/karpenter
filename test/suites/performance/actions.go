@@ -642,41 +642,6 @@ func executeActions(actions []Action, env *common.Environment) (map[string]*apps
 	return deploymentMap, initialPodCount, nil
 }
 
-// routeToMonitoring detects test type and routes to appropriate monitoring function
-func routeToMonitoring(actions []Action, deploymentMap map[string]*appsv1.Deployment, initialPodCount, finalPodCount, initialNodeCount int, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
-	testType := detectTestType(actions, deploymentMap, env)
-
-	//GinkgoWriter.Printf("DEBUG: Routing to monitoring function for test type '%s'\n", testType)
-	//GinkgoWriter.Printf("DEBUG: Pod counts - Initial: %d, Final: %d, Node count: %d, Timeout: %v\n",
-	//	initialPodCount, finalPodCount, initialNodeCount, timeOut)
-
-	var report *PerformanceReport
-	var err error
-
-	switch testType {
-	case "scale-out":
-		//GinkgoWriter.Printf("DEBUG: Using MonitorScaleOut with %d expected pods\n", finalPodCount)
-		report, err = MonitorScaleOut(env, finalPodCount, timeOut)
-	case "consolidation":
-		//GinkgoWriter.Printf("DEBUG: Using MonitorConsolidationTest with initial: %d, final: %d pods, initial nodes: %d\n",
-		//	initialPodCount, finalPodCount, initialNodeCount)
-		report, err = MonitorConsolidationTest(env, initialPodCount, finalPodCount, initialNodeCount, timeOut)
-	case "drift":
-		//GinkgoWriter.Printf("DEBUG: Using MonitorDrift with %d expected pods\n", finalPodCount)
-		report, err = MonitorDrift(env, finalPodCount, timeOut)
-	default:
-		GinkgoWriter.Printf("DEBUG: Unknown test type '%s', defaulting to MonitorScaleOut\n", testType)
-		report, err = MonitorScaleOut(env, finalPodCount, timeOut)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("monitoring failed for test type '%s' with %d pods (initial: %d, final: %d, timeout: %v): %w",
-			testType, finalPodCount, initialPodCount, finalPodCount, timeOut, err)
-	}
-
-	return report, nil
-}
-
 // routeToMonitoringWithType routes to appropriate monitoring function based on predetermined test type
 func routeToMonitoringWithType(testType string, initialPodCount, finalPodCount, initialNodeCount int, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
 	GinkgoWriter.Printf("DEBUG: Using predetermined test type '%s' for monitoring\n", testType)
