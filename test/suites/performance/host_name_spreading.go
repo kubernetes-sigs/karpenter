@@ -24,7 +24,7 @@ import (
 )
 
 var _ = Describe("Performance", func() {
-	Context("Host Name Spreading Deployment", func() {
+	Context("Host Name Spreading Deployment Reg", func() {
 		It("should efficiently scale two deployments with host name topology spreading", func() {
 			By("Setting up NodePool and NodeClass for the test")
 			env.ExpectCreated(nodePool, nodeClass)
