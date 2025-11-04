@@ -390,34 +390,58 @@ type ActionExecutionResult struct {
 	Description string
 }
 
+// lookupDeploymentReplicasInCluster looks up current replica count for a deployment in the cluster
+func lookupDeploymentReplicasInCluster(env *common.Environment, deploymentName string) int32 {
+	deployments := &appsv1.DeploymentList{}
+	err := env.Client.List(env.Context, deployments)
+	if err != nil {
+		return 0 // Return 0 if we can't lookup
+	}
+
+	for _, deployment := range deployments.Items {
+		if deployment.Name == deploymentName {
+			if deployment.Spec.Replicas != nil {
+				return *deployment.Spec.Replicas
+			}
+		}
+	}
+	return 0 // Deployment not found
+}
+
 // detectTestType analyzes the actions to determine the test type
-func detectTestType(actions []Action, deploymentMap map[string]*appsv1.Deployment) string {
+func detectTestType(actions []Action, deploymentMap map[string]*appsv1.Deployment, env *common.Environment) string {
 	hasDrift := false
 	hasScaleDown := false
 
-	//GinkgoWriter.Printf("DEBUG: Detecting test type for %d actions with %d deployments available\n", len(actions), len(deploymentMap))
+	GinkgoWriter.Printf("DEBUG: Detecting test type for %d actions with %d deployments in map\n", len(actions), len(deploymentMap))
 
 	for _, action := range actions {
-		//GinkgoWriter.Printf("DEBUG: Analyzing action: %s (type: %s)\n", action.GetDescription(), action.GetType())
+		GinkgoWriter.Printf("DEBUG: Analyzing action: %s (type: %s)\n", action.GetDescription(), action.GetType())
 
 		if action.GetType() == ActionTypeTriggerDrift {
 			hasDrift = true
-			//GinkgoWriter.Printf("DEBUG: Found drift action - will be detected as drift test\n")
+			GinkgoWriter.Printf("DEBUG: Found drift action - will be detected as drift test\n")
 		}
 		if updateAction, ok := action.(*UpdateReplicasAction); ok {
-			// Check if it's scaling down by comparing with existing deployment
+			var currentReplicas int32 = 0
+
+			// First try deployment map
 			if deployment, exists := deploymentMap[updateAction.DeploymentName]; exists {
-				oldReplicas := int32(0)
 				if deployment.Spec.Replicas != nil {
-					oldReplicas = *deployment.Spec.Replicas
+					currentReplicas = *deployment.Spec.Replicas
 				}
-				GinkgoWriter.Printf("DEBUG: Update action '%s': %d -> %d replicas\n", updateAction.DeploymentName, oldReplicas, updateAction.NewReplicas)
-				if deployment.Spec.Replicas != nil && updateAction.NewReplicas < *deployment.Spec.Replicas {
-					hasScaleDown = true
-					GinkgoWriter.Printf("DEBUG: Found scale-down action - will be detected as consolidation test\n")
-				}
+				GinkgoWriter.Printf("DEBUG: Found '%s' in map with %d replicas\n", updateAction.DeploymentName, currentReplicas)
 			} else {
-				GinkgoWriter.Printf("DEBUG: Update action '%s' has no corresponding deployment in map\n", updateAction.DeploymentName)
+				// Fallback: lookup in cluster
+				currentReplicas = lookupDeploymentReplicasInCluster(env, updateAction.DeploymentName)
+				GinkgoWriter.Printf("DEBUG: Looked up '%s' in cluster, found %d replicas\n", updateAction.DeploymentName, currentReplicas)
+			}
+
+			GinkgoWriter.Printf("DEBUG: Update action '%s': %d -> %d replicas\n", updateAction.DeploymentName, currentReplicas, updateAction.NewReplicas)
+
+			if currentReplicas > 0 && updateAction.NewReplicas < currentReplicas {
+				hasScaleDown = true
+				GinkgoWriter.Printf("DEBUG: Found scale-down action - will be detected as consolidation test\n")
 			}
 		}
 	}
@@ -429,7 +453,7 @@ func detectTestType(actions []Action, deploymentMap map[string]*appsv1.Deploymen
 		testType = "consolidation"
 	}
 
-	//GinkgoWriter.Printf("DEBUG: Detected test type: '%s' (hasDrift: %t, hasScaleDown: %t)\n", testType, hasDrift, hasScaleDown)
+	GinkgoWriter.Printf("DEBUG: Detected test type: '%s' (hasDrift: %t, hasScaleDown: %t)\n", testType, hasDrift, hasScaleDown)
 	return testType
 }
 
@@ -620,7 +644,7 @@ func executeActions(actions []Action, env *common.Environment) (map[string]*apps
 
 // routeToMonitoring detects test type and routes to appropriate monitoring function
 func routeToMonitoring(actions []Action, deploymentMap map[string]*appsv1.Deployment, initialPodCount, finalPodCount, initialNodeCount int, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
-	testType := detectTestType(actions, deploymentMap)
+	testType := detectTestType(actions, deploymentMap, env)
 
 	//GinkgoWriter.Printf("DEBUG: Routing to monitoring function for test type '%s'\n", testType)
 	//GinkgoWriter.Printf("DEBUG: Pod counts - Initial: %d, Final: %d, Node count: %d, Timeout: %v\n",
