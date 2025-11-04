@@ -677,10 +677,42 @@ func routeToMonitoring(actions []Action, deploymentMap map[string]*appsv1.Deploy
 	return report, nil
 }
 
+// routeToMonitoringWithType routes to appropriate monitoring function based on predetermined test type
+func routeToMonitoringWithType(testType string, initialPodCount, finalPodCount, initialNodeCount int, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
+	GinkgoWriter.Printf("DEBUG: Using predetermined test type '%s' for monitoring\n", testType)
+
+	var report *PerformanceReport
+	var err error
+
+	switch testType {
+	case "scale-out":
+		report, err = MonitorScaleOut(env, finalPodCount, timeOut)
+	case "consolidation":
+		report, err = MonitorConsolidationTest(env, initialPodCount, finalPodCount, initialNodeCount, timeOut)
+	case "drift":
+		report, err = MonitorDrift(env, finalPodCount, timeOut)
+	default:
+		GinkgoWriter.Printf("DEBUG: Unknown predetermined test type '%s', defaulting to MonitorScaleOut\n", testType)
+		report, err = MonitorScaleOut(env, finalPodCount, timeOut)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("monitoring failed for predetermined test type '%s' with %d pods (initial: %d, final: %d, timeout: %v): %w",
+			testType, finalPodCount, initialPodCount, finalPodCount, timeOut, err)
+	}
+
+	return report, nil
+}
+
 // ExecuteActionsAndGenerateReport executes a list of actions and generates a performance report
 func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
 	// Record initial state for consolidation tests
 	initialNodeCount := env.Monitor.CreatedNodeCount()
+
+	// IMPORTANT: Detect test type BEFORE executing actions, when we can still see original replica counts
+	emptyDeploymentMap := make(map[string]*appsv1.Deployment) // Empty map for initial detection
+	testType := detectTestType(actions, emptyDeploymentMap, env)
+	GinkgoWriter.Printf("DEBUG: Pre-execution test type detection: '%s'\n", testType)
 
 	// Execute actions and track deployments
 	deploymentMap, initialPodCount, err := executeActions(actions, env)
@@ -696,8 +728,8 @@ func ExecuteActionsAndGenerateReport(actions []Action, testName string, env *com
 		}
 	}
 
-	// Route to appropriate monitoring based on test type
-	report, err := routeToMonitoring(actions, deploymentMap, initialPodCount, finalPodCount, initialNodeCount, env, timeOut)
+	// Route to appropriate monitoring based on pre-determined test type
+	report, err := routeToMonitoringWithType(testType, initialPodCount, finalPodCount, initialNodeCount, env, timeOut)
 	if err != nil {
 		return nil, err
 	}
