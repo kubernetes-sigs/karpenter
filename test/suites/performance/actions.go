@@ -248,6 +248,9 @@ func (a *CreateDeploymentAction) Execute(env *common.Environment) error {
 	}
 
 	a.deployment = test.Deployment(test.DeploymentOptions{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: a.Name, // Explicitly set the deployment name
+		},
 		Replicas:   a.Replicas,
 		PodOptions: podOptions,
 	})
@@ -321,7 +324,7 @@ func (a *UpdateReplicasAction) Execute(env *common.Environment) error {
 		}
 
 		a.deployment = foundDeployment
-		GinkgoWriter.Printf("DEBUG: Found deployment '%s' in cluster with %d replicas\n", a.DeploymentName, *foundDeployment.Spec.Replicas)
+		//GinkgoWriter.Printf("DEBUG: Found deployment '%s' in cluster with %d replicas\n", a.DeploymentName, *foundDeployment.Spec.Replicas)
 	}
 
 	oldReplicas := int32(0)
@@ -392,14 +395,14 @@ func detectTestType(actions []Action, deploymentMap map[string]*appsv1.Deploymen
 	hasDrift := false
 	hasScaleDown := false
 
-	GinkgoWriter.Printf("DEBUG: Detecting test type for %d actions with %d deployments available\n", len(actions), len(deploymentMap))
+	//GinkgoWriter.Printf("DEBUG: Detecting test type for %d actions with %d deployments available\n", len(actions), len(deploymentMap))
 
 	for _, action := range actions {
-		GinkgoWriter.Printf("DEBUG: Analyzing action: %s (type: %s)\n", action.GetDescription(), action.GetType())
+		//GinkgoWriter.Printf("DEBUG: Analyzing action: %s (type: %s)\n", action.GetDescription(), action.GetType())
 
 		if action.GetType() == ActionTypeTriggerDrift {
 			hasDrift = true
-			GinkgoWriter.Printf("DEBUG: Found drift action - will be detected as drift test\n")
+			//GinkgoWriter.Printf("DEBUG: Found drift action - will be detected as drift test\n")
 		}
 		if updateAction, ok := action.(*UpdateReplicasAction); ok {
 			// Check if it's scaling down by comparing with existing deployment
@@ -426,7 +429,7 @@ func detectTestType(actions []Action, deploymentMap map[string]*appsv1.Deploymen
 		testType = "consolidation"
 	}
 
-	GinkgoWriter.Printf("DEBUG: Detected test type: '%s' (hasDrift: %t, hasScaleDown: %t)\n", testType, hasDrift, hasScaleDown)
+	//GinkgoWriter.Printf("DEBUG: Detected test type: '%s' (hasDrift: %t, hasScaleDown: %t)\n", testType, hasDrift, hasScaleDown)
 	return testType
 }
 
@@ -575,17 +578,17 @@ func executeActions(actions []Action, env *common.Environment) (map[string]*apps
 	deploymentMap := make(map[string]*appsv1.Deployment)
 	initialPodCount := 0
 
-	GinkgoWriter.Printf("DEBUG: Executing %d actions\n", len(actions))
+	//GinkgoWriter.Printf("DEBUG: Executing %d actions\n", len(actions))
 
 	for i, action := range actions {
-		GinkgoWriter.Printf("DEBUG: Executing action %d/%d: %s\n", i+1, len(actions), action.GetDescription())
+		//GinkgoWriter.Printf("DEBUG: Executing action %d/%d: %s\n", i+1, len(actions), action.GetDescription())
 
 		// Handle deployment references for UpdateReplicasAction
 		if updateAction, ok := action.(*UpdateReplicasAction); ok {
 			availableDeployments := getDeploymentNames(deploymentMap)
 			if deployment, exists := deploymentMap[updateAction.DeploymentName]; exists {
 				updateAction.SetDeployment(deployment)
-				GinkgoWriter.Printf("DEBUG: Found deployment '%s' for update action\n", updateAction.DeploymentName)
+				//GinkgoWriter.Printf("DEBUG: Found deployment '%s' for update action\n", updateAction.DeploymentName)
 			} else {
 				GinkgoWriter.Printf("DEBUG: Deployment '%s' not found in map. Available deployments: %v\n",
 					updateAction.DeploymentName, availableDeployments)
@@ -605,12 +608,12 @@ func executeActions(actions []Action, env *common.Environment) (map[string]*apps
 			deployment := createAction.GetDeployment()
 			deploymentMap[createAction.Name] = deployment
 			initialPodCount += int(createAction.Replicas)
-			GinkgoWriter.Printf("DEBUG: Tracked deployment '%s' with %d replicas\n", createAction.Name, createAction.Replicas)
+			//GinkgoWriter.Printf("DEBUG: Tracked deployment '%s' with %d replicas\n", createAction.Name, createAction.Replicas)
 		}
 	}
 
-	GinkgoWriter.Printf("DEBUG: Action execution completed. Tracked deployments: %v, Initial pod count: %d\n",
-		getDeploymentNames(deploymentMap), initialPodCount)
+	//GinkgoWriter.Printf("DEBUG: Action execution completed. Tracked deployments: %v, Initial pod count: %d\n",
+	//	getDeploymentNames(deploymentMap), initialPodCount)
 
 	return deploymentMap, initialPodCount, nil
 }
@@ -619,23 +622,23 @@ func executeActions(actions []Action, env *common.Environment) (map[string]*apps
 func routeToMonitoring(actions []Action, deploymentMap map[string]*appsv1.Deployment, initialPodCount, finalPodCount, initialNodeCount int, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
 	testType := detectTestType(actions, deploymentMap)
 
-	GinkgoWriter.Printf("DEBUG: Routing to monitoring function for test type '%s'\n", testType)
-	GinkgoWriter.Printf("DEBUG: Pod counts - Initial: %d, Final: %d, Node count: %d, Timeout: %v\n",
-		initialPodCount, finalPodCount, initialNodeCount, timeOut)
+	//GinkgoWriter.Printf("DEBUG: Routing to monitoring function for test type '%s'\n", testType)
+	//GinkgoWriter.Printf("DEBUG: Pod counts - Initial: %d, Final: %d, Node count: %d, Timeout: %v\n",
+	//	initialPodCount, finalPodCount, initialNodeCount, timeOut)
 
 	var report *PerformanceReport
 	var err error
 
 	switch testType {
 	case "scale-out":
-		GinkgoWriter.Printf("DEBUG: Using MonitorScaleOut with %d expected pods\n", finalPodCount)
+		//GinkgoWriter.Printf("DEBUG: Using MonitorScaleOut with %d expected pods\n", finalPodCount)
 		report, err = MonitorScaleOut(env, finalPodCount, timeOut)
 	case "consolidation":
-		GinkgoWriter.Printf("DEBUG: Using MonitorConsolidationTest with initial: %d, final: %d pods, initial nodes: %d\n",
-			initialPodCount, finalPodCount, initialNodeCount)
+		//GinkgoWriter.Printf("DEBUG: Using MonitorConsolidationTest with initial: %d, final: %d pods, initial nodes: %d\n",
+		//	initialPodCount, finalPodCount, initialNodeCount)
 		report, err = MonitorConsolidationTest(env, initialPodCount, finalPodCount, initialNodeCount, timeOut)
 	case "drift":
-		GinkgoWriter.Printf("DEBUG: Using MonitorDrift with %d expected pods\n", finalPodCount)
+		//GinkgoWriter.Printf("DEBUG: Using MonitorDrift with %d expected pods\n", finalPodCount)
 		report, err = MonitorDrift(env, finalPodCount, timeOut)
 	default:
 		GinkgoWriter.Printf("DEBUG: Unknown test type '%s', defaulting to MonitorScaleOut\n", testType)
