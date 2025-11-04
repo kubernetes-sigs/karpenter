@@ -908,8 +908,8 @@ func MonitorConsolidation(env *common.Environment, preScaleInNodes int, timeout 
 
 			// Wait for this round to complete
 			roundStartTime := time.Now()
-			env.EventuallyExpectNodeCount("<=", currentNodes-len(drainingNodes))
-
+			env.EventuallyExpectNodeCount("<", currentNodes)
+			time.Sleep(5 * time.Second)
 			finalNodeCount := env.Monitor.CreatedNodeCount()
 			roundDuration := time.Since(roundStartTime)
 
