@@ -19,7 +19,6 @@ package performance
 import (
 	"time"
 
-	"github.com/docker/docker/api/types/versions"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/labels"
