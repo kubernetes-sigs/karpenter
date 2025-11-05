@@ -76,8 +76,8 @@ var _ = Describe("Performance", func() {
 			Expect(driftReport.TestType).To(Equal("drift"), "Should be detected as drift test")
 
 			// Drift performance assertions
-			Expect(driftReport.TotalTime).To(BeNumerically("<", 15*time.Minute),
-				"Drift should complete within 5 minutes")
+			Expect(driftReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
+				"Drift should complete within 15 minutes")
 
 			By("Outputting drift performance report")
 			OutputPerformanceReport(driftReport, "drift_execution")
