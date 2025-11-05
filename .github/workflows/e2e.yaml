@@ -73,6 +73,14 @@ jobs:
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         TEST_SUITE="$SUITE" make e2etests
+    - name: Upload performance results
+      if: always() && env.OUTPUT_DIR != ''
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-${{ github.run_id }}
+        path: ${{ env.OUTPUT_DIR }}/*_performance_report.json
+        retention-days: 30
+        if-no-files-found: ignore
     - name: cleanup 
       shell: bash
       run: | 
