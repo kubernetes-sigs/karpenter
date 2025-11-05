@@ -62,7 +62,6 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 			}
 		}
 	}
-	GinkgoWriter.Printf("=====================================\n")
 }
 
 // ActionType represents the type of action to be performed
@@ -300,8 +299,6 @@ func (a *UpdateReplicasAction) SetDeployment(deployment *appsv1.Deployment) {
 func (a *UpdateReplicasAction) Execute(env *common.Environment) error {
 	if a.deployment == nil {
 		// Try to find the deployment in the cluster by name
-		GinkgoWriter.Printf("DEBUG: Deployment '%s' not in map, looking up in cluster\n", a.DeploymentName)
-
 		deployments := &appsv1.DeploymentList{}
 		err := env.Client.List(env.Context, deployments)
 		if err != nil {
@@ -325,15 +322,7 @@ func (a *UpdateReplicasAction) Execute(env *common.Environment) error {
 		}
 
 		a.deployment = foundDeployment
-		//GinkgoWriter.Printf("DEBUG: Found deployment '%s' in cluster with %d replicas\n", a.DeploymentName, *foundDeployment.Spec.Replicas)
 	}
-
-	oldReplicas := int32(0)
-	if a.deployment.Spec.Replicas != nil {
-		oldReplicas = *a.deployment.Spec.Replicas
-	}
-
-	GinkgoWriter.Printf("DEBUG: Updating deployment '%s' from %d to %d replicas\n", a.DeploymentName, oldReplicas, a.NewReplicas)
 
 	a.deployment.Spec.Replicas = lo.ToPtr(a.NewReplicas)
 	env.ExpectUpdated(a.deployment)
@@ -385,8 +374,6 @@ func (a *TriggerDriftAction) Execute(env *common.Environment) error {
 			return fmt.Errorf("no nodeclaims found to drift")
 		}
 
-		GinkgoWriter.Printf("DEBUG: Triggering drift for %d nodeclaims by updating NodePool template annotation\n", currentNodeClaimCount)
-
 		// Get the nodePool from the global variable (we need to access it from the test context)
 		// Since we can't directly access the global nodePool variable from here, we'll need to
 		// pass it through the action or get it from the environment
@@ -411,10 +398,7 @@ func (a *TriggerDriftAction) Execute(env *common.Environment) error {
 		env.ExpectUpdated(nodePoolPtr)
 
 		// Wait for Karpenter to detect the drift
-		GinkgoWriter.Printf("DEBUG: Waiting for drift detection on %d nodeclaims\n", len(existingNodeClaims))
 		env.EventuallyExpectDrifted(existingNodeClaims...)
-
-		GinkgoWriter.Printf("DEBUG: Drift successfully triggered for %d nodeclaims\n", len(existingNodeClaims))
 		return nil
 
 	default:
@@ -465,14 +449,10 @@ func detectTestType(actions []Action, deploymentMap map[string]*appsv1.Deploymen
 	hasDrift := false
 	hasScaleDown := false
 
-	GinkgoWriter.Printf("DEBUG: Detecting test type for %d actions with %d deployments in map\n", len(actions), len(deploymentMap))
-
 	for _, action := range actions {
-		GinkgoWriter.Printf("DEBUG: Analyzing action: %s (type: %s)\n", action.GetDescription(), action.GetType())
 
 		if action.GetType() == ActionTypeTriggerDrift {
 			hasDrift = true
-			GinkgoWriter.Printf("DEBUG: Found drift action - will be detected as drift test\n")
 		}
 		if updateAction, ok := action.(*UpdateReplicasAction); ok {
 			var currentReplicas int32 = 0
@@ -482,18 +462,13 @@ func detectTestType(actions []Action, deploymentMap map[string]*appsv1.Deploymen
 				if deployment.Spec.Replicas != nil {
 					currentReplicas = *deployment.Spec.Replicas
 				}
-				GinkgoWriter.Printf("DEBUG: Found '%s' in map with %d replicas\n", updateAction.DeploymentName, currentReplicas)
 			} else {
 				// Fallback: lookup in cluster
 				currentReplicas = lookupDeploymentReplicasInCluster(env, updateAction.DeploymentName)
-				GinkgoWriter.Printf("DEBUG: Looked up '%s' in cluster, found %d replicas\n", updateAction.DeploymentName, currentReplicas)
 			}
-
-			GinkgoWriter.Printf("DEBUG: Update action '%s': %d -> %d replicas\n", updateAction.DeploymentName, currentReplicas, updateAction.NewReplicas)
 
 			if currentReplicas > 0 && updateAction.NewReplicas < currentReplicas {
 				hasScaleDown = true
-				GinkgoWriter.Printf("DEBUG: Found scale-down action - will be detected as consolidation test\n")
 			}
 		}
 	}
@@ -505,7 +480,6 @@ func detectTestType(actions []Action, deploymentMap map[string]*appsv1.Deploymen
 		testType = "consolidation"
 	}
 
-	GinkgoWriter.Printf("DEBUG: Detected test type: '%s' (hasDrift: %t, hasScaleDown: %t)\n", testType, hasDrift, hasScaleDown)
 	return testType
 }
 
@@ -556,9 +530,7 @@ func MonitorConsolidationTest(env *common.Environment, initialPods, finalPods, i
 	// Wait for pods to scale down first
 	allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 	if finalPods > 0 {
-		GinkgoWriter.Printf("DEBUG: MonitorConsolidationTest - Waiting for %d healthy pods with selector %v, timeout: %v\n", finalPods, allPodsSelector, timeout/2)
 		env.EventuallyExpectHealthyPodCountWithTimeout(timeout, allPodsSelector, finalPods)
-		GinkgoWriter.Printf("DEBUG: MonitorConsolidationTest - Successfully reached %d healthy pods\n", finalPods)
 	}
 
 	// Monitor consolidation rounds
@@ -566,7 +538,6 @@ func MonitorConsolidationTest(env *common.Environment, initialPods, finalPods, i
 	if err != nil {
 		// Continue even if consolidation monitoring fails
 		consolidationRounds = []ConsolidationRound{}
-		GinkgoWriter.Printf("DEBUG: error while monitoring consolidation %s", err)
 	}
 
 	totalTime := time.Since(startTime)
@@ -604,8 +575,6 @@ func MonitorDrift(env *common.Environment, expectedPods int, timeout time.Durati
 	startTime := time.Now()
 	initialNodeCount := env.Monitor.CreatedNodeCount()
 
-	GinkgoWriter.Printf("DEBUG: Starting drift monitoring with %d initial nodes, expecting %d pods\n", initialNodeCount, expectedPods)
-
 	// Track node replacement during drift
 	driftRounds := 0
 	lastReplacementTime := time.Now()
@@ -633,7 +602,6 @@ func MonitorDrift(env *common.Environment, expectedPods int, timeout time.Durati
 		if len(drainingNodes) > 0 {
 			lastReplacementTime = time.Now()
 			driftRounds++
-			GinkgoWriter.Printf("DEBUG: Drift round %d detected - %d nodes draining\n", driftRounds, len(drainingNodes))
 
 			// Wait for replacement to complete
 			time.Sleep(30 * time.Second)
@@ -641,7 +609,6 @@ func MonitorDrift(env *common.Environment, expectedPods int, timeout time.Durati
 
 		// Check for stability (no replacements for 2 minutes)
 		if time.Since(lastReplacementTime) >= 2*time.Minute {
-			GinkgoWriter.Printf("DEBUG: Drift appears stable - no replacements for 2 minutes\n")
 			break
 		}
 
@@ -652,7 +619,6 @@ func MonitorDrift(env *common.Environment, expectedPods int, timeout time.Durati
 	// Ensure all pods are healthy after drift
 	allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 	if expectedPods > 0 {
-		GinkgoWriter.Printf("DEBUG: Waiting for %d pods to be healthy after drift\n", expectedPods)
 		env.EventuallyExpectHealthyPodCountWithTimeout(timeout/2, allPodsSelector, expectedPods)
 	}
 
@@ -673,11 +639,7 @@ func MonitorDrift(env *common.Environment, expectedPods int, timeout time.Durati
 	// If no drift rounds were detected, assume at least 1 round occurred
 	if driftRounds == 0 {
 		driftRounds = 1
-		GinkgoWriter.Printf("DEBUG: No explicit drift rounds detected, assuming 1 round\n")
 	}
-
-	GinkgoWriter.Printf("DEBUG: Drift monitoring completed - %d rounds, %v total time, %d final nodes\n",
-		driftRounds, totalTime, finalNodeCount)
 
 	return &PerformanceReport{
 		TestType:                "drift",
@@ -709,26 +671,13 @@ func executeActions(actions []Action, env *common.Environment) (map[string]*apps
 	deploymentMap := make(map[string]*appsv1.Deployment)
 	initialPodCount := 0
 
-	//GinkgoWriter.Printf("DEBUG: Executing %d actions\n", len(actions))
-
 	for i, action := range actions {
-		//GinkgoWriter.Printf("DEBUG: Executing action %d/%d: %s\n", i+1, len(actions), action.GetDescription())
-
 		// Handle deployment references for UpdateReplicasAction
 		if updateAction, ok := action.(*UpdateReplicasAction); ok {
-			availableDeployments := getDeploymentNames(deploymentMap)
 			if deployment, exists := deploymentMap[updateAction.DeploymentName]; exists {
 				updateAction.SetDeployment(deployment)
-				//GinkgoWriter.Printf("DEBUG: Found deployment '%s' for update action\n", updateAction.DeploymentName)
-			} else {
-				GinkgoWriter.Printf("DEBUG: Deployment '%s' not found in map. Available deployments: %v\n",
-					updateAction.DeploymentName, availableDeployments)
 			}
 		}
-
-		// Handle nodePool reference for TriggerDriftAction
-		// Note: nodePool must be set externally before calling executeActions
-		// This is handled by ExecuteActionsAndGenerateReportWithNodePool
 
 		// Execute the action
 		err := action.Execute(env)
@@ -743,19 +692,14 @@ func executeActions(actions []Action, env *common.Environment) (map[string]*apps
 			deployment := createAction.GetDeployment()
 			deploymentMap[createAction.Name] = deployment
 			initialPodCount += int(createAction.Replicas)
-			//GinkgoWriter.Printf("DEBUG: Tracked deployment '%s' with %d replicas\n", createAction.Name, createAction.Replicas)
 		}
 	}
-
-	//GinkgoWriter.Printf("DEBUG: Action execution completed. Tracked deployments: %v, Initial pod count: %d\n",
-	//	getDeploymentNames(deploymentMap), initialPodCount)
 
 	return deploymentMap, initialPodCount, nil
 }
 
 // routeToMonitoringWithType routes to appropriate monitoring function based on predetermined test type
 func routeToMonitoringWithType(testType string, initialPodCount, finalPodCount, initialNodeCount int, env *common.Environment, timeOut time.Duration) (*PerformanceReport, error) {
-	GinkgoWriter.Printf("DEBUG: Using predetermined test type '%s' for monitoring\n", testType)
 
 	var report *PerformanceReport
 	var err error
@@ -768,7 +712,6 @@ func routeToMonitoringWithType(testType string, initialPodCount, finalPodCount, 
 	case "drift":
 		report, err = MonitorDrift(env, finalPodCount, timeOut)
 	default:
-		GinkgoWriter.Printf("DEBUG: Unknown predetermined test type '%s', defaulting to MonitorScaleOut\n", testType)
 		report, err = MonitorScaleOut(env, finalPodCount, timeOut)
 	}
 
@@ -791,7 +734,6 @@ func calculateInitialPodCount(testType string, actions []Action, env *common.Env
 				initialPodCount += int(originalReplicas)
 			}
 		}
-		GinkgoWriter.Printf("DEBUG: Calculated initial pod count for consolidation from cluster: %d\n", initialPodCount)
 		return initialPodCount
 	}
 	return 0 // Will be set from executeActions for other test types
@@ -824,7 +766,6 @@ func addUnchangedDeploymentsFromMap(deploymentMap map[string]*appsv1.Deployment,
 		if _, hasUpdate := updateActionMap[deploymentName]; !hasUpdate {
 			if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas > 1 {
 				podCount += int(*deployment.Spec.Replicas)
-				GinkgoWriter.Printf("DEBUG: Including unchanged deployment '%s' with %d replicas\n", deploymentName, *deployment.Spec.Replicas)
 			}
 		}
 	}
@@ -834,7 +775,6 @@ func addUnchangedDeploymentsFromMap(deploymentMap map[string]*appsv1.Deployment,
 // addUnchangedDeploymentsFromCluster adds unchanged deployments by querying cluster
 func addUnchangedDeploymentsFromCluster(env *common.Environment, updateActionMap map[string]int32) int {
 	podCount := 0
-	GinkgoWriter.Printf("DEBUG: deploymentMap is empty, querying cluster for test deployments\n")
 
 	deployments := &appsv1.DeploymentList{}
 	err := env.Client.List(env.Context, deployments)
@@ -849,7 +789,6 @@ func addUnchangedDeploymentsFromCluster(env *common.Environment, updateActionMap
 
 			if _, hasUpdate := updateActionMap[deployment.Name]; !hasUpdate {
 				podCount += int(*deployment.Spec.Replicas)
-				GinkgoWriter.Printf("DEBUG: Including unchanged test deployment '%s' with %d replicas\n", deployment.Name, *deployment.Spec.Replicas)
 			}
 		}
 	}
@@ -867,7 +806,6 @@ func calculateConsolidationPodCount(actions []Action, deploymentMap map[string]*
 		finalPodCount += addUnchangedDeploymentsFromCluster(env, updateActionMap)
 	}
 
-	GinkgoWriter.Printf("DEBUG: Calculated final pod count for consolidation (updated: %d actions, total: %d pods)\n", len(updateActionMap), finalPodCount)
 	return finalPodCount
 }
 
@@ -879,7 +817,6 @@ func calculateScaleOutPodCount(deploymentMap map[string]*appsv1.Deployment) int 
 			finalPodCount += int(*deployment.Spec.Replicas)
 		}
 	}
-	GinkgoWriter.Printf("DEBUG: Calculated final pod count from deployments: %d\n", finalPodCount)
 	return finalPodCount
 }
 
@@ -913,7 +850,6 @@ func ExecuteActionsAndGenerateReportWithNodePool(actions []Action, testName stri
 	// IMPORTANT: Detect test type BEFORE executing actions, when we can still see original replica counts
 	emptyDeploymentMap := make(map[string]*appsv1.Deployment) // Empty map for initial detection
 	testType := detectTestType(actions, emptyDeploymentMap, env)
-	GinkgoWriter.Printf("DEBUG: Pre-execution test type detection: '%s'\n", testType)
 
 	// Calculate initial pod count for consolidation tests BEFORE executing actions
 	initialPodCount := calculateInitialPodCount(testType, actions, env)
@@ -931,9 +867,6 @@ func ExecuteActionsAndGenerateReportWithNodePool(actions []Action, testName stri
 
 	// Calculate final expected pods based on test type
 	finalPodCount := calculateFinalPodCount(testType, actions, deploymentMap, env)
-
-	GinkgoWriter.Printf("DEBUG: Pod count summary - Initial: %d, Final: %d, Net Change: %d\n",
-		initialPodCount, finalPodCount, finalPodCount-initialPodCount)
 
 	// Route to appropriate monitoring based on pre-determined test type
 	report, err := routeToMonitoringWithType(testType, initialPodCount, finalPodCount, initialNodeCount, env, timeOut)
