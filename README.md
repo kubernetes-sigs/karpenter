@@ -1,3 +1,5 @@
+This is a test for CLA.
+
 [![Build Status](https://img.shields.io/github/actions/workflow/status/aws/karpenter-core/presubmit.yaml?branch=main)](https://github.com/aws/karpenter-core/actions/workflows/presubmit.yaml)
 ![GitHub stars](https://img.shields.io/github/stars/aws/karpenter-core)
 ![GitHub forks](https://img.shields.io/github/forks/aws/karpenter-core)
