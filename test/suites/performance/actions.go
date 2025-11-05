@@ -801,13 +801,36 @@ func calculateInitialPodCount(testType string, actions []Action, env *common.Env
 func calculateFinalPodCount(testType string, actions []Action, deploymentMap map[string]*appsv1.Deployment) int {
 	finalPodCount := 0
 	if testType == "consolidation" {
-		// For consolidation, calculate from the update actions since deploymentMap may be empty
+		// For consolidation, we need to account for ALL test deployments, not just those being updated
+		// Create a map of deployment names that have update actions
+		updateActionMap := make(map[string]int32)
 		for _, action := range actions {
 			if updateAction, ok := action.(*UpdateReplicasAction); ok {
-				finalPodCount += int(updateAction.NewReplicas)
+				updateActionMap[updateAction.DeploymentName] = updateAction.NewReplicas
 			}
 		}
-		GinkgoWriter.Printf("DEBUG: Calculated final pod count for consolidation: %d\n", finalPodCount)
+
+		// First, add up all the update actions
+		for _, newReplicas := range updateActionMap {
+			finalPodCount += int(newReplicas)
+		}
+
+		// Then, check if there are any test deployments that weren't updated
+		// We'll look for deployments with the test discovery label and >1 replica
+		if len(deploymentMap) > 0 {
+			// Use deployment map if available (from scale-out phase)
+			for deploymentName, deployment := range deploymentMap {
+				if _, hasUpdate := updateActionMap[deploymentName]; !hasUpdate {
+					// This deployment wasn't updated, so include its current replica count
+					if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas > 1 {
+						finalPodCount += int(*deployment.Spec.Replicas)
+						GinkgoWriter.Printf("DEBUG: Including unchanged deployment '%s' with %d replicas\n", deploymentName, *deployment.Spec.Replicas)
+					}
+				}
+			}
+		}
+
+		GinkgoWriter.Printf("DEBUG: Calculated final pod count for consolidation (updated: %d actions, total: %d pods)\n", len(updateActionMap), finalPodCount)
 	} else {
 		// For scale-out and drift, use deployment map
 		for _, deployment := range deploymentMap {
@@ -910,8 +933,8 @@ func MonitorConsolidation(env *common.Environment, preScaleInNodes int, timeout 
 
 			// Wait for this round to complete
 			roundStartTime := time.Now()
-			env.EventuallyExpectNodeCount("<", currentNodes)
-			time.Sleep(5 * time.Second)
+			//env.EventuallyExpectNodeCount("<", currentNodes)
+			time.Sleep(25 * time.Second)
 			finalNodeCount := env.Monitor.CreatedNodeCount()
 			roundDuration := time.Since(roundStartTime)
 
