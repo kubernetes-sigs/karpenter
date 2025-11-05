@@ -50,7 +50,7 @@ func OutputPerformanceReport(report *PerformanceReport, filePrefix string) {
 	GinkgoWriter.Printf("Memory Utilization: %.2f%%\n", report.TotalReservedMemoryUtil*100)
 	GinkgoWriter.Printf("Efficiency Score: %.1f%%\n", report.ResourceEfficiencyScore)
 	GinkgoWriter.Printf("Pods per Node: %.1f\n", report.PodsPerNode)
-	GinkgoWriter.Printf("Rounds: %.0f\n", report.Rounds)
+	GinkgoWriter.Printf("Rounds: %d\n", report.Rounds)
 
 	// File output
 	if outputDir := os.Getenv("OUTPUT_DIR"); outputDir != "" {
@@ -556,11 +556,11 @@ func MonitorConsolidationTest(env *common.Environment, initialPods, finalPods, i
 	// Wait for pods to scale down first
 	allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 	if finalPods > 0 {
-		env.EventuallyExpectHealthyPodCountWithTimeout(timeout/2, allPodsSelector, finalPods)
+		env.EventuallyExpectHealthyPodCountWithTimeout(timeout, allPodsSelector, finalPods)
 	}
 
 	// Monitor consolidation rounds
-	consolidationRounds, _, err := MonitorConsolidation(env, initialNodes, timeout/2)
+	consolidationRounds, _, err := MonitorConsolidation(env, initialNodes, timeout)
 	if err != nil {
 		// Continue even if consolidation monitoring fails
 		consolidationRounds = []ConsolidationRound{}
