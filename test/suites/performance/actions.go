@@ -556,7 +556,9 @@ func MonitorConsolidationTest(env *common.Environment, initialPods, finalPods, i
 	// Wait for pods to scale down first
 	allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 	if finalPods > 0 {
-		env.EventuallyExpectHealthyPodCountWithTimeout(timeout, allPodsSelector, finalPods)
+		GinkgoWriter.Printf("DEBUG: MonitorConsolidationTest - Waiting for %d healthy pods with selector %v, timeout: %v\n", finalPods, allPodsSelector, timeout/2)
+		env.EventuallyExpectHealthyPodCountWithTimeout(timeout/2, allPodsSelector, finalPods)
+		GinkgoWriter.Printf("DEBUG: MonitorConsolidationTest - Successfully reached %d healthy pods\n", finalPods)
 	}
 
 	// Monitor consolidation rounds

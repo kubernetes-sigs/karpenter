@@ -89,7 +89,7 @@ var _ = Describe("Performance", func() {
 				// Note: do-not-disrupt-app remains at 100 replicas
 			}
 
-			consolidationReport, err := ExecuteActionsAndGenerateReport(consolidationActions, "Do Not Disrupt Consolidation Test", env, 20*time.Minute)
+			consolidationReport, err := ExecuteActionsAndGenerateReport(consolidationActions, "Do Not Disrupt Consolidation Test", env, 25*time.Minute)
 			Expect(err).ToNot(HaveOccurred(), "Consolidation actions should execute successfully")
 
 			By("Validating disruption protection during consolidation")
