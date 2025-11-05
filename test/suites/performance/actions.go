@@ -557,7 +557,7 @@ func MonitorConsolidationTest(env *common.Environment, initialPods, finalPods, i
 	allPodsSelector := labels.SelectorFromSet(map[string]string{test.DiscoveryLabel: "unspecified"})
 	if finalPods > 0 {
 		GinkgoWriter.Printf("DEBUG: MonitorConsolidationTest - Waiting for %d healthy pods with selector %v, timeout: %v\n", finalPods, allPodsSelector, timeout/2)
-		env.EventuallyExpectHealthyPodCountWithTimeout(timeout/2, allPodsSelector, finalPods)
+		env.EventuallyExpectHealthyPodCountWithTimeout(timeout, allPodsSelector, finalPods)
 		GinkgoWriter.Printf("DEBUG: MonitorConsolidationTest - Successfully reached %d healthy pods\n", finalPods)
 	}
 
@@ -808,27 +808,63 @@ func buildUpdateActionMap(actions []Action) map[string]int32 {
 	return updateActionMap
 }
 
-// calculateConsolidationPodCount calculates pod count for consolidation tests
-func calculateConsolidationPodCount(actions []Action, deploymentMap map[string]*appsv1.Deployment) int {
-	updateActionMap := buildUpdateActionMap(actions)
+// sumUpdateActionReplicas sums up replica counts from update actions
+func sumUpdateActionReplicas(updateActionMap map[string]int32) int {
 	finalPodCount := 0
-
-	// First, add up all the update actions
 	for _, newReplicas := range updateActionMap {
 		finalPodCount += int(newReplicas)
 	}
+	return finalPodCount
+}
 
-	// Then, check if there are any test deployments that weren't updated
-	if len(deploymentMap) > 0 {
-		for deploymentName, deployment := range deploymentMap {
-			if _, hasUpdate := updateActionMap[deploymentName]; !hasUpdate {
-				// This deployment wasn't updated, so include its current replica count
-				if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas > 1 {
-					finalPodCount += int(*deployment.Spec.Replicas)
-					GinkgoWriter.Printf("DEBUG: Including unchanged deployment '%s' with %d replicas\n", deploymentName, *deployment.Spec.Replicas)
-				}
+// addUnchangedDeploymentsFromMap adds unchanged deployments from deployment map
+func addUnchangedDeploymentsFromMap(deploymentMap map[string]*appsv1.Deployment, updateActionMap map[string]int32) int {
+	podCount := 0
+	for deploymentName, deployment := range deploymentMap {
+		if _, hasUpdate := updateActionMap[deploymentName]; !hasUpdate {
+			if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas > 1 {
+				podCount += int(*deployment.Spec.Replicas)
+				GinkgoWriter.Printf("DEBUG: Including unchanged deployment '%s' with %d replicas\n", deploymentName, *deployment.Spec.Replicas)
 			}
 		}
+	}
+	return podCount
+}
+
+// addUnchangedDeploymentsFromCluster adds unchanged deployments by querying cluster
+func addUnchangedDeploymentsFromCluster(env *common.Environment, updateActionMap map[string]int32) int {
+	podCount := 0
+	GinkgoWriter.Printf("DEBUG: deploymentMap is empty, querying cluster for test deployments\n")
+
+	deployments := &appsv1.DeploymentList{}
+	err := env.Client.List(env.Context, deployments)
+	if err != nil {
+		GinkgoWriter.Printf("DEBUG: Failed to list deployments from cluster: %v\n", err)
+		return podCount
+	}
+
+	for _, deployment := range deployments.Items {
+		if deployment.Labels[test.DiscoveryLabel] == "unspecified" &&
+			deployment.Spec.Replicas != nil && *deployment.Spec.Replicas > 1 {
+
+			if _, hasUpdate := updateActionMap[deployment.Name]; !hasUpdate {
+				podCount += int(*deployment.Spec.Replicas)
+				GinkgoWriter.Printf("DEBUG: Including unchanged test deployment '%s' with %d replicas\n", deployment.Name, *deployment.Spec.Replicas)
+			}
+		}
+	}
+	return podCount
+}
+
+// calculateConsolidationPodCount calculates pod count for consolidation tests
+func calculateConsolidationPodCount(actions []Action, deploymentMap map[string]*appsv1.Deployment, env *common.Environment) int {
+	updateActionMap := buildUpdateActionMap(actions)
+	finalPodCount := sumUpdateActionReplicas(updateActionMap)
+
+	if len(deploymentMap) > 0 {
+		finalPodCount += addUnchangedDeploymentsFromMap(deploymentMap, updateActionMap)
+	} else {
+		finalPodCount += addUnchangedDeploymentsFromCluster(env, updateActionMap)
 	}
 
 	GinkgoWriter.Printf("DEBUG: Calculated final pod count for consolidation (updated: %d actions, total: %d pods)\n", len(updateActionMap), finalPodCount)
@@ -848,9 +884,9 @@ func calculateScaleOutPodCount(deploymentMap map[string]*appsv1.Deployment) int 
 }
 
 // calculateFinalPodCount calculates the final expected pod count based on test type
-func calculateFinalPodCount(testType string, actions []Action, deploymentMap map[string]*appsv1.Deployment) int {
+func calculateFinalPodCount(testType string, actions []Action, deploymentMap map[string]*appsv1.Deployment, env *common.Environment) int {
 	if testType == "consolidation" {
-		return calculateConsolidationPodCount(actions, deploymentMap)
+		return calculateConsolidationPodCount(actions, deploymentMap, env)
 	}
 	return calculateScaleOutPodCount(deploymentMap)
 }
@@ -894,7 +930,7 @@ func ExecuteActionsAndGenerateReportWithNodePool(actions []Action, testName stri
 	}
 
 	// Calculate final expected pods based on test type
-	finalPodCount := calculateFinalPodCount(testType, actions, deploymentMap)
+	finalPodCount := calculateFinalPodCount(testType, actions, deploymentMap, env)
 
 	GinkgoWriter.Printf("DEBUG: Pod count summary - Initial: %d, Final: %d, Net Change: %d\n",
 		initialPodCount, finalPodCount, finalPodCount-initialPodCount)
