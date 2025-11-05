@@ -77,7 +77,7 @@ var _ = Describe("Performance", func() {
 
 			// Drift performance assertions
 			Expect(driftReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
-				"Drift should complete within 15 minutes")
+				"Drift should complete within 25 minutes")
 
 			By("Outputting drift performance report")
 			OutputPerformanceReport(driftReport, "drift_execution")

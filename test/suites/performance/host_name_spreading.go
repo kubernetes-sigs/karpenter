@@ -47,14 +47,14 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(1000), "Should have 1000 total pods")
 
 			// Performance assertions - hostname spreading may require more nodes
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
 				"Total scale-out time should be less than 10 minutes")
-			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 1000),
+			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 650),
 				"Should not require more than 1000 nodes for 1000 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.4),
-				"Average CPU utilization should be greater than 40%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.4),
-				"Average memory utilization should be greater than 40%")
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
+				"Average CPU utilization should be greater than 55%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
+				"Average memory utilization should be greater than 75%")
 
 			By("Outputting scale-out performance report")
 			OutputPerformanceReport(scaleOutReport, "hostname_spread_scale_out")
@@ -79,8 +79,12 @@ var _ = Describe("Performance", func() {
 			// Consolidation assertions
 			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
 				"Node count should decrease after consolidation")
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 20*time.Minute),
-				"Consolidation should complete within 20 minutes")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
+				"Consolidation should complete within 10 minutes")
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
+				"Average CPU utilization should be greater than 55%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
+				"Average memory utilization should be greater than 75%")
 
 			By("Outputting consolidation performance report")
 			OutputPerformanceReport(consolidationReport, "hostname_spread_consolidation")

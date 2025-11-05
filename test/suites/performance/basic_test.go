@@ -45,11 +45,11 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(1000), "Should have 1000 total pods")
 
 			// Performance assertions
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 3*time.Minute),
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 2*time.Minute),
 				"Total scale-out time should be less than 3 minutes")
-			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 500),
+			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 200),
 				"Should not require more than 50 nodes for 1000 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.75),
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.85),
 				"Average CPU utilization should be greater than 75%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
 				"Average memory utilization should be greater than 75%")

@@ -47,14 +47,14 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalPods).To(Equal(2000), "Should have 2000 total pods")
 
 			// XL Performance assertions - hostname spreading at scale may require many more nodes
-			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 20*time.Minute),
-				"Total XL scale-out time should be less than 20 minutes")
-			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 2000),
+			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 7*time.Minute),
+				"Total XL scale-out time should be less than 7 minutes")
+			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 1200),
 				"Should not require more than 2000 nodes for 2000 pods")
-			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.4),
-				"Average CPU utilization should be greater than 40%")
-			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.4),
-				"Average memory utilization should be greater than 40%")
+			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
+				"Average CPU utilization should be greater than 55%")
+			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
+				"Average memory utilization should be greater than 70%")
 
 			By("Outputting XL scale-out performance report")
 			OutputPerformanceReport(scaleOutReport, "hostname_spread_xl_scale_out")
@@ -79,9 +79,12 @@ var _ = Describe("Performance", func() {
 			// XL Consolidation assertions
 			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
 				"Node count should decrease after consolidation")
-			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
-				"XL consolidation should complete within 25 minutes")
-
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
+				"XL consolidation should complete within 10 minutes")
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
+				"Average CPU utilization should be greater than 55%")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
+				"Average memory utilization should be greater than 70%")
 			By("Outputting XL consolidation performance report")
 			OutputPerformanceReport(consolidationReport, "hostname_spread_xl_consolidation")
 
