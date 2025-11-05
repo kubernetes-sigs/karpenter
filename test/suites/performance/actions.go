@@ -797,50 +797,62 @@ func calculateInitialPodCount(testType string, actions []Action, env *common.Env
 	return 0 // Will be set from executeActions for other test types
 }
 
-// calculateFinalPodCount calculates the final expected pod count based on test type
-func calculateFinalPodCount(testType string, actions []Action, deploymentMap map[string]*appsv1.Deployment) int {
+// buildUpdateActionMap creates a map of deployment names to their new replica counts from update actions
+func buildUpdateActionMap(actions []Action) map[string]int32 {
+	updateActionMap := make(map[string]int32)
+	for _, action := range actions {
+		if updateAction, ok := action.(*UpdateReplicasAction); ok {
+			updateActionMap[updateAction.DeploymentName] = updateAction.NewReplicas
+		}
+	}
+	return updateActionMap
+}
+
+// calculateConsolidationPodCount calculates pod count for consolidation tests
+func calculateConsolidationPodCount(actions []Action, deploymentMap map[string]*appsv1.Deployment) int {
+	updateActionMap := buildUpdateActionMap(actions)
 	finalPodCount := 0
-	if testType == "consolidation" {
-		// For consolidation, we need to account for ALL test deployments, not just those being updated
-		// Create a map of deployment names that have update actions
-		updateActionMap := make(map[string]int32)
-		for _, action := range actions {
-			if updateAction, ok := action.(*UpdateReplicasAction); ok {
-				updateActionMap[updateAction.DeploymentName] = updateAction.NewReplicas
-			}
-		}
 
-		// First, add up all the update actions
-		for _, newReplicas := range updateActionMap {
-			finalPodCount += int(newReplicas)
-		}
+	// First, add up all the update actions
+	for _, newReplicas := range updateActionMap {
+		finalPodCount += int(newReplicas)
+	}
 
-		// Then, check if there are any test deployments that weren't updated
-		// We'll look for deployments with the test discovery label and >1 replica
-		if len(deploymentMap) > 0 {
-			// Use deployment map if available (from scale-out phase)
-			for deploymentName, deployment := range deploymentMap {
-				if _, hasUpdate := updateActionMap[deploymentName]; !hasUpdate {
-					// This deployment wasn't updated, so include its current replica count
-					if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas > 1 {
-						finalPodCount += int(*deployment.Spec.Replicas)
-						GinkgoWriter.Printf("DEBUG: Including unchanged deployment '%s' with %d replicas\n", deploymentName, *deployment.Spec.Replicas)
-					}
+	// Then, check if there are any test deployments that weren't updated
+	if len(deploymentMap) > 0 {
+		for deploymentName, deployment := range deploymentMap {
+			if _, hasUpdate := updateActionMap[deploymentName]; !hasUpdate {
+				// This deployment wasn't updated, so include its current replica count
+				if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas > 1 {
+					finalPodCount += int(*deployment.Spec.Replicas)
+					GinkgoWriter.Printf("DEBUG: Including unchanged deployment '%s' with %d replicas\n", deploymentName, *deployment.Spec.Replicas)
 				}
 			}
 		}
-
-		GinkgoWriter.Printf("DEBUG: Calculated final pod count for consolidation (updated: %d actions, total: %d pods)\n", len(updateActionMap), finalPodCount)
-	} else {
-		// For scale-out and drift, use deployment map
-		for _, deployment := range deploymentMap {
-			if deployment.Spec.Replicas != nil {
-				finalPodCount += int(*deployment.Spec.Replicas)
-			}
-		}
-		GinkgoWriter.Printf("DEBUG: Calculated final pod count from deployments: %d\n", finalPodCount)
 	}
+
+	GinkgoWriter.Printf("DEBUG: Calculated final pod count for consolidation (updated: %d actions, total: %d pods)\n", len(updateActionMap), finalPodCount)
 	return finalPodCount
+}
+
+// calculateScaleOutPodCount calculates pod count for scale-out and drift tests
+func calculateScaleOutPodCount(deploymentMap map[string]*appsv1.Deployment) int {
+	finalPodCount := 0
+	for _, deployment := range deploymentMap {
+		if deployment.Spec.Replicas != nil {
+			finalPodCount += int(*deployment.Spec.Replicas)
+		}
+	}
+	GinkgoWriter.Printf("DEBUG: Calculated final pod count from deployments: %d\n", finalPodCount)
+	return finalPodCount
+}
+
+// calculateFinalPodCount calculates the final expected pod count based on test type
+func calculateFinalPodCount(testType string, actions []Action, deploymentMap map[string]*appsv1.Deployment) int {
+	if testType == "consolidation" {
+		return calculateConsolidationPodCount(actions, deploymentMap)
+	}
+	return calculateScaleOutPodCount(deploymentMap)
 }
 
 // ExecuteActionsAndGenerateReport executes a list of actions and generates a performance report
