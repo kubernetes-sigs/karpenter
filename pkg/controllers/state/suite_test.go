@@ -62,7 +62,9 @@ var nodeController *informer.NodeController
 var podController *informer.PodController
 var nodePoolController *informer.NodePoolController
 var daemonsetController *informer.DaemonSetController
+var nodeOverlayStore *nodeoverlay.InstanceTypeStore
 var nodeOverlayController *nodeoverlay.Controller
+var pricingController *informer.PricingController
 var cloudProvider *fake.CloudProvider
 var nodePool *v1.NodePool
 
@@ -87,8 +89,10 @@ var _ = BeforeSuite(func() {
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
 	nodePoolController = informer.NewNodePoolController(env.Client, cloudProvider, cluster)
-	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeoverlay.NewInstanceTypeStore(), cluster, clusterCost)
+	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
+	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeOverlayStore, cluster)
 	daemonsetController = informer.NewDaemonSetController(env.Client, cluster)
+	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
 })
 
 var _ = AfterSuite(func() {
@@ -104,6 +108,7 @@ var _ = BeforeEach(func() {
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
+	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
 	cluster.Reset()
 	cloudProvider.Reset()
 })

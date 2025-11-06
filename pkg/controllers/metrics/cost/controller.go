@@ -23,6 +23,7 @@ import (
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
+	"github.com/samber/lo"
 
 	"github.com/prometheus/client_golang/prometheus"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -52,6 +53,7 @@ var (
 type Controller struct {
 	client      client.Client
 	clusterCost *state.ClusterCost
+	npMap       map[string]*v1.NodePool
 }
 
 func NewController(client client.Client, clusterCost *state.ClusterCost) *Controller {
@@ -68,12 +70,25 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{}, err
 	}
 
+	for _, np := range c.npMap {
+		if !lo.ContainsBy(nodepools.Items, func(np2 v1.NodePool) bool {
+			return np.UID == np2.UID
+		}) {
+			ClusterCost.Delete(map[string]string{
+				metrics.NodePoolLabel: np.Name,
+			})
+			delete(c.npMap, string(np.UID))
+		}
+
+	}
+
 	// Update cost metrics for each nodepool
 	for _, np := range nodepools.Items {
 		cost := c.clusterCost.GetNodepoolCost(&np)
 		ClusterCost.Set(cost, map[string]string{
 			metrics.NodePoolLabel: np.Name,
 		})
+		c.npMap[string(np.UID)] = &np
 	}
 
 	return reconciler.Result{RequeueAfter: time.Second * 10}, nil

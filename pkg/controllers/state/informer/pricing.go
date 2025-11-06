@@ -18,6 +18,7 @@ package informer
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reconciler"
@@ -70,13 +71,10 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 			continue
 		}
 
-		if exists {
-			if equal(oldIts, newIts) {
-				continue
-			}
+		if exists && equal(oldIts, newIts) {
+			continue
 		}
-		err = c.clusterCost.UpdateOfferings(ctx, &np, newIts)
-		if err != nil {
+		if err := c.clusterCost.UpdateOfferings(ctx, &np, newIts); err != nil {
 			errs = multierr.Append(errs, err)
 			continue
 		}
@@ -85,7 +83,7 @@ func (c *PricingController) Reconcile(ctx context.Context) (reconciler.Result, e
 		})
 	}
 	if errs != nil {
-		return reconciler.Result{}, err
+		return reconciler.Result{}, fmt.Errorf("refreshing pricing info, %w", err)
 	}
 	c.npItMap = newNpItMap
 
@@ -102,10 +100,10 @@ func equal(oldIts map[string]*cloudprovider.InstanceType, newIts []*cloudprovide
 			return false
 		}
 		oldItOffMap := lo.SliceToMap(oldIt.Offerings, func(o *cloudprovider.Offering) (state.OfferingKey, *cloudprovider.Offering) {
-			return state.OfferingKey{Capacity: o.CapacityType(), Zone: o.Zone(), InstanceName: it.Name}, o
+			return state.OfferingKey{CapacityType: o.CapacityType(), Zone: o.Zone(), InstanceName: it.Name}, o
 		})
 		for _, of := range it.Offerings {
-			ofKey := state.OfferingKey{Capacity: of.CapacityType(), Zone: of.Zone(), InstanceName: it.Name}
+			ofKey := state.OfferingKey{CapacityType: of.CapacityType(), Zone: of.Zone(), InstanceName: it.Name}
 			oldOf, exists := oldItOffMap[ofKey]
 			if !exists {
 				return false

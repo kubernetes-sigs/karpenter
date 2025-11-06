@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -32,7 +33,6 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -40,7 +40,6 @@ import (
 )
 
 var _ = Describe("ClusterCost", func() {
-	var clusterCost *state.ClusterCost
 	var testNodePool *v1.NodePool
 	var testNodePool2 *v1.NodePool
 	var testInstanceType *cloudprovider.InstanceType
@@ -80,13 +79,9 @@ var _ = Describe("ClusterCost", func() {
 			},
 		}
 		cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{testInstanceType}
-		// Initialize ClusterCost with required dependencies
-		clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
-		nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeoverlay.NewInstanceTypeStore(), cluster, clusterCost)
 
 		ExpectApplied(ctx, env.Client, testNodePool, testNodePool2)
 	})
-
 	Context("UpdateNodeClaim", func() {
 		It("should update costs correctly for single spot offering to empty nodepool", func() {
 			initialClusterCost := clusterCost.GetClusterCost()
@@ -272,6 +267,11 @@ var _ = Describe("ClusterCost", func() {
 
 			ExpectApplied(ctx, env.Client, overlay)
 			ExpectReconcileSucceeded(ctx, nodeOverlayController, client.ObjectKeyFromObject(overlay))
+			var err error
+			cloudProvider.InstanceTypes, err = nodeOverlayStore.ApplyAll(testNodePool.Name, cloudProvider.InstanceTypes)
+			Expect(err).To(Succeed())
+			err = clusterCost.UpdateOfferings(ctx, testNodePool, cloudProvider.InstanceTypes)
+			Expect(err).To(Succeed())
 
 			// Verify cost has been updated to reflect new price
 			updatedCost := clusterCost.GetNodepoolCost(testNodePool)
@@ -514,6 +514,12 @@ func createTestNodeClaim(np *v1.NodePool, instanceName, capacityType, zone strin
 				corev1.LabelInstanceTypeStable: instanceName,
 				v1.CapacityTypeLabelKey:        capacityType,
 				corev1.LabelTopologyZone:       zone,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					Kind: object.GVK(np).Kind,
+					UID:  np.UID,
+				},
 			},
 		},
 	})
