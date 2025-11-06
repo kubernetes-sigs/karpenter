@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	pscheduling "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 
 	"sigs.k8s.io/karpenter/pkg/metrics"
 
@@ -63,7 +64,7 @@ import (
 
 var ctx context.Context
 var env *test.Environment
-var clusterCost *state.ClusterCost
+var clusterCost *cost.ClusterCost
 var cluster *state.Cluster
 var disruptionController *disruption.Controller
 var prov *provisioning.Provisioner
@@ -93,7 +94,7 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
-	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
+	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)

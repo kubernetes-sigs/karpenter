@@ -14,11 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package state_test
+package cost_test
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/awslabs/operatorpkg/object"
@@ -27,17 +29,67 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
+	"k8s.io/client-go/rest"
+	clock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
+	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
+	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
+
+var ctx context.Context
+var env *test.Environment
+var fakeClock *clock.FakeClock
+var cluster *state.Cluster
+var nodeOverlayStore *nodeoverlay.InstanceTypeStore
+var nodeOverlayController *nodeoverlay.Controller
+var pricingController *informer.PricingController
+var cloudProvider *fake.CloudProvider
+var clusterCost *cost.ClusterCost
+
+func TestAPIs(t *testing.T) {
+	ctx = TestContextWithLogger(t)
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "State/Cost")
+}
+
+var _ = BeforeSuite(func() {
+	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(testv1alpha1.CRDs...), test.WithConfigOptions(func(config *rest.Config) {
+		config.QPS = -1
+	}))
+	ctx = options.ToContext(ctx, test.Options())
+	cloudProvider = fake.NewCloudProvider()
+	fakeClock = clock.NewFakeClock(time.Now())
+	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	nodeOverlayStore = nodeoverlay.NewInstanceTypeStore()
+	nodeOverlayController = nodeoverlay.NewController(env.Client, cloudProvider, nodeOverlayStore, cluster)
+	pricingController = informer.NewPricingController(env.Client, cloudProvider, clusterCost)
+	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
+})
+
+var _ = AfterSuite(func() {
+	Expect(env.Stop()).To(Succeed(), "Failed to stop environment")
+})
+
+var _ = AfterEach(func() {
+	ExpectCleanedUp(ctx, env.Client)
+	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
+	cluster.Reset()
+	cloudProvider.Reset()
+})
 
 var _ = Describe("ClusterCost", func() {
 	var testNodePool *v1.NodePool
@@ -525,7 +577,7 @@ func createTestNodeClaim(np *v1.NodePool, instanceName, capacityType, zone strin
 	})
 }
 
-func RunUpdateNodeClaimTest(clusterCost *state.ClusterCost, np *v1.NodePool, instanceName, capacityType, zone string, expectedNodePoolCost float64, expectedClusterCost float64) {
+func RunUpdateNodeClaimTest(clusterCost *cost.ClusterCost, np *v1.NodePool, instanceName, capacityType, zone string, expectedNodePoolCost float64, expectedClusterCost float64) {
 	GinkgoHelper()
 	// Record initial costs before adding nodeclaim
 	initialNodePoolCost := clusterCost.GetNodepoolCost(np)
@@ -552,7 +604,7 @@ func RunUpdateNodeClaimTest(clusterCost *state.ClusterCost, np *v1.NodePool, ins
 		"Cluster cost should not decrease when adding nodeclaims")
 }
 
-func RunDeleteNodeClaimTest(clusterCost *state.ClusterCost, nodeClaim *v1.NodeClaim, np *v1.NodePool, expectedNodePoolCost float64, expectedClusterCost float64) {
+func RunDeleteNodeClaimTest(clusterCost *cost.ClusterCost, nodeClaim *v1.NodeClaim, np *v1.NodePool, expectedNodePoolCost float64, expectedClusterCost float64) {
 	GinkgoHelper()
 	// Record initial costs before removing nodeclaim
 	initialNodePoolCost := clusterCost.GetNodepoolCost(np)

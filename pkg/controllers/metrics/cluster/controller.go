@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cost
+package cluster
 
 import (
 	"context"
@@ -32,8 +32,8 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 )
 
 // These are alpha metrics, they may not stay. Do not rely on them.
@@ -52,11 +52,11 @@ var (
 
 type Controller struct {
 	client      client.Client
-	clusterCost *state.ClusterCost
+	clusterCost *cost.ClusterCost
 	npMap       map[string]*v1.NodePool
 }
 
-func NewController(client client.Client, clusterCost *state.ClusterCost) *Controller {
+func NewController(client client.Client, clusterCost *cost.ClusterCost) *Controller {
 	return &Controller{
 		client:      client,
 		clusterCost: clusterCost,

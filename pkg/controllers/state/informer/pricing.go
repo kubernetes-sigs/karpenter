@@ -32,7 +32,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 )
 
 // This whole pricing controller only exists because CP's surface InstanceType information
@@ -42,11 +42,11 @@ import (
 type PricingController struct {
 	client        client.Client
 	cloudProvider cloudprovider.CloudProvider
-	clusterCost   *state.ClusterCost
+	clusterCost   *cost.ClusterCost
 	npItMap       map[string]map[string]*cloudprovider.InstanceType
 }
 
-func NewPricingController(client client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *state.ClusterCost) *PricingController {
+func NewPricingController(client client.Client, cloudProvider cloudprovider.CloudProvider, clusterCost *cost.ClusterCost) *PricingController {
 	return &PricingController{
 		client:        client,
 		cloudProvider: cloudProvider,
@@ -99,11 +99,11 @@ func equal(oldIts map[string]*cloudprovider.InstanceType, newIts []*cloudprovide
 		if !exists {
 			return false
 		}
-		oldItOffMap := lo.SliceToMap(oldIt.Offerings, func(o *cloudprovider.Offering) (state.OfferingKey, *cloudprovider.Offering) {
-			return state.OfferingKey{CapacityType: o.CapacityType(), Zone: o.Zone(), InstanceName: it.Name}, o
+		oldItOffMap := lo.SliceToMap(oldIt.Offerings, func(o *cloudprovider.Offering) (cost.OfferingKey, *cloudprovider.Offering) {
+			return cost.OfferingKey{CapacityType: o.CapacityType(), Zone: o.Zone(), InstanceName: it.Name}, o
 		})
 		for _, of := range it.Offerings {
-			ofKey := state.OfferingKey{CapacityType: of.CapacityType(), Zone: of.Zone(), InstanceName: it.Name}
+			ofKey := cost.OfferingKey{CapacityType: of.CapacityType(), Zone: of.Zone(), InstanceName: it.Name}
 			oldOf, exists := oldItOffMap[ofKey]
 			if !exists {
 				return false

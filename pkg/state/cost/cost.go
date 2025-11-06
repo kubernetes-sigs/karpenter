@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package state
+package cost
 
 import (
 	"context"
@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -70,8 +71,8 @@ var (
 type ClusterCost struct {
 	sync.RWMutex
 	npCostMap map[types.UID]*NodePoolCost // nodepool.Uid -> NodePoolCost
-	// nodeClaimMap tracks which NodeClaims are currently being monitored for cost
-	nodeClaimMap map[string]bool
+	// nodeClaimSet tracks which NodeClaims are currently being monitored for cost
+	nodeClaimSet sets.Set[string]
 
 	cloudProvider cloudprovider.CloudProvider
 	client        client.Client
@@ -104,7 +105,7 @@ type OfferingCount struct {
 func NewClusterCost(ctx context.Context, cloudProvider cloudprovider.CloudProvider, client client.Client) *ClusterCost {
 	return &ClusterCost{
 		npCostMap:     make(map[types.UID]*NodePoolCost),
-		nodeClaimMap:  make(map[string]bool),
+		nodeClaimSet:  make(sets.Set[string]),
 		cloudProvider: cloudProvider,
 		client:        client,
 	}
@@ -192,7 +193,7 @@ func (cc *ClusterCost) createNewNodePoolCost(np *v1.NodePool, instanceTypes []*c
 // all required labels or it will be ignored and logged as an error.
 func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) {
 	cc.RLock()
-	_, exists := cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim).String()]
+	exists := cc.nodeClaimSet.Has(client.ObjectKeyFromObject(nodeClaim).String())
 	cc.RUnlock()
 
 	if exists {
@@ -235,14 +236,14 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 		failed = true
 		return
 	}
-	cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim).String()] = true
+	cc.nodeClaimSet.Insert(client.ObjectKeyFromObject(nodeClaim).String())
 }
 
 // DeleteNodeClaim removes a NodeClaim from cost tracking. If the NodeClaim
 // was not being tracked, this operation is a no-op.
 func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) {
 	cc.RLock()
-	_, exists := cc.nodeClaimMap[client.ObjectKeyFromObject(nodeClaim).String()]
+	exists := cc.nodeClaimSet.Has(client.ObjectKeyFromObject(nodeClaim).String())
 	cc.RUnlock()
 
 	if !exists {
@@ -287,7 +288,7 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 		failed = true
 		return
 	}
-	delete(cc.nodeClaimMap, client.ObjectKeyFromObject(nodeClaim).String())
+	cc.nodeClaimSet.Delete(client.ObjectKeyFromObject(nodeClaim).String())
 }
 
 func (cc *ClusterCost) internalAddOffering(ctx context.Context, np *v1.NodePool, instanceName, capacityType, zone string, firstTry bool) error {

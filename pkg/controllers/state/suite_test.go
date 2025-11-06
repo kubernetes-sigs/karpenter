@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -55,8 +56,8 @@ import (
 var ctx context.Context
 var env *test.Environment
 var fakeClock *clock.FakeClock
-var clusterCost *state.ClusterCost
 var cluster *state.Cluster
+var clusterCost *cost.ClusterCost
 var nodeClaimController *informer.NodeClaimController
 var nodeController *informer.NodeController
 var podController *informer.PodController
@@ -83,8 +84,8 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 	cloudProvider = fake.NewCloudProvider()
 	fakeClock = clock.NewFakeClock(time.Now())
-	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
+	clusterCost = cost.NewClusterCost(ctx, cloudProvider, env.Client)
 	nodeClaimController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	nodeController = informer.NewNodeController(env.Client, cluster)
 	podController = informer.NewPodController(env.Client, cluster)
@@ -108,7 +109,6 @@ var _ = BeforeEach(func() {
 })
 var _ = AfterEach(func() {
 	ExpectCleanedUp(ctx, env.Client)
-	clusterCost = state.NewClusterCost(ctx, cloudProvider, env.Client)
 	cluster.Reset()
 	cloudProvider.Reset()
 })
