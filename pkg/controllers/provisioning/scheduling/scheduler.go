@@ -143,7 +143,7 @@ func NewScheduler(
 	templates := lo.FilterMap(nodePools, func(np *v1.NodePool, _ int) (*NodeClaimTemplate, bool) {
 		var err error
 		nct := NewNodeClaimTemplate(np)
-		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, corev1.ResourceList{}, corev1.ResourceList{}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
+		nct.InstanceTypeOptions, _, err = filterInstanceTypesByRequirements(instanceTypes[np.Name], nct.Requirements, &corev1.Pod{}, corev1.ResourceList{}, map[*cloudprovider.InstanceType]corev1.ResourceList{}, map[*cloudprovider.InstanceType]*scheduling.HostPortUsage{}, corev1.ResourceList{}, minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
 		if len(nct.InstanceTypeOptions) == 0 {
 			if instanceTypeFilterErr, ok := lo.ErrorsAs[InstanceTypeFilterError](err); ok && instanceTypeFilterErr.minValuesIncompatibleErr != nil {
 				recorder.Publish(NoCompatibleInstanceTypes(np, true))
@@ -194,8 +194,8 @@ type Scheduler struct {
 	existingNodes           []*ExistingNode
 	nodeClaimTemplates      []*NodeClaimTemplate
 	remainingResources      map[string]corev1.ResourceList // (NodePool name) -> remaining resources for that NodePool
-	daemonOverhead          map[*NodeClaimTemplate]corev1.ResourceList
-	daemonHostPortUsage     map[*NodeClaimTemplate]*scheduling.HostPortUsage
+	daemonOverhead          map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]corev1.ResourceList
+	daemonHostPortUsage     map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]*scheduling.HostPortUsage
 	cachedPodData           map[types.UID]*PodData // (Pod Namespace/Name) -> pre-computed data for pods to avoid re-computation and memory usage
 	preferences             *Preferences
 	topology                *Topology
@@ -770,40 +770,49 @@ func parallelizeUntil(workers, pieces int, doWorkPiece func(int) bool) {
 }
 
 // getDaemonOverhead determines the overhead for each NodeClaimTemplate required for daemons to schedule for any node provisioned by the NodeClaimTemplate
-func getDaemonOverhead(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]corev1.ResourceList {
-	return lo.SliceToMap(nodeClaimTemplates, func(nct *NodeClaimTemplate) (*NodeClaimTemplate, corev1.ResourceList) {
-		return nct, resources.RequestsForPods(lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool {
-			// Exclude daemon pods with DRA requirements when IgnoreDRARequests is enabled
-			if pod.HasDRARequirements(p) && karpopts.FromContext(ctx).IgnoreDRARequests {
-				return false
+func getDaemonOverhead(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]corev1.ResourceList {
+	return lo.SliceToMap(nodeClaimTemplates, func(nct *NodeClaimTemplate) (*NodeClaimTemplate, map[*cloudprovider.InstanceType]corev1.ResourceList) {
+		return nct, lo.SliceToMap(nct.InstanceTypeOptions, func(it *cloudprovider.InstanceType) (*cloudprovider.InstanceType, corev1.ResourceList) {
+			compatibleDaemonPods := getCompatibleDaemonPods(ctx, daemonSetPods, nct, it)
+			if len(compatibleDaemonPods) == 0 {
+				return it, corev1.ResourceList{}
 			}
-			return isDaemonPodCompatible(nct, p)
-		})...)
+			return it, resources.RequestsForPods(compatibleDaemonPods...)
+		})
 	})
 }
 
 // getDaemonHostPortUsage determines requested host ports for DaemonSet pods, given a NodeClaimTemplate
-func getDaemonHostPortUsage(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]*scheduling.HostPortUsage {
-	nctToOccupiedPorts := map[*NodeClaimTemplate]*scheduling.HostPortUsage{}
+func getDaemonHostPortUsage(ctx context.Context, nodeClaimTemplates []*NodeClaimTemplate, daemonSetPods []*corev1.Pod) map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]*scheduling.HostPortUsage {
+	nctToOccupiedPorts := map[*NodeClaimTemplate]map[*cloudprovider.InstanceType]*scheduling.HostPortUsage{}
 	for _, nct := range nodeClaimTemplates {
-		hostPortUsage := scheduling.NewHostPortUsage()
-		// gather compatible DaemonSet pods for the NodeClaimTemplate
-		for _, pod := range lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool {
-			// Exclude daemon pods with DRA requirements when IgnoreDRARequests is enabled
-			if pod.HasDRARequirements(p) && karpopts.FromContext(ctx).IgnoreDRARequests {
-				return false
+		occupiedPorts := map[*cloudprovider.InstanceType]*scheduling.HostPortUsage{}
+		for _, it := range nct.InstanceTypeOptions {
+			hostPortUsage := scheduling.NewHostPortUsage()
+			// gather compatible DaemonSet pods for the NodeClaimTemplate
+			for _, pod := range getCompatibleDaemonPods(ctx, daemonSetPods, nct, it) {
+				hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
 			}
-			return isDaemonPodCompatible(nct, p)
-		}) {
-			hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
+			occupiedPorts[it] = hostPortUsage
 		}
-		nctToOccupiedPorts[nct] = hostPortUsage
+		nctToOccupiedPorts[nct] = occupiedPorts
 	}
 	return nctToOccupiedPorts
 }
 
+func getCompatibleDaemonPods(ctx context.Context, daemonSetPods []*corev1.Pod, nct *NodeClaimTemplate, it *cloudprovider.InstanceType) []*corev1.Pod {
+	daemonSetCompatiblePods := lo.Filter(daemonSetPods, func(p *corev1.Pod, _ int) bool {
+		// Exclude daemon pods with DRA requirements when IgnoreDRARequests is enabled
+		if pod.HasDRARequirements(p) && karpopts.FromContext(ctx).IgnoreDRARequests {
+			return false
+		}
+		return isDaemonPodCompatible(nct, it, p)
+	})
+	return daemonSetCompatiblePods
+}
+
 // isDaemonPodCompatible determines if the daemon pod is compatible with the NodeClaimTemplate for daemon scheduling
-func isDaemonPodCompatible(nodeClaimTemplate *NodeClaimTemplate, pod *corev1.Pod) bool {
+func isDaemonPodCompatible(nodeClaimTemplate *NodeClaimTemplate, it *cloudprovider.InstanceType, pod *corev1.Pod) bool {
 	preferences := &Preferences{}
 	// Add a toleration for PreferNoSchedule since a daemon pod shouldn't respect the preference
 	_ = preferences.toleratePreferNoScheduleTaints(pod)
@@ -811,8 +820,12 @@ func isDaemonPodCompatible(nodeClaimTemplate *NodeClaimTemplate, pod *corev1.Pod
 		return false
 	}
 	for {
+		podRequirements := scheduling.NewStrictPodRequirements(pod)
 		// We don't consider pod preferences for scheduling requirements since we know that pod preferences won't matter with Daemonset scheduling
-		if nodeClaimTemplate.Requirements.IsCompatible(scheduling.NewStrictPodRequirements(pod), scheduling.AllowUndefinedWellKnownLabels) {
+		if nodeClaimTemplate.Requirements.IsCompatible(podRequirements, scheduling.AllowUndefinedWellKnownLabels) &&
+			// We use Intersects instead of IsCompatible for instance type requirements since we want to ignore any custom keys on the daemonset pod since they
+			// will not be available on the instance type requirements.
+			it.Requirements.Intersects(podRequirements) == nil {
 			return true
 		}
 		// If relaxing the Node Affinity term didn't succeed, then this DaemonSet can't schedule to this NodePool
