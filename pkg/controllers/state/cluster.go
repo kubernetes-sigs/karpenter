@@ -571,6 +571,8 @@ func (c *Cluster) NodePoolResourcesFor(nodePoolName string) corev1.ResourceList 
 
 // Reset the cluster state for unit testing
 func (c *Cluster) Reset() {
+	c.unsyncedTimeMu.Lock()
+	defer c.unsyncedTimeMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clusterState = time.Time{}
