@@ -135,7 +135,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	// Otherwise, we could leak resources
 	stored := nodeClaim.DeepCopy()
 	controllerutil.AddFinalizer(nodeClaim, v1.TerminationFinalizer)
-	if !equality.Semantic.DeepEqual(nodeClaim, stored) {
+	if !equality.Semantic.DeepEqual(nodeClaim.Finalizers, stored.Finalizers) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
 		// Here, we are updating the finalizer list
@@ -224,7 +224,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 		}
 		stored := nodeClaim.DeepCopy()
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeInstanceTerminating)
-		if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+		if !equality.Semantic.DeepEqual(stored.Status, nodeClaim.Status) {
 			// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 			// can cause races due to the fact that it fully replaces the list on a change
 			// Here, we are updating the status condition list
@@ -247,7 +247,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClaim *v1.NodeClaim) (rec
 	}
 	stored := nodeClaim.DeepCopy() // The NodeClaim may have been modified in the EnsureTerminated function
 	controllerutil.RemoveFinalizer(nodeClaim, v1.TerminationFinalizer)
-	if !equality.Semantic.DeepEqual(stored, nodeClaim) {
+	if !equality.Semantic.DeepEqual(stored.Finalizers, nodeClaim.Finalizers) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
 		// Here, we are updating the finalizer list
