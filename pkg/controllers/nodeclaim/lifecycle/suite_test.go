@@ -57,7 +57,7 @@ var (
 	fakeClock           *clock.FakeClock
 	cloudProvider       *fake.CloudProvider
 	recorder            *test.EventRecorder
-	npState             nodepoolhealth.State
+	npState             *nodepoolhealth.State
 )
 
 func TestAPIs(t *testing.T) {
@@ -85,7 +85,7 @@ var _ = BeforeSuite(func() {
 	ctx = options.ToContext(ctx, test.Options())
 
 	cloudProvider = fake.NewCloudProvider()
-	npState = nodepoolhealth.State{}
+	npState = nodepoolhealth.NewState()
 	nodeClaimController = nodeclaimlifecycle.NewController(fakeClock, env.Client, cloudProvider, recorder, npState)
 })
 
