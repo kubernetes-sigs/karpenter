@@ -77,7 +77,7 @@ func NewControllers(
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
-	npState := make(nodepoolhealth.State)
+	npState := nodepoolhealth.NewState()
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
