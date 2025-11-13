@@ -29,6 +29,18 @@ const (
 	decisionLabel                = "decision"
 	ConsolidationTypeLabel       = "consolidation_type"
 	CandidatesIneligible         = "candidates_ineligible"
+
+	// Label constants
+	ClusterCostLabel              = "cluster_cost"
+	TotalCPURequestsLabel         = "total_cpu_requests"
+	TotalMemoryRequestsLabel      = "total_memory_requests"
+	TotalNodeCountLabel           = "total_node_count"
+	TotalDesiredPodCountLabel     = "total_desired_pod_count"
+	InvolvesPodAntiAffinityLabel  = "involves_pod_anti_affinity"
+	ConsolidationPolicyLabel      = "consolidation_policy"
+	NodePoolNameLabel             = "nodepool_name"
+	PodCPURequestChangeRatioLabel = "pod_cpu_request_change_ratio"
+	PodMemRequestChangeRatioLabel = "pod_mem_request_change_ratio"
 )
 
 func init() {
@@ -107,5 +119,92 @@ var (
 			Help:      "The number of times that an enqueued disruption decision failed. Labeled by disruption method.",
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
+	)
+
+	DecisionDimensions = []string{
+		ClusterCostLabel,
+		TotalCPURequestsLabel,
+		TotalMemoryRequestsLabel,
+		TotalNodeCountLabel,
+		TotalDesiredPodCountLabel,
+		InvolvesPodAntiAffinityLabel,
+		ConsolidationPolicyLabel,
+		ConsolidationTypeLabel,
+		NodePoolNameLabel,
+		PodCPURequestChangeRatioLabel,
+		PodMemRequestChangeRatioLabel,
+	}
+	// Change ratios are calculated with the following formula:
+	//   Value at Beginning / Value at End
+
+	// ClusterCostChangeRatio tracks the ratio of cluster cost before and after a decision
+	ClusterCostChangeRatio = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: decisionLabel,
+			Name:      "cluster_cost_change_ratio",
+			Help:      "ALPHA METRIC. Ratio of cluster cost at decision start to cluster cost at decision end. Labeled by decision dimensions.",
+		},
+		DecisionDimensions,
+	)
+
+	// CPURequestsChangeRatio tracks the ratio of total desired pod CPU requests before and after a decision
+	CPURequestsChangeRatio = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: decisionLabel,
+			Name:      "cpu_requests_change_ratio",
+			Help:      "ALPHA METRIC. Ratio of total desired pod CPU requests at decision start to total desired pod CPU requests at decision end. Labeled by decision dimensions.",
+		},
+		DecisionDimensions,
+	)
+
+	// MemoryRequestsChangeRatio tracks the ratio of total desired pod memory requests before and after a decision
+	MemoryRequestsChangeRatio = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: decisionLabel,
+			Name:      "memory_requests_change_ratio",
+			Help:      "ALPHA METRIC. Ratio of total desired pod memory requests at decision start to total desired pod memory requests at decision end. Labeled by decision dimensions.",
+		},
+		DecisionDimensions,
+	)
+
+	// NodeCountChangeRatio tracks the ratio of total node count before and after a decision
+	NodeCountChangeRatio = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: decisionLabel,
+			Name:      "node_count_change_ratio",
+			Help:      "ALPHA METRIC. Ratio of total node count at decision start to total node count at decision end. Labeled by decision dimensions.",
+		},
+		DecisionDimensions,
+	)
+
+	// DesiredPodCountChangeRatio tracks the ratio of total desired pod count before and after a decision
+	DesiredPodCountChangeRatio = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: decisionLabel,
+			Name:      "desired_pod_count_change_ratio",
+			Help:      "ALPHA METRIC. Ratio of total desired pod count at decision start to total desired pod count at decision end. Labeled by decision dimensions.",
+		},
+		DecisionDimensions,
+	)
+	// DecisionTrackerErrors tracks the number of errors in the decision tracker
+	DecisionTrackerErrors = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: decisionLabel,
+			Name:      "internal_errors_total",
+			Help:      "ALPHA METRIC. Total Errors during the course of decision tracking",
+		},
+		[]string{},
 	)
 )
