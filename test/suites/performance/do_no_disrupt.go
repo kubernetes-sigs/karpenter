@@ -85,8 +85,6 @@ var _ = Describe("Performance", func() {
 				}
 			}
 
-			GinkgoWriter.Printf("Nodes with do-not-disrupt pods: %d\n", len(nodesWithProtectedPods))
-
 			By("Scaling down deployments to trigger consolidation")
 			initialNodes := scaleOutReport.TotalNodes
 
@@ -123,8 +121,6 @@ var _ = Describe("Performance", func() {
 			By("Validating that protected nodes were not disrupted")
 			Expect(protectedNodesStillPresent).To(BeNumerically(">", 0),
 				"At least some nodes with do-not-disrupt pods should remain protected")
-
-			GinkgoWriter.Printf("Protected nodes still present: %d/%d\n", protectedNodesStillPresent, len(nodesWithProtectedPods))
 
 		})
 	})

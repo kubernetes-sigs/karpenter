@@ -25,6 +25,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"sigs.k8s.io/karpenter/pkg/test"
 	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
@@ -159,11 +160,9 @@ var _ = Describe("Performance", func() {
 			deployments := createWideDeployments()
 
 			// Create all deployments in the cluster
-			deploymentObjects := make([]interface{}, len(deployments))
-			for i, dep := range deployments {
-				deploymentObjects[i] = dep
+			for _, dep := range deployments {
+				env.ExpectCreated(dep)
 			}
-			env.ExpectCreated(deploymentObjects...)
 
 			By("Monitoring wide scale-out performance (30 deployments, 1000 pods)")
 			scaleOutReport, err := ReportScaleOutWithOutput(env, "Wide Deployments Performance Test", 1000, 20*time.Minute, "wide_deployments_scale_out")
@@ -191,8 +190,8 @@ var _ = Describe("Performance", func() {
 			// Scale down all deployments to their scale-in pod counts
 			for i, deployment := range deployments {
 				deployment.Spec.Replicas = &configs[i].ScaleInPods
+				env.ExpectUpdated(deployment)
 			}
-			env.ExpectUpdated(deploymentObjects...)
 
 			By("Monitoring wide consolidation performance")
 			consolidationReport, err := ReportConsolidationWithOutput(env, "Wide Deployments Consolidation Test", 1000, 700, initialNodes, 25*time.Minute, "wide_deployments_consolidation")
