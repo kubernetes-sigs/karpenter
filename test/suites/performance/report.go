@@ -132,11 +132,7 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 	}
 
 	// Monitor consolidation rounds
-	consolidationRounds, _, err := monitorConsolidationRounds(env, timeout)
-	if err != nil {
-		// Continue even if consolidation monitoring fails
-		consolidationRounds = []ConsolidationRound{}
-	}
+	consolidationRounds, _ := monitorConsolidationRounds(env, timeout)
 
 	totalTime := time.Since(startTime)
 
@@ -269,15 +265,13 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 
 // monitorConsolidationRounds monitors node consolidation and returns consolidation rounds.
 // This is a helper function used by ReportConsolidation to track individual consolidation rounds.
-func monitorConsolidationRounds(env *common.Environment, timeout time.Duration) ([]ConsolidationRound, time.Duration, error) {
+func monitorConsolidationRounds(env *common.Environment, timeout time.Duration) ([]ConsolidationRound, time.Duration) {
 	var consolidationRounds []ConsolidationRound
 	roundNumber := 1
 	lastDrainingTime := time.Now()
 	consolidationStartTime := time.Now()
 
-	consolidationComplete := false
-
-	for time.Since(consolidationStartTime) < timeout && !consolidationComplete {
+	for time.Since(consolidationStartTime) < timeout {
 		currentNodes := env.Monitor.CreatedNodeCount()
 
 		// Check if nodes are draining/terminating
@@ -320,7 +314,6 @@ func monitorConsolidationRounds(env *common.Environment, timeout time.Duration) 
 
 		// Check for stability (no draining for 3 minutes)
 		if time.Since(lastDrainingTime) >= 3*time.Minute {
-			consolidationComplete = true
 			break
 		}
 
@@ -330,11 +323,7 @@ func monitorConsolidationRounds(env *common.Environment, timeout time.Duration) 
 
 	totalConsolidationTime := time.Since(consolidationStartTime)
 
-	if !consolidationComplete {
-		return consolidationRounds, totalConsolidationTime, nil // Don't return error, just incomplete data
-	}
-
-	return consolidationRounds, totalConsolidationTime, nil
+	return consolidationRounds, totalConsolidationTime
 }
 
 // Convenience functions for common monitoring patterns

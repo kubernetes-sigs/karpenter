@@ -79,11 +79,11 @@ func CreateDeploymentOptions(name string, replicas int32, cpuRequest, memoryRequ
 // WithLabels adds or merges labels to the pod template
 func WithLabels(labels map[string]string) DeploymentOptionModifier {
 	return func(opts *test.DeploymentOptions) {
-		if opts.PodOptions.ObjectMeta.Labels == nil {
-			opts.PodOptions.ObjectMeta.Labels = make(map[string]string)
+		if opts.PodOptions.Labels == nil {
+			opts.PodOptions.Labels = make(map[string]string)
 		}
 		for k, v := range labels {
-			opts.PodOptions.ObjectMeta.Labels[k] = v
+			opts.PodOptions.Labels[k] = v
 		}
 	}
 }
@@ -91,11 +91,11 @@ func WithLabels(labels map[string]string) DeploymentOptionModifier {
 // WithAnnotations adds or merges annotations to the pod template
 func WithAnnotations(annotations map[string]string) DeploymentOptionModifier {
 	return func(opts *test.DeploymentOptions) {
-		if opts.PodOptions.ObjectMeta.Annotations == nil {
-			opts.PodOptions.ObjectMeta.Annotations = make(map[string]string)
+		if opts.PodOptions.Annotations == nil {
+			opts.PodOptions.Annotations = make(map[string]string)
 		}
 		for k, v := range annotations {
-			opts.PodOptions.ObjectMeta.Annotations[k] = v
+			opts.PodOptions.Annotations[k] = v
 		}
 	}
 }
@@ -111,9 +111,9 @@ func WithDoNotDisrupt() DeploymentOptionModifier {
 func WithHostnameSpread() DeploymentOptionModifier {
 	return func(opts *test.DeploymentOptions) {
 		// Get the current labels to use in the label selector
-		labels := opts.PodOptions.ObjectMeta.Labels
+		labels := opts.PodOptions.Labels
 		if labels == nil {
-			labels = map[string]string{"app": opts.ObjectMeta.Name}
+			labels = map[string]string{"app": opts.Name}
 		}
 
 		constraint := corev1.TopologySpreadConstraint{
@@ -136,9 +136,9 @@ func WithHostnameSpread() DeploymentOptionModifier {
 func WithZoneSpread() DeploymentOptionModifier {
 	return func(opts *test.DeploymentOptions) {
 		// Get the current labels to use in the label selector
-		labels := opts.PodOptions.ObjectMeta.Labels
+		labels := opts.PodOptions.Labels
 		if labels == nil {
-			labels = map[string]string{"app": opts.ObjectMeta.Name}
+			labels = map[string]string{"app": opts.Name}
 		}
 
 		constraint := corev1.TopologySpreadConstraint{
@@ -161,9 +161,9 @@ func WithZoneSpread() DeploymentOptionModifier {
 func WithPodAntiAffinity(topologyKey string) DeploymentOptionModifier {
 	return func(opts *test.DeploymentOptions) {
 		// Get the current labels to use in the label selector
-		labels := opts.PodOptions.ObjectMeta.Labels
+		labels := opts.PodOptions.Labels
 		if labels == nil {
-			labels = map[string]string{"app": opts.ObjectMeta.Name}
+			labels = map[string]string{"app": opts.Name}
 		}
 
 		antiAffinityTerm := corev1.PodAffinityTerm{
@@ -232,56 +232,4 @@ func WithTerminationGracePeriod(seconds int64) DeploymentOptionModifier {
 	return func(opts *test.DeploymentOptions) {
 		opts.PodOptions.TerminationGracePeriodSeconds = &seconds
 	}
-}
-
-// Predefined resource configurations for common use cases
-
-// WithSmallResources applies small resource profile (950m CPU, 3900Mi memory)
-func WithSmallResources() DeploymentOptionModifier {
-	return func(opts *test.DeploymentOptions) {
-		opts.PodOptions.ResourceRequirements.Requests[corev1.ResourceCPU] = resource.MustParse("950m")
-		opts.PodOptions.ResourceRequirements.Requests[corev1.ResourceMemory] = resource.MustParse("3900Mi")
-	}
-}
-
-// WithLargeResources applies large resource profile (3800m CPU, 31Gi memory)
-func WithLargeResources() DeploymentOptionModifier {
-	return func(opts *test.DeploymentOptions) {
-		opts.PodOptions.ResourceRequirements.Requests[corev1.ResourceCPU] = resource.MustParse("3800m")
-		opts.PodOptions.ResourceRequirements.Requests[corev1.ResourceMemory] = resource.MustParse("31Gi")
-	}
-}
-
-// WithMinimalResources applies minimal resource profile (100m CPU, 128Mi memory)
-func WithMinimalResources() DeploymentOptionModifier {
-	return func(opts *test.DeploymentOptions) {
-		opts.PodOptions.ResourceRequirements.Requests[corev1.ResourceCPU] = resource.MustParse("100m")
-		opts.PodOptions.ResourceRequirements.Requests[corev1.ResourceMemory] = resource.MustParse("128Mi")
-	}
-}
-
-// Convenience functions for common deployment patterns
-
-// CreateSmallDeployment creates a deployment with small resource profile
-func CreateSmallDeployment(name string, replicas int32, opts ...DeploymentOptionModifier) test.DeploymentOptions {
-	modifiers := append([]DeploymentOptionModifier{WithSmallResources()}, opts...)
-	return CreateDeploymentOptions(name, replicas, "100m", "128Mi", modifiers...)
-}
-
-// CreateLargeDeployment creates a deployment with large resource profile
-func CreateLargeDeployment(name string, replicas int32, opts ...DeploymentOptionModifier) test.DeploymentOptions {
-	modifiers := append([]DeploymentOptionModifier{WithLargeResources()}, opts...)
-	return CreateDeploymentOptions(name, replicas, "100m", "128Mi", modifiers...)
-}
-
-// CreateSpreadDeployment creates a deployment with hostname spreading
-func CreateSpreadDeployment(name string, replicas int32, cpuRequest, memoryRequest string, opts ...DeploymentOptionModifier) test.DeploymentOptions {
-	modifiers := append([]DeploymentOptionModifier{WithHostnameSpread()}, opts...)
-	return CreateDeploymentOptions(name, replicas, cpuRequest, memoryRequest, modifiers...)
-}
-
-// CreateProtectedDeployment creates a deployment with do-not-disrupt annotation
-func CreateProtectedDeployment(name string, replicas int32, cpuRequest, memoryRequest string, opts ...DeploymentOptionModifier) test.DeploymentOptions {
-	modifiers := append([]DeploymentOptionModifier{WithDoNotDisrupt()}, opts...)
-	return CreateDeploymentOptions(name, replicas, cpuRequest, memoryRequest, modifiers...)
 }
