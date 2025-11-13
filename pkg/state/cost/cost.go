@@ -291,6 +291,9 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	cc.nodeClaimSet.Delete(client.ObjectKeyFromObject(nodeClaim).String())
 }
 
+// internalAddOffering updates the internal clusterCost state to include a new offering for a given nodepool.
+// It is used to increment the overall cost when a node joins the cluster. It is only called by UpdateNodeClaim
+// after that function has determined if a nodeclaim is new.
 func (cc *ClusterCost) internalAddOffering(ctx context.Context, np *v1.NodePool, instanceName, capacityType, zone string, firstTry bool) error {
 	_, exists := cc.npCostMap[np.UID]
 	if !exists {
@@ -336,6 +339,9 @@ func (cc *ClusterCost) internalAddOffering(ctx context.Context, np *v1.NodePool,
 	return nil
 }
 
+// internalRemoveOffering updates the internal clusterCost state to remove an existing offering for a given nodepool.
+// It is used to decrement the overall cost when a node leeaves the cluster. It is only called by DeleteNodeClaim
+// after that function has determined if a nodeclaim is already being accounted for.
 func (cc *ClusterCost) internalRemoveOffering(np *v1.NodePool, instanceName, capacityType, zone string) error {
 	npc, exists := cc.npCostMap[np.UID]
 	if !exists {
