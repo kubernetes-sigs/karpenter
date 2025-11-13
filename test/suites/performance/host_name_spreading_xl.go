@@ -21,6 +21,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
+
+	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 var _ = Describe("Performance", func() {
@@ -30,17 +34,22 @@ var _ = Describe("Performance", func() {
 			env.ExpectCreated(nodePool, nodeClass)
 
 			// ========== PHASE 1: XL SCALE-OUT TEST WITH HOSTNAME SPREADING ==========
-			By("Executing XL scale-out performance test with hostname spreading (2000 pods)")
+			By("Creating XL deployments with hostname spreading")
 
-			scaleOutActions := []Action{
-				// Small deployment with hostname topology spreading - XL scale (1000 pods)
-				NewCreateDeploymentActionWithHostnameSpread("small-resource-app", 1000, SmallResourceProfile),
-				// Large deployment without topology constraints - XL scale (1000 pods)
-				NewCreateDeploymentAction("large-resource-app", 1000, LargeResourceProfile),
-			}
+			// Create deployment options using templates - XL scale (2000 pods total)
+			smallOpts := common.CreateDeploymentOptions("small-resource-app", 1000, "950m", "3900Mi",
+				common.WithHostnameSpread())
+			largeOpts := common.CreateDeploymentOptions("large-resource-app", 1000, "3800m", "31Gi")
 
-			scaleOutReport, err := ExecuteActionsAndGenerateReport(scaleOutActions, "XL Host Name Spreading Performance Test", env, 20*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "XL scale-out actions should execute successfully")
+			// Create deployments
+			smallDeployment := test.Deployment(smallOpts)
+			largeDeployment := test.Deployment(largeOpts)
+
+			env.ExpectCreated(smallDeployment, largeDeployment)
+
+			By("Monitoring XL scale-out performance with hostname spreading (2000 pods)")
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "XL Host Name Spreading Performance Test", 2000, 20*time.Minute, "hostname_spread_xl_scale_out")
+			Expect(err).ToNot(HaveOccurred(), "XL scale-out should execute successfully")
 
 			By("Validating XL scale-out performance with hostname spreading")
 			Expect(scaleOutReport.TestType).To(Equal("scale-out"), "Should be detected as scale-out test")
@@ -56,25 +65,23 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
 				"Average memory utilization should be greater than 70%")
 
-			By("Outputting XL scale-out performance report")
-			OutputPerformanceReport(scaleOutReport, "hostname_spread_xl_scale_out")
-
 			// ========== PHASE 2: XL CONSOLIDATION TEST ==========
-			By("Executing XL consolidation performance test (scaling down to 1400 pods)")
+			By("Scaling down XL deployments to trigger consolidation")
+			initialNodes := scaleOutReport.TotalNodes
 
-			consolidationActions := []Action{
-				NewUpdateReplicasAction("small-resource-app", 700),
-				NewUpdateReplicasAction("large-resource-app", 700),
-			}
+			// Scale down both deployments
+			smallDeployment.Spec.Replicas = lo.ToPtr(int32(700))
+			largeDeployment.Spec.Replicas = lo.ToPtr(int32(700))
+			env.ExpectUpdated(smallDeployment, largeDeployment)
 
-			consolidationReport, err := ExecuteActionsAndGenerateReport(consolidationActions, "XL Hostname Spread Consolidation Test", env, 25*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "XL consolidation actions should execute successfully")
+			By("Monitoring XL consolidation performance")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "XL Hostname Spread Consolidation Test", 2000, 1400, initialNodes, 25*time.Minute, "hostname_spread_xl_consolidation")
+			Expect(err).ToNot(HaveOccurred(), "XL consolidation should execute successfully")
 
 			By("Validating XL consolidation performance")
 			Expect(consolidationReport.TestType).To(Equal("consolidation"), "Should be detected as consolidation test")
 			Expect(consolidationReport.TotalPods).To(Equal(1400), "Should have 1400 total pods after scale-in")
 			Expect(consolidationReport.PodsNetChange).To(Equal(-600), "Should have net reduction of 600 pods")
-			//Expect(consolidationReport.Rounds).To(BeNumerically(">", 0), "Should have consolidation rounds")
 
 			// XL Consolidation assertions
 			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
@@ -85,8 +92,6 @@ var _ = Describe("Performance", func() {
 				"Average CPU utilization should be greater than 55%")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
 				"Average memory utilization should be greater than 70%")
-			By("Outputting XL consolidation performance report")
-			OutputPerformanceReport(consolidationReport, "hostname_spread_xl_consolidation")
 
 		})
 	})

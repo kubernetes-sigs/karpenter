@@ -22,8 +22,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 // DeploymentConfig holds the deterministic configuration for each deployment
@@ -82,20 +85,14 @@ func getDeterministicDeploymentConfigs() []DeploymentConfig {
 	return configs
 }
 
-// createWideDeploymentActions creates actions for all 30 wide deployments
-func createWideDeploymentActions() []Action {
+// createWideDeployments creates all 30 wide deployments using the new template approach
+func createWideDeployments() []*appsv1.Deployment {
 	configs := getDeterministicDeploymentConfigs()
-	actions := make([]Action, 30)
+	deployments := make([]*appsv1.Deployment, 30)
 
 	for i, config := range configs {
-		// Create custom resource profile for this deployment
-		profile := ResourceProfile{
-			CPU:    config.CPU,
-			Memory: config.Memory,
-		}
-
-		// Create base action
-		action := NewCreateDeploymentAction(config.Name, config.InitialPods, profile)
+		// Build modifiers based on configuration
+		var modifiers []common.DeploymentOptionModifier
 
 		// Add zone topology spreading (all deployments get this)
 		zoneConstraints := []corev1.TopologySpreadConstraint{
@@ -124,53 +121,29 @@ func createWideDeploymentActions() []Action {
 				},
 			}
 			zoneConstraints = append(zoneConstraints, hostnameConstraint)
-
-			// Add label to indicate hostname spreading
-			action.Labels["has-hostname-spread"] = "true"
+			modifiers = append(modifiers, common.WithLabels(map[string]string{"has-hostname-spread": "true"}))
 		}
 
-		// Set topology constraints
-		action.SetTopologySpreadConstraints(zoneConstraints)
+		modifiers = append(modifiers, common.WithTopologySpreadConstraints(zoneConstraints))
 
 		// Add pod anti-affinity for deployments 1, 2, 3
 		if config.HasAntiAffinity {
-			antiAffinity := &corev1.PodAntiAffinity{
-				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-					{
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"has-anti-affinity": "true",
-							},
-						},
-						TopologyKey: corev1.LabelHostname,
-					},
-				},
-			}
-			action.SetPodAntiAffinity(antiAffinity)
-
-			// Add label to indicate anti-affinity
-			action.Labels["has-anti-affinity"] = "true"
+			modifiers = append(modifiers,
+				common.WithPodAntiAffinity(corev1.LabelHostname),
+				common.WithLabels(map[string]string{"has-anti-affinity": "true"}))
 		}
 
 		// Add deployment index label
-		action.Labels["deployment-index"] = fmt.Sprintf("%d", i+1)
+		modifiers = append(modifiers, common.WithLabels(map[string]string{
+			"deployment-index": fmt.Sprintf("%d", i+1),
+		}))
 
-		actions[i] = action
+		// Create deployment options using templates
+		opts := common.CreateDeploymentOptions(config.Name, config.InitialPods, config.CPU, config.Memory, modifiers...)
+		deployments[i] = test.Deployment(opts)
 	}
 
-	return actions
-}
-
-// createWideDeploymentScaleActions creates scale-down actions for all 30 deployments
-func createWideDeploymentScaleActions() []Action {
-	configs := getDeterministicDeploymentConfigs()
-	actions := make([]Action, 30)
-
-	for i, config := range configs {
-		actions[i] = NewUpdateReplicasAction(config.Name, config.ScaleInPods)
-	}
-
-	return actions
+	return deployments
 }
 
 var _ = Describe("Performance", func() {
@@ -180,12 +153,21 @@ var _ = Describe("Performance", func() {
 			env.ExpectCreated(nodePool, nodeClass)
 
 			// ========== PHASE 1: WIDE SCALE-OUT TEST ==========
-			By("Executing wide scale-out performance test (30 deployments, 1000 pods)")
+			By("Creating 30 wide deployments with varied configurations")
 
-			scaleOutActions := createWideDeploymentActions()
+			// Create all 30 deployments using the new template approach
+			deployments := createWideDeployments()
 
-			scaleOutReport, err := ExecuteActionsAndGenerateReport(scaleOutActions, "Wide Deployments Performance Test", env, 20*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "Wide scale-out actions should execute successfully")
+			// Create all deployments in the cluster
+			deploymentObjects := make([]interface{}, len(deployments))
+			for i, dep := range deployments {
+				deploymentObjects[i] = dep
+			}
+			env.ExpectCreated(deploymentObjects...)
+
+			By("Monitoring wide scale-out performance (30 deployments, 1000 pods)")
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "Wide Deployments Performance Test", 1000, 20*time.Minute, "wide_deployments_scale_out")
+			Expect(err).ToNot(HaveOccurred(), "Wide scale-out should execute successfully")
 
 			By("Validating wide scale-out performance")
 			Expect(scaleOutReport.TestType).To(Equal("scale-out"), "Should be detected as scale-out test")
@@ -201,22 +183,25 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.55),
 				"Average memory utilization should be greater than 55%")
 
-			By("Outputting wide scale-out performance report")
-			OutputPerformanceReport(scaleOutReport, "wide_deployments_scale_out")
-
 			// ========== PHASE 2: WIDE CONSOLIDATION TEST ==========
-			By("Executing wide consolidation performance test (scaling down to 700 pods)")
+			By("Scaling down all 30 deployments to trigger consolidation")
+			initialNodes := scaleOutReport.TotalNodes
+			configs := getDeterministicDeploymentConfigs()
 
-			consolidationActions := createWideDeploymentScaleActions()
+			// Scale down all deployments to their scale-in pod counts
+			for i, deployment := range deployments {
+				deployment.Spec.Replicas = &configs[i].ScaleInPods
+			}
+			env.ExpectUpdated(deploymentObjects...)
 
-			consolidationReport, err := ExecuteActionsAndGenerateReport(consolidationActions, "Wide Deployments Consolidation Test", env, 25*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "Wide consolidation actions should execute successfully")
+			By("Monitoring wide consolidation performance")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Wide Deployments Consolidation Test", 1000, 700, initialNodes, 25*time.Minute, "wide_deployments_consolidation")
+			Expect(err).ToNot(HaveOccurred(), "Wide consolidation should execute successfully")
 
 			By("Validating wide consolidation performance")
 			Expect(consolidationReport.TestType).To(Equal("consolidation"), "Should be detected as consolidation test")
 			Expect(consolidationReport.TotalPods).To(Equal(700), "Should have 700 total pods after scale-in")
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
-			//Expect(consolidationReport.Rounds).To(BeNumerically(">", 0), "Should have consolidation rounds")
 
 			// Wide consolidation assertions
 			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
@@ -228,8 +213,6 @@ var _ = Describe("Performance", func() {
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.65),
 				"Average memory utilization should be greater than 65%")
 
-			By("Outputting wide consolidation performance report")
-			OutputPerformanceReport(consolidationReport, "wide_deployments_consolidation")
 		})
 	})
 })

@@ -21,6 +21,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
+
+	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 var _ = Describe("Performance", func() {
@@ -30,17 +34,22 @@ var _ = Describe("Performance", func() {
 			env.ExpectCreated(nodePool, nodeClass)
 
 			// ========== PHASE 1: SCALE-OUT TEST WITH HOSTNAME SPREADING ==========
-			By("Executing scale-out performance test with hostname spreading (1000 pods)")
+			By("Creating deployments with hostname spreading")
 
-			scaleOutActions := []Action{
-				// Small deployment with hostname topology spreading
-				NewCreateDeploymentActionWithHostnameSpread("small-resource-app", 500, SmallResourceProfile),
-				// Large deployment without topology constraints
-				NewCreateDeploymentAction("large-resource-app", 500, LargeResourceProfile),
-			}
+			// Create deployment options using templates
+			smallOpts := common.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
+				common.WithHostnameSpread())
+			largeOpts := common.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
 
-			scaleOutReport, err := ExecuteActionsAndGenerateReport(scaleOutActions, "Host Name Spreading Performance Test", env, 15*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "Scale-out actions should execute successfully")
+			// Create deployments
+			smallDeployment := test.Deployment(smallOpts)
+			largeDeployment := test.Deployment(largeOpts)
+
+			env.ExpectCreated(smallDeployment, largeDeployment)
+
+			By("Monitoring scale-out performance with hostname spreading (1000 pods)")
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "Host Name Spreading Performance Test", 1000, 15*time.Minute, "hostname_spread_scale_out")
+			Expect(err).ToNot(HaveOccurred(), "Scale-out should execute successfully")
 
 			By("Validating scale-out performance with hostname spreading")
 			Expect(scaleOutReport.TestType).To(Equal("scale-out"), "Should be detected as scale-out test")
@@ -56,25 +65,23 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
 				"Average memory utilization should be greater than 75%")
 
-			By("Outputting scale-out performance report")
-			OutputPerformanceReport(scaleOutReport, "hostname_spread_scale_out")
-
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
-			By("Executing consolidation performance test (scaling down to 700 pods)")
+			By("Scaling down deployments to trigger consolidation")
+			initialNodes := scaleOutReport.TotalNodes
 
-			consolidationActions := []Action{
-				NewUpdateReplicasAction("small-resource-app", 350),
-				NewUpdateReplicasAction("large-resource-app", 350),
-			}
+			// Scale down both deployments
+			smallDeployment.Spec.Replicas = lo.ToPtr(int32(350))
+			largeDeployment.Spec.Replicas = lo.ToPtr(int32(350))
+			env.ExpectUpdated(smallDeployment, largeDeployment)
 
-			consolidationReport, err := ExecuteActionsAndGenerateReport(consolidationActions, "Hostname Spread Consolidation Test", env, 20*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "Consolidation actions should execute successfully")
+			By("Monitoring consolidation performance")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Hostname Spread Consolidation Test", 1000, 700, initialNodes, 20*time.Minute, "hostname_spread_consolidation")
+			Expect(err).ToNot(HaveOccurred(), "Consolidation should execute successfully")
 
 			By("Validating consolidation performance")
 			Expect(consolidationReport.TestType).To(Equal("consolidation"), "Should be detected as consolidation test")
 			Expect(consolidationReport.TotalPods).To(Equal(700), "Should have 700 total pods after scale-in")
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
-			//Expect(consolidationReport.Rounds).To(BeNumerically(">", 0), "Should have consolidation rounds")
 
 			// Consolidation assertions
 			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
@@ -85,9 +92,6 @@ var _ = Describe("Performance", func() {
 				"Average CPU utilization should be greater than 55%")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
 				"Average memory utilization should be greater than 75%")
-
-			By("Outputting consolidation performance report")
-			OutputPerformanceReport(consolidationReport, "hostname_spread_consolidation")
 
 		})
 	})

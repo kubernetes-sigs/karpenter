@@ -17,6 +17,7 @@ limitations under the License.
 package performance
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -24,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 var _ = Describe("Performance", func() {
@@ -33,16 +35,21 @@ var _ = Describe("Performance", func() {
 			env.ExpectCreated(nodePool, nodeClass)
 
 			// ========== PHASE 1: INITIAL DEPLOYMENT ==========
-			By("Executing initial deployment for drift testing (600 pods)")
+			By("Creating initial deployments for drift testing")
 
-			initialActions := []Action{
-				// Hostname spread deployment (forces wide node distribution)
-				NewCreateDeploymentActionWithHostnameSpread("hostname-spread-app", 300, SmallResourceProfile),
-				// Standard deployment without topology constraints
-				NewCreateDeploymentAction("standard-app", 300, LargeResourceProfile),
-			}
+			// Create deployment options using templates
+			hostnameSpreadOpts := common.CreateDeploymentOptions("hostname-spread-app", 300, "950m", "3900Mi",
+				common.WithHostnameSpread())
+			standardOpts := common.CreateDeploymentOptions("standard-app", 300, "3800m", "31Gi")
 
-			initialReport, err := ExecuteActionsAndGenerateReport(initialActions, "Drift Test Initial Deployment", env, 20*time.Minute)
+			// Create deployments
+			hostnameSpreadDeployment := test.Deployment(hostnameSpreadOpts)
+			standardDeployment := test.Deployment(standardOpts)
+
+			env.ExpectCreated(hostnameSpreadDeployment, standardDeployment)
+
+			By("Monitoring initial deployment performance (600 pods)")
+			initialReport, err := ReportScaleOutWithOutput(env, "Drift Test Initial Deployment", 600, 20*time.Minute, "drift_initial_deployment")
 			Expect(err).ToNot(HaveOccurred(), "Initial deployment should execute successfully")
 
 			By("Validating initial deployment")
@@ -55,32 +62,34 @@ var _ = Describe("Performance", func() {
 			Expect(initialReport.TotalNodes).To(BeNumerically(">", 0),
 				"Should provision nodes for the pods")
 
-			By("Outputting initial deployment performance report")
-			OutputPerformanceReport(initialReport, "drift_initial_deployment")
-
 			// Allow system to stabilize before triggering drift
 			By("Allowing system to stabilize before triggering drift")
 			time.Sleep(30 * time.Second)
 
-			// ========== PHASE 2: DRIFT TRIGGER ==========
+			// ========== PHASE 2: DRIFT TRIGGER AND MONITORING ==========
 			By("Triggering drift by updating NodePool template")
 
-			driftActions := []Action{
-				NewTriggerDriftAction("annotation", "NodePool template annotation drift test"),
+			// Trigger drift by updating the NodePool template annotation
+			if nodePool.Spec.Template.Annotations == nil {
+				nodePool.Spec.Template.Annotations = make(map[string]string)
 			}
+			nodePool.Spec.Template.Annotations["test-drift-trigger"] = fmt.Sprintf("drift-%d", time.Now().Unix())
+			env.ExpectUpdated(nodePool)
 
-			driftReport, err := ExecuteActionsAndGenerateReportWithNodePool(driftActions, "Drift Performance Test", env, 25*time.Minute, nodePool)
-			Expect(err).ToNot(HaveOccurred(), "Drift trigger should execute successfully")
+			By("Monitoring drift performance")
+			driftReport, err := ReportDriftWithOutput(env, "Drift Performance Test", 600, 25*time.Minute, "drift_execution")
+			Expect(err).ToNot(HaveOccurred(), "Drift should execute successfully")
 
 			By("Validating drift execution")
 			Expect(driftReport.TestType).To(Equal("drift"), "Should be detected as drift test")
+			Expect(driftReport.TotalPods).To(Equal(600), "Should maintain 600 pods during drift")
+			Expect(driftReport.PodsNetChange).To(Equal(0), "Pods should not change during drift")
 
 			// Drift performance assertions
 			Expect(driftReport.TotalTime).To(BeNumerically("<", 25*time.Minute),
 				"Drift should complete within 25 minutes")
-
-			By("Outputting drift performance report")
-			OutputPerformanceReport(driftReport, "drift_execution")
+			Expect(driftReport.Rounds).To(BeNumerically(">", 0),
+				"Should have at least one drift replacement round")
 
 			// ========== PHASE 3: POST-DRIFT VALIDATION ==========
 			By("Validating post-drift cluster state")

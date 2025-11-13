@@ -21,9 +21,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 var _ = Describe("Performance", func() {
@@ -33,19 +35,25 @@ var _ = Describe("Performance", func() {
 			env.ExpectCreated(nodePool, nodeClass)
 
 			// ========== PHASE 1: SCALE-OUT TEST WITH DO-NOT-DISRUPT ==========
-			By("Executing scale-out performance test with do-not-disrupt protection (1100 pods)")
+			By("Creating deployments with different resource profiles and protection")
 
-			scaleOutActions := []Action{
-				// Small deployment with hostname topology spreading
-				NewCreateDeploymentActionWithHostnameSpread("small-resource-app", 500, SmallResourceProfile),
-				// Large deployment without constraints
-				NewCreateDeploymentAction("large-resource-app", 500, LargeResourceProfile),
-				// Do-not-disrupt deployment with protection annotation
-				NewCreateDeploymentActionWithDoNotDisrupt("do-not-disrupt-app", 100, DoNotDisruptResourceProfile),
-			}
+			// Create deployment options using templates
+			smallOpts := common.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
+				common.WithHostnameSpread())
+			largeOpts := common.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
+			protectedOpts := common.CreateDeploymentOptions("do-not-disrupt-app", 100, "950m", "450Mi",
+				common.WithDoNotDisrupt())
 
-			scaleOutReport, err := ExecuteActionsAndGenerateReport(scaleOutActions, "Do Not Disrupt Performance Test", env, 15*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "Scale-out actions should execute successfully")
+			// Create deployments
+			smallDeployment := test.Deployment(smallOpts)
+			largeDeployment := test.Deployment(largeOpts)
+			protectedDeployment := test.Deployment(protectedOpts)
+
+			env.ExpectCreated(smallDeployment, largeDeployment, protectedDeployment)
+
+			By("Monitoring scale-out performance with do-not-disrupt protection (1100 pods)")
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "Do Not Disrupt Performance Test", 1100, 15*time.Minute, "do_not_disrupt_scale_out")
+			Expect(err).ToNot(HaveOccurred(), "Scale-out should execute successfully")
 
 			By("Validating scale-out performance with do-not-disrupt protection")
 			Expect(scaleOutReport.TestType).To(Equal("scale-out"), "Should be detected as scale-out test")
@@ -60,9 +68,6 @@ var _ = Describe("Performance", func() {
 				"Average CPU utilization should be greater than 55%")
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
 				"Average memory utilization should be greater than 70%")
-
-			By("Outputting scale-out performance report")
-			OutputPerformanceReport(scaleOutReport, "do_not_disrupt_scale_out")
 
 			// ========== PHASE 2: DISRUPTION PROTECTION TEST ==========
 			By("Testing disruption protection behavior")
@@ -82,15 +87,17 @@ var _ = Describe("Performance", func() {
 
 			GinkgoWriter.Printf("Nodes with do-not-disrupt pods: %d\n", len(nodesWithProtectedPods))
 
-			// Scale down small and large deployments to trigger consolidation (but keep do-not-disrupt)
-			consolidationActions := []Action{
-				NewUpdateReplicasAction("small-resource-app", 250),
-				NewUpdateReplicasAction("large-resource-app", 250),
-				// Note: do-not-disrupt-app remains at 100 replicas
-			}
+			By("Scaling down deployments to trigger consolidation")
+			initialNodes := scaleOutReport.TotalNodes
 
-			consolidationReport, err := ExecuteActionsAndGenerateReport(consolidationActions, "Do Not Disrupt Consolidation Test", env, 25*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "Consolidation actions should execute successfully")
+			// Scale down small and large deployments (keep do-not-disrupt unchanged)
+			smallDeployment.Spec.Replicas = lo.ToPtr(int32(250))
+			largeDeployment.Spec.Replicas = lo.ToPtr(int32(250))
+			env.ExpectUpdated(smallDeployment, largeDeployment)
+
+			By("Monitoring consolidation with disruption protection")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Do Not Disrupt Consolidation Test", 1100, 600, initialNodes, 25*time.Minute, "do_not_disrupt_consolidation")
+			Expect(err).ToNot(HaveOccurred(), "Consolidation should execute successfully")
 
 			By("Validating disruption protection during consolidation")
 			Expect(consolidationReport.TestType).To(Equal("consolidation"), "Should be detected as consolidation test")
@@ -103,6 +110,7 @@ var _ = Describe("Performance", func() {
 				"Average CPU utilization should be greater than 55%")
 			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.7),
 				"Average memory utilization should be greater than 70%")
+
 			// Check if nodes with do-not-disrupt pods are still present
 			currentNodes := env.Monitor.CreatedNodes()
 			protectedNodesStillPresent := 0
@@ -117,9 +125,6 @@ var _ = Describe("Performance", func() {
 				"At least some nodes with do-not-disrupt pods should remain protected")
 
 			GinkgoWriter.Printf("Protected nodes still present: %d/%d\n", protectedNodesStillPresent, len(nodesWithProtectedPods))
-
-			By("Outputting consolidation performance report")
-			OutputPerformanceReport(consolidationReport, "do_not_disrupt_consolidation")
 
 		})
 	})

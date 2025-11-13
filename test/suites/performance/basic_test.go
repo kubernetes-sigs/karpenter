@@ -21,26 +21,27 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
+	"sigs.k8s.io/karpenter/pkg/test"
+	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 var _ = Describe("Performance", func() {
 	Context("Basic Deployment", func() {
 		It("should efficiently scale two deployments with different resource profiles", func() {
-			By("Setting up NodePool and NodeClass for the test")
-			env.ExpectCreated(nodePool, nodeClass)
-
 			// ========== PHASE 1: SCALE-OUT TEST ==========
 			By("Executing scale-out performance test with 1000 pods")
+			// Create deployments directly using the template
+			smallDeploymentOpts := common.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi")
+			largeDeploymentOpts := common.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
 
-			scaleOutActions := []Action{
-				NewCreateDeploymentAction("small-resource-app", 500, SmallResourceProfile),
-				NewCreateDeploymentAction("large-resource-app", 500, LargeResourceProfile),
-			}
+			smallDeployment := test.Deployment(smallDeploymentOpts)
+			largeDeployment := test.Deployment(largeDeploymentOpts)
 
-			scaleOutReport, err := ExecuteActionsAndGenerateReport(scaleOutActions, "Large Scale Deployment Performance Test", env, 15*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "Scale-out actions should execute successfully")
+			env.ExpectCreated(nodePool, nodeClass, smallDeployment, largeDeployment)
 
-			By("Validating scale-out performance")
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "Scale Out Test", 1000, 15*time.Minute, "scale_out")
+			Expect(err).ToNot(HaveOccurred())
 			Expect(scaleOutReport.TestType).To(Equal("scale-out"), "Should be detected as scale-out test")
 			Expect(scaleOutReport.TotalPods).To(Equal(1000), "Should have 1000 total pods")
 
@@ -54,21 +55,18 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
 				"Average memory utilization should be greater than 75%")
 
-			By("Outputting scale-out performance report")
-			OutputPerformanceReport(scaleOutReport, "scale_out")
-
 			// ========== PHASE 2: CONSOLIDATION TEST ==========
 			By("Executing consolidation performance test (scaling down to 700 pods)")
+			// Phase 2: Scale-down and consolidation
+			initialNodes := scaleOutReport.TotalNodes
 
-			consolidationActions := []Action{
-				NewUpdateReplicasAction("small-resource-app", 350),
-				NewUpdateReplicasAction("large-resource-app", 350),
-			}
+			// Update deployments to scale down
+			smallDeployment.Spec.Replicas = lo.ToPtr(int32(350))
+			largeDeployment.Spec.Replicas = lo.ToPtr(int32(350))
+			env.ExpectUpdated(smallDeployment, largeDeployment)
 
-			consolidationReport, err := ExecuteActionsAndGenerateReport(consolidationActions, "Consolidation Performance Test", env, 20*time.Minute)
-			Expect(err).ToNot(HaveOccurred(), "Consolidation actions should execute successfully")
-
-			By("Validating consolidation performance")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Consolidation Test", 1000, 700, initialNodes, 20*time.Minute, "consolidation")
+			Expect(err).ToNot(HaveOccurred())
 			Expect(consolidationReport.TestType).To(Equal("consolidation"), "Should be detected as consolidation test")
 			Expect(consolidationReport.TotalPods).To(Equal(700), "Should have 700 total pods after scale-in")
 			Expect(consolidationReport.PodsNetChange).To(Equal(-300), "Should have net reduction of 300 pods")
@@ -79,9 +77,6 @@ var _ = Describe("Performance", func() {
 				"Node count should decrease after consolidation")
 			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 15*time.Minute),
 				"Consolidation should complete within 10 minutes")
-
-			By("Outputting consolidation performance report")
-			OutputPerformanceReport(consolidationReport, "consolidation")
 
 		})
 	})
