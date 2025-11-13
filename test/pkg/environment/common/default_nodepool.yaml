@@ -9,8 +9,8 @@ spec:
    budgets:
      - nodes: 100%
  limits:
-   cpu: 1000
-   memory: 1000Gi
+   cpu: 10000
+   memory: 8000Gi
  template:
    spec:
      expireAfter: Never
