@@ -100,11 +100,12 @@ type Queue struct {
 	cluster             *state.Cluster
 	clock               clock.Clock
 	provisioner         *provisioning.Provisioner
+	tracker             *Tracker
 }
 
 // NewQueue creates a queue that will asynchronously orchestrate disruption commands
 func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state.Cluster, clock clock.Clock,
-	provisioner *provisioning.Provisioner,
+	provisioner *provisioning.Provisioner, tracker *Tracker,
 ) *Queue {
 	queue := &Queue{
 		// nolint:staticcheck
@@ -116,6 +117,7 @@ func NewQueue(kubeClient client.Client, recorder events.Recorder, cluster *state
 		cluster:             cluster,
 		clock:               clock,
 		provisioner:         provisioner,
+		tracker:             tracker,
 	}
 	return queue
 }
@@ -228,7 +230,11 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	errs := make([]error, len(cmd.Candidates))
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
-			return q.kubeClient.Delete(ctx, cmd.Candidates[i].NodeClaim)
+			e := q.kubeClient.Delete(ctx, cmd.Candidates[i].NodeClaim)
+			if e != nil {
+				q.tracker.FinishCommand(ctx, cmd.Candidates[i].NodeClaim)
+			}
+			return e
 		}); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
 			return
@@ -239,6 +245,7 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 			metrics.NodePoolLabel:     cmd.Candidates[i].NodeClaim.Labels[v1.NodePoolLabelKey],
 			metrics.CapacityTypeLabel: cmd.Candidates[i].NodeClaim.Labels[v1.CapacityTypeLabelKey],
 		})
+
 	})
 	// If there were any deletion failures, we should requeue.
 	// In the case where we requeue, but the timeout for the command is reached, we'll mark this as a failure.
@@ -321,6 +328,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	if markDisruptedErr != nil && (len(cmd.Replacements) > 0 || len(markedCandidates) == 0) {
 		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", markDisruptedErr), "command-id", cmd.ID)
 	}
+	q.tracker.AddCommand(ctx, cmd)
 
 	// Update the command to only consider the successfully MarkDisrupted candidates
 	cmd.Candidates = markedCandidates
