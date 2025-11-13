@@ -132,7 +132,7 @@ func ReportConsolidation(env *common.Environment, testName string, initialPods, 
 	}
 
 	// Monitor consolidation rounds
-	consolidationRounds, _, err := monitorConsolidationRounds(env, initialNodes, timeout)
+	consolidationRounds, _, err := monitorConsolidationRounds(env, timeout)
 	if err != nil {
 		// Continue even if consolidation monitoring fails
 		consolidationRounds = []ConsolidationRound{}
@@ -268,8 +268,8 @@ func ReportDrift(env *common.Environment, testName string, expectedPods int, tim
 }
 
 // monitorConsolidationRounds monitors node consolidation and returns consolidation rounds.
-// This is a helper function used by MonitorConsolidation to track individual consolidation rounds.
-func monitorConsolidationRounds(env *common.Environment, preScaleInNodes int, timeout time.Duration) ([]ConsolidationRound, time.Duration, error) {
+// This is a helper function used by ReportConsolidation to track individual consolidation rounds.
+func monitorConsolidationRounds(env *common.Environment, timeout time.Duration) ([]ConsolidationRound, time.Duration, error) {
 	var consolidationRounds []ConsolidationRound
 	roundNumber := 1
 	lastDrainingTime := time.Now()
