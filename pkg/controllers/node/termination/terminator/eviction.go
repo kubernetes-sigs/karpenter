@@ -91,16 +91,18 @@ type Queue struct {
 	source chan event.TypedGenericEvent[*corev1.Pod]
 	set    sets.Set[QueueKey]
 
-	kubeClient client.Client
-	recorder   events.Recorder
+	kubeClient      client.Client
+	recorder        events.Recorder
+	rolloutStrategy *RolloutStrategy
 }
 
 func NewQueue(kubeClient client.Client, recorder events.Recorder) *Queue {
 	return &Queue{
-		source:     make(chan event.TypedGenericEvent[*corev1.Pod], 10000),
-		set:        sets.New[QueueKey](),
-		kubeClient: kubeClient,
-		recorder:   recorder,
+		source:          make(chan event.TypedGenericEvent[*corev1.Pod], 10000),
+		set:             sets.New[QueueKey](),
+		kubeClient:      kubeClient,
+		recorder:        recorder,
+		rolloutStrategy: NewRolloutStrategy(kubeClient),
 	}
 }
 
@@ -159,6 +161,28 @@ func (q *Queue) Reconcile(ctx context.Context, pod *corev1.Pod) (reconcile.Resul
 		//controller can reconcile on it
 		return reconcile.Result{}, nil
 	}
+
+	// Try graceful rollout first for consolidation evictions
+	if q.isConsolidationEviction(ctx, pod) {
+		log.FromContext(ctx).V(1).Info("attempting graceful rollout for consolidation", "pod", pod.Name)
+
+		triggered, err := q.rolloutStrategy.TriggerGracefulRollout(ctx, pod)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to trigger graceful rollout, falling back to eviction")
+		} else if triggered {
+			// Wait for new pod to be ready on different node
+			originalNodeName := pod.Spec.NodeName
+			log.FromContext(ctx).Info("waiting for new pod to be ready", "pod", pod.Name, "originalNode", originalNodeName)
+
+			if err := q.rolloutStrategy.WaitForNewPodReady(ctx, pod, originalNodeName); err != nil {
+				log.FromContext(ctx).Error(err, "timeout waiting for new pod, proceeding with eviction")
+			} else {
+				log.FromContext(ctx).Info("new pod ready on different node, proceeding to evict old pod", "pod", pod.Name)
+				// Continue to eviction below to clean up the old pod
+			}
+		}
+	}
+
 	// Evict the pod
 	if err := q.kubeClient.SubResource("eviction").Create(ctx,
 		pod,
@@ -221,4 +245,11 @@ func evictionReason(ctx context.Context, pod *corev1.Pod, kubeClient client.Clie
 		return cond.Reason
 	}
 	return "Forceful Termination"
+}
+
+// isConsolidationEviction checks if the pod is being evicted due to consolidation
+func (q *Queue) isConsolidationEviction(ctx context.Context, pod *corev1.Pod) bool {
+	reason := evictionReason(ctx, pod, q.kubeClient)
+	// Check for consolidation-related disruption reasons
+	return reason == "Underutilized" || reason == "underutilized"
 }
