@@ -125,6 +125,17 @@ func NodePoolBlockedForDisruptionReason(nodePool *v1.NodePool, reason v1.Disrupt
 	}
 }
 
+func NodePoolBlockedForDisruptionReasonByNodeLimit(nodePool *v1.NodePool, reason v1.DisruptionReason) events.Event {
+	return events.Event{
+		InvolvedObject: nodePool,
+		Type:           corev1.EventTypeNormal,
+		Reason:         events.DisruptionBlocked,
+		Message:        fmt.Sprintf("No allowed disruptions for disruption reason %s due to node hard limit", reason),
+		DedupeValues:   []string{string(nodePool.UID), string(reason)},
+		DedupeTimeout:  1 * time.Minute,
+	}
+}
+
 func NodePoolBlocked(nodePool *v1.NodePool) events.Event {
 	return events.Event{
 		InvolvedObject: nodePool,
