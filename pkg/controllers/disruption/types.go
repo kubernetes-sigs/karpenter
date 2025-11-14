@@ -121,17 +121,15 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 			return nil, err
 		}
 	}
-	reschedulablePods := lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) })
 	return &Candidate{
 		StateNode:         node,
 		instanceType:      instanceType,
 		NodePool:          nodePool,
 		capacityType:      node.Labels()[v1.CapacityTypeLabelKey],
 		zone:              node.Labels()[corev1.LabelTopologyZone],
-		reschedulablePods: reschedulablePods,
-		// Only include reschedulable pods in disruption cost calculation.
-		// DaemonSet pods are excluded because they will be automatically recreated on any new node.
-		DisruptionCost: disruptionutils.ReschedulingCost(ctx, reschedulablePods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
+		reschedulablePods: lo.Filter(pods, func(p *corev1.Pod, _ int) bool { return pod.IsReschedulable(p) }),
+		// We get the disruption cost from all pods in the candidate, not just the reschedulable pods
+		DisruptionCost: disruptionutils.ReschedulingCost(ctx, pods) * disruptionutils.LifetimeRemaining(clk, nodePool, node.NodeClaim),
 	}, nil
 }
 
