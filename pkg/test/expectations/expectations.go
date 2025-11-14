@@ -384,7 +384,8 @@ func ExpectNodeClaimDeployedNoNode(ctx context.Context, c client.Client, cloudPr
 	Expect(err).To(Succeed())
 
 	// Make the nodeclaim ready in the status conditions
-	nc = lifecycle.PopulateNodeClaimDetails(nc, resolved)
+	nc, err = lifecycle.PopulateNodeClaimDetails(nc, resolved)
+	Expect(err).ToNot(HaveOccurred())
 	nc.StatusConditions().SetTrue(v1.ConditionTypeLaunched)
 	ExpectApplied(ctx, c, nc)
 	return nc, nil
