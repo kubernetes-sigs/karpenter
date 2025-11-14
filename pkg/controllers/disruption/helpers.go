@@ -83,7 +83,7 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 	}
 	for _, n := range candidates {
 		currentlyReschedulablePods := lo.Filter(n.reschedulablePods, func(p *corev1.Pod, _ int) bool {
-			return pdbs.IsCurrentlyReschedulable(p)
+			return pdbs.IsCurrentlyReschedulable(ctx, kubeClient, p)
 		})
 		pods = append(pods, currentlyReschedulablePods...)
 	}
