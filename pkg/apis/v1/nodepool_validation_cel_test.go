@@ -308,6 +308,79 @@ var _ = Describe("CEL/Validation", func() {
 			}}
 			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
 		})
+
+		DescribeTable("should succeed on a valid consolidationPriceImprovementPercentage", func(value int32) {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			lo.Must0(unstructured.SetNestedField(u, int64(value), "spec", "disruption", "consolidationPriceImprovementPercentage"))
+			obj := &unstructured.Unstructured{}
+			obj.SetGroupVersionKind(nodePool.GroupVersionKind())
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Succeed())
+		},
+			Entry("zero (any savings)", int32(0)),
+			Entry("5 percent", int32(5)),
+			Entry("10 percent", int32(10)),
+			Entry("20 percent", int32(20)),
+			Entry("50 percent", int32(50)),
+			Entry("100 percent (disable)", int32(100)),
+		)
+
+		DescribeTable("should fail on an invalid consolidationPriceImprovementPercentage", func(value int32) {
+			u := lo.Must(runtime.DefaultUnstructuredConverter.ToUnstructured(nodePool))
+			lo.Must0(unstructured.SetNestedField(u, int64(value), "spec", "disruption", "consolidationPriceImprovementPercentage"))
+			obj := &unstructured.Unstructured{}
+			obj.SetGroupVersionKind(nodePool.GroupVersionKind())
+			lo.Must0(runtime.DefaultUnstructuredConverter.FromUnstructured(u, obj))
+
+			Expect(env.Client.Create(ctx, obj)).To(Not(Succeed()))
+		},
+			Entry("negative", int32(-1)),
+			Entry("negative large", int32(-10)),
+			Entry("greater than 100", int32(101)),
+			Entry("much greater than 100", int32(200)),
+		)
+
+		It("should succeed when consolidationPriceImprovementPercentage is nil", func() {
+			// Test that the field is optional
+			Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+		})
+
+		// Runtime validation tests for consolidationPriceImprovementPercentage
+		Context("Runtime Validation", func() {
+			BeforeEach(func() {
+				Expect(env.Client.Create(ctx, nodePool)).To(Succeed())
+			})
+
+			It("should succeed with valid consolidationPriceImprovementPercentage values", func() {
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = lo.ToPtr(int32(20))
+				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = lo.ToPtr(int32(0))
+				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = lo.ToPtr(int32(100))
+				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = lo.ToPtr(int32(50))
+				Expect(nodePool.RuntimeValidate(ctx)).To(Succeed())
+			})
+
+			It("should fail with consolidationPriceImprovementPercentage out of range", func() {
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = lo.ToPtr(int32(-1))
+				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
+
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = lo.ToPtr(int32(101))
+				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
+
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = lo.ToPtr(int32(200))
+				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
+
+				nodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage = lo.ToPtr(int32(-10))
+				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())
+			})
+		})
 	})
 	Context("Taints", func() {
 		It("should succeed for valid taints", func() {
