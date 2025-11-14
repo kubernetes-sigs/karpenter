@@ -19,9 +19,9 @@ package disruption
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
-	"time"
 
 	cache "github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
@@ -38,11 +38,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-const (
-	defaultExpiration = 30 * time.Minute
-	cleanupInterval   = 1 * time.Minute
-)
-
 type Tracker struct {
 	sync.RWMutex
 	decisionCache       *cache.Cache
@@ -50,35 +45,35 @@ type Tracker struct {
 	bucketsThresholdMap map[string]*BucketThresholds
 	enabled             bool
 
-	client      client.Client
+	kubeClient  client.Client
 	cluster     *state.Cluster
 	clusterCost *cost.ClusterCost
 	clock       clock.Clock
 }
 
 // NewTracker creates a queue that will asynchronously track and emit metrics on decisions
-func NewTracker(cluster *state.Cluster, clock clock.Clock, bucketsThresholdMap map[string]*BucketThresholds, enabled bool) *Tracker {
-	decisionCache := cache.New(defaultExpiration, cleanupInterval)
+func NewTracker(cluster *state.Cluster, clock clock.Clock, decisionCache *cache.Cache, bucketsThresholdMap map[string]*BucketThresholds, enabled bool) *Tracker {
 	decisionCache.OnEvicted(DecisionExpired)
-	for _, st := range lo.Values(bucketsThresholdMap) {
-		sort.Slice(st.thresholds, func(i, j int) bool {
-			return st.thresholds[i].lowerBound < st.thresholds[j].lowerBound
-		})
-	}
-	for _, b := range DecisionDimensions {
-		_, exists := bucketsThresholdMap[b]
-		if !exists {
-			log.FromContext(context.Background()).Error(fmt.Errorf("missing thresholds for necessary bucket"), "bucket", b)
-			DecisionTrackerErrors.Inc(map[string]string{})
-			// disabling to prevent panics later.
-			enabled = false
+	bucketsThresholdMapCopy := map[string]*BucketThresholds{}
+	if bucketsThresholdMap != nil {
+		maps.Copy(bucketsThresholdMapCopy, bucketsThresholdMap)
+		for _, bt := range bucketsThresholdMapCopy {
+			sort.Slice(bt.thresholds, func(i, j int) bool {
+				return bt.thresholds[i].lowerBound < bt.thresholds[j].lowerBound
+			})
+		}
+		for _, b := range DecisionDimensions {
+			_, exists := bucketsThresholdMapCopy[b]
+			if !exists {
+				panic(fmt.Errorf("missing thresholds for necessary bucket %s", b))
+			}
 		}
 	}
 	tracker := &Tracker{
 		// nolint:staticcheck
 		decisionCache:       decisionCache,
 		disruptionKeyMap:    make(map[string]string),
-		bucketsThresholdMap: bucketsThresholdMap,
+		bucketsThresholdMap: bucketsThresholdMapCopy,
 		enabled:             enabled,
 		cluster:             cluster,
 		clock:               clock,
@@ -88,7 +83,7 @@ func NewTracker(cluster *state.Cluster, clock clock.Clock, bucketsThresholdMap m
 
 func (t *Tracker) GatherClusterState(ctx context.Context) (*ClusterStateSnapshot, error) {
 	deployments := appsv1.DeploymentList{}
-	err := t.client.List(ctx, &deployments)
+	err := t.kubeClient.List(ctx, &deployments)
 	if err != nil {
 		return nil, err
 	}
@@ -132,20 +127,28 @@ func (t *Tracker) AddCommand(ctx context.Context, cmd *Command) {
 	if err != nil {
 		log.FromContext(ctx).Error(err, "gathering cluster state", "cmd", cmd)
 		DecisionTrackerErrors.Inc(map[string]string{})
+		return
 	}
+	nodepoolName := "unknown"
+	if len(cmd.Candidates) > 0 && cmd.Candidates[0].NodePool != nil {
+		nodepoolName = cmd.Candidates[0].NodePool.Name
+	}
+
 	d := TrackedDecision{
-		clusterState: s,
-		startTime:    t.clock.Now(),
-		command:      cmd,
-		otherKeys:    lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.NodeClaim.Name }),
+		clusterState:      s,
+		startTime:         t.clock.Now(),
+		otherKeys:         lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.NodeClaim.Name }),
+		consolidationType: cmd.ConsolidationType(),
+		nodepoolName:      nodepoolName,
 	}
 	t.Lock()
 	defer t.Unlock()
 	for _, k := range d.otherKeys {
-		err := t.decisionCache.Add(k, d, 0)
+		err := t.decisionCache.Add(k, d, cache.DefaultExpiration)
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to add decision to cache", "key", k)
 			DecisionTrackerErrors.Inc(map[string]string{})
+			continue
 		}
 	}
 }
@@ -158,6 +161,7 @@ func (t *Tracker) FinishCommand(ctx context.Context, nc *v1.NodeClaim) {
 	if err != nil {
 		log.FromContext(ctx).Error(err, "gathering cluster state", "nc", nc)
 		DecisionTrackerErrors.Inc(map[string]string{})
+		return
 	}
 	t.Lock()
 
@@ -168,8 +172,8 @@ func (t *Tracker) FinishCommand(ctx context.Context, nc *v1.NodeClaim) {
 		t.Unlock()
 		return
 	}
-	decision, okay := d.(*TrackedDecision)
-	if !okay {
+	decision, ok := d.(*TrackedDecision)
+	if !ok {
 		log.FromContext(ctx).Error(fmt.Errorf("failed to cast cached item to Decision for NodeClaim"), "nc", nc)
 		DecisionTrackerErrors.Inc(map[string]string{})
 		t.Unlock()
@@ -189,7 +193,14 @@ func (t *Tracker) FinishCommand(ctx context.Context, nc *v1.NodeClaim) {
 }
 
 func DecisionExpired(k string, d interface{}) {
-	fmt.Printf("A decision expired! %s %s \n", k, d)
+	decision, ok := d.(*TrackedDecision)
+	if !ok {
+		log.FromContext(context.Background()).Error(fmt.Errorf("failed to cast cached item to Decision for key"), "key", k)
+		DecisionTrackerErrors.Inc(map[string]string{})
+		return
+	}
+	log.FromContext(context.Background()).Info("A decision expired", "decision", decision)
+	DecisionTrackerCacheExpirations.Inc(map[string]string{})
 }
 
 func (t *Tracker) EmitMetrics(start *TrackedDecision, end *ClusterStateSnapshot) {
@@ -234,29 +245,10 @@ func (t *Tracker) EmitMetrics(start *TrackedDecision, end *ClusterStateSnapshot)
 		TotalMemoryRequestsLabel:      convertIntoBucket(float64(startMemory.Value()), t.bucketsThresholdMap[TotalMemoryRequestsLabel]),
 		TotalNodeCountLabel:           convertIntoBucket(float64(start.clusterState.totalNodes), t.bucketsThresholdMap[TotalNodeCountLabel]),
 		TotalDesiredPodCountLabel:     convertIntoBucket(float64(start.clusterState.totalDesiredPodCount), t.bucketsThresholdMap[TotalDesiredPodCountLabel]),
-		ConsolidationTypeLabel:        start.command.ConsolidationType(),
+		ConsolidationTypeLabel:        start.consolidationType,
 		PodCPURequestChangeRatioLabel: convertIntoBucket(cpuRequestsRatio, t.bucketsThresholdMap[PodCPURequestChangeRatioLabel]),
 		PodMemRequestChangeRatioLabel: convertIntoBucket(memoryRequestsRatio, t.bucketsThresholdMap[PodMemRequestChangeRatioLabel]),
 	}
-
-	// Add consolidation type from the command method if available
-	if start.command.Method != nil {
-		labels[ConsolidationPolicyLabel] = start.command.ConsolidationType()
-	}
-
-	// Add nodepool name - using first candidate's nodepool for now
-	// TODO: Handle multiple nodepools in a single decision better
-	if len(start.command.Candidates) > 0 && start.command.Candidates[0].NodePool != nil {
-		labels[NodePoolNameLabel] = start.command.Candidates[0].NodePool.Name
-	}
-
-	// TODO: InvolvesPodAntiAffinity dimension not available in current data structures
-	// Need to analyze the pods in the decision to determine if anti-affinity is involved
-	labels[InvolvesPodAntiAffinityLabel] = "unknown"
-
-	// TODO: ConsolidationPolicy (WhenEmpty, WhenEmptyOrUnderutilized, Never) not available
-	// Need to access the NodePool's disruption policy configuration
-	// Currently using ConsolidationType as a substitute which gives us "empty", "single", "multi", etc.
 
 	// Emit all the change ratio metrics
 	ClusterCostChangeRatio.Set(clusterCostRatio, labels)

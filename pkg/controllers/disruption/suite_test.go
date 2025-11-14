@@ -36,6 +36,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	cache "github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -101,7 +102,7 @@ var _ = BeforeSuite(func() {
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	recorder = test.NewEventRecorder()
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock)
-	tracker = disruption.NewTracker(cluster, fakeClock, nil, false)
+	tracker = disruption.NewTracker(cluster, fakeClock, cache.New(30*time.Minute, time.Minute), nil, false)
 	queue = disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov, tracker)
 })
 

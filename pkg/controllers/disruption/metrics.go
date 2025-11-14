@@ -37,7 +37,6 @@ const (
 	TotalNodeCountLabel           = "total_node_count"
 	TotalDesiredPodCountLabel     = "total_desired_pod_count"
 	InvolvesPodAntiAffinityLabel  = "involves_pod_anti_affinity"
-	ConsolidationPolicyLabel      = "consolidation_policy"
 	NodePoolNameLabel             = "nodepool_name"
 	PodCPURequestChangeRatioLabel = "pod_cpu_request_change_ratio"
 	PodMemRequestChangeRatioLabel = "pod_mem_request_change_ratio"
@@ -127,8 +126,6 @@ var (
 		TotalMemoryRequestsLabel,
 		TotalNodeCountLabel,
 		TotalDesiredPodCountLabel,
-		InvolvesPodAntiAffinityLabel,
-		ConsolidationPolicyLabel,
 		ConsolidationTypeLabel,
 		NodePoolNameLabel,
 		PodCPURequestChangeRatioLabel,
@@ -196,7 +193,7 @@ var (
 		},
 		DecisionDimensions,
 	)
-	// DecisionTrackerErrors tracks the number of errors in the decision tracker
+	// DecisionTrackerErrors tracks the number of internal errors in the decision tracker
 	DecisionTrackerErrors = opmetrics.NewPrometheusCounter(
 		crmetrics.Registry,
 		prometheus.CounterOpts{
@@ -204,6 +201,17 @@ var (
 			Subsystem: decisionLabel,
 			Name:      "internal_errors_total",
 			Help:      "ALPHA METRIC. Total Errors during the course of decision tracking",
+		},
+		[]string{},
+	)
+	// DecisionTrackerCacheExpirations tracks the number of cache expirations in the decision tracker
+	DecisionTrackerCacheExpirations = opmetrics.NewPrometheusCounter(
+		crmetrics.Registry,
+		prometheus.CounterOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: decisionLabel,
+			Name:      "cache_expirations_total",
+			Help:      "ALPHA METRIC. Total Cache entry expirations during the course of decision tracking",
 		},
 		[]string{},
 	)

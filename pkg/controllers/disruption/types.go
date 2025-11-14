@@ -169,10 +169,11 @@ var (
 )
 
 type TrackedDecision struct {
-	clusterState *ClusterStateSnapshot
-	startTime    time.Time
-	command      *Command
-	otherKeys    []string
+	clusterState      *ClusterStateSnapshot
+	startTime         time.Time
+	otherKeys         []string
+	consolidationType string
+	nodepoolName      string
 }
 
 type ClusterStateSnapshot struct {
