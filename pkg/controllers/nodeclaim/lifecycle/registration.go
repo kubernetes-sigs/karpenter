@@ -104,7 +104,7 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 	if nodePoolName != "" {
 		nodePool := &v1.NodePool{}
 		if err := r.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-			return err
+			return fmt.Errorf("getting nodepool %q, %w", nodePoolName, err)
 		}
 		if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 			return o.Kind == object.GVK(nodePool).Kind && o.UID == nodePool.UID
@@ -117,7 +117,7 @@ func (r *Registration) updateNodePoolRegistrationHealth(ctx context.Context, nod
 			// can cause races due to the fact that it fully replaces the list on a change
 			// Here, we are updating the status condition list
 			if err := r.kubeClient.Status().Patch(ctx, nodePool, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); client.IgnoreNotFound(err) != nil {
-				return err
+				return fmt.Errorf("patching nodepool %q status, %w", nodePool.Name, err)
 			}
 		}
 		r.npState.Update(nodePool.UID, true)

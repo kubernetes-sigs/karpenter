@@ -291,7 +291,7 @@ func (q *Queue) markDisrupted(ctx context.Context, cmd *Command) ([]*Candidate, 
 func (q *Queue) createReplacementNodeClaims(ctx context.Context, cmd *Command) error {
 	nodeClaimNames, err := q.provisioner.CreateNodeClaims(ctx, lo.Map(cmd.Replacements, func(r *Replacement, _ int) *pscheduling.NodeClaim { return r.NodeClaim }), provisioning.WithReason(strings.ToLower(string(cmd.Reason()))))
 	if err != nil {
-		return err
+		return fmt.Errorf("creating replacement nodeclaims, %w", err)
 	}
 	if len(nodeClaimNames) != len(cmd.Replacements) {
 		// shouldn't ever occur since a partially failed CreateNodeClaims should return an error

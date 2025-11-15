@@ -93,7 +93,7 @@ func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*core
 	for _, node := range n {
 		p, err := node.Pods(ctx, kubeClient)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("getting pods for node %q, %w", node.Node.Name, err)
 		}
 		pods = append(pods, p...)
 	}
@@ -105,7 +105,7 @@ func (n StateNodes) CurrentlyReschedulablePods(ctx context.Context, kubeClient c
 	for _, node := range n {
 		p, err := node.CurrentlyReschedulablePods(ctx, kubeClient)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("getting currently reschedulable pods for node %q, %w", node.Node.Name, err)
 		}
 		pods = append(pods, p...)
 	}
