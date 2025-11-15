@@ -18,10 +18,12 @@ package controllers
 
 import (
 	"context"
+	"time"
 
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
+	"github.com/patrickmn/go-cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
@@ -78,9 +80,10 @@ func NewControllers(
 ) []controller.Controller {
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
-	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
+	tracker := disruption.NewTracker(cluster, clock, cache.New(30*time.Minute, time.Minute), nil, false)
+	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p, tracker)
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,

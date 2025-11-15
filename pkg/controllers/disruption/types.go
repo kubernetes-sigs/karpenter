@@ -168,6 +168,30 @@ var (
 	DeleteDecision  Decision = "delete"
 )
 
+type TrackedDecision struct {
+	clusterState      *ClusterStateSnapshot
+	startTime         time.Time
+	otherKeys         []string
+	consolidationType string
+	nodepoolName      string
+}
+
+type ClusterStateSnapshot struct {
+	clusterCost              float64
+	podResources             corev1.ResourceList
+	totalNodes               int
+	totalDesiredPodCount     int
+	totalDesiredPodResources *corev1.ResourceList
+}
+type BucketThresholds struct {
+	biggestName string
+	thresholds  []BucketThreshold
+}
+type BucketThreshold struct {
+	lowerBound float64
+	size       string
+}
+
 func (c Command) Decision() Decision {
 	switch {
 	case len(c.Candidates) > 0 && len(c.Replacements) > 0:
