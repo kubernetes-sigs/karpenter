@@ -98,7 +98,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		if node.NodeClaim != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 		}
-		return nil, err
+		return nil, fmt.Errorf("validating node %q for disruption, %w", node.Node.Name, err)
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
@@ -118,7 +118,7 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		eventualDisruptionCandidate := node.NodeClaim.Spec.TerminationGracePeriod != nil && disruptionClass == EventualDisruptionClass
 		if lo.Ternary(eventualDisruptionCandidate, state.IgnorePodBlockEvictionError(err), err) != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
-			return nil, err
+			return nil, fmt.Errorf("validating pod disruption for node %q, %w", node.Node.Name, err)
 		}
 	}
 	return &Candidate{
