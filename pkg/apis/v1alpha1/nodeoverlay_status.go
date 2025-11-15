@@ -28,9 +28,10 @@ const (
 
 // NodeOverlayStatus defines the observed state of NodeOverlay
 type NodeOverlayStatus struct {
+	//nolint:kubeapilinter
 	// Conditions contains signals for health and readiness
 	// +optional
-	Conditions []status.Condition `json:"conditions,omitempty"`
+	Conditions []status.Condition `json:"conditions,omitempty"` //nolint:kubeapilinter
 }
 
 func (in *NodeOverlay) StatusConditions() status.ConditionSet {

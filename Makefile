@@ -113,7 +113,7 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	hack/boilerplate.sh
 	go vet ./...
 	cd kwok/charts && helm-docs
-	golangci-lint run
+	./bin/golangci-lint-kube-api-linter run
 	@git diff --quiet ||\
 		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
 		if [ "${CI}" = true ]; then\

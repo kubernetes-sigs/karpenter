@@ -25,6 +25,7 @@ import (
 )
 
 type NodeOverlaySpec struct {
+	//nolint:kubeapilinter
 	// Requirements constrain when this NodeOverlay is applied during scheduling simulations.
 	// These requirements can match:
 	// - Well-known labels (e.g., node.kubernetes.io/instance-type, karpenter.sh/nodepool)
@@ -35,22 +36,26 @@ type NodeOverlaySpec struct {
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
 	Requirements []v1.NodeSelectorRequirement `json:"requirements,omitempty"`
+	//nolint:kubeapilinter
 	// PriceAdjustment specifies the price change for matching instance types. Accepts either:
 	// - A fixed price modifier (e.g., -0.5, 1.2)
 	// - A percentage modifier (e.g., +10% for increase, -15% for decrees)
 	// +kubebuilder:validation:Pattern=`^(([+-]{1}(\d*\.?\d+))|(\+{1}\d*\.?\d+%)|(^(-\d{1,2}(\.\d+)?%)$)|(-100%))$`
 	// +optional
 	PriceAdjustment *string `json:"priceAdjustment,omitempty"`
+	//nolint:kubeapilinter
 	// Price specifies amount for an instance types that match the specified labels. Users can override prices using a signed float representing the price override
 	// +kubebuilder:validation:Pattern=`^\d+(\.\d+)?$`
 	// +optional
 	Price *string `json:"price,omitempty"`
+	//nolint:kubeapilinter
 	// Capacity adds extended resources only, and does not replace any existing resources.
 	// These extended resources are appended to the node's existing resource list.
 	// Note: This field does not modify or override standard resources like cpu, memory, ephemeral-storage, or pods.
 	// +kubebuilder:validation:XValidation:message="invalid resource restricted",rule="self.all(x, !(x in ['cpu', 'memory', 'ephemeral-storage', 'pods']))"
 	// +optional
 	Capacity v1.ResourceList `json:"capacity,omitempty"`
+	//nolint:kubeapilinter
 	// Weight defines the priority of this NodeOverlay when overriding node attributes.
 	// NodeOverlays with higher numerical weights take precedence over those with lower weights.
 	// If no weight is specified, the NodeOverlay is treated as having a weight of 0.
@@ -69,12 +74,14 @@ type NodeOverlaySpec struct {
 // +kubebuilder:printcolumn:name="Weight",type="integer",JSONPath=".spec.weight",priority=1,description=""
 // +kubebuilder:subresource:status
 type NodeOverlay struct {
-	metav1.TypeMeta   `json:",inline"`
+	metav1.TypeMeta `json:",inline"`
+	//nolint:kubeapilinter
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	//nolint:kubeapilinter
 	// +kubebuilder:validation:XValidation:message="cannot set both 'price' and 'priceAdjustment'",rule="!has(self.price) || !has(self.priceAdjustment)"
 	Spec   NodeOverlaySpec   `json:"spec"`
-	Status NodeOverlayStatus `json:"status,omitempty"`
+	Status NodeOverlayStatus `json:"status,omitempty"` //nolint:kubeapilinter
 }
 
 // +kubebuilder:object:root=true
