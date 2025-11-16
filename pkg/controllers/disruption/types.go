@@ -98,7 +98,11 @@ func NewCandidate(ctx context.Context, kubeClient client.Client, recorder events
 		if node.NodeClaim != nil {
 			recorder.Publish(disruptionevents.Blocked(node.Node, node.NodeClaim, pretty.Sentence(err.Error()))...)
 		}
-		return nil, fmt.Errorf("validating node %q for disruption, %w", node.Node.Name, err)
+		nodeName := ""
+		if node.Node != nil {
+			nodeName = node.Node.Name
+		}
+		return nil, fmt.Errorf("validating node %q for disruption, %w", nodeName, err)
 	}
 	// We know that the node will have the label key because of the node.IsDisruptable check above
 	nodePoolName := node.Labels()[v1.NodePoolLabelKey]
