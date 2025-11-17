@@ -401,6 +401,25 @@ func (c *Cluster) NodeClaimExists(nodeClaimName string) bool {
 	return ok
 }
 
+// GetUnresolvedNodeClaimNames returns the names of NodeClaims that don't have a ProviderID yet
+// (i.e., instances that haven't been launched/resolved)
+func (c *Cluster) GetUnresolvedNodeClaimNames(nodePoolName string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	nodeClaimState := c.NodePoolState.GetNodeClaimState(nodePoolName)
+	var unresolved []string
+
+	// Check active NodeClaims
+	for ncName := range nodeClaimState.Active {
+		if providerID, ok := c.nodeClaimNameToProviderID[ncName]; ok && providerID == "" {
+			unresolved = append(unresolved, ncName)
+		}
+	}
+
+	return unresolved
+}
+
 // AckPods marks the pod as acknowledged for scheduling from the provisioner. This is only done once per-pod.
 func (c *Cluster) AckPods(pods ...*corev1.Pod) {
 	now := c.clock.Now()
