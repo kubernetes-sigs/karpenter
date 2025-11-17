@@ -189,8 +189,16 @@ func (c *Controller) getDeprovisioningCandidates(ctx context.Context, np *v1.Nod
 		return candidates
 	}
 
+	// Get all StateNodes for this NodePool
+	nodes := make([]*state.StateNode, 0)
+	for n := range c.cluster.Nodes() {
+		if n.Labels()[v1.NodePoolLabelKey] == np.Name && n.NodeClaim != nil && !n.MarkedForDeletion() {
+			nodes = append(nodes, n.DeepCopy())
+		}
+	}
+
 	// Resolved nodes (empty first, then by disruption cost)
-	resolvedCandidates := c.getResolvedNodeClaims(ctx, np, remaining)
+	resolvedCandidates := c.getResolvedNodeClaims(ctx, nodes, np, remaining)
 	candidates = append(candidates, resolvedCandidates...)
 
 	return candidates
@@ -223,15 +231,7 @@ func (c *Controller) getUnresolvedNodeClaims(ctx context.Context, nodePoolName s
 
 // getResolvedNodeClaims returns resolved NodeClaims (those with ProviderID) up to the specified count,
 // prioritizing empty nodes first, then nodes with lowest disruption cost
-func (c *Controller) getResolvedNodeClaims(ctx context.Context, np *v1.NodePool, count int) []*v1.NodeClaim {
-	// Get all StateNodes for this NodePool
-	nodes := make([]*state.StateNode, 0)
-	for n := range c.cluster.Nodes() {
-		if n.Labels()[v1.NodePoolLabelKey] == np.Name && n.NodeClaim != nil && !n.MarkedForDeletion() {
-			nodes = append(nodes, n.DeepCopy())
-		}
-	}
-
+func (c *Controller) getResolvedNodeClaims(ctx context.Context, nodes []*state.StateNode, np *v1.NodePool, count int) []*v1.NodeClaim {
 	if len(nodes) == 0 {
 		return nil
 	}
