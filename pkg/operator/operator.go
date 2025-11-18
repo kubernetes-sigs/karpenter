@@ -104,7 +104,7 @@ type Operator struct {
 
 type Options struct {
 	LeaderElectionLabels map[string]string
-	LeaderElectionConfig *rest.Config  // Optional separate config for leader election
+	LeaderElectionConfig *rest.Config // Optional separate config for leader election
 }
 
 // Adds LeaderElectionLabels to the underlying manager's LeaderElectionOptions
@@ -116,9 +116,9 @@ func WithLeaderElectionLabels(labels map[string]string) option.Function[Options]
 
 // Adds LeaderElectionConfig to the underlying manager's LeaderElectionOptions allowing for custom client config
 func WithLeaderElectionConfig(config *rest.Config) option.Function[Options] {
-    return func(opts *Options) {
-        opts.LeaderElectionConfig = config
-    }
+	return func(opts *Options) {
+		opts.LeaderElectionConfig = config
+	}
 }
 
 // NewOperator instantiates a controller manager or panics
@@ -154,8 +154,8 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	leaderConfig := rest.CopyConfig(config)
 
 	if opts.LeaderElectionConfig != nil {
-        leaderConfig = opts.LeaderElectionConfig
-    }
+		leaderConfig = opts.LeaderElectionConfig
+	}
 
 	config.QPS = float32(options.FromContext(ctx).KubeClientQPS)
 	config.Burst = options.FromContext(ctx).KubeClientBurst
