@@ -25,6 +25,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	karpenterv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 type DeploymentOptions struct {
@@ -144,7 +146,7 @@ func WithAnnotations(annotations map[string]string) DeploymentOptionModifier {
 // WithDoNotDisrupt adds the do-not-disrupt annotation to prevent Karpenter disruption
 func WithDoNotDisrupt() DeploymentOptionModifier {
 	return WithAnnotations(map[string]string{
-		"karpenter.sh/do-not-disrupt": "true",
+		karpenterv1.DoNotDisruptAnnotationKey: "true",
 	})
 }
 
@@ -313,4 +315,18 @@ func WithLivenessProbe(probe *v1.Probe) DeploymentOptionModifier {
 // WithPodAntiAffinityHostname is a convenience function for hostname anti-affinity
 func WithPodAntiAffinityHostname() DeploymentOptionModifier {
 	return WithPodAntiAffinity(v1.LabelHostname)
+}
+
+// WithCommand sets a custom command for the container
+func WithCommand(command []string) DeploymentOptionModifier {
+	return func(opts *DeploymentOptions) {
+		opts.PodOptions.Command = command
+	}
+}
+
+// WithPreStopSleep adds a pre-stop sleep hook to the container
+func WithPreStopSleep(seconds int64) DeploymentOptionModifier {
+	return func(opts *DeploymentOptions) {
+		opts.PodOptions.PreStopSleep = &seconds
+	}
 }
