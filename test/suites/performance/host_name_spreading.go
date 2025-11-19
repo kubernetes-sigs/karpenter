@@ -24,7 +24,6 @@ import (
 	"github.com/samber/lo"
 
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 var _ = Describe("Performance", func() {
@@ -37,9 +36,9 @@ var _ = Describe("Performance", func() {
 			By("Creating deployments with hostname spreading")
 
 			// Create deployment options using templates
-			smallOpts := common.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
-				common.WithHostnameSpread())
-			largeOpts := common.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
+			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
+				test.WithHostnameSpread())
+			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
 
 			// Create deployments
 			smallDeployment := test.Deployment(smallOpts)

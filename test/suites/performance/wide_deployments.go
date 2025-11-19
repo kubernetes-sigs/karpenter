@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 // DeploymentConfig holds the deterministic configuration for each deployment
@@ -93,7 +92,7 @@ func createWideDeployments() []*appsv1.Deployment {
 
 	for i, config := range configs {
 		// Build modifiers based on configuration
-		var modifiers []common.DeploymentOptionModifier
+		var modifiers []test.DeploymentOptionModifier
 
 		// Add zone topology spreading (all deployments get this)
 		zoneConstraints := []corev1.TopologySpreadConstraint{
@@ -122,25 +121,25 @@ func createWideDeployments() []*appsv1.Deployment {
 				},
 			}
 			zoneConstraints = append(zoneConstraints, hostnameConstraint)
-			modifiers = append(modifiers, common.WithLabels(map[string]string{"has-hostname-spread": "true"}))
+			modifiers = append(modifiers, test.WithLabels(map[string]string{"has-hostname-spread": "true"}))
 		}
 
-		modifiers = append(modifiers, common.WithTopologySpreadConstraints(zoneConstraints))
+		modifiers = append(modifiers, test.WithTopologySpreadConstraints(zoneConstraints))
 
 		// Add pod anti-affinity for deployments 1, 2, 3
 		if config.HasAntiAffinity {
 			modifiers = append(modifiers,
-				common.WithPodAntiAffinity(corev1.LabelHostname),
-				common.WithLabels(map[string]string{"has-anti-affinity": "true"}))
+				test.WithPodAntiAffinity(corev1.LabelHostname),
+				test.WithLabels(map[string]string{"has-anti-affinity": "true"}))
 		}
 
 		// Add deployment index label
-		modifiers = append(modifiers, common.WithLabels(map[string]string{
+		modifiers = append(modifiers, test.WithLabels(map[string]string{
 			"deployment-index": fmt.Sprintf("%d", i+1),
 		}))
 
 		// Create deployment options using templates
-		opts := common.CreateDeploymentOptions(config.Name, config.InitialPods, config.CPU, config.Memory, modifiers...)
+		opts := test.CreateDeploymentOptions(config.Name, config.InitialPods, config.CPU, config.Memory, modifiers...)
 		deployments[i] = test.Deployment(opts)
 	}
 

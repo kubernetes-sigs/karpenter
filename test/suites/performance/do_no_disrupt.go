@@ -25,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 var _ = Describe("Performance", func() {
@@ -38,11 +37,11 @@ var _ = Describe("Performance", func() {
 			By("Creating deployments with different resource profiles and protection")
 
 			// Create deployment options using templates
-			smallOpts := common.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
-				common.WithHostnameSpread())
-			largeOpts := common.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
-			protectedOpts := common.CreateDeploymentOptions("do-not-disrupt-app", 100, "950m", "450Mi",
-				common.WithDoNotDisrupt())
+			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
+				test.WithHostnameSpread())
+			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
+			protectedOpts := test.CreateDeploymentOptions("do-not-disrupt-app", 100, "950m", "450Mi",
+				test.WithDoNotDisrupt())
 
 			// Create deployments
 			smallDeployment := test.Deployment(smallOpts)

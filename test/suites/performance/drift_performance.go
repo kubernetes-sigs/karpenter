@@ -25,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 var _ = Describe("Performance", func() {
@@ -38,9 +37,9 @@ var _ = Describe("Performance", func() {
 			By("Creating initial deployments for drift testing")
 
 			// Create deployment options using templates
-			hostnameSpreadOpts := common.CreateDeploymentOptions("hostname-spread-app", 300, "950m", "3900Mi",
-				common.WithHostnameSpread())
-			standardOpts := common.CreateDeploymentOptions("standard-app", 300, "3800m", "31Gi")
+			hostnameSpreadOpts := test.CreateDeploymentOptions("hostname-spread-app", 300, "950m", "3900Mi",
+				test.WithHostnameSpread())
+			standardOpts := test.CreateDeploymentOptions("standard-app", 300, "3800m", "31Gi")
 
 			// Create deployments
 			hostnameSpreadDeployment := test.Deployment(hostnameSpreadOpts)

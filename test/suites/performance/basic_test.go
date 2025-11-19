@@ -24,7 +24,6 @@ import (
 	"github.com/samber/lo"
 
 	"sigs.k8s.io/karpenter/pkg/test"
-	"sigs.k8s.io/karpenter/test/pkg/environment/common"
 )
 
 var _ = Describe("Performance", func() {
@@ -33,8 +32,8 @@ var _ = Describe("Performance", func() {
 			// ========== PHASE 1: SCALE-OUT TEST ==========
 			By("Executing scale-out performance test with 1000 pods")
 			// Create deployments directly using the template
-			smallDeploymentOpts := common.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi")
-			largeDeploymentOpts := common.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
+			smallDeploymentOpts := test.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi")
+			largeDeploymentOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi")
 
 			smallDeployment := test.Deployment(smallDeploymentOpts)
 			largeDeployment := test.Deployment(largeDeploymentOpts)
