@@ -37,7 +37,6 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - uses: github/codeql-action/init@df32e399139a3050671466d7d9b3cbacc1cfd034 # v2.22.8
         with:
-          languages: javascript
           source-root: .github
           config: |
             packs:
