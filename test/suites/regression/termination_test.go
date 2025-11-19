@@ -105,7 +105,7 @@ var _ = Describe("Termination", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = karpv1.MustParseNillableDuration("10s")
 
 			const numPods = 1
-			deployment := test.Deployment(test.DeploymentOptions{Replicas: numPods})
+			deployment := test.Deployment(test.CreateDeploymentOptions("test-app", numPods, "100m", "128Mi", test.WithNoResourceRequests()))
 
 			By("kicking off provisioning for a deployment")
 			env.ExpectCreated(nodeClass, nodePool, deployment)
