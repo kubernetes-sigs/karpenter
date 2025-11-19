@@ -268,41 +268,56 @@ var _ = Describe("Termination", func() {
 				ResourceRequirements:          corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}},
 			},
 		})
-		deployment := test.Deployment(test.CreateDeploymentOptions("deployment", 1, "100m", "128Mi",
-			test.WithNoResourceRequests(),
-			test.WithLabels(map[string]string{
-				"drain-test": "true",
-				"app":        "deployment",
-			}),
-			test.WithTerminationGracePeriod(60),
-			test.WithImage("alpine:3.20.2"),
-			test.WithCommand([]string{"/bin/sh", "-c", "sleep 1000"}),
-			test.WithPreStopSleep(60),
-			test.WithResourceLimits("", "1Gi")))
-		nodeCriticalDeployment := test.Deployment(test.CreateDeploymentOptions("node-critical-deployment", 1, "100m", "128Mi",
-			test.WithNoResourceRequests(),
-			test.WithLabels(map[string]string{
-				"drain-test": "true",
-				"app":        "node-critical-deployment",
-			}),
-			test.WithTerminationGracePeriod(60),
-			test.WithImage("alpine:3.20.2"),
-			test.WithCommand([]string{"/bin/sh", "-c", "sleep 1000"}),
-			test.WithPreStopSleep(60),
-			test.WithPriorityClass("system-node-critical"),
-			test.WithResourceLimits("", "1Gi")))
-		clusterCriticalDeployment := test.Deployment(test.CreateDeploymentOptions("cluster-critical-deployment", 1, "100m", "128Mi",
-			test.WithNoResourceRequests(),
-			test.WithLabels(map[string]string{
-				"drain-test": "true",
-				"app":        "cluster-critical-deployment",
-			}),
-			test.WithTerminationGracePeriod(60),
-			test.WithImage("alpine:3.20.2"),
-			test.WithCommand([]string{"/bin/sh", "-c", "sleep 1000"}),
-			test.WithPreStopSleep(60),
-			test.WithPriorityClass("system-cluster-critical"),
-			test.WithResourceLimits("", "1Gi")))
+		deployment := test.Deployment(test.DeploymentOptions{
+			Replicas: int32(1),
+			PodOptions: test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"drain-test": "true",
+						"app":        "deployment",
+					},
+				},
+				TerminationGracePeriodSeconds: lo.ToPtr(int64(60)),
+				Image:                         "alpine:3.20.2",
+				Command:                       []string{"/bin/sh", "-c", "sleep 1000"},
+				PreStopSleep:                  lo.ToPtr(int64(60)),
+				ResourceRequirements:          corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}},
+			},
+		})
+		nodeCriticalDeployment := test.Deployment(test.DeploymentOptions{
+			Replicas: int32(1),
+			PodOptions: test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"drain-test": "true",
+						"app":        "node-critical-deployment",
+					},
+				},
+				TerminationGracePeriodSeconds: lo.ToPtr(int64(60)),
+				Image:                         "alpine:3.20.2",
+				Command:                       []string{"/bin/sh", "-c", "sleep 1000"},
+				PreStopSleep:                  lo.ToPtr(int64(60)),
+				PriorityClassName:             "system-node-critical",
+				ResourceRequirements:          corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}},
+			},
+		})
+		clusterCriticalDeployment := test.Deployment(test.DeploymentOptions{
+			Replicas: int32(1),
+			PodOptions: test.PodOptions{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"drain-test": "true",
+						"app":        "cluster-critical-deployment",
+					},
+				},
+				TerminationGracePeriodSeconds: lo.ToPtr(int64(60)),
+				Image:                         "alpine:3.20.2",
+				Command:                       []string{"/bin/sh", "-c", "sleep 1000"},
+				PreStopSleep:                  lo.ToPtr(int64(60)),
+				PriorityClassName:             "system-cluster-critical",
+				ResourceRequirements:          corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}},
+			},
+		})
 		env.ExpectCreated(nodeClass, nodePool, daemonSet, nodeCriticalDaemonSet, clusterCriticalDaemonSet, deployment, nodeCriticalDeployment, clusterCriticalDeployment)
 
 		nodeClaim := env.EventuallyExpectCreatedNodeClaimCount("==", 1)[0]
