@@ -108,4 +108,47 @@ var (
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
+	CandidatesSortDurationSeconds = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "candidates_sort_duration_seconds",
+			Help:      "Duration of candidate sorting in seconds. Labeled by consolidation type.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{ConsolidationTypeLabel},
+	)
+	MultiNodeConsolidationIterations = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "multi_node_consolidation_iterations",
+			Help:      "Number of binary search iterations to find optimal multi-node consolidation batch.",
+			Buckets:   []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20},
+		},
+		[]string{},
+	)
+	MultiNodeConsolidationBatchSize = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "multi_node_consolidation_batch_size",
+			Help:      "Number of nodes in successful multi-node consolidation batch. Labeled by decision type.",
+		},
+		[]string{decisionLabel},
+	)
+	MultiNodeConsolidationFailedIterationDuration = opmetrics.NewPrometheusHistogram(
+		crmetrics.Registry,
+		prometheus.HistogramOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: voluntaryDisruptionSubsystem,
+			Name:      "multi_node_consolidation_failed_iteration_duration_seconds",
+			Help:      "Cumulative time spent on failed binary search iterations per consolidation attempt.",
+			Buckets:   metrics.DurationBuckets(),
+		},
+		[]string{},
+	)
 )

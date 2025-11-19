@@ -124,10 +124,15 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	}
 
 	lastSavedCommand := Command{}
+	iterationCount := 0
+	var failedIterationTime time.Duration
+
 	// Set a timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, MultiNodeConsolidationTimeoutDuration)
 	defer cancel()
 	for min <= max {
+		iterationCount++
+		iterationStart := m.clock.Now()
 		mid := (min + max) / 2
 		candidatesToConsolidate := candidates[0 : mid+1]
 
@@ -162,9 +167,28 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 			lastSavedCommand = cmd
 			min = mid + 1
 		} else {
+			// This iteration failed - accumulate the time spent
+			failedIterationTime += m.clock.Since(iterationStart)
 			max = mid - 1
 		}
 	}
+
+	// Record metrics
+	MultiNodeConsolidationIterations.Observe(float64(iterationCount), map[string]string{})
+	if failedIterationTime > 0 {
+		MultiNodeConsolidationFailedIterationDuration.Observe(failedIterationTime.Seconds(), map[string]string{})
+	}
+	if lastSavedCommand.Decision() != NoOpDecision {
+		batchSize := len(lastSavedCommand.Candidates)
+		decision := "delete"
+		if lastSavedCommand.Decision() == ReplaceDecision {
+			decision = "replace"
+		}
+		MultiNodeConsolidationBatchSize.Set(float64(batchSize), map[string]string{
+			decisionLabel: decision,
+		})
+	}
+
 	return lastSavedCommand, nil
 }
 
