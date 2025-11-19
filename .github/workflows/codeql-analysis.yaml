@@ -38,6 +38,7 @@ jobs:
       - uses: github/codeql-action/init@df32e399139a3050671466d7d9b3cbacc1cfd034 # v2.22.8
         with:
           languages: javascript
+          source-root: .github
           config: |
             packs:
               # Use the latest version of 'codeql-javascript' published by 'advanced-security'
