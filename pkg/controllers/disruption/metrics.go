@@ -120,17 +120,21 @@ var (
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
 
-	DecisionDimensions = []string{
+	DecisionBucketDimensions = []string{
 		ClusterCostLabel,
 		TotalCPURequestsLabel,
 		TotalMemoryRequestsLabel,
 		TotalNodeCountLabel,
 		TotalDesiredPodCountLabel,
-		ConsolidationTypeLabel,
-		NodePoolNameLabel,
 		PodCPURequestChangeRatioLabel,
 		PodMemRequestChangeRatioLabel,
 	}
+
+	DecisionDimensions = append([]string{
+		ConsolidationTypeLabel,
+		NodePoolNameLabel,
+	}, DecisionBucketDimensions...)
+
 	// Change ratios are calculated with the following formula:
 	//   Value at Beginning / Value at End
 
@@ -201,17 +205,6 @@ var (
 			Subsystem: decisionLabel,
 			Name:      "internal_errors_total",
 			Help:      "ALPHA METRIC. Total Errors during the course of decision tracking",
-		},
-		[]string{},
-	)
-	// DecisionTrackerCacheExpirations tracks the number of cache expirations in the decision tracker
-	DecisionTrackerCacheExpirations = opmetrics.NewPrometheusCounter(
-		crmetrics.Registry,
-		prometheus.CounterOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: decisionLabel,
-			Name:      "cache_expirations_total",
-			Help:      "ALPHA METRIC. Total Cache entry expirations during the course of decision tracking",
 		},
 		[]string{},
 	)

@@ -30,6 +30,7 @@ import (
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/state/podresources"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 )
 
@@ -42,14 +43,16 @@ var stateRetryPeriod = 1 * time.Minute
 
 // PodController reconciles pods for the purpose of maintaining state regarding pods that is expensive to compute.
 type PodController struct {
-	kubeClient client.Client
-	cluster    *state.Cluster
+	kubeClient   client.Client
+	cluster      *state.Cluster
+	podResources *podresources.PodResources
 }
 
-func NewPodController(kubeClient client.Client, cluster *state.Cluster) *PodController {
+func NewPodController(kubeClient client.Client, cluster *state.Cluster, podResources *podresources.PodResources) *PodController {
 	return &PodController{
-		kubeClient: kubeClient,
-		cluster:    cluster,
+		kubeClient:   kubeClient,
+		cluster:      cluster,
+		podResources: podResources,
 	}
 }
 
@@ -61,9 +64,11 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 		if errors.IsNotFound(err) {
 			// notify cluster state of the node deletion
 			c.cluster.DeletePod(req.NamespacedName)
+			c.podResources.DeletePod(pod)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+	c.podResources.UpdatePod(pod)
 	if err := c.cluster.UpdatePod(ctx, pod); err != nil {
 		// We requeue here since the NotFound error is from finding the node for the binding
 		if errors.IsNotFound(err) {

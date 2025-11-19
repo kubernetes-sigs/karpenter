@@ -65,6 +65,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
+	"sigs.k8s.io/karpenter/pkg/state/podresources"
 )
 
 func NewControllers(
@@ -82,7 +83,8 @@ func NewControllers(
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
-	tracker := disruption.NewTracker(cluster, clock, cache.New(30*time.Minute, time.Minute), nil, false)
+	podResources := podresources.NewPodResources()
+	tracker := disruption.NewTracker(cluster, clusterCost, podResources, clock, cache.New(30*time.Minute, time.Minute), nil, false)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p, tracker)
 
 	controllers := []controller.Controller{
@@ -94,7 +96,7 @@ func NewControllers(
 		expiration.NewController(clock, kubeClient, cloudProvider),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
-		informer.NewPodController(kubeClient, cluster),
+		informer.NewPodController(kubeClient, cluster, podResources),
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),

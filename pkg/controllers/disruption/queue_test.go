@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/state/podresources"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 
@@ -418,7 +419,7 @@ var _ = Describe("Queue", func() {
 		Context("CalculateRetryDuration", func() {
 			DescribeTable("should calculate correct timeout based on queue length",
 				func(numCommands int, expectedDuration time.Duration) {
-					tracker := disruption.NewTracker(cluster, fakeClock, cache.New(30*time.Minute, time.Minute), nil, false)
+					tracker := disruption.NewTracker(cluster, clusterCost, podresources.NewPodResources(), fakeClock, cache.New(30*time.Minute, time.Minute), nil, false)
 					q := disruption.NewQueue(env.Client, recorder, cluster, fakeClock, prov, tracker)
 					q.Lock()
 					for i := range numCommands {

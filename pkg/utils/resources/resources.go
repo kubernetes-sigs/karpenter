@@ -146,6 +146,25 @@ func Cmp(lhs resource.Quantity, rhs resource.Quantity) int {
 	return lhs.Cmp(rhs)
 }
 
+func Eql(lhs v1.ResourceList, rhs v1.ResourceList) bool {
+	for lhsName, lhsQuantity := range lhs {
+		rhsQuantity, exists := rhs[lhsName]
+		if !exists {
+			return false
+		}
+		if lhsQuantity.Cmp(rhsQuantity) != 0 {
+			return false
+		}
+	}
+	for rhsName := range rhs {
+		_, exists := lhs[rhsName]
+		if !exists {
+			return false
+		}
+	}
+	return true
+}
+
 // Fits returns true if the candidate set of resources is less than or equal to the total set of resources.
 func Fits(candidate, total v1.ResourceList) bool {
 	// If any of the total resource values are negative then the resource will never fit
