@@ -126,7 +126,7 @@ var (
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "multi_node_consolidation_iterations",
 			Help:      "Number of binary search iterations to find optimal multi-node consolidation batch.",
-			Buckets:   []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20},
+			Buckets:   []float64{1, 2, 3, 4, 5, 6, 7},
 		},
 		[]string{},
 	)
