@@ -177,19 +177,19 @@ type TrackedDecision struct {
 }
 
 type ClusterStateSnapshot struct {
-	clusterCost              float64
-	podResources             corev1.ResourceList
-	totalNodes               int
-	totalDesiredPodCount     int
-	totalDesiredPodResources *corev1.ResourceList
+	ClusterCost              float64
+	PodResources             corev1.ResourceList
+	TotalNodes               int
+	TotalDesiredPodCount     int
+	TotalDesiredPodResources *corev1.ResourceList
 }
 type BucketThresholds struct {
-	biggestName string
-	thresholds  []BucketThreshold
+	BiggestName string
+	Thresholds  []BucketThreshold
 }
 type BucketThreshold struct {
-	lowerBound float64
-	size       string
+	LowerBound float64
+	Size       string
 }
 
 func (c Command) Decision() Decision {
