@@ -130,13 +130,14 @@ var (
 		},
 		[]string{},
 	)
-	MultiNodeConsolidationBatchSize = opmetrics.NewPrometheusGauge(
+	MultiNodeConsolidationBatchSize = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
-		prometheus.GaugeOpts{
+		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "multi_node_consolidation_batch_size",
 			Help:      "Number of nodes in successful multi-node consolidation batch. Labeled by decision type.",
+			Buckets:   []float64{2, 3, 4, 5, 7, 10, 15, 20, 25, 30, 40, 50},
 		},
 		[]string{decisionLabel},
 	)
@@ -146,9 +147,9 @@ var (
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "multi_node_consolidation_failed_iteration_duration_seconds",
-			Help:      "Cumulative time spent on failed binary search iterations per consolidation attempt.",
+			Help:      "Cumulative time spent on failed binary search iterations per consolidation attempt. Labeled by whether the search ultimately succeeded.",
 			Buckets:   metrics.DurationBuckets(),
 		},
-		[]string{},
+		[]string{"sim_success"},
 	)
 )
