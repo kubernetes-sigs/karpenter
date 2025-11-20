@@ -84,7 +84,7 @@ func NewControllers(
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
 	podResources := podresources.NewPodResources()
-	tracker := disruption.NewTracker(cluster, clusterCost, podResources, clock, cache.New(30*time.Minute, time.Minute), nil, false)
+	tracker := disruption.NewTracker(cluster, clusterCost, podResources, clock, cache.New(30*time.Minute, time.Minute), nil, options.FromContext(ctx).TrackDecisions)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p, tracker)
 
 	controllers := []controller.Controller{
