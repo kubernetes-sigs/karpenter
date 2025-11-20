@@ -70,7 +70,7 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 	// https://github.com/aws/aws-node-termination-handler/issues/316
 	// https://github.com/aws/karpenter/pull/2518
 	node.Labels = lo.Assign(node.Labels, map[string]string{
-		corev1.LabelNodeExcludeBalancers: "karpenter",
+		corev1.LabelNodeExcludeBalancers: "true",
 	})
 	if !equality.Semantic.DeepEqual(node, stored) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
