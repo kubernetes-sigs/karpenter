@@ -103,7 +103,7 @@ func (i *NodeClaimTemplate) ToNodeClaim() *v1.NodeClaim {
 			i.Requirements.Add(scheduling.NewRequirement(
 				v1.CapacityTypeLabelKey,
 				corev1.NodeSelectorOpIn,
-				capacityTypeList...
+				capacityTypeList...,
 			))
 		}
 
