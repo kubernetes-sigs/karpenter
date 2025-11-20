@@ -46,7 +46,9 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	disruptionutils "sigs.k8s.io/karpenter/pkg/utils/disruption"
+	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
+
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
@@ -180,8 +182,8 @@ func HasNodePoolReplicaCountChanged(oldNP, newNP *v1.NodePool) bool {
 func (c *Controller) getDeprovisioningCandidates(ctx context.Context, np *v1.NodePool, count int) []*v1.NodeClaim {
 	candidates := make([]*v1.NodeClaim, 0, count)
 
-	// Unresolved NodeClaims (haven't launched yet or that failed CreateFleet call)
-	unresolvedCandidates := c.getUnresolvedNodeClaims(ctx, np.Name, count)
+	// Unresolved NodeClaims (haven't launched yet or that failed Create call)
+	unresolvedCandidates := c.unResolvedDeprovisioningCandidates(ctx, np.Name, count)
 	candidates = append(candidates, unresolvedCandidates...)
 	remaining := count - len(candidates)
 
@@ -198,23 +200,26 @@ func (c *Controller) getDeprovisioningCandidates(ctx context.Context, np *v1.Nod
 	}
 
 	// Resolved nodes (empty first, then by disruption cost)
-	resolvedCandidates := c.getResolvedNodeClaims(ctx, nodes, np, remaining)
+	resolvedCandidates := c.resolvedDeprovisioningCandidates(ctx, nodes, np, remaining)
 	candidates = append(candidates, resolvedCandidates...)
 
 	return candidates
 }
 
-// getUnresolvedNodeClaims returns unresolved NodeClaims (those without ProviderID) up to the specified count
-func (c *Controller) getUnresolvedNodeClaims(ctx context.Context, nodePoolName string, count int) []*v1.NodeClaim {
-	nodeClaimList := &v1.NodeClaimList{}
-	if err := c.kubeClient.List(ctx, nodeClaimList, client.MatchingLabels{v1.NodePoolLabelKey: nodePoolName}); err != nil {
+// unResolvedDeprovisioningCandidates returns unresolved NodeClaims (those without ProviderID) up to the specified count
+func (c *Controller) unResolvedDeprovisioningCandidates(ctx context.Context, nodePoolName string, count int) []*v1.NodeClaim {
+	nodeClaimList, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider, nodeclaimutils.ForNodePool(nodePoolName))
+	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to list nodeclaims")
 		return nil
 	}
 
-	unresolvedNodeClaims := lo.Filter(nodeClaimList.Items, func(nc v1.NodeClaim, _ int) bool {
-		return nc.Status.ProviderID == "" && nc.DeletionTimestamp.IsZero()
-	})
+	unresolvedNodeClaims := make([]*v1.NodeClaim, 0)
+	for _, nc := range nodeClaimList {
+		if nc.Status.ProviderID == "" && nc.DeletionTimestamp.IsZero() {
+			unresolvedNodeClaims = append(unresolvedNodeClaims, nc)
+		}
+	}
 
 	if len(unresolvedNodeClaims) == 0 {
 		return nil
@@ -223,15 +228,15 @@ func (c *Controller) getUnresolvedNodeClaims(ctx context.Context, nodePoolName s
 	unresolvedToDelete := lo.Min([]int{count, len(unresolvedNodeClaims)})
 	candidates := make([]*v1.NodeClaim, 0, unresolvedToDelete)
 	for i := range unresolvedToDelete {
-		candidates = append(candidates, &unresolvedNodeClaims[i])
+		candidates = append(candidates, unresolvedNodeClaims[i])
 	}
 
 	return candidates
 }
 
-// getResolvedNodeClaims returns resolved NodeClaims (those with ProviderID) up to the specified count,
+// resolvedDeprovisioningCandidates returns resolved NodeClaims (those with ProviderID) up to the specified count,
 // prioritizing empty nodes first, then nodes with lowest disruption cost
-func (c *Controller) getResolvedNodeClaims(ctx context.Context, nodes []*state.StateNode, np *v1.NodePool, count int) []*v1.NodeClaim {
+func (c *Controller) resolvedDeprovisioningCandidates(ctx context.Context, nodes []*state.StateNode, np *v1.NodePool, count int) []*v1.NodeClaim {
 	if len(nodes) == 0 {
 		return nil
 	}
