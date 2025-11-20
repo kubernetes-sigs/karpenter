@@ -57,8 +57,8 @@ var (
 )
 
 type taintKeyEffect struct {
-	OwnerKey string
-	Effect   v1.TaintEffect
+	OwnerKey string         //nolint:kubeapilinter
+	Effect   v1.TaintEffect //nolint:kubeapilinter
 }
 
 func (in *NodeClaimTemplateSpec) validateTaints() (errs error) {
