@@ -322,7 +322,10 @@ var _ = Describe("Drift", Ordered, func() {
 		fmt.Println(CurrentSpecReport().LeafNodeText)
 		if CurrentSpecReport().LeafNodeText == "Start-up Taints" {
 			nodes := env.EventuallyExpectCreatedNodeCount("==", 2)
-			nodePtrs := slices.Map(nodes, func(n corev1.Node) *corev1.Node { return &n })
+			nodePtrs := make([]*corev1.Node, len(nodes))
+			for i := range nodes {
+				nodePtrs[i] = nodes[i]
+			}
 			slices.SortStableFunc(nodePtrs, func(a, b *corev1.Node) int {
 				if a.CreationTimestamp.Before(&b.CreationTimestamp) {
 					return -1
