@@ -17,11 +17,9 @@ limitations under the License.
 package integration_test
 
 import (
-	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -38,17 +36,10 @@ var _ = Describe("Expiration", func() {
 	var numPods int
 	BeforeEach(func() {
 		numPods = 1
-		dep = test.Deployment(test.DeploymentOptions{
-			Replicas: int32(numPods),
-			PodOptions: test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "my-app",
-					},
-				},
-				TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
-			},
-		})
+		dep = test.Deployment(test.CreateDeploymentOptions("my-app", int32(numPods), "100m", "128Mi",
+			test.WithNoResourceRequests(),
+			test.WithLabels(map[string]string{"app": "my-app"}),
+			test.WithTerminationGracePeriod(0)))
 		selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 	})
 	It("should expire the node after the expiration is reached", func() {

@@ -67,17 +67,8 @@ var _ = Describe("Integration", func() {
 				},
 			})
 			numPods := 1
-			dep = test.Deployment(test.DeploymentOptions{
-				Replicas: int32(numPods),
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{"app": "large-app"},
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("4")},
-					},
-				},
-			})
+			dep = test.Deployment(test.CreateDeploymentOptions("large-app", int32(numPods), "100m", "4",
+				test.WithLabels(map[string]string{"app": "large-app"})))
 		})
 		It("should account for LimitRange Default on daemonSet pods for resources", func() {
 			limitrange.Spec.Limits = []corev1.LimitRangeItem{
@@ -160,33 +151,16 @@ var _ = Describe("Integration", func() {
 	Describe("Utilization", Label(debug.NoWatch), Label(debug.NoEvents), func() {
 		It("should provision one pod per node", func() {
 			label := map[string]string{"app": "large-app"}
-			deployment := test.Deployment(test.DeploymentOptions{
-				Replicas: 100,
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							v1.DoNotDisruptAnnotationKey: "true",
-						},
-						Labels: label,
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU: func() resource.Quantity {
-								dsOverhead := env.GetDaemonSetOverhead(nodePool)
-								base := lo.ToPtr(resource.MustParse("1800m"))
-								base.Sub(*dsOverhead.Cpu())
-								return *base
-							}(),
-						},
-					},
-					PodAntiRequirements: []corev1.PodAffinityTerm{{
-						TopologyKey: corev1.LabelHostname,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: label,
-						},
-					}},
-				},
-			})
+			// Calculate dynamic CPU requirement
+			dsOverhead := env.GetDaemonSetOverhead(nodePool)
+			base := lo.ToPtr(resource.MustParse("1800m"))
+			base.Sub(*dsOverhead.Cpu())
+			cpuRequest := base.String()
+
+			deployment := test.Deployment(test.CreateDeploymentOptions("large-app", 100, cpuRequest, "128Mi",
+				test.WithLabels(label),
+				test.WithDoNotDisrupt(),
+				test.WithPodAntiAffinityHostname()))
 
 			env.ExpectCreated(nodeClass, nodePool, deployment)
 			env.EventuallyExpectHealthyPodCountWithTimeout(time.Minute*10, labels.SelectorFromSet(deployment.Spec.Selector.MatchLabels), int(*deployment.Spec.Replicas))
@@ -333,20 +307,11 @@ var _ = Describe("Integration", func() {
 				}
 				numPods = 1
 				// Add pods with a do-not-disrupt annotation so that we can check node metadata before we disrupt
-				dep = test.Deployment(test.DeploymentOptions{
-					Replicas: int32(numPods),
-					PodOptions: test.PodOptions{
-						ObjectMeta: metav1.ObjectMeta{
-							Labels: map[string]string{
-								"app": "my-app",
-							},
-							Annotations: map[string]string{
-								v1.DoNotDisruptAnnotationKey: "true",
-							},
-						},
-						TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
-					},
-				})
+				dep = test.Deployment(test.CreateDeploymentOptions("my-app", int32(numPods), "100m", "128Mi",
+					test.WithNoResourceRequests(),
+					test.WithLabels(map[string]string{"app": "my-app"}),
+					test.WithDoNotDisrupt(),
+					test.WithTerminationGracePeriod(0)))
 				selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 			})
 			DescribeTable("Conditions", func(unhealthyCondition corev1.NodeCondition) {

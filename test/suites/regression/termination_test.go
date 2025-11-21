@@ -47,14 +47,9 @@ var _ = Describe("Termination", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = karpv1.MustParseNillableDuration("0s")
 
 			numPods = 1
-			dep = test.Deployment(test.DeploymentOptions{
-				Replicas: int32(numPods),
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{"app": "large-app"},
-					},
-				},
-			})
+			dep = test.Deployment(test.CreateDeploymentOptions("large-app", int32(numPods), "100m", "128Mi",
+				test.WithNoResourceRequests(),
+				test.WithLabels(map[string]string{"app": "large-app"})))
 			selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 		})
 		Context("Budgets", func() {
@@ -105,7 +100,7 @@ var _ = Describe("Termination", func() {
 			nodePool.Spec.Disruption.ConsolidateAfter = karpv1.MustParseNillableDuration("10s")
 
 			const numPods = 1
-			deployment := test.Deployment(test.DeploymentOptions{Replicas: numPods})
+			deployment := test.Deployment(test.CreateDeploymentOptions("test-app", numPods, "100m", "128Mi", test.WithNoResourceRequests()))
 
 			By("kicking off provisioning for a deployment")
 			env.ExpectCreated(nodeClass, nodePool, deployment)
