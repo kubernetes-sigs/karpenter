@@ -115,13 +115,8 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		}
 
 		log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(candidate)).V(1).Info("deleting nodeclaim")
-		// Only mark for deletion in cluster state if it has a ProviderID (resolved NodeClaims)
-		// Unresolved Nodeclaims are not tracked under StateNode, just in StateNodePool
-		if candidate.Status.ProviderID != "" {
-			c.cluster.MarkForDeletion(candidate.Status.ProviderID)
-		} else {
-			c.cluster.NodePoolState.MarkNodeClaimDeleting(np.Name, candidate.Name)
-		}
+		// Mark the NodeClaim as Deleting in StateNodePool
+		c.cluster.NodePoolState.MarkNodeClaimDeleting(np.Name, candidate.Name)
 	})
 
 	if scaleDownErr := multierr.Combine(scaleDownErrs...); scaleDownErr != nil {
