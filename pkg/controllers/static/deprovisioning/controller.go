@@ -183,7 +183,7 @@ func (c *Controller) getDeprovisioningCandidates(ctx context.Context, np *v1.Nod
 	candidates := make([]*v1.NodeClaim, 0, count)
 
 	// Unresolved NodeClaims (haven't launched yet or that failed Create call)
-	unresolvedCandidates := c.unResolvedDeprovisioningCandidates(ctx, np.Name, count)
+	unresolvedCandidates := c.unresolvedDeprovisioningCandidates(ctx, np.Name, count)
 	candidates = append(candidates, unresolvedCandidates...)
 	remaining := count - len(candidates)
 
@@ -207,7 +207,7 @@ func (c *Controller) getDeprovisioningCandidates(ctx context.Context, np *v1.Nod
 }
 
 // unResolvedDeprovisioningCandidates returns unresolved NodeClaims (those without ProviderID) up to the specified count
-func (c *Controller) unResolvedDeprovisioningCandidates(ctx context.Context, nodePoolName string, count int) []*v1.NodeClaim {
+func (c *Controller) unresolvedDeprovisioningCandidates(ctx context.Context, nodePoolName string, count int) []*v1.NodeClaim {
 	nodeClaimList, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider, nodeclaimutils.ForNodePool(nodePoolName))
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to list nodeclaims")
