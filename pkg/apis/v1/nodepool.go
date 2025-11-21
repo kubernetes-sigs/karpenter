@@ -99,7 +99,6 @@ type Disruption struct {
 	// +kubebuilder:validation:Enum:={WhenEmpty,WhenEmptyOrUnderutilized}
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
-	//nolint:kubeapilinter
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,
@@ -108,18 +107,20 @@ type Disruption struct {
 	// +kubebuilder:default:={{nodes: "10%"}}
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
+	// +listType=atomic
+	//nolint:kubeapilinter
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
 }
 
 // Budget defines when Karpenter will restrict the
 // number of Node Claims that can be terminating simultaneously.
 type Budget struct {
-	//nolint:kubeapilinter
-	// Reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
+	// reasons is a list of disruption methods that this budget applies to. If Reasons is not set, this budget applies to all methods.
 	// Otherwise, this will apply to each reason defined.
 	// allowed reasons are Underutilized, Empty, and Drifted.
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
+	// +listType=set
 	Reasons []DisruptionReason `json:"reasons,omitempty"`
 	//nolint:kubeapilinter
 	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
@@ -197,24 +198,25 @@ type NodeClaimTemplate struct {
 // NodeClaimTemplateSpec is used in the NodePool's NodeClaimTemplate, with the resource requests omitted since
 // users are not able to set resource requests in the NodePool.
 type NodeClaimTemplateSpec struct {
-	//nolint:kubeapilinter
-	// Taints will be applied to the NodeClaim's node.
+	// taints will be applied to the NodeClaim's node.
 	// +optional
+	// +listType=atomic
 	Taints []v1.Taint `json:"taints,omitempty"`
-	//nolint:kubeapilinter
-	// StartupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
+	// startupTaints are taints that are applied to nodes upon startup which are expected to be removed automatically
 	// within a short period of time, typically by a DaemonSet that tolerates the taint. These are commonly used by
 	// daemonsets to allow initialization and enforce startup ordering.  StartupTaints are ignored for provisioning
 	// purposes in that pods are not required to tolerate a StartupTaint in order to have nodes provisioned for them.
 	// +optional
+	// +listType=atomic
 	StartupTaints []v1.Taint `json:"startupTaints,omitempty"`
-	//nolint:kubeapilinter
 	// Requirements are layered with GetLabels and applied to every node.
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
 	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt', 'Lt', 'Gte', or 'Lte' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt' || x.operator == 'Gte' || x.operator == 'Lte') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
 	// +kubebuilder:validation:XValidation:message="requirements with 'minValues' must have at least that many values specified in the 'values' field",rule="self.all(x, (x.operator == 'In' && has(x.minValues)) ? x.values.size() >= x.minValues : true)"
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
+	// +listType=atomic
+	//nolint:kubeapilinter
 	Requirements []NodeSelectorRequirementWithMinValues `json:"requirements" hash:"ignore"`
 	//nolint:kubeapilinter
 	// NodeClassRef is a reference to an object that defines provider specific configuration
@@ -271,20 +273,20 @@ func (in *NodeClaimTemplate) ToNodeClaim() *NodeClaim {
 }
 
 type ObjectMeta struct {
-	//nolint:kubeapilinter
-	// Map of string keys and values that can be used to organize and categorize
+	// labels is a map of string keys and values that can be used to organize and categorize
 	// (scope and select) objects. May match selectors of replication controllers
 	// and services.
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels
 	// +optional
+	// +mapType=atomic
 	Labels map[string]string `json:"labels,omitempty"`
 
-	//nolint:kubeapilinter
-	// Annotations is an unstructured key value map stored with a resource that may be
+	// annotations is an unstructured key value map stored with a resource that may be
 	// set by external tools to store and retrieve arbitrary metadata. They are not
 	// queryable and should be preserved when modifying objects.
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations
 	// +optional
+	// +mapType=granular
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
