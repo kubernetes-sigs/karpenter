@@ -18,7 +18,7 @@ package integration_test
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -322,8 +322,18 @@ var _ = Describe("Drift", Ordered, func() {
 		fmt.Println(CurrentSpecReport().LeafNodeText)
 		if CurrentSpecReport().LeafNodeText == "Start-up Taints" {
 			nodes := env.EventuallyExpectCreatedNodeCount("==", 2)
-			sort.Slice(nodes, func(i int, j int) bool {
-				return nodes[i].CreationTimestamp.Before(&nodes[j].CreationTimestamp)
+			nodePtrs := make([]*corev1.Node, len(nodes))
+			for i := range nodes {
+				nodePtrs[i] = nodes[i]
+			}
+			slices.SortStableFunc(nodePtrs, func(a, b *corev1.Node) int {
+				if a.CreationTimestamp.Before(&b.CreationTimestamp) {
+					return -1
+				}
+				if a.CreationTimestamp.Equal(&b.CreationTimestamp) {
+					return 0
+				}
+				return 1
 			})
 			nodeTwo := nodes[1]
 			// Remove the startup taints from the new nodes to initialize them
