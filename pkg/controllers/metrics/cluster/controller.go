@@ -60,6 +60,7 @@ func NewController(client client.Client, clusterCost *cost.ClusterCost) *Control
 	return &Controller{
 		client:      client,
 		clusterCost: clusterCost,
+		npMap:       make(map[string]*v1.NodePool),
 	}
 }
 
