@@ -166,15 +166,15 @@ func (c *ConsolidationValidator) isValid(ctx context.Context, cmd Command, valid
 	}
 	validatedCandidates, err := c.validateCandidates(ctx, cmd.Candidates...)
 	if err != nil {
-		return err
+		return fmt.Errorf("validating candidates, %w", err)
 	}
 	if err := c.validateCommand(ctx, cmd, validatedCandidates); err != nil {
-		return err
+		return fmt.Errorf("validating command, %w", err)
 	}
 	// Revalidate candidates after validating the command. This mitigates the chance of a race condition outlined in
 	// the following GitHub issue: https://github.com/kubernetes-sigs/karpenter/issues/1167.
 	if _, err = c.validateCandidates(ctx, validatedCandidates...); err != nil {
-		return err
+		return fmt.Errorf("revalidating candidates, %w", err)
 	}
 	return nil
 }
