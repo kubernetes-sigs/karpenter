@@ -115,6 +115,7 @@ func (c *Controller) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.
 		}
 
 		log.FromContext(ctx).WithValues("NodeClaim", klog.KObj(candidate)).V(1).Info("deleting nodeclaim")
+
 		// Mark the NodeClaim as Deleting in StateNodePool
 		c.cluster.NodePoolState.MarkNodeClaimDeleting(np.Name, candidate.Name)
 	})
