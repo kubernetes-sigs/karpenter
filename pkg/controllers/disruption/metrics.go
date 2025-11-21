@@ -108,23 +108,12 @@ var (
 		},
 		[]string{decisionLabel, metrics.ReasonLabel, ConsolidationTypeLabel},
 	)
-	CandidatesSortDurationSeconds = opmetrics.NewPrometheusHistogram(
-		crmetrics.Registry,
-		prometheus.HistogramOpts{
-			Namespace: metrics.Namespace,
-			Subsystem: voluntaryDisruptionSubsystem,
-			Name:      "candidates_sort_duration_seconds",
-			Help:      "Duration of candidate sorting in seconds. Labeled by consolidation type.",
-			Buckets:   metrics.DurationBuckets(),
-		},
-		[]string{ConsolidationTypeLabel},
-	)
 	MultiNodeConsolidationIterations = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
-			Name:      "multi_node_consolidation_iterations",
+			Name:      "multi_node_consolidation_batch_iterations",
 			Help:      "Alpha metric prone to change. Number of binary search iterations to find optimal multi-node consolidation batch.",
 			Buckets:   []float64{1, 2, 3, 4, 5, 6, 7},
 		},
@@ -141,12 +130,12 @@ var (
 		},
 		[]string{decisionLabel},
 	)
-	MultiNodeConsolidationFailedIterationDuration = opmetrics.NewPrometheusHistogram(
+	MultiNodeConsolidationFailedSimDuration = opmetrics.NewPrometheusHistogram(
 		crmetrics.Registry,
 		prometheus.HistogramOpts{
 			Namespace: metrics.Namespace,
 			Subsystem: voluntaryDisruptionSubsystem,
-			Name:      "multi_node_consolidation_failed_iteration_duration_seconds",
+			Name:      "multi_consolidation_failed_sim_duration_seconds",
 			Help:      "Alpha metric prone to change. Cumulative time spent on failed binary search iterations per consolidation attempt. Labeled by whether the search ultimately succeeded.",
 			Buckets:   metrics.DurationBuckets(),
 		},

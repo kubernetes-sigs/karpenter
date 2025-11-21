@@ -181,7 +181,7 @@ func (m *MultiNodeConsolidation) firstNConsolidationOption(ctx context.Context, 
 	simSuccess := lastSavedCommand.Decision() != NoOpDecision
 
 	if failedIterationTime > 0 {
-		MultiNodeConsolidationFailedIterationDuration.Observe(failedIterationTime.Seconds(), map[string]string{
+		MultiNodeConsolidationFailedSimDuration.Observe(failedIterationTime.Seconds(), map[string]string{
 			"sim_success": strconv.FormatBool(simSuccess),
 		})
 	}
