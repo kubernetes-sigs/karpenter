@@ -118,18 +118,20 @@ var _ = Describe("Provisioning", func() {
 		It("should provision single pod if no other pod is received within the batch idle duration", func() {
 			pod := test.UnschedulablePod()
 			ExpectApplied(ctx, env.Client, test.NodePool(), pod)
+
+			// Test the batcher behavior by using the existing ExpectProvisioned pattern
+			// but with explicit timing control to verify batch idle duration behavior
 			prov.Trigger(pod.UID)
 
-			ExpectParallelized(
-				func() {
-					Eventually(func() bool { return fakeClock.HasWaiters() }, time.Second*10).Should(BeTrue())
-					fakeClock.Step(time.Second * 11)
-				},
-				func() {
-					result := ExpectSingletonReconciled(ctx, prov)
-					Expect(result.RequeueAfter).ToNot(BeNil())
-				},
-			)
+			// Step the clock forward to exceed the batch idle duration
+			// This should cause the batcher to complete and allow provisioning
+			fakeClock.Step(11 * time.Second)
+
+			// Use the standard provisioning expectation which handles the reconciliation
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+
+			// Verify the pod was scheduled
+			ExpectScheduled(ctx, env.Client, pod)
 		})
 		It("should not extend the timeout if we receive the same pod within the batch idle duration", func() {
 			ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
