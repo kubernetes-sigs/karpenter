@@ -592,6 +592,13 @@ func (c *Cluster) Reset() {
 	c.podsSchedulableTimes = sync.Map{}
 }
 
+// sets the cluster to be unsynced for unit testing
+func (c *Cluster) Unsynced() {
+	c.unsyncedTimeMu.Lock()
+	defer c.unsyncedTimeMu.Unlock()
+	c.hasSynced.Store(false)
+}
+
 func (c *Cluster) GetDaemonSetPod(daemonset *appsv1.DaemonSet) *corev1.Pod {
 	if pod, ok := c.daemonSetPods.Load(client.ObjectKeyFromObject(daemonset)); ok {
 		return pod.(*corev1.Pod).DeepCopy()
