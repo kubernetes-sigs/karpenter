@@ -93,6 +93,7 @@ func NewController(client client.Client, clusterCost *cost.ClusterCost, podResou
 		client:       client,
 		clusterCost:  clusterCost,
 		podResources: podResources,
+		npMap:        make(map[string]*v1.NodePool),
 	}
 }
 

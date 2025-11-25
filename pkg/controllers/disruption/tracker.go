@@ -89,7 +89,7 @@ func NewTracker(cluster *state.Cluster, clusterCost *cost.ClusterCost, podResour
 func (t *Tracker) GatherClusterState(ctx context.Context) (*ClusterStateSnapshot, error) {
 	return &ClusterStateSnapshot{
 		ClusterCost:              t.clusterCost.GetClusterCost(),
-		PodResources:             t.cluster.GetTotalPodResourceRequests(),
+		PodResources:             t.cluster.GetTotalNodePoolResources(),
 		TotalNodes:               len(t.cluster.DeepCopyNodes()),
 		TotalDesiredPodCount:     t.podResources.GetTotalPodCount(),
 		TotalDesiredPodResources: t.podResources.GetTotalPodResourceRequests(),

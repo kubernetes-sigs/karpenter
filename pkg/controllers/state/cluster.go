@@ -582,7 +582,7 @@ func (c *Cluster) Reset() {
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
-	c.NodePoolState = NewNodePoolState()
+	c.NodePoolState.Reset()
 	c.nodePoolResources = map[string]corev1.ResourceList{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
@@ -625,6 +625,12 @@ func (c *Cluster) UpdateDaemonSet(ctx context.Context, daemonset *appsv1.DaemonS
 
 func (c *Cluster) DeleteDaemonSet(key types.NamespacedName) {
 	c.daemonSetPods.Delete(key)
+}
+
+func (c *Cluster) GetTotalNodePoolResources() corev1.ResourceList {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return resources.Merge(lo.Values(c.nodePoolResources)...)
 }
 
 // WARNING
@@ -903,8 +909,4 @@ func (c *Cluster) triggerConsolidationOnChange(old, new *StateNode) {
 // HasSynced returns whether the cluster state has been synchronized at least once.
 func (c *Cluster) HasSynced() bool {
 	return c.hasSynced.Load()
-}
-
-func (c *Cluster) GetTotalPodResourceRequests() corev1.ResourceList {
-	return resources.Merge(lo.Values(c.nodePoolResources)...)
 }

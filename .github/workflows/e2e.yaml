@@ -20,7 +20,7 @@ jobs:
         echo "Event name: ${{ github.event_name }}"
         echo "Workflow run conclusion: ${{ github.event.workflow_run.conclusion }}"
         echo "Workflow run name: ${{ github.event.workflow_run.name }}"
-    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+    - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
     - name: Set up Python 3.10
       uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
       with:
@@ -29,7 +29,7 @@ jobs:
       with:
           k8sVersion: ${{ inputs.k8s_version }}
     - name: Kind Cluster
-      uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
+      uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1.13.0
     - name: check kind cluster and taint nodes
       shell: bash
       run: |
