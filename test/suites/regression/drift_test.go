@@ -48,18 +48,11 @@ var _ = Describe("Drift", Ordered, func() {
 		numPods = 1
 		label = map[string]string{"app": "large-app"}
 		// Add pods with a do-not-disrupt annotation so that we can check node metadata before we disrupt
-		dep = test.Deployment(test.DeploymentOptions{
-			Replicas: int32(numPods),
-			PodOptions: test.PodOptions{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: label,
-					Annotations: map[string]string{
-						v1.DoNotDisruptAnnotationKey: "true",
-					},
-				},
-				TerminationGracePeriodSeconds: lo.ToPtr[int64](0),
-			},
-		})
+		dep = test.Deployment(test.CreateDeploymentOptions("large-app", int32(numPods), "100m", "128Mi",
+			test.WithNoResourceRequests(),
+			test.WithLabels(label),
+			test.WithDoNotDisrupt(),
+			test.WithTerminationGracePeriod(0)))
 		selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 	})
 	Context("Budgets", func() {
@@ -69,23 +62,11 @@ var _ = Describe("Drift", Ordered, func() {
 				Nodes: "50%",
 			}}
 			var numPods int32 = 3
-			dep = test.Deployment(test.DeploymentOptions{
-				Replicas: numPods,
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							v1.DoNotDisruptAnnotationKey: "true",
-						},
-						Labels: label,
-					},
-					PodAntiRequirements: []corev1.PodAffinityTerm{{
-						TopologyKey: corev1.LabelHostname,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: label,
-						},
-					}},
-				},
-			})
+			dep = test.Deployment(test.CreateDeploymentOptions("large-app", numPods, "100m", "128Mi",
+				test.WithNoResourceRequests(),
+				test.WithLabels(label),
+				test.WithDoNotDisrupt(),
+				test.WithPodAntiAffinityHostname()))
 			selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 			env.ExpectCreated(nodeClass, nodePool, dep)
 
@@ -122,27 +103,21 @@ var _ = Describe("Drift", Ordered, func() {
 				Nodes: "50%",
 			}}
 			var numPods int32 = 9
-			dep = test.Deployment(test.DeploymentOptions{
-				Replicas: numPods,
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							v1.DoNotDisruptAnnotationKey: "true",
-						},
-						Labels: label,
-					},
-					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
-						{
-							MaxSkew:           3,
-							TopologyKey:       corev1.LabelHostname,
-							WhenUnsatisfiable: corev1.DoNotSchedule,
-							LabelSelector: &metav1.LabelSelector{
-								MatchLabels: label,
-							},
-						},
+			customConstraints := []corev1.TopologySpreadConstraint{
+				{
+					MaxSkew:           3,
+					TopologyKey:       corev1.LabelHostname,
+					WhenUnsatisfiable: corev1.DoNotSchedule,
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: label,
 					},
 				},
-			})
+			}
+			dep = test.Deployment(test.CreateDeploymentOptions("large-app", numPods, "100m", "128Mi",
+				test.WithNoResourceRequests(),
+				test.WithLabels(label),
+				test.WithDoNotDisrupt(),
+				test.WithTopologySpreadConstraints(customConstraints)))
 			selector = labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 			env.ExpectCreated(nodeClass, nodePool, dep)
 
@@ -195,20 +170,10 @@ var _ = Describe("Drift", Ordered, func() {
 			// Create a 5 pod deployment with hostname inter-pod anti-affinity to ensure each pod is placed on a unique node
 			numPods = 5
 			selector = labels.SelectorFromSet(appLabels)
-			deployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(numPods),
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: appLabels,
-					},
-					PodAntiRequirements: []corev1.PodAffinityTerm{{
-						TopologyKey: corev1.LabelHostname,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: appLabels,
-						},
-					}},
-				},
-			})
+			deployment := test.Deployment(test.CreateDeploymentOptions("large-app", int32(numPods), "100m", "128Mi",
+				test.WithNoResourceRequests(),
+				test.WithLabels(appLabels),
+				test.WithPodAntiAffinityHostname()))
 
 			env.ExpectCreated(nodeClass, nodePool, deployment)
 
@@ -425,18 +390,10 @@ var _ = Describe("Drift", Ordered, func() {
 
 			// launch a new nodeClaim
 			var numPods int32 = 2
-			dep := test.Deployment(test.DeploymentOptions{
-				Replicas: 2,
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "inflate"}},
-					PodAntiRequirements: []corev1.PodAffinityTerm{{
-						TopologyKey: corev1.LabelHostname,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"app": "inflate"},
-						}},
-					},
-				},
-			})
+			dep := test.Deployment(test.CreateDeploymentOptions("inflate", 2, "100m", "128Mi",
+				test.WithNoResourceRequests(),
+				test.WithLabels(map[string]string{"app": "inflate"}),
+				test.WithPodAntiAffinityHostname()))
 			// Expect only a single node to get tainted due to default disruption budgets
 			nodePool.Spec.Disruption = v1.Disruption{}
 			env.ExpectCreated(dep, nodeClass, nodePool)
@@ -473,18 +430,10 @@ var _ = Describe("Drift", Ordered, func() {
 		It("should not disrupt a drifted node if the replacement node registers but never initialized", func() {
 			// launch a new nodeClaim
 			var numPods int32 = 2
-			dep := test.Deployment(test.DeploymentOptions{
-				Replicas: 2,
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "inflate"}},
-					PodAntiRequirements: []corev1.PodAffinityTerm{{
-						TopologyKey: corev1.LabelHostname,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"app": "inflate"},
-						}},
-					},
-				},
-			})
+			dep := test.Deployment(test.CreateDeploymentOptions("inflate", 2, "100m", "128Mi",
+				test.WithNoResourceRequests(),
+				test.WithLabels(map[string]string{"app": "inflate"}),
+				test.WithPodAntiAffinityHostname()))
 			// Expect only a single node to get tainted due to default disruption budgets
 			nodePool.Spec.Disruption = v1.Disruption{}
 			env.ExpectCreated(dep, nodeClass, nodePool)
@@ -529,30 +478,21 @@ var _ = Describe("Drift", Ordered, func() {
 			// Create a deployment that contains a readiness probe that will never succeed
 			// This way, the pod will bind to the node, but the PodDisruptionBudget will never go healthy
 			var numPods int32 = 2
-			dep := test.Deployment(test.DeploymentOptions{
-				Replicas: 2,
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{
-							"app":                 "inflate",
-							"kwok.x-k8s.io/stage": "unhealthy",
-						},
-					},
-					PodAntiRequirements: []corev1.PodAffinityTerm{{
-						TopologyKey: corev1.LabelHostname,
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"app": "inflate"},
-						}},
-					},
-					ReadinessProbe: &corev1.Probe{
-						ProbeHandler: corev1.ProbeHandler{
-							HTTPGet: &corev1.HTTPGetAction{
-								Port: intstr.FromInt32(80),
-							},
-						},
+			readinessProbe := &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Port: intstr.FromInt32(80),
 					},
 				},
-			})
+			}
+			dep := test.Deployment(test.CreateDeploymentOptions("inflate", 2, "100m", "128Mi",
+				test.WithNoResourceRequests(),
+				test.WithLabels(map[string]string{
+					"app":                 "inflate",
+					"kwok.x-k8s.io/stage": "unhealthy",
+				}),
+				test.WithPodAntiAffinityHostname(),
+				test.WithReadinessProbe(readinessProbe)))
 			selector := labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 			minAvailable := intstr.FromInt32(numPods - 1)
 			pdb := test.PodDisruptionBudget(test.PDBOptions{

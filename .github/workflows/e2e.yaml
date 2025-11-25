@@ -8,12 +8,20 @@ on:
       suite:
         type: string
         required: true
+      focus:
+        type: string
+        required: false
+        description: "Ginkgo focus pattern to run specific tests"
+      test_name:
+        type: string
+        required: false
+        description: "Human-readable test name for job identification"
 jobs:
   e2e:
     permissions:
       issues: write
     runs-on: ubuntu-latest
-    name: suite-${{ inputs.suite }}
+    name: ${{ inputs.test_name || format('suite-{0}', inputs.suite) }}
     steps:
     - name: Debug workflow_run trigger
       run: |
@@ -55,19 +63,27 @@ jobs:
         kubectl get nodepools
         kubectl get pods -A
         kubectl describe nodes
-    - name: run the ${{ inputs.suite }} test suite
+    - name: run the ${{ inputs.test_name || inputs.suite }} test
       env:
           SUITE: ${{ inputs.suite }}
+          FOCUS: ${{ inputs.focus }}
       shell: bash
       run: |
         OUTPUT_DIR=$(mktemp -d)
         export OUTPUT_DIR
         echo OUTPUT_DIR="$OUTPUT_DIR" >> "$GITHUB_ENV"
         TEST_SUITE="$SUITE" make e2etests
+    - name: Upload performance results
+      if: always() && env.OUTPUT_DIR != ''
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: performance-results-${{ inputs.test_name || format('suite-{0}', inputs.suite) }}-${{ github.run_id }}
+        path: ${{ env.OUTPUT_DIR }}/*_performance_report.json
+        retention-days: 30
+        if-no-files-found: ignore
     - name: cleanup 
       shell: bash
       run: | 
         kubectl delete nodepools --all 
         make delete
         make uninstall-kwok
-        

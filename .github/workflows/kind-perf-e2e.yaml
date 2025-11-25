@@ -16,8 +16,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite:
-          - name: Performance
+        test:
+          - name: "Drift Performance"
+            focus: "Drift Performance"
+          - name: "Host Name Spreading"
+            focus: "Host Name Spreading Deployment Reg"
+          - name: "Host Name Spreading XL"
+            focus: "Host Name Spreading Deployment XL"
+          - name: "Wide Deployments"
+            focus: "Wide Deployments"
+          - name: "Basic Scale Test"
+            focus: "Basic Deployment"
+          - name: "Do Not Disrupt Performance"
+            focus: "Do Not Disrupt Performance Test"
+          - name: "Provisioning"
+            focus: "Provisioning"
     uses: ./.github/workflows/e2e.yaml
     with:
-      suite: ${{ matrix.suite.name }}
+      suite: Performance
+      focus: ${{ matrix.test.focus }}
+      test_name: ${{ matrix.test.name }}
