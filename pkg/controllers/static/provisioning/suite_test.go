@@ -541,7 +541,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 				go func(i int) {
 					defer GinkgoRecover()
 					if i%4 == 0 {
-						cluster.Reset()
+						cluster.Unsynced()
 					}
 					_, e := controller.Reconcile(ctx, nodePool)
 					errs <- e
@@ -558,6 +558,8 @@ var _ = Describe("Static Provisioning Controller", func() {
 				return len(list.Items)
 			}, 5*time.Second).Should(BeNumerically("<=", 10))
 
+			_, e := controller.Reconcile(ctx, nodePool)
+			Expect(e).ToNot(HaveOccurred())
 			// at the end we should have right counts in StateNodePool
 			ExpectStateNodePoolCount(cluster, nodePool.Name, 10, 0, 0)
 		})
