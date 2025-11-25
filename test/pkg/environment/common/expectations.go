@@ -1262,3 +1262,56 @@ func (env *Environment) GetDaemonSetOverhead(np *v1.NodePool) corev1.ResourceLis
 		return p, true
 	})...)
 }
+
+// GetClusterCost calculates the cost of all nodes in the cluster by grouping nodes
+// with identical instance configurations (type, zone, OS, arch, capacity type) and matching
+// them against pricing data from env.InstanceTypes. Returns 0.0 if no nodes or pricing data exists.
+//
+//nolint:gocyclo
+func (env *Environment) GetClusterCost() float64 {
+	GinkgoHelper()
+
+	By("Calculating cluster cost")
+	nodes := &corev1.NodeList{}
+	Expect(env.Client.List(env, nodes, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
+	if len(nodes.Items) == 0 || len(env.InstanceTypes) == 0 {
+		return 0.0
+	}
+
+	type NodeKey struct {
+		InstanceType string
+		Zone         string
+		OS           string
+		Arch         string
+		CapacityType string
+	}
+
+	uniqueInstanceOffering := make(map[NodeKey]int)
+	for _, node := range nodes.Items {
+		key := NodeKey{
+			InstanceType: node.Labels["node.kubernetes.io/instance-type"],
+			Zone:         node.Labels["topology.kubernetes.io/zone"],
+			OS:           node.Labels["kubernetes.io/os"],
+			Arch:         node.Labels["kubernetes.io/arch"],
+			CapacityType: node.Labels["karpenter.sh/capacity-type"],
+		}
+		uniqueInstanceOffering[key]++
+	}
+
+	var totalCost float64
+	for o, count := range uniqueInstanceOffering {
+		if it, found := env.InstanceTypes[o.InstanceType]; found {
+			for _, offering := range it.Offerings {
+				if offering.Price > 0 &&
+					offering.Zone() == o.Zone &&
+					offering.CapacityType() == o.CapacityType &&
+					it.Requirements.Get("kubernetes.io/arch").Has(o.Arch) &&
+					it.Requirements.Get("kubernetes.io/os").Has(o.OS) {
+					totalCost += offering.Price * float64(count)
+					break
+				}
+			}
+		}
+	}
+	return totalCost
+}
