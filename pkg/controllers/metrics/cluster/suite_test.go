@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/cluster"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/podresources"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
@@ -37,6 +38,7 @@ var ctx context.Context
 var env *test.Environment
 var clusterCost *cost.ClusterCost
 var cp *fake.CloudProvider
+var podResources *podresources.PodResources
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -48,7 +50,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...))
 	cp = fake.NewCloudProvider()
 	clusterCost = cost.NewClusterCost(ctx, cp, env.Client)
-	clusterController = cluster.NewController(env.Client, clusterCost)
+	podResources = podresources.NewPodResources()
+	clusterController = cluster.NewController(env.Client, clusterCost, podResources)
 })
 
 var _ = AfterSuite(func() {
