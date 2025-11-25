@@ -19,9 +19,8 @@ package podresources
 import (
 	"sync"
 
-	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -31,20 +30,18 @@ import (
 // with a superior desired resource count mechanism that handles the following cases:
 //  1. Pod manager objects (replicasets, jobs) and their replacement workflows.
 //  2. Standalone pods
-//  3. IPPA
+//  3. In Place Pod Autoscaling
 
 type PodResources struct {
 	sync.RWMutex
-	podMap map[string]corev1.ResourceList
+	podMap map[types.UID]corev1.ResourceList
 	total  corev1.ResourceList
-	count  int
 }
 
 func NewPodResources() *PodResources {
 	return &PodResources{
-		podMap: make(map[string]corev1.ResourceList),
-		total:  nil,
-		count:  0,
+		podMap: make(map[types.UID]corev1.ResourceList),
+		total:  corev1.ResourceList{},
 	}
 }
 
@@ -52,17 +49,14 @@ func (pr *PodResources) UpdatePod(p *corev1.Pod) {
 	pr.Lock()
 	defer pr.Unlock()
 
-	podKey := client.ObjectKeyFromObject(p).String()
+	podKey := p.UID
 	rl, exists := pr.podMap[podKey]
-	totalResources := corev1.ResourceList{}
 
-	for _, r := range p.Spec.Containers {
-		totalResources = resources.MergeInto(totalResources, r.Resources.Requests)
-	}
+	totalResources := resources.RequestsForPods(p)
+	pr.podMap[podKey] = totalResources
+
 	if !exists {
-		pr.podMap[podKey] = totalResources
 		pr.total = resources.MergeInto(pr.total, totalResources)
-		pr.count++
 		return
 	} else if !resources.Eql(rl, totalResources) {
 		resources.SubtractFrom(pr.total, rl)
@@ -74,25 +68,24 @@ func (pr *PodResources) DeletePod(p *corev1.Pod) {
 	pr.Lock()
 	defer pr.Unlock()
 
-	podKey := client.ObjectKeyFromObject(p).String()
+	podKey := p.UID
 	rl, exists := pr.podMap[podKey]
 
 	if !exists {
 		return
 	}
-	pr.count--
 	resources.SubtractFrom(pr.total, rl)
 	delete(pr.podMap, podKey)
 }
 
-func (pr *PodResources) GetTotalPodResourceRequests() *corev1.ResourceList {
+func (pr *PodResources) GetTotalPodResourceRequests() corev1.ResourceList {
 	pr.Lock()
 	defer pr.Unlock()
-	return lo.ToPtr(pr.total.DeepCopy())
+	return pr.total.DeepCopy()
 }
 
 func (pr *PodResources) GetTotalPodCount() int {
 	pr.RLock()
 	defer pr.RUnlock()
-	return pr.count
+	return len(pr.podMap)
 }

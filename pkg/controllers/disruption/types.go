@@ -181,7 +181,7 @@ type ClusterStateSnapshot struct {
 	PodResources             corev1.ResourceList
 	TotalNodes               int
 	TotalDesiredPodCount     int
-	TotalDesiredPodResources *corev1.ResourceList
+	TotalDesiredPodResources corev1.ResourceList
 }
 type BucketThresholds struct {
 	BiggestName string

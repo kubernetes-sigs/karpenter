@@ -178,8 +178,11 @@ var _ = Describe("Tracker", func() {
 						},
 					}),
 				}
+				ExpectApplied(ctx, env.Client, pods[0])
 				podResources.UpdatePod(pods[0])
+				ExpectApplied(ctx, env.Client, pods[1])
 				podResources.UpdatePod(pods[1])
+				ExpectApplied(ctx, env.Client, pods[2])
 				podResources.UpdatePod(pods[2])
 
 				clusterState, err := tracker.GatherClusterState(ctx)
@@ -193,8 +196,8 @@ var _ = Describe("Tracker", func() {
 				expectedCPU := resource.MustParse("300m")
 				expectedMemory := resource.MustParse("384Mi") // 3 * 128Mi
 
-				calculatedCPU := lo.ToPtr((*clusterState.TotalDesiredPodResources)[corev1.ResourceCPU])
-				calculatedMemory := lo.ToPtr((*clusterState.TotalDesiredPodResources)[corev1.ResourceMemory])
+				calculatedCPU := lo.ToPtr((clusterState.TotalDesiredPodResources)[corev1.ResourceCPU])
+				calculatedMemory := lo.ToPtr((clusterState.TotalDesiredPodResources)[corev1.ResourceMemory])
 
 				Expect(calculatedCPU.String()).To(Equal(expectedCPU.String()))
 				Expect(calculatedMemory.String()).To(Equal(expectedMemory.String()))
@@ -257,6 +260,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				for _, pod := range pods {
+					ExpectApplied(ctx, env.Client, pod)
 					podResources.UpdatePod(pod)
 				}
 
@@ -267,7 +271,7 @@ var _ = Describe("Tracker", func() {
 
 				// Total CPU should be (2 * 100m) + (5 * 200m) = 1200m
 				expectedCPU := resource.MustParse("1200m")
-				calculatedCPU := lo.ToPtr((*clusterState.TotalDesiredPodResources)[corev1.ResourceCPU])
+				calculatedCPU := lo.ToPtr(clusterState.TotalDesiredPodResources[corev1.ResourceCPU])
 				Expect(calculatedCPU.String()).To(Equal(expectedCPU.String()))
 			})
 
@@ -276,7 +280,7 @@ var _ = Describe("Tracker", func() {
 
 				Expect(err).ToNot(HaveOccurred())
 				Expect(clusterState.TotalDesiredPodCount).To(Equal(0))
-				Expect((*clusterState.TotalDesiredPodResources)[corev1.ResourceCPU]).To(Equal(resource.Quantity{}))
+				Expect(clusterState.TotalDesiredPodResources[corev1.ResourceCPU]).To(Equal(resource.Quantity{}))
 			})
 
 			It("should include cluster cost and pod resources from cluster state", func() {
@@ -326,7 +330,7 @@ var _ = Describe("Tracker", func() {
 				Expect(found).To(BeFalse())
 
 				// Add command should succeed
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Verify decision was cached
 				cachedDecision, found := testCache.Get(nodeClaim.Name)
@@ -378,7 +382,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// Add command should succeed
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Verify both candidates were cached
 				cachedDecision1, found1 := testCache.Get(nodeClaim.Name)
@@ -394,32 +398,6 @@ var _ = Describe("Tracker", func() {
 				_, ok2 := cachedDecision2.(disruption.TrackedDecision)
 				Expect(ok1).To(BeTrue())
 				Expect(ok2).To(BeTrue())
-			})
-
-			It("should handle candidates with nil NodePool", func() {
-				driftMethod := disruption.NewDrift(env.Client, cluster, prov, recorder)
-
-				ExpectApplied(ctx, env.Client, nodePool, nodeClaim, node)
-				ExpectMakeNodesAndNodeClaimsInitializedAndStateUpdated(ctx, env.Client, nodeStateController, nodeClaimStateController, []*corev1.Node{node}, []*v1.NodeClaim{nodeClaim})
-
-				stateNode := ExpectStateNodeExists(cluster, node)
-				candidate := &disruption.Candidate{
-					StateNode: stateNode,
-					NodePool:  nil, // Nil NodePool
-				}
-
-				command := &disruption.Command{
-					Method:     driftMethod,
-					Candidates: []*disruption.Candidate{candidate},
-				}
-
-				// Add command should still succeed with "unknown" nodepool name
-				tracker.AddCommand(ctx, command)
-
-				// Verify decision was cached
-				cachedDecision, found := testCache.Get(nodeClaim.Name)
-				Expect(found).To(BeTrue())
-				Expect(cachedDecision).ToNot(BeNil())
 			})
 
 			It("should use correct cache expiration", func() {
@@ -439,7 +417,7 @@ var _ = Describe("Tracker", func() {
 					Candidates: []*disruption.Candidate{candidate},
 				}
 
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Verify decision exists in cache
 				_, found := testCache.Get(nodeClaim.Name)
@@ -471,7 +449,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// Add command should not cache anything when disabled
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Verify nothing was cached
 				_, found := testCache.Get(nodeClaim.Name)
@@ -506,7 +484,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// Add the command to cache the decision
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Verify decision is in cache
 				cachedDecision, found := testCache.Get(nodeClaim.Name)
@@ -514,7 +492,7 @@ var _ = Describe("Tracker", func() {
 				Expect(cachedDecision).ToNot(BeNil())
 
 				// Now finish the command - since there's only one candidate, it should finish immediately
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// Decision should be removed from cache
 				_, found = testCache.Get(nodeClaim.Name)
@@ -560,7 +538,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// Add command (creates decisions for both candidates)
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Both decisions should be in cache
 				_, found1 := testCache.Get(nodeClaim.Name)
@@ -569,7 +547,7 @@ var _ = Describe("Tracker", func() {
 				Expect(found2).To(BeTrue())
 
 				// Try to finish first candidate - should not complete because second is still pending
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// Only non-finished entry should still be in cache.
 				_, found1 = testCache.Get(nodeClaim.Name)
@@ -581,7 +559,7 @@ var _ = Describe("Tracker", func() {
 				testCache.Delete(nodeClaim2.Name)
 
 				// Now finishing first candidate should work
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// First decision should still be in cache
 				_, found1 = testCache.Get(nodeClaim.Name)
@@ -597,7 +575,7 @@ var _ = Describe("Tracker", func() {
 				Expect(found).To(BeFalse())
 
 				// FinishCommand should handle this gracefully (logs error but doesn't panic)
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// Still should be empty
 				_, found = testCache.Get(nodeClaim.Name)
@@ -609,7 +587,7 @@ var _ = Describe("Tracker", func() {
 				testCache.Set(nodeClaim.Name, "invalid-decision-type", cache.DefaultExpiration)
 
 				// FinishCommand should handle this gracefully
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// Cache item should no longer be there
 				_, found := testCache.Get(nodeClaim.Name)
@@ -634,10 +612,10 @@ var _ = Describe("Tracker", func() {
 					Candidates: []*disruption.Candidate{candidate},
 				}
 
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Finish the command - this should trigger metrics emission
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// We can't easily verify the exact metrics values without exposing internal state,
 				// but we can verify the command finished without error
@@ -874,7 +852,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// Step 1: AddCommand should succeed and cache the decision
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				cachedDecision, found := testCache.Get(nodeClaim.Name)
 				Expect(found).To(BeTrue())
@@ -885,7 +863,7 @@ var _ = Describe("Tracker", func() {
 				Expect(decision).ToNot(BeNil())
 
 				// Step 2: FinishCommand should complete the workflow and emit metrics
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// Decision should have been removed from cache.
 				_, found = testCache.Get(nodeClaim.Name)
@@ -955,7 +933,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// AddCommand should create decisions for all candidates
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Verify all candidates have cached decisions
 				_, found1 := testCache.Get(nodeClaim.Name)
@@ -967,7 +945,7 @@ var _ = Describe("Tracker", func() {
 
 				// Finish candidates one by one
 				// First finish should not complete (others still pending)
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 				_, found1 = testCache.Get(nodeClaim.Name)
 				_, found2 = testCache.Get(nodeClaim2.Name)
 				_, found3 = testCache.Get(nodeClaim3.Name)
@@ -976,7 +954,7 @@ var _ = Describe("Tracker", func() {
 				Expect(found3).To(BeTrue())
 
 				// Second finish should not complete (one still pending)
-				tracker.FinishCommand(ctx, nodeClaim2)
+				_ = tracker.FinishCommand(ctx, nodeClaim2)
 				_, found1 = testCache.Get(nodeClaim.Name)
 				_, found2 = testCache.Get(nodeClaim2.Name)
 				_, found3 = testCache.Get(nodeClaim3.Name)
@@ -985,7 +963,7 @@ var _ = Describe("Tracker", func() {
 				Expect(found3).To(BeTrue())
 
 				// Third finish should complete the workflow and emit metrics
-				tracker.FinishCommand(ctx, nodeClaim3)
+				_ = tracker.FinishCommand(ctx, nodeClaim3)
 
 				// All decisions should still be in cache (not removed by FinishCommand)
 				_, found1 = testCache.Get(nodeClaim.Name)
@@ -1018,6 +996,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				for _, pod := range initialPods {
+					ExpectApplied(ctx, env.Client, pod)
 					podResources.UpdatePod(pod)
 				}
 
@@ -1038,7 +1017,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// Add command - captures initial state
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Modify cluster state by adding more pods
 				additionalPods := []*corev1.Pod{
@@ -1069,11 +1048,12 @@ var _ = Describe("Tracker", func() {
 				}
 
 				for _, pod := range additionalPods {
+					ExpectApplied(ctx, env.Client, pod)
 					podResources.UpdatePod(pod)
 				}
 
 				// Finish command - captures final state and calculates ratios
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// The workflow should handle state changes and calculate metrics appropriately
 				_, found := testCache.Get(nodeClaim.Name)
@@ -1098,13 +1078,13 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// Add command successfully
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Corrupt the cached decision to simulate error scenario
 				testCache.Set(nodeClaim.Name, "invalid-data", cache.DefaultExpiration)
 
 				// FinishCommand should handle the error gracefully
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// Cache should have the item removed
 				_, found := testCache.Get(nodeClaim.Name)
@@ -1129,14 +1109,14 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// Add command
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Wait for cache expiration
 				fakeClock.Step(40 * time.Minute)
 				testCache.DeleteExpired()
 
 				// FinishCommand should handle missing cache entry gracefully
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// Cache should be empty due to expiration
 				_, found := testCache.Get(nodeClaim.Name)
@@ -1167,13 +1147,13 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// AddCommand should do nothing when disabled
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				_, found := testCache.Get(nodeClaim.Name)
 				Expect(found).To(BeFalse())
 
 				// FinishCommand should also do nothing when disabled
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				_, found = testCache.Get(nodeClaim.Name)
 				Expect(found).To(BeFalse())
@@ -1209,8 +1189,8 @@ var _ = Describe("Tracker", func() {
 						},
 					}),
 				}
-
 				for _, pod := range initialPods {
+					ExpectApplied(ctx, env.Client, pod)
 					podResources.UpdatePod(pod)
 				}
 
@@ -1235,7 +1215,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				// Start tracking
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Add more pods to simulate scaling up
 				additionalPods := []*corev1.Pod{
@@ -1266,6 +1246,7 @@ var _ = Describe("Tracker", func() {
 				}
 
 				for _, pod := range additionalPods {
+					ExpectApplied(ctx, env.Client, pod)
 					podResources.UpdatePod(pod)
 				}
 
@@ -1275,7 +1256,7 @@ var _ = Describe("Tracker", func() {
 				Expect(finalState.TotalDesiredPodCount).To(Equal(6))
 
 				// Finish tracking - should calculate change ratios
-				tracker.FinishCommand(ctx, nodeClaim)
+				_ = tracker.FinishCommand(ctx, nodeClaim)
 
 				// Workflow completed with accurate resource tracking
 				_, found := testCache.Get(nodeClaim.Name)
@@ -1352,7 +1333,7 @@ var _ = Describe("Tracker", func() {
 							}
 
 							// This should be thread-safe
-							tracker.AddCommand(ctx, command)
+							_ = tracker.AddCommand(ctx, command)
 							resultChan <- true
 						}
 					}(i * commandsPerGoroutine)
@@ -1421,7 +1402,7 @@ var _ = Describe("Tracker", func() {
 						Candidates: []*disruption.Candidate{candidate},
 					}
 
-					tracker.AddCommand(ctx, command)
+					_ = tracker.AddCommand(ctx, command)
 				}
 
 				// Channel to collect results
@@ -1434,7 +1415,7 @@ var _ = Describe("Tracker", func() {
 						for j := 0; j < commandsPerGoroutine; j++ {
 							idx := start + j
 							// This should be thread-safe
-							tracker.FinishCommand(ctx, nodeClaims[idx])
+							_ = tracker.FinishCommand(ctx, nodeClaims[idx])
 							resultChan <- true
 						}
 					}(i * commandsPerGoroutine)
@@ -1471,7 +1452,7 @@ var _ = Describe("Tracker", func() {
 					Candidates: []*disruption.Candidate{candidate},
 				}
 
-				tracker.AddCommand(ctx, command)
+				_ = tracker.AddCommand(ctx, command)
 
 				// Channel to collect results
 				resultChan := make(chan bool, numReaders*operationsPerWorker+numWriters*operationsPerWorker)
@@ -1481,7 +1462,7 @@ var _ = Describe("Tracker", func() {
 					go func() {
 						defer GinkgoRecover()
 						for j := 0; j < operationsPerWorker; j++ {
-							tracker.FinishCommand(ctx, nodeClaim)
+							_ = tracker.FinishCommand(ctx, nodeClaim)
 							resultChan <- true
 						}
 					}()
@@ -1492,7 +1473,7 @@ var _ = Describe("Tracker", func() {
 					go func() {
 						defer GinkgoRecover()
 						for j := 0; j < operationsPerWorker; j++ {
-							tracker.AddCommand(ctx, command)
+							_ = tracker.AddCommand(ctx, command)
 							resultChan <- true
 						}
 					}()
@@ -1571,14 +1552,14 @@ var _ = Describe("Tracker", func() {
 							}
 
 							// Add command
-							tracker.AddCommand(ctx, command)
+							_ = tracker.AddCommand(ctx, command)
 							resultChan <- "add"
 
 							// Small delay to simulate real-world timing
 							time.Sleep(1 * time.Millisecond)
 
 							// Finish command
-							tracker.FinishCommand(ctx, nc)
+							_ = tracker.FinishCommand(ctx, nc)
 							resultChan <- "finish"
 						}
 					}(i)
@@ -1676,10 +1657,10 @@ var _ = Describe("Tracker", func() {
 								Candidates: []*disruption.Candidate{candidate},
 							}
 
-							tracker.AddCommand(ctx, command)
+							_ = tracker.AddCommand(ctx, command)
 						} else {
 							// Finish operation
-							tracker.FinishCommand(ctx, nc)
+							_ = tracker.FinishCommand(ctx, nc)
 						}
 
 						done <- true

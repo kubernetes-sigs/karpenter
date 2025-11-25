@@ -34,6 +34,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
+	"sigs.k8s.io/karpenter/pkg/state/podresources"
 )
 
 // These are alpha metrics, they may not stay. Do not rely on them.
@@ -48,18 +49,50 @@ var (
 		},
 		[]string{metrics.NodePoolLabel},
 	)
+	PodResourcesCPU = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.ClusterSubsystem,
+			Name:      "cpu_total",
+			Help:      "ALPHA METRIC. Total cpu requests of the cluster from Karpenter's perspective.",
+		},
+		[]string{},
+	)
+	PodResourcesMem = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.ClusterSubsystem,
+			Name:      "mem_total",
+			Help:      "ALPHA METRIC. Total mem requests of the cluster from Karpenter's perspective.",
+		},
+		[]string{},
+	)
+	PodCount = opmetrics.NewPrometheusGauge(
+		crmetrics.Registry,
+		prometheus.GaugeOpts{
+			Namespace: metrics.Namespace,
+			Subsystem: metrics.ClusterSubsystem,
+			Name:      "pods_total",
+			Help:      "ALPHA METRIC. Total pod count of the cluster from Karpenter's perspective.",
+		},
+		[]string{},
+	)
 )
 
 type Controller struct {
-	client      client.Client
-	clusterCost *cost.ClusterCost
-	npMap       map[string]*v1.NodePool
+	client       client.Client
+	clusterCost  *cost.ClusterCost
+	podResources *podresources.PodResources
+	npMap        map[string]*v1.NodePool
 }
 
-func NewController(client client.Client, clusterCost *cost.ClusterCost) *Controller {
+func NewController(client client.Client, clusterCost *cost.ClusterCost, podResources *podresources.PodResources) *Controller {
 	return &Controller{
 		client:      client,
 		clusterCost: clusterCost,
+		podResources: podResources,
 		npMap:       make(map[string]*v1.NodePool),
 	}
 }
@@ -91,6 +124,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		})
 		c.npMap[string(np.UID)] = &np
 	}
+
+	resources := c.podResources.GetTotalPodResourceRequests()
+	PodResourcesCPU.Set(float64(resources.Cpu().Value()), map[string]string{})
+	PodResourcesMem.Set(float64(resources.Memory().Value()), map[string]string{})
+	PodCount.Set(float64(c.podResources.GetTotalPodCount()), map[string]string{})
 
 	return reconciler.Result{RequeueAfter: time.Second * 10}, nil
 }
