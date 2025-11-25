@@ -231,9 +231,6 @@ func (q *Queue) waitOrTerminate(ctx context.Context, cmd *Command) (err error) {
 	workqueue.ParallelizeUntil(ctx, len(cmd.Candidates), len(cmd.Candidates), func(i int) {
 		if err := retry.OnError(retry.DefaultBackoff, func(err error) bool { return client.IgnoreNotFound(err) != nil }, func() error {
 			e := q.kubeClient.Delete(ctx, cmd.Candidates[i].NodeClaim)
-			if e != nil {
-				q.tracker.FinishCommand(ctx, cmd.Candidates[i].NodeClaim)
-			}
 			return e
 		}); err != nil {
 			errs[i] = client.IgnoreNotFound(err)
@@ -328,7 +325,7 @@ func (q *Queue) StartCommand(ctx context.Context, cmd *Command) error {
 	if markDisruptedErr != nil && (len(cmd.Replacements) > 0 || len(markedCandidates) == 0) {
 		return serrors.Wrap(fmt.Errorf("marking disrupted, %w", markDisruptedErr), "command-id", cmd.ID)
 	}
-	q.tracker.AddCommand(ctx, cmd)
+	_ = q.tracker.AddCommand(ctx, cmd)
 
 	// Update the command to only consider the successfully MarkDisrupted candidates
 	cmd.Candidates = markedCandidates

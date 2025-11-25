@@ -45,6 +45,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
@@ -67,16 +68,18 @@ type Controller struct {
 	cloudProvider cloudprovider.CloudProvider
 	terminator    *terminator.Terminator
 	recorder      events.Recorder
+	tracker       disruption.TrackerInterface
 }
 
 // NewController constructs a controller instance
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, terminator *terminator.Terminator, recorder events.Recorder, tracker disruption.TrackerInterface) *Controller {
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		terminator:    terminator,
 		recorder:      recorder,
+		tracker:       tracker,
 	}
 }
 
@@ -283,6 +286,7 @@ func (c *Controller) awaitInstanceTermination(
 	if !cloudprovider.IsNodeClaimNotFoundError(deleteErr) {
 		return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 	}
+	_ = c.tracker.FinishCommand(ctx, nodeClaim)
 	return reconcile.Result{}, nil
 }
 

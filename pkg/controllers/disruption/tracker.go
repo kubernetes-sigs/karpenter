@@ -37,6 +37,11 @@ import (
 	"sigs.k8s.io/karpenter/pkg/state/podresources"
 )
 
+type TrackerInterface interface {
+	AddCommand(ctx context.Context, cmd *Command) error
+	FinishCommand(ctx context.Context, nc *v1.NodeClaim) error
+}
+
 type Tracker struct {
 	sync.RWMutex
 	decisionCache       *cache.Cache
@@ -91,19 +96,21 @@ func (t *Tracker) GatherClusterState(ctx context.Context) (*ClusterStateSnapshot
 	}, nil
 }
 
-func (t *Tracker) AddCommand(ctx context.Context, cmd *Command) {
+func (t *Tracker) AddCommand(ctx context.Context, cmd *Command) error {
 	if !t.enabled {
-		return
+		return nil
 	}
 	s, err := t.GatherClusterState(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "gathering cluster state", "cmd", cmd)
 		DecisionTrackerErrors.Inc(map[string]string{})
-		return
+		return err
 	}
-	nodepoolName := "unknown"
-	if len(cmd.Candidates) > 0 && cmd.Candidates[0].NodePool != nil {
-		nodepoolName = cmd.Candidates[0].NodePool.Name
+
+	if len(cmd.Candidates) == 0 || cmd.Candidates[0].NodePool == nil {
+		log.FromContext(ctx).Error(fmt.Errorf("getting nodepool"), "while adding command")
+		DecisionTrackerErrors.Inc(map[string]string{})
+		return err
 	}
 
 	d := TrackedDecision{
@@ -111,7 +118,7 @@ func (t *Tracker) AddCommand(ctx context.Context, cmd *Command) {
 		startTime:         t.clock.Now(),
 		otherKeys:         lo.Map(cmd.Candidates, func(c *Candidate, _ int) string { return c.NodeClaim.Name }),
 		consolidationType: cmd.ConsolidationType(),
-		nodepoolName:      nodepoolName,
+		nodepoolName:      cmd.Candidates[0].NodePool.Name,
 	}
 	t.Lock()
 	defer t.Unlock()
@@ -123,46 +130,45 @@ func (t *Tracker) AddCommand(ctx context.Context, cmd *Command) {
 			continue
 		}
 	}
+	return nil
 }
 
-func (t *Tracker) FinishCommand(ctx context.Context, nc *v1.NodeClaim) {
+func (t *Tracker) FinishCommand(ctx context.Context, nc *v1.NodeClaim) error {
 	if !t.enabled {
-		return
+		return nil
 	}
 	s, err := t.GatherClusterState(ctx)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "gathering cluster state", "nc", nc)
 		DecisionTrackerErrors.Inc(map[string]string{})
-		return
+		return err
 	}
 	t.Lock()
+	defer t.Unlock()
 
 	d, exists := t.decisionCache.Get(nc.Name)
 	if !exists {
 		log.FromContext(ctx).Error(fmt.Errorf("decision not found in cache for NodeClaim"), "finishing decision", "nc", nc)
 		DecisionTrackerErrors.Inc(map[string]string{})
-		t.Unlock()
-		return
+		return err
 	}
 	t.decisionCache.Delete(nc.Name)
 	decision, ok := d.(TrackedDecision)
 	if !ok {
 		log.FromContext(ctx).Error(fmt.Errorf("failed to cast cached item to Decision for NodeClaim"), "finishing decision", "nc", nc)
 		DecisionTrackerErrors.Inc(map[string]string{})
-		t.Unlock()
-		return
+		return err
 	}
 	for _, k := range decision.otherKeys {
 		_, exists := t.decisionCache.Get(k)
 		if exists {
 			// decision isn't done yet, lets wait
-			t.Unlock()
-			return
+			return nil
 		}
 	}
 	// we know the decision is over, lets emit metrics
-	t.Unlock()
 	t.EmitMetrics(&decision, s)
+	return nil
 }
 
 func (t *Tracker) EmitMetrics(start *TrackedDecision, end *ClusterStateSnapshot) {
