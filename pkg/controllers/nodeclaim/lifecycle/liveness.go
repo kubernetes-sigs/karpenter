@@ -61,10 +61,6 @@ type NodeClaimTimeout struct {
 }
 
 var (
-	RegistrationTimeout = NodeClaimTimeout{
-		duration: registrationTimeout,
-		reason:   registrationTimeoutReason,
-	}
 	LaunchTimeout = NodeClaimTimeout{
 		duration: launchTimeout,
 		reason:   launchTimeoutReason,
@@ -102,9 +98,14 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 	if registered == nil {
 		return reconcile.Result{Requeue: true}, nil
 	}
+	nodeRegistrationTTL := registrationTimeout
+	if nodeClaim.Spec.RegistrationTTL != nil {
+		nodeRegistrationTTL = nodeClaim.Spec.RegistrationTTL.Duration
+	}
+
 	// If the Registered statusCondition hasn't gone True during the timeout since we first updated it, we should terminate the NodeClaim
 	// NOTE: Timeout has to be stored and checked in the same place since l.clock can advance after the check causing a race
-	if timeUntilTimeout := registrationTimeout - l.clock.Since(registered.LastTransitionTime.Time); timeUntilTimeout > 0 {
+	if timeUntilTimeout := nodeRegistrationTTL - l.clock.Since(registered.LastTransitionTime.Time); timeUntilTimeout > 0 {
 		return reconcile.Result{RequeueAfter: timeUntilTimeout}, nil
 	}
 	if err := l.updateNodePoolRegistrationHealth(ctx, nodeClaim); client.IgnoreNotFound(err) != nil {
@@ -114,7 +115,10 @@ func (l *Liveness) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reco
 		return reconcile.Result{}, err
 	}
 	// Delete the NodeClaim if we believe the NodeClaim won't register since we haven't seen the node
-	if err := l.deleteNodeClaimForTimeout(ctx, RegistrationTimeout, nodeClaim); err != nil {
+	if err := l.deleteNodeClaimForTimeout(ctx, NodeClaimTimeout{
+		duration: nodeRegistrationTTL,
+		reason:   registrationTimeoutReason,
+	}, nodeClaim); err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			return reconcile.Result{}, err
 		}
