@@ -53,7 +53,7 @@ e2etests: ## Run the e2e suite against your local cluster
 		--ginkgo.focus="${FOCUS}" \
 		--ginkgo.skip="${SKIP}" \
 		--ginkgo.timeout=2h \
-		--ginkgo.grace-period=5m \
+		--ginkgo.grace-period=15m \
 		--ginkgo.vv
 
 # Run make install-kwok to install the kwok controller in your cluster first
@@ -112,8 +112,8 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
 	hack/boilerplate.sh
 	go vet ./...
+	golangci-lint-kube-api-linter run
 	cd kwok/charts && helm-docs
-	golangci-lint run
 	@git diff --quiet ||\
 		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
 		if [ "${CI}" = true ]; then\

@@ -571,6 +571,8 @@ func (c *Cluster) NodePoolResourcesFor(nodePoolName string) corev1.ResourceList 
 
 // Reset the cluster state for unit testing
 func (c *Cluster) Reset() {
+	c.unsyncedTimeMu.Lock()
+	defer c.unsyncedTimeMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clusterState = time.Time{}
@@ -580,7 +582,7 @@ func (c *Cluster) Reset() {
 	c.nodes = map[string]*StateNode{}
 	c.nodeNameToProviderID = map[string]string{}
 	c.nodeClaimNameToProviderID = map[string]string{}
-	c.NodePoolState = NewNodePoolState()
+	c.NodePoolState.Reset()
 	c.nodePoolResources = map[string]corev1.ResourceList{}
 	c.bindings = map[types.NamespacedName]string{}
 	c.antiAffinityPods = sync.Map{}
