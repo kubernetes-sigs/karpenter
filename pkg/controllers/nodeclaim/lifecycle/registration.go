@@ -44,7 +44,7 @@ import (
 type Registration struct {
 	kubeClient client.Client
 	recorder   events.Recorder
-	npState    nodepoolhealth.State
+	npState    *nodepoolhealth.State
 }
 
 func (r *Registration) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {

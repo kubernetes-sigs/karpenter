@@ -28,6 +28,9 @@ tools() {
     if ! echo "$PATH" | grep -q "${GOPATH:-undefined}/bin\|$HOME/go/bin"; then
         echo "Go workspace's \"bin\" directory is not in PATH. Run 'export PATH=\"\$PATH:\${GOPATH:-\$HOME/go}/bin\"'."
     fi
+    
+    # Build golangci-lint with kube-api-linter plugin
+    golangci-lint custom --destination ${GOBIN:-$(go env GOPATH)/bin} 
 }
 
 kubebuilder() {

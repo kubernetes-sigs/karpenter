@@ -31,11 +31,11 @@ const Never = "Never"
 // marshaling to YAML and JSON. It uses the value "Never" to signify
 // that the duration is disabled and sets the inner duration as nil
 type NillableDuration struct {
-	*time.Duration
+	*time.Duration //nolint:kubeapilinter
 
 	// Raw is used to ensure we remarshal the NillableDuration in the same format it was specified.
 	// This ensures tools like Flux and ArgoCD don't mistakenly detect drift due to our conversion webhooks.
-	Raw []byte `hash:"ignore"`
+	Raw []byte `hash:"ignore"` //nolint:kubeapilinter
 }
 
 func MustParseNillableDuration(val string) NillableDuration {
