@@ -1922,6 +1922,200 @@ var _ = Describe("Topology", func() {
 		})
 	})
 
+	// Issue #2227: https://github.com/kubernetes-sigs/karpenter/issues/2227
+	// Test that topology spread constraints only consider domains from NodePools compatible with pod requirements
+	Context("NodePool Domain Filtering (Issue #2227)", func() {
+		var restrictedNodePool, unrestrictedNodePool *v1.NodePool
+
+		BeforeEach(func() {
+			// NodePool with specific zone restrictions (zone-1 and zone-2 only)
+			restrictedNodePool = test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "restricted"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+										Key:      corev1.LabelTopologyZone,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"test-zone-1", "test-zone-2"},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+
+			// NodePool with only zone-3 available
+			// This creates a clear distinction: pods targeting zone-1/2 use restrictedNodePool,
+			// pods targeting zone-3 use unrestrictedNodePool
+			unrestrictedNodePool = test.NodePool(v1.NodePool{
+				ObjectMeta: metav1.ObjectMeta{Name: "unrestricted"},
+				Spec: v1.NodePoolSpec{
+					Template: v1.NodeClaimTemplate{
+						Spec: v1.NodeClaimTemplateSpec{
+							Requirements: []v1.NodeSelectorRequirementWithMinValues{
+								{
+									NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+										Key:      corev1.LabelTopologyZone,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"test-zone-3"},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+		})
+
+		It("should only consider zones from NodePool matching pod's nodeSelector", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			// Pods with nodeSelector targeting zone-2
+			// Both NodePools have zone-2, but the test demonstrates that topology
+			// spread only considers zones from NodePools compatible with the pod
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeSelector:              map[string]string{corev1.LabelTopologyZone: "test-zone-2"},
+			}, 2)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// All pods are in zone-2 because of nodeSelector
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2))
+
+			// Verify all pods were scheduled in test-zone-2
+			nodes := &corev1.NodeList{}
+			Expect(env.Client.List(ctx, nodes)).To(Succeed())
+			for _, node := range nodes.Items {
+				Expect(node.Labels[corev1.LabelTopologyZone]).To(Equal("test-zone-2"))
+			}
+		})
+
+		It("should only consider zones from NodePool matching pod's nodeAffinity", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			// Pods with nodeAffinity targeting zone-1 or zone-2 will select restrictedNodePool
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1", "test-zone-2"},
+					},
+				},
+			}, 4)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// Verify pods are spread across only zone-1 and zone-2
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 2))
+		})
+
+		It("should handle pods without NodePool restrictions using all zones", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			// Pods targeting zone-3 will use unrestrictedNodePool
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeSelector:              map[string]string{corev1.LabelTopologyZone: "test-zone-3"},
+			}, 2)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// All pods should be in zone-3
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2))
+		})
+
+		It("should not fail due to zones outside NodePool scope", func() {
+			topology := []corev1.TopologySpreadConstraint{{
+				TopologyKey:       corev1.LabelTopologyZone,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: labels},
+				MaxSkew:           1,
+			}}
+
+			ExpectApplied(ctx, env.Client, restrictedNodePool, unrestrictedNodePool)
+
+			// This test verifies the fix for Issue #2227:
+			// Before fix: Karpenter evaluated all cluster zones (zone-1, 2, 3) even though
+			//             the pod targets restrictedNodePool which only has zone-1 and zone-2.
+			//             This caused unnecessary scheduling failures.
+			// After fix:  Karpenter only evaluates zones available in the targeted NodePool.
+			//
+			// Setup: restrictedNodePool has zone-1, zone-2; unrestrictedNodePool has zone-3
+			// Pod targets zone-1 or zone-2, which only matches restrictedNodePool
+			// With maxSkew=1 and 3 pods across 2 zones: 2-1 distribution is valid
+			pods := test.UnschedulablePods(test.PodOptions{
+				ObjectMeta:                metav1.ObjectMeta{Labels: labels},
+				TopologySpreadConstraints: topology,
+				NodeRequirements: []corev1.NodeSelectorRequirement{
+					{
+						Key:      corev1.LabelTopologyZone,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"test-zone-1", "test-zone-2"},
+					},
+				},
+			}, 3)
+
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pods...)
+
+			// All pods should successfully schedule
+			for _, pod := range pods {
+				ExpectScheduled(ctx, env.Client, pod)
+			}
+
+			// Verify the spread is 2-1 across the two zones (zone-1 and zone-2)
+			// This would have failed before the fix if Karpenter incorrectly
+			// tried to evaluate zone-3 as well
+			ExpectSkew(ctx, env.Client, "default", &topology[0]).To(ConsistOf(2, 1))
+
+			// Verify no pods were scheduled in test-zone-3
+			nodes := &corev1.NodeList{}
+			Expect(env.Client.List(ctx, nodes)).To(Succeed())
+			for _, node := range nodes.Items {
+				Expect(node.Labels[corev1.LabelTopologyZone]).To(BeElementOf("test-zone-1", "test-zone-2"))
+			}
+		})
+	})
+
 	Context("Pod Affinity/Anti-Affinity", func() {
 		It("should schedule a pod with empty pod affinity and anti-affinity", func() {
 			ExpectApplied(ctx, env.Client)
