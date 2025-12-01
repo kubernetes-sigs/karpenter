@@ -126,7 +126,7 @@ var (
 			Subsystem: voluntaryDisruptionSubsystem,
 			Name:      "multi_node_consolidation_batch_size",
 			Help:      "Alpha metric prone to change. Number of nodes in successful multi-node consolidation batch, labeled with decision type.",
-			Buckets:   []float64{2, 3, 4, 5, 7, 10, 15, 20, 25, 30, 40, 50},
+			Buckets:   []float64{2, 3, 4, 5, 7, 10, 15, 20, 25, 30, 40, 50, 100},
 		},
 		[]string{decisionLabel},
 	)
