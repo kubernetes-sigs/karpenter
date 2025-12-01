@@ -124,7 +124,7 @@ spec:
                       and minValues that represent the requirement to have at least that many values.
                     properties:
                       key:
-                        description: The label key that the selector applies to.
+                        description: key is the label key that the selector applies to.
                         type: string
                         maxLength: 316
                         pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(\/))?([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$
@@ -146,9 +146,8 @@ spec:
                         type: integer
                       operator:
                         description: |-
-                          Represents a key's relationship to a set of values.
-                          Valid operators are In, NotIn, Exists, DoesNotExist. Gt, and Lt.
-                        type: string
+                          operator represents a key's relationship to a set of values.
+                          Valid operators are In, NotIn, Exists, DoesNotExist, Gt, Lt, Gte, and Lte.
                         enum:
                           - In
                           - NotIn
@@ -156,14 +155,25 @@ spec:
                           - DoesNotExist
                           - Gt
                           - Lt
+                          - Gte
+                          - Lte
+                          - In
+                          - NotIn
+                          - Exists
+                          - DoesNotExist
+                          - Gt
+                          - Lt
+                        type: string
                       values:
                         description: |-
-                          An array of string values. If the operator is In or NotIn,
+                          values is an array of string values. If the operator is In or NotIn,
                           the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                          the values array must be empty. If the operator is Gt or Lt, the values
+                          the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values
                           array must have a single element, which will be interpreted as an integer.
                           This array is replaced during a strategic merge patch.
                         items:
+                          maxLength: 63
+                          pattern: ^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$
                           type: string
                         type: array
                         x-kubernetes-list-type: atomic
@@ -178,8 +188,8 @@ spec:
                   x-kubernetes-validations:
                     - message: requirements with operator 'In' must have a value defined
                       rule: 'self.all(x, x.operator == ''In'' ? x.values.size() != 0 : true)'
-                    - message: requirements operator 'Gt' or 'Lt' must have a single positive integer value
-                      rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt'') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
+                    - message: requirements operator 'Gt', 'Lt', 'Gte', or 'Lte' must have a single positive integer value
+                      rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt'' || x.operator == ''Gte'' || x.operator == ''Lte'') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
                     - message: requirements with 'minValues' must have at least that many values specified in the 'values' field
                       rule: 'self.all(x, (x.operator == ''In'' && has(x.minValues)) ? x.values.size() >= x.minValues : true)'
                 resources:

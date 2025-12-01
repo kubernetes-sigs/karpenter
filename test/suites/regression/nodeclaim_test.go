@@ -45,13 +45,11 @@ var _ = Describe("NodeClaim", func() {
 			requirements = nodePool.Spec.Template.Spec.Requirements
 			if env.IsDefaultNodeClassKWOK() {
 				requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values: []string{
-							"c-16x-amd64-linux",
-							"c-16x-arm64-linux",
-						},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values: []string{
+						"c-16x-amd64-linux",
+						"c-16x-arm64-linux",
 					},
 				})
 			}

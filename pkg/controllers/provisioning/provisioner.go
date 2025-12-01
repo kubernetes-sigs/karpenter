@@ -578,7 +578,9 @@ func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm)
 		for _, requirement := range term.MatchExpressions {
 			errs = multierr.Append(errs, v1.ValidateRequirement(ctx,
 				v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: requirement,
+					Key:      requirement.Key,
+					Operator: requirement.Operator,
+					Values:   requirement.Values,
 				}))
 		}
 	}

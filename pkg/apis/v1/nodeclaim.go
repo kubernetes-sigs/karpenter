@@ -39,7 +39,7 @@ type NodeClaimSpec struct {
 	//nolint:kubeapilinter
 	// Requirements are layered with GetLabels and applied to every node.
 	// +kubebuilder:validation:XValidation:message="requirements with operator 'In' must have a value defined",rule="self.all(x, x.operator == 'In' ? x.values.size() != 0 : true)"
-	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt' or 'Lt' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
+	// +kubebuilder:validation:XValidation:message="requirements operator 'Gt', 'Lt', 'Gte', or 'Lte' must have a single positive integer value",rule="self.all(x, (x.operator == 'Gt' || x.operator == 'Lt' || x.operator == 'Gte' || x.operator == 'Lte') ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)"
 	// +kubebuilder:validation:XValidation:message="requirements with 'minValues' must have at least that many values specified in the 'values' field",rule="self.all(x, (x.operator == 'In' && has(x.minValues)) ? x.values.size() >= x.minValues : true)"
 	// +kubebuilder:validation:MaxItems:=100
 	// +required
@@ -82,10 +82,41 @@ type NodeClaimSpec struct {
 	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
 }
 
+// NodeSelectorOperator is a type alias that extends corev1.NodeSelectorOperator.
+// This is a workaround for codegen limitations - we cannot add values to upstream
+// enums, so we define additional operators here (Gte, Lte) that get merged with
+// the standard operators (In, NotIn, Exists, DoesNotExist, Gt, Lt) at runtime.
+// Validation is handled in ValidateRequirement() via SupportedNodeSelectorOps.
+type NodeSelectorOperator v1.NodeSelectorOperator
+
+const (
+	NodeSelectorOpGte NodeSelectorOperator = "Gte"
+	NodeSelectorOpLte NodeSelectorOperator = "Lte"
+)
+
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
 // and minValues that represent the requirement to have at least that many values.
 type NodeSelectorRequirementWithMinValues struct {
-	v1.NodeSelectorRequirement `json:",inline"`
+	//nolint:kubeapilinter
+	// key is the label key that the selector applies to.
+	// +required
+	Key string `json:"key"`
+	//nolint:kubeapilinter
+	// operator represents a key's relationship to a set of values.
+	// Valid operators are In, NotIn, Exists, DoesNotExist, Gt, Lt, Gte, and Lte.
+	// +kubebuilder:validation:Enum:=In;NotIn;Exists;DoesNotExist;Gt;Lt;Gte;Lte
+	// +required
+	Operator v1.NodeSelectorOperator `json:"operator"`
+	// values is an array of string values. If the operator is In or NotIn,
+	// the values array must be non-empty. If the operator is Exists or DoesNotExist,
+	// the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values
+	// array must have a single element, which will be interpreted as an integer.
+	// This array is replaced during a strategic merge patch.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:items:MaxLength:=63
+	// +kubebuilder:validation:items:Pattern:=`^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$`
+	Values []string `json:"values,omitempty"`
 	//nolint:kubeapilinter
 	// This field is ALPHA and can be dropped or replaced at any time
 	// MinValues is the minimum number of unique values required to define the flexibility of the specific requirement.
