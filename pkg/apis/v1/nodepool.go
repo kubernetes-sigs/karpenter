@@ -109,9 +109,12 @@ type Disruption struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Budgets []Budget `json:"budgets,omitempty" hash:"ignore"`
-	// ConsolidationPriceImprovementPercentage is the minimum cost savings percentage required for consolidation.
+	// consolidationPriceImprovementPercentage is the minimum cost savings percentage required for consolidation.
 	// Only consolidate when replacement nodes cost at least this percentage less than current nodes.
 	// If not specified, uses the operator-level consolidation-price-improvement-percentage setting.
+	//
+	// For multi-node consolidation involving multiple NodePools with different thresholds,
+	// the most conservative (highest percentage) threshold is used.
 	//
 	// Examples:
 	//   0  = Consolidate for any cost savings (legacy behavior)

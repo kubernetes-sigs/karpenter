@@ -5633,6 +5633,15 @@ var _ = Describe("Consolidation", func() {
 
 				// Verify in events that consolidation was blocked due to insufficient savings
 				Expect(recorder.Calls(events.Unconsolidatable)).To(BeNumerically(">", 0))
+
+				// Verify that metrics reference NodePool A (the one with 10% - most conservative)
+				metric, found := FindMetricWithLabelValues("karpenter_voluntary_disruption_consolidation_price_factor_blocks_total", map[string]string{
+					"reason":        "underutilized",
+					"factor_source": "nodepool",
+					"nodepool":      nodePoolA.Name, // Should be nodepool-a (10% threshold, most conservative)
+				})
+				Expect(found).To(BeTrue())
+				Expect(metric.GetCounter().GetValue()).To(BeNumerically(">", 0))
 			})
 		})
 	})

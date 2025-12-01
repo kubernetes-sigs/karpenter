@@ -358,14 +358,15 @@ func getMinFactorFromCandidates(ctx context.Context, candidates []*Candidate) (*
 // 1. NodePool-level (if set and valid) - for multi-node consolidation, uses the most conservative (minimum) factor
 // 2. Operator-level
 // 3. Default (1.0)
-func (c *consolidation) getPriceImprovementFactor(ctx context.Context, candidates []*Candidate) float64 {
+// Returns: (factor, factorSource, nodePoolName) where factorSource is "nodepool" or "operator"
+func (c *consolidation) getPriceImprovementFactor(ctx context.Context, candidates []*Candidate) (float64, string, string) {
 	// Try to find the minimum (most conservative) factor from candidates
 	minFactor, minFactorNodePool := getMinFactorFromCandidates(ctx, candidates)
 
 	if minFactor != nil {
 		log.FromContext(ctx).V(1).Info("Using most conservative NodePool-level consolidation price improvement factor",
 			"nodePool", minFactorNodePool, "value", *minFactor, "candidateCount", len(candidates))
-		return *minFactor
+		return *minFactor, "nodepool", minFactorNodePool
 	}
 
 	// Fall back to operator-level setting
@@ -374,7 +375,7 @@ func (c *consolidation) getPriceImprovementFactor(ctx context.Context, candidate
 	operatorFactor := 1.0 - (float64(operatorPct) / 100.0)
 	log.FromContext(ctx).V(1).Info("Using operator-level consolidation price improvement factor",
 		"percentage", operatorPct, "factor", operatorFactor, "candidateCount", len(candidates))
-	return operatorFactor
+	return operatorFactor, "operator", ""
 }
 
 // calculateSavingsPercentage calculates the cost savings percentage for consolidation.
@@ -388,17 +389,6 @@ func calculateSavingsPercentage(currentPrice, replacementPrice float64) float64 
 		return 0.0
 	}
 	return (currentPrice - replacementPrice) / currentPrice
-}
-
-// determineFactorSource determines the source of the price improvement factor and returns
-// the factor source ("nodepool" or "operator") and the nodepool name if applicable.
-func determineFactorSource(candidates []*Candidate) (string, string) {
-	for _, candidate := range candidates {
-		if candidate.NodePool != nil && candidate.NodePool.Spec.Disruption.ConsolidationPriceImprovementPercentage != nil {
-			return "nodepool", candidate.NodePool.Name
-		}
-	}
-	return "operator", ""
 }
 
 // getCheapestReplacementPrice extracts the cheapest replacement price from a NodeClaim's instance type options.
@@ -477,8 +467,7 @@ func (c *consolidation) handleBlockedConsolidation(ctx context.Context, candidat
 }
 
 func (c *consolidation) filterByPrice(ctx context.Context, candidates []*Candidate, results pscheduling.Results, candidatePrice float64) bool {
-	priceImprovementFactor := c.getPriceImprovementFactor(ctx, candidates)
-	factorSource, nodePoolName := determineFactorSource(candidates)
+	priceImprovementFactor, factorSource, nodePoolName := c.getPriceImprovementFactor(ctx, candidates)
 
 	// Get cheapest replacement price and instance type counts before filtering
 	instanceTypesBefore := len(results.NewNodeClaims[0].InstanceTypeOptions)
