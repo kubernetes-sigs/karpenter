@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
+//nolint:gocyclo
 func TestStoreApplySelectiveCopy(t *testing.T) {
 	tests := []struct {
 		name                 string
@@ -200,16 +201,10 @@ func TestStoreApplySelectiveCopy(t *testing.T) {
 				}
 			}
 
-			// Verify Capacity sharing - ResourceList is a map, check if modifications affect original
-			if tt.expectSharedCapacity {
-				// For ResourceList (map), we can check if they point to the same memory
-				// by verifying that modifications would affect both
-				if len(result.Capacity) > 0 && len(tt.instanceType.Capacity) > 0 {
-					// Check if they share the same underlying map by comparing addresses
-					// Since we can't directly compare map pointers, we skip this detailed check
-					// The correctness tests below verify the actual behavior
-				}
-			}
+			// Verify Capacity sharing - ResourceList is a map
+			// For ResourceList (map), we can't directly compare map pointers
+			// The correctness tests below verify the actual behavior
+			_ = tt.expectSharedCapacity
 		})
 	}
 }

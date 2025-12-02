@@ -77,6 +77,8 @@ func (ms *memStats) String() string {
 
 // TestMemoryUsage_OverlayScenarios tests memory usage for different overlay configurations
 // This test validates the selective copy-on-write optimization reduces memory consumption
+//
+//nolint:gocyclo
 func TestMemoryUsage_OverlayScenarios(t *testing.T) {
 	instanceTypes := createRealisticInstanceTypes(200)
 	nodePools := []string{"nodepool-1", "nodepool-2", "nodepool-3", "nodepool-4", "nodepool-5"}

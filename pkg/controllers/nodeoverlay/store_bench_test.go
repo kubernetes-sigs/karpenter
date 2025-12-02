@@ -276,7 +276,40 @@ func BenchmarkStoreApplyAllScenario(b *testing.B) {
 	}
 }
 
+// setupNodeOverlayBenchmarkStore creates a store with realistic controller scenario data
+func setupNodeOverlayBenchmarkStore(instanceTypes []*cloudprovider.InstanceType, nodePools []string) *internalInstanceTypeStore {
+	overlay := v1alpha1.NodeOverlay{
+		Spec: v1alpha1.NodeOverlaySpec{
+			Weight: lo.ToPtr(int32(100)),
+		},
+	}
+
+	store := newInternalInstanceTypeStore()
+
+	for _, np := range nodePools {
+		store.evaluatedNodePools.Insert(np)
+		store.updates[np] = make(map[string]*instanceTypeUpdate)
+
+		for _, it := range instanceTypes {
+			// Apply overlay to spot offerings only
+			spotOfferings := cloudprovider.Offerings{}
+			for _, offering := range it.Offerings {
+				if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
+					spotOfferings = append(spotOfferings, offering)
+				}
+			}
+			if len(spotOfferings) > 0 {
+				store.updateInstanceTypeOffering(np, it.Name, overlay, spotOfferings)
+			}
+		}
+	}
+
+	return store
+}
+
 // BenchmarkNodeOverlayControllerScenario benchmarks a realistic controller scenario
+//
+//nolint:gocyclo
 func BenchmarkNodeOverlayControllerScenario(b *testing.B) {
 	// Simulate the scenario from GitHub issue #2655:
 	// - 200 instance types (m/r/c families, generations 6-7, large to 32xlarge)
@@ -297,32 +330,8 @@ func BenchmarkNodeOverlayControllerScenario(b *testing.B) {
 		}
 	}
 
-	overlay := v1alpha1.NodeOverlay{
-		Spec: v1alpha1.NodeOverlaySpec{
-			Weight: lo.ToPtr(int32(100)),
-		},
-	}
-
-	store := newInternalInstanceTypeStore()
 	nodePools := []string{"nodepool-1", "nodepool-2", "nodepool-3", "nodepool-4", "nodepool-5"}
-
-	for _, np := range nodePools {
-		store.evaluatedNodePools.Insert(np)
-		store.updates[np] = make(map[string]*instanceTypeUpdate)
-
-		for _, it := range instanceTypes {
-			// Apply overlay to spot offerings only
-			spotOfferings := cloudprovider.Offerings{}
-			for _, offering := range it.Offerings {
-				if offering.Requirements.Get(v1.CapacityTypeLabelKey).Has("spot") {
-					spotOfferings = append(spotOfferings, offering)
-				}
-			}
-			if len(spotOfferings) > 0 {
-				store.updateInstanceTypeOffering(np, it.Name, overlay, spotOfferings)
-			}
-		}
-	}
+	store := setupNodeOverlayBenchmarkStore(instanceTypes, nodePools)
 
 	b.ReportAllocs()
 	b.ResetTimer()
