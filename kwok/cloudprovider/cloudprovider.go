@@ -229,24 +229,10 @@ func (c CloudProvider) toNode(nodeClaim *v1.NodeClaim) (*corev1.Node, error) {
 			// so we only apply resource requests, since NodeOverlay will not apply.
 			// If this changes in the future, we'll need to update capacity and allocatable values for KWOK nodes.
 			Capacity:    nodeClaim.Spec.Resources.Requests,
-			Allocatable: minResourceList(nodeClaim.Spec.Resources.Requests, instanceType.Allocatable()),
+			Allocatable: nodeClaim.Spec.Resources.Requests,
 			Phase:       corev1.NodePending,
 		},
 	}, nil
-}
-
-// minResourceList returns a ResourceList where each resource is the minimum of the two input values.
-// This ensures allocatable <= capacity invariant is maintained.
-// Only resources present in 'capacity' (first argument) are included in the result.
-func minResourceList(capacity, allocatable corev1.ResourceList) corev1.ResourceList {
-	result := make(corev1.ResourceList)
-	for k, capVal := range capacity {
-		result[k] = capVal
-		if allocVal, ok := allocatable[k]; ok && allocVal.Cmp(capVal) < 0 {
-			result[k] = allocVal
-		}
-	}
-	return result
 }
 
 func addInstanceLabels(labels map[string]string, instanceType *cloudprovider.InstanceType, nodeClaim *v1.NodeClaim, offering *cloudprovider.Offering) map[string]string {
