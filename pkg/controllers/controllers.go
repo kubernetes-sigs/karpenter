@@ -18,10 +18,12 @@ package controllers
 
 import (
 	"context"
+	"time"
 
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/object"
 	"github.com/awslabs/operatorpkg/status"
+	"github.com/patrickmn/go-cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
@@ -63,7 +65,17 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/state/nodepoolhealth"
+	"sigs.k8s.io/karpenter/pkg/state/podresources"
 )
+
+type ControllerOptions struct {
+	EnableDecisionTracking bool
+}
+
+func (c ControllerOptions) WithDecisionTracking() ControllerOptions {
+	c.EnableDecisionTracking = true
+	return c
+}
 
 func NewControllers(
 	ctx context.Context,
@@ -75,12 +87,20 @@ func NewControllers(
 	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
 	cluster *state.Cluster,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
+	opts ...ControllerOptions,
 ) []controller.Controller {
+	if len(opts) > 1 {
+		panic("too many options passed to NewControllers")
+	} else if len(opts) == 0 {
+		opts[0] = ControllerOptions{}
+	}
 	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
-	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
+	podResources := podresources.NewPodResources()
+	tracker := disruption.NewTracker(cluster, clusterCost, podResources, clock, cache.New(30*time.Minute, time.Minute), nil, opts[0].EnableDecisionTracking)
+	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p, tracker)
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
@@ -91,11 +111,11 @@ func NewControllers(
 		expiration.NewController(clock, kubeClient, cloudProvider),
 		informer.NewDaemonSetController(kubeClient, cluster),
 		informer.NewNodeController(kubeClient, cluster),
-		informer.NewPodController(kubeClient, cluster),
+		informer.NewPodController(kubeClient, cluster, podResources),
 		informer.NewNodePoolController(kubeClient, cloudProvider, cluster),
 		informer.NewNodeClaimController(kubeClient, cloudProvider, cluster, clusterCost),
 		informer.NewPricingController(kubeClient, cloudProvider, clusterCost),
-		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder),
+		termination.NewController(clock, kubeClient, cloudProvider, terminator.NewTerminator(clock, kubeClient, evictionQueue, recorder), recorder, tracker),
 		nodepoolreadiness.NewController(kubeClient, cloudProvider),
 		nodepoolregistrationhealth.NewController(kubeClient, cloudProvider, npState),
 		nodepoolcounter.NewController(kubeClient, cloudProvider, cluster),
@@ -114,7 +134,7 @@ func NewControllers(
 			metricspod.NewController(kubeClient, cluster),
 			metricsnodepool.NewController(kubeClient, cloudProvider),
 			metricsnode.NewController(cluster),
-			metricscluster.NewController(kubeClient, clusterCost),
+			metricscluster.NewController(kubeClient, clusterCost, podResources),
 			status.NewController[*v1.NodeClaim](
 				kubeClient,
 				mgr.GetEventRecorderFor("karpenter"),
