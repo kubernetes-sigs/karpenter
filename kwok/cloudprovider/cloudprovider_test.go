@@ -163,6 +163,22 @@ func TestMinResourceList(t *testing.T) {
 				corev1.ResourceMemory: resource.MustParse("0"),
 			},
 		},
+		{
+			name: "completely disjoint resource sets - only capacity resources returned",
+			a: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			},
+			b: corev1.ResourceList{
+				corev1.ResourceName("nvidia.com/gpu"):  resource.MustParse("2"),
+				corev1.ResourceName("hugepages-2Mi"):   resource.MustParse("1Gi"),
+				corev1.ResourceName("example.com/foo"): resource.MustParse("10"),
+			},
+			expected: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			},
+		},
 	}
 
 	for _, tt := range tests {
