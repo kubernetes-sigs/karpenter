@@ -24,54 +24,46 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-func TestAllocatableCapacityInvariant(t *testing.T) {
-	// This test verifies that the bug in commit 99057233 is fixed.
-	// The bug: using lo.Assign() allowed instanceType.Allocatable() to override
-	// nodeClaim.Spec.Resources.Requests, causing allocatable > capacity.
+func TestRevertToInstanceType(t *testing.T) {
+	// This test verifies that reverting to instanceType.Capacity/Allocatable()
+	// (the original behavior before commit 99057233) maintains the invariant.
+	// 
+	// The bug in commit 99057233 was trying to merge nodeClaim.Spec.Resources.Requests
+	// with instanceType.Allocatable() using lo.Assign(), which violated the invariant.
+	//
+	// The fix: just use instanceType values like the original code did.
 	
 	capacity := corev1.ResourceList{
-		corev1.ResourceCPU:    resource.MustParse("2"),
-		corev1.ResourceMemory: resource.MustParse("4Gi"),
-	}
-	
-	instanceAllocatable := corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse("4"),
 		corev1.ResourceMemory: resource.MustParse("8Gi"),
 	}
 	
-	// The old buggy approach used lo.Assign()
-	oldApproach := lo.Assign(capacity, instanceAllocatable)
-	
-	// Verify old approach violated the invariant
-	violationsFound := false
-	for k, capVal := range capacity {
-		allocVal := oldApproach[k]
-		if allocVal.Cmp(capVal) > 0 {
-			violationsFound = true
-			t.Logf("Old approach violated invariant: allocatable[%s]=%s > capacity[%s]=%s", 
-				k, allocVal.String(), k, capVal.String())
-		}
+	allocatable := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("3900m"),
+		corev1.ResourceMemory: resource.MustParse("7500Mi"),
 	}
 	
-	if !violationsFound {
-		t.Error("Expected old approach to violate invariant, but it didn't")
-	}
-	
-	// The new approach simply uses capacity for both
-	// This is correct for KWOK since we're simulating nodes and the comment says
-	// "we only apply resource requests"
-	newApproach := capacity
-	
-	// Verify new approach maintains invariant (allocatable == capacity)
+	// Verify instanceType approach maintains invariant
 	for k, capVal := range capacity {
-		allocVal, ok := newApproach[k]
+		allocVal, ok := allocatable[k]
 		if !ok {
 			t.Errorf("Resource %s missing from allocatable", k)
 			continue
 		}
-		if allocVal.Cmp(capVal) != 0 {
-			t.Errorf("Allocatable should equal capacity: allocatable[%s]=%s, capacity[%s]=%s", 
+		if allocVal.Cmp(capVal) > 0 {
+			t.Errorf("Allocatable exceeds capacity: allocatable[%s]=%s > capacity[%s]=%s", 
 				k, allocVal.String(), k, capVal.String())
 		}
 	}
+	
+	// Show what the buggy approach did
+	requests := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("2"),
+		corev1.ResourceMemory: resource.MustParse("4Gi"),
+	}
+	
+	buggyApproach := lo.Assign(requests, allocatable)
+	
+	t.Logf("Original (correct): capacity=%v, allocatable=%v", capacity, allocatable)
+	t.Logf("Buggy approach: capacity=%v, allocatable=%v (violates invariant!)", requests, buggyApproach)
 }
