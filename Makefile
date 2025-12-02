@@ -92,7 +92,7 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 		./pkg/...
 
 vulncheck: ## Verify code vulnerabilities
-	@go tool govulncheck ./pkg/...
+	@hack/vulncheck.sh
 
 licenses: download ## Verifies dependency licenses
 	! go tool go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
