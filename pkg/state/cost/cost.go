@@ -210,8 +210,9 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	}()
 
 	// First lets check if the right labels are there
-	if nodeClaimMissingLabels(ctx, *nodeClaim) {
-		failed = true
+	if nodeClaimMissingLabels(*nodeClaim) {
+		// not technically a failure mode as we expect to retry once the
+		// labels are propagated
 		return
 	}
 
@@ -260,8 +261,9 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	}()
 
 	// First lets check if the right labels are there
-	if nodeClaimMissingLabels(ctx, *nodeClaim) {
-		failed = true
+	if nodeClaimMissingLabels(*nodeClaim) {
+		// not technically a failure mode as we expect to retry once the
+		// labels are propagated
 		return
 	}
 
@@ -387,7 +389,7 @@ func (cc *ClusterCost) GetNodepoolCost(np *v1.NodePool) float64 {
 	return npc.cost
 }
 
-func nodeClaimMissingLabels(ctx context.Context, nc v1.NodeClaim) bool {
+func nodeClaimMissingLabels(nc v1.NodeClaim) bool {
 	var missingLabels []string
 	for _, key := range NecessaryLabels {
 		_, exists := nc.Labels[key]
@@ -395,10 +397,5 @@ func nodeClaimMissingLabels(ctx context.Context, nc v1.NodeClaim) bool {
 			missingLabels = append(missingLabels, key)
 		}
 	}
-	if len(missingLabels) > 0 {
-		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("nodeclaim is missing required labels"), "nodeclaim", klog.KObj(&nc), "missingLabels", missingLabels), "failed to update nodeclaim from cost tracking")
-		return true
-	}
-
-	return false
+	return len(missingLabels) > 0
 }
