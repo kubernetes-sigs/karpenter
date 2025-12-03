@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -484,17 +485,18 @@ var _ = Describe("Static Provisioning Controller", func() {
 		})
 		It("should handle large replica counts", func() {
 			nodePool := test.StaticNodePool()
-			nodePool.Spec.Replicas = lo.ToPtr(int64(500))
+			numNodeClaims := 1000
+			nodePool.Spec.Replicas = lo.ToPtr(int64(numNodeClaims))
 			ExpectApplied(ctx, env.Client, nodePool)
 
-			result := ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
-			Expect(result.RequeueAfter).To(BeNumerically("~", time.Minute*1, time.Second))
-
-			// Should create 500 NodeClaims
-			nodeClaims := &v1.NodeClaimList{}
-			Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
-			Expect(nodeClaims.Items).To(HaveLen(500))
-			ExpectStateNodePoolCount(cluster, nodePool.Name, 500, 0, 0)
+			Eventually(func(g Gomega) int {
+				// TODO: remove Eventually when 1.31 is deprecated https://github.com/kubernetes/enhancements/issues/4420
+				_, _ = reconcile.AsReconciler(env.Client, controller).Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(nodePool)})
+				nodeClaims := &v1.NodeClaimList{}
+				Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
+				return len(nodeClaims.Items)
+			}).WithTimeout(40 * time.Second).Should(Equal(numNodeClaims))
+			ExpectStateNodePoolCount(cluster, nodePool.Name, numNodeClaims, 0, 0)
 		})
 		It("handles concurrent reconciliation without exceeding NodePool limits", func() {
 			nodePool := test.StaticNodePool()
