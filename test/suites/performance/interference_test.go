@@ -40,18 +40,18 @@ var _ = Describe("Performance", func() {
 				test.WithHostnameSpread())
 			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi", test.WithHostnameSpread())
 
-			// Create deployments
+			// Create 1st deployment
 			smallDeployment := test.Deployment(smallOpts)
 
 			env.ExpectCreated(smallDeployment)
 
-			By("Monitoring scale-out performance with hostname spreading (1000 pods)")
-			scaleOutReport, err := ReportScaleOutWithOutput(env, "Host Name Spreading Performance Test", 1000, 15*time.Minute, "hostname_spread_scale_out_small")
+			By("Monitoring scale-out performance with hostname spreading (500 pods)")
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "Host Name Spreading Performance Test", 500, 15*time.Minute, "hostname_spread_scale_out_small")
 			Expect(err).ToNot(HaveOccurred(), "Scale-out should execute successfully")
 
 			By("Validating scale-out performance with hostname spreading")
 			Expect(scaleOutReport.TestType).To(Equal("scale-out"), "Should be detected as scale-out test")
-			Expect(scaleOutReport.TotalPods).To(Equal(500), "Should have 1000 total pods")
+			Expect(scaleOutReport.TotalPods).To(Equal(500), "Should have 500 total pods")
 
 			// Performance assertions - hostname spreading may require more nodes
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
@@ -66,7 +66,7 @@ var _ = Describe("Performance", func() {
 			// ========== PHASE 2: Interference TEST ==========
 			By("Scaling down and scaling out interference scaling test")
 
-			// Scale down both deployments
+			// Scale down one deployment 50% and Scale up the 2nd to 500
 			smallDeployment.Spec.Replicas = lo.ToPtr(int32(250))
 			largeDeployment := test.Deployment(largeOpts)
 			env.ExpectUpdated(smallDeployment)
@@ -78,7 +78,7 @@ var _ = Describe("Performance", func() {
 
 			By("Validating scale out performance")
 			Expect(interferenceReport.TestType).To(Equal("scale-out"), "Should be detected as scale out test")
-			Expect(interferenceReport.TotalPods).To(Equal(750), "Should have 700 total pods after scale-in")
+			Expect(interferenceReport.TotalPods).To(Equal(750), "Should have 750 total pods after scale-in")
 
 			// Consolidation assertions
 			Expect(interferenceReport.TotalTime).To(BeNumerically("<", 10*time.Minute),
