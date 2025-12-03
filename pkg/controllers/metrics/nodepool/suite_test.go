@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
 	"sigs.k8s.io/karpenter/pkg/controllers/metrics/nodepool"
 	"sigs.k8s.io/karpenter/pkg/metrics"
+	"sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/state/cost"
 	"sigs.k8s.io/karpenter/pkg/test"
 	. "sigs.k8s.io/karpenter/pkg/test/expectations"
@@ -55,7 +56,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	cp = fake.NewCloudProvider()
 	cc = cost.NewClusterCost(ctx, cp, env.Client)
-	nodePoolController = nodepool.NewController(env.Client, cp, cc)
+	ctx = options.ToContext(ctx, test.Options())
+	nodePoolController = nodepool.NewController(ctx, env.Client, cp, cc)
 })
 
 var _ = AfterSuite(func() {
@@ -100,8 +102,11 @@ var _ = Describe("Metrics", func() {
 
 			for k, v := range limits {
 				m, found := FindMetricWithLabelValues("karpenter_nodepools_limit", map[string]string{
-					metrics.NodePoolLabel:     nodePool.GetName(),
-					metrics.ResourceTypeLabel: strings.ReplaceAll(k.String(), "-", "_"),
+					"nodepool":      nodePool.GetName(),
+					"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
+					"capacity_type": "",
+					"zone":          "",
+					"architecture":  "",
 				})
 				Expect(found).To(Equal(isNodePoolManaged))
 				if isNodePoolManaged {
@@ -125,8 +130,11 @@ var _ = Describe("Metrics", func() {
 
 		for k, v := range resources {
 			m, found := FindMetricWithLabelValues("karpenter_nodepools_usage", map[string]string{
-				metrics.NodePoolLabel:     nodePool.GetName(),
-				metrics.ResourceTypeLabel: strings.ReplaceAll(k.String(), "-", "_"),
+				"nodepool":      nodePool.GetName(),
+				"resource_type": strings.ReplaceAll(k.String(), "-", "_"),
+				"capacity_type": "",
+				"zone":          "",
+				"architecture":  "",
 			})
 			Expect(found).To(BeTrue())
 			Expect(m.GetGauge().GetValue()).To(BeNumerically("~", v.AsApproximateFloat64()))
@@ -163,5 +171,52 @@ var _ = Describe("Metrics", func() {
 			})
 			Expect(found).To(BeFalse())
 		}
+	})
+
+	It("should include additional labels from CLI flags", func() {
+		// Set NodePool with additional labels
+		nodePool.Labels = map[string]string{
+			"capacity_type": "spot",
+			"zone":          "us-east-1a",
+			"architecture":  "amd64",
+		}
+		nodePool.Spec.Limits = v1.Limits{
+			corev1.ResourceCPU: resource.MustParse("10"),
+		}
+
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+
+		// Verify metric has additional labels
+		m, found := FindMetricWithLabelValues("karpenter_nodepools_limit", map[string]string{
+			"nodepool":      nodePool.GetName(),
+			"resource_type": "cpu",
+			"capacity_type": "spot",
+			"zone":          "us-east-1a",
+			"architecture":  "amd64",
+		})
+		Expect(found).To(BeTrue())
+		Expect(m.GetGauge().GetValue()).To(BeNumerically("~", 10))
+	})
+
+	It("should use empty string for missing additional labels", func() {
+		// NodePool without additional labels
+		nodePool.Spec.Limits = v1.Limits{
+			corev1.ResourceCPU: resource.MustParse("5"),
+		}
+
+		ExpectApplied(ctx, env.Client, nodePool)
+		ExpectReconcileSucceeded(ctx, nodePoolController, client.ObjectKeyFromObject(nodePool))
+
+		// Verify metric has empty strings for missing labels
+		m, found := FindMetricWithLabelValues("karpenter_nodepools_limit", map[string]string{
+			"nodepool":      nodePool.GetName(),
+			"resource_type": "cpu",
+			"capacity_type": "",
+			"zone":          "",
+			"architecture":  "",
+		})
+		Expect(found).To(BeTrue())
+		Expect(m.GetGauge().GetValue()).To(BeNumerically("~", 5))
 	})
 })
