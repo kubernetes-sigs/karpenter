@@ -66,7 +66,7 @@ func IgnorePodBlockEvictionError(err error) error {
 	return err
 }
 
-//go:generate controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
+//go:generate go tool controller-gen object:headerFile="../../../hack/boilerplate.go.txt" paths="."
 
 // StateNodes is a typed version of a list of *Node
 // nolint: revive

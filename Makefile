@@ -88,7 +88,7 @@ benchmark: ## Run benchmark tests for node overlay store
 	go test -bench=. -benchmem ./pkg/controllers/nodeoverlay/... -run=^$$
 
 deflake: ## Run randomized, racing tests until the test fails to catch flakes
-	ginkgo \
+	go tool ginkgo \
 		--race \
 		--focus="${FOCUS}" \
 		--timeout=20m \
@@ -98,10 +98,10 @@ deflake: ## Run randomized, racing tests until the test fails to catch flakes
 		./pkg/...
 
 vulncheck: ## Verify code vulnerabilities
-	@govulncheck ./pkg/...
+	@go tool govulncheck ./pkg/...
 
 licenses: download ## Verifies dependency licenses
-	! go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
+	! go tool go-licenses csv ./... | grep -v -e 'MIT' -e 'Apache-2.0' -e 'BSD-3-Clause' -e 'BSD-2-Clause' -e 'ISC' -e 'MPL-2.0'
 
 verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatting, etc
 	go mod tidy
@@ -118,22 +118,19 @@ verify: ## Verify code. Includes codegen, docgen, dependencies, linting, formatt
 	@perl -i -pe 's/sets.Set/sets.Set[string]/g' pkg/scheduling/zz_generated.deepcopy.go
 	hack/boilerplate.sh
 	go vet ./...
-	golangci-lint-kube-api-linter run
-	cd kwok/charts && helm-docs
+	go tool golangci-lint-kube-api-linter run
+	cd kwok/charts && go tool helm-docs
 	@git diff --quiet ||\
 		{ echo "New file modification detected in the Git working tree. Please check in before commit."; git --no-pager diff --name-only | uniq | awk '{print "  - " $$0}'; \
 		if [ "${CI}" = true ]; then\
 			exit 1;\
 		fi;}
-	actionlint -oneline
+	go tool actionlint -oneline
 
 download: ## Recursively "go mod download" on all directories where go.mod exists
 	$(foreach dir,$(MOD_DIRS),cd $(dir) && go mod download $(newline))
 
-toolchain: ## Install developer toolchain
-	./hack/toolchain.sh
-
 gen_instance_types:
 	go run kwok/tools/gen_instance_types.go > kwok/cloudprovider/instance_types.json
 
-.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory benchmark deflake vulncheck licenses verify download toolchain gen_instance_types
+.PHONY: help presubmit install-kwok uninstall-kwok build apply delete test test-memory benchmark deflake vulncheck licenses verify download gen_instance_types
