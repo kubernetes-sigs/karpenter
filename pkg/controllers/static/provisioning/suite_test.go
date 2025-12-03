@@ -495,7 +495,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 				nodeClaims := &v1.NodeClaimList{}
 				Expect(env.Client.List(ctx, nodeClaims)).To(Succeed())
 				return len(nodeClaims.Items)
-			}, ).WithTimeout(40 * time.Second).Should(Equal(numNodeClaims))
+			}).WithTimeout(40 * time.Second).Should(Equal(numNodeClaims))
 			ExpectStateNodePoolCount(cluster, nodePool.Name, numNodeClaims, 0, 0)
 		})
 		It("handles concurrent reconciliation without exceeding NodePool limits", func() {
