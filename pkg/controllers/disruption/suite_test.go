@@ -62,27 +62,30 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
-var ctx context.Context
-var env *test.Environment
-var clusterCost *cost.ClusterCost
-var cluster *state.Cluster
-var disruptionController *disruption.Controller
-var pricingController *informer.PricingController
-var prov *provisioning.Provisioner
-var cloudProvider *fake.CloudProvider
-var nodeStateController *informer.NodeController
-var nodeClaimStateController *informer.NodeClaimController
-var fakeClock *clock.FakeClock
-var recorder *test.EventRecorder
-var queue *disruption.Queue
-var allKnownDisruptionReasons []v1.DisruptionReason
+var (
+	ctx                       context.Context
+	env                       *test.Environment
+	clusterCost               *cost.ClusterCost
+	cluster                   *state.Cluster
+	disruptionController      *disruption.Controller
+	prov                      *provisioning.Provisioner
+	cloudProvider             *fake.CloudProvider
+	nodeStateController       *informer.NodeController
+	nodeClaimStateController  *informer.NodeClaimController
+	fakeClock                 *clock.FakeClock
+	recorder                  *test.EventRecorder
+	queue                     *disruption.Queue
+	allKnownDisruptionReasons []v1.DisruptionReason
+)
 
-var onDemandInstances []*cloudprovider.InstanceType
-var spotInstances []*cloudprovider.InstanceType
-var leastExpensiveInstance, mostExpensiveInstance *cloudprovider.InstanceType
-var leastExpensiveOffering, mostExpensiveOffering *cloudprovider.Offering
-var leastExpensiveSpotInstance, mostExpensiveSpotInstance *cloudprovider.InstanceType
-var leastExpensiveSpotOffering, mostExpensiveSpotOffering *cloudprovider.Offering
+var (
+	onDemandInstances                                     []*cloudprovider.InstanceType
+	spotInstances                                         []*cloudprovider.InstanceType
+	leastExpensiveInstance, mostExpensiveInstance         *cloudprovider.InstanceType
+	leastExpensiveOffering, mostExpensiveOffering         *cloudprovider.Offering
+	leastExpensiveSpotInstance, mostExpensiveSpotInstance *cloudprovider.InstanceType
+	leastExpensiveSpotOffering, mostExpensiveSpotOffering *cloudprovider.Offering
+)
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -412,7 +415,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		}
 		persistentVolumeClaim := test.PersistentVolumeClaim(test.PersistentVolumeClaimOptions{VolumeName: persistentVolume.Name, StorageClassName: &storageClass.Name})
 		pod := test.Pod(test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "apps/v1",
@@ -493,7 +497,8 @@ var _ = Describe("Simulate Scheduling", func() {
 		Expect(env.Client.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
 
 		pod := test.Pod(test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "apps/v1",
@@ -503,7 +508,9 @@ var _ = Describe("Simulate Scheduling", func() {
 						Controller:         lo.ToPtr(true),
 						BlockOwnerDeletion: lo.ToPtr(true),
 					},
-				}}})
+				},
+			},
+		})
 
 		ExpectApplied(ctx, env.Client, rs, pod, nodeClaim, node, nodePool)
 
@@ -945,6 +952,7 @@ var _ = Describe("Candidate Filtering", func() {
 		Expect(cluster.DeepCopyNodes()).To(HaveLen(1))
 		_, err := disruption.NewCandidate(ctx, env.Client, recorder, fakeClock, cluster.DeepCopyNodes()[0], pdbLimits, nodePoolMap, nodePoolInstanceTypeMap, queue, disruption.GracefulDisruptionClass)
 		Expect(err).To(HaveOccurred())
+		fmt.Printf("\n\n=== BEFORE (without wrapping) ===\n%s\n=================================\n\n", err.Error())
 		Expect(err.Error()).To(ContainSubstring(fmt.Sprintf(`pod has "karpenter.sh/do-not-disrupt" annotation (Pod=%s)`, client.ObjectKeyFromObject(pod))))
 		Expect(recorder.DetectedEvent(fmt.Sprintf(`Pod has "karpenter.sh/do-not-disrupt" annotation (Pod=%s)`, client.ObjectKeyFromObject(pod)))).To(BeTrue())
 	})
@@ -1894,7 +1902,7 @@ var _ = Describe("Candidate Filtering", func() {
 
 var _ = Describe("Metrics", func() {
 	var nodePool *v1.NodePool
-	var labels = map[string]string{
+	labels := map[string]string{
 		"app": "test",
 	}
 	var nodeClaims []*v1.NodeClaim
@@ -2009,7 +2017,8 @@ var _ = Describe("Metrics", func() {
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
 		pods := test.Pods(4, test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "apps/v1",
@@ -2063,7 +2072,8 @@ var _ = Describe("Metrics", func() {
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
 		pods := test.Pods(4, test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "apps/v1",
@@ -2118,7 +2128,8 @@ var _ = Describe("Metrics", func() {
 		rs := test.ReplicaSet()
 		ExpectApplied(ctx, env.Client, rs)
 		pods := test.Pods(4, test.PodOptions{
-			ObjectMeta: metav1.ObjectMeta{Labels: labels,
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "apps/v1",
