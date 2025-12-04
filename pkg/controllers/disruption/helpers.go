@@ -176,7 +176,7 @@ func GetCandidates(ctx context.Context, cluster *state.Cluster, kubeClient clien
 ) ([]*Candidate, error) {
 	nodePoolMap, nodePoolToInstanceTypesMap, err := BuildNodePoolMap(ctx, kubeClient, cloudProvider)
 	if err != nil {
-		return nil, fmt.Errorf("building nodepool map, %w", err)
+		return nil, err
 	}
 	pdbs, err := pdb.NewLimits(ctx, kubeClient)
 	if err != nil {
