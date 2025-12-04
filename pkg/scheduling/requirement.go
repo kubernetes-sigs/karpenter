@@ -29,7 +29,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
+//go:generate go tool controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 
 // Requirement is an efficient represenatation of corev1.NodeSelectorRequirement
 // +k8s:deepcopy-gen=true
