@@ -28,4 +28,6 @@ runs:
         go tool setup-envtest use -p path ${{ inputs.k8sVersion }} | xargs -I {} sudo mv {} /usr/local/kubebuilder/bin
     - name: Install ko
       shell: bash
-      run: go install github.com/google/ko@v0.14.1
+      run: |
+        curl -sSfL https://github.com/ko-build/ko/releases/download/v0.15.4/ko_0.15.4_Linux_x86_64.tar.gz | sudo tar xzf - -C /usr/local/bin ko
+        sudo chmod +x /usr/local/bin/ko
