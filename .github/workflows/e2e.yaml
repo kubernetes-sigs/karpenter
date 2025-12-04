@@ -43,7 +43,7 @@ jobs:
       run: |
         kubectl config current-context
         kubectl get nodes
-        kubectl taint nodes chart-testing-control-plane CriticalAddonsOnly:NoSchedule
+        kubectl taint nodes --all CriticalAddonsOnly:NoSchedule
     - name: install prometheus 
       uses: ./.github/actions/install-prometheus
     - name: install pyroscope 
