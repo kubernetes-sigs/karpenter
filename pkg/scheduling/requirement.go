@@ -180,9 +180,11 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	lessThan, lessThanOrEqual = collapseUpperBounds(lessThan, lessThanOrEqual)
 
 	// Check if bounds are incompatible
-	if lower, upper := intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual); lower > upper {
+	lower, upper := intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual)
+	if lower > upper {
 		return NewRequirementWithFlexibility(r.Key, corev1.NodeSelectorOpDoesNotExist, minValues)
 	}
+	hasBounds := greaterThan != nil || greaterThanOrEqual != nil || lessThan != nil || lessThanOrEqual != nil
 
 	// Values
 	var values sets.Set[string]
@@ -195,9 +197,10 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	} else {
 		values = r.values.Intersection(requirement.values)
 	}
-	for value := range values {
-		if !withinRange(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
-			values.Delete(value)
+	for v := range values {
+		val, err := strconv.Atoi(v)
+		if hasBounds && (err != nil || val < lower || val > upper) {
+			values.Delete(v)
 		}
 	}
 	// Remove boundaries for concrete sets
@@ -220,30 +223,37 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	if lower > upper {
 		return false
 	}
+	hasBounds := greaterThan != nil || greaterThanOrEqual != nil || lessThan != nil || lessThanOrEqual != nil
 	// Both requirements have a complement
 	if r.complement && requirement.complement {
 		return true
 	}
 	// Only one requirement has a complement
 	if r.complement && !requirement.complement {
-		for value := range requirement.values {
-			if !r.values.Has(value) && withinRange(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
+		for v := range requirement.values {
+			val, err := strconv.Atoi(v)
+			inRange := !hasBounds || (err == nil && val >= lower && val <= upper)
+			if !r.values.Has(v) && inRange {
 				return true
 			}
 		}
 		return false
 	}
 	if !r.complement && requirement.complement {
-		for value := range r.values {
-			if !requirement.values.Has(value) && withinRange(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
+		for v := range r.values {
+			val, err := strconv.Atoi(v)
+			inRange := !hasBounds || (err == nil && val >= lower && val <= upper)
+			if !requirement.values.Has(v) && inRange {
 				return true
 			}
 		}
 		return false
 	}
 	// Both requirements are non-complement requirements
-	for value := range r.values {
-		if requirement.values.Has(value) && withinRange(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
+	for v := range r.values {
+		val, err := strconv.Atoi(v)
+		inRange := !hasBounds || (err == nil && val >= lower && val <= upper)
+		if requirement.values.Has(v) && inRange {
 			return true
 		}
 	}
