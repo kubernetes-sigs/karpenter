@@ -27,10 +27,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/klog/v2"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -85,7 +87,8 @@ func (c *Controller) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	for i := range nodePoolList.Items {
 		its, err := c.cloudProvider.GetInstanceTypes(ctx, &nodePoolList.Items[i])
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("listing instance types, %w", err)
+			log.FromContext(ctx).WithValues("NodePool", klog.KObj(&nodePoolList.Items[i])).Error(err, "skipping, unable to resolve instance types")
+			continue
 		}
 		nodePoolToInstanceTypes[nodePoolList.Items[i].Name] = its
 	}
