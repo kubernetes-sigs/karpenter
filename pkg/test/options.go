@@ -41,6 +41,7 @@ type OptionsFields struct {
 	MemoryLimit                      *int64
 	CPURequests                      *int64
 	LogLevel                         *string
+	LogEncoding                      *string
 	LogOutputPaths                   *string
 	LogErrorOutputPaths              *string
 	PreferencePolicy                 *options.PreferencePolicy
@@ -79,6 +80,7 @@ func Options(overrides ...OptionsFields) *options.Options {
 		MemoryLimit:                      lo.FromPtrOr(opts.MemoryLimit, -1),
 		CPURequests:                      lo.FromPtrOr(opts.CPURequests, 5000), // use 5 threads to enforce parallelism
 		LogLevel:                         lo.FromPtrOr(opts.LogLevel, ""),
+		LogEncoding:                      lo.FromPtrOr(opts.LogEncoding, "json"),
 		LogOutputPaths:                   lo.FromPtrOr(opts.LogOutputPaths, "stdout"),
 		LogErrorOutputPaths:              lo.FromPtrOr(opts.LogErrorOutputPaths, "stderr"),
 		BatchMaxDuration:                 lo.FromPtrOr(opts.BatchMaxDuration, 10*time.Second),
