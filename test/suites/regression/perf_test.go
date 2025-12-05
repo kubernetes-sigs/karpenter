@@ -23,9 +23,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -37,35 +34,15 @@ var _ = Describe("Performance", func() {
 
 	Context("Provisioning", func() {
 		It("should do simple provisioning", func() {
-			deployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(replicas),
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: testLabels,
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU: resource.MustParse("1"),
-						},
-					},
-				}})
+			deployment := test.Deployment(test.CreateDeploymentOptions("test-app", int32(replicas), "1", "128Mi",
+				test.WithLabels(testLabels)))
 			env.ExpectCreated(deployment)
 			env.ExpectCreated(nodePool, nodeClass)
 			env.EventuallyExpectHealthyPodCount(labelSelector, replicas)
 		})
 		It("should do simple provisioning and simple drift", func() {
-			deployment := test.Deployment(test.DeploymentOptions{
-				Replicas: int32(replicas),
-				PodOptions: test.PodOptions{
-					ObjectMeta: metav1.ObjectMeta{
-						Labels: testLabels,
-					},
-					ResourceRequirements: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceCPU: resource.MustParse("1"),
-						},
-					},
-				}})
+			deployment := test.Deployment(test.CreateDeploymentOptions("test-app", int32(replicas), "1", "128Mi",
+				test.WithLabels(testLabels)))
 			env.ExpectCreated(deployment)
 			env.ExpectCreated(nodePool, nodeClass)
 			env.EventuallyExpectHealthyPodCount(labelSelector, replicas)

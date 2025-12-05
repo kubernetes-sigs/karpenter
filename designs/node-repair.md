@@ -59,12 +59,12 @@ func (c *CloudProvider) RepairPolicy() []cloudprovider.RepairStatement {
         {
             Type: "Ready"
             Status: corev1.ConditionFalse,
-            TrolorationDuration: "30m"
+            TolerationDuration: "30m"
         },
         {
             Type: "NetworkUnavailable"
             Status: corev1.ConditionTrue,
-            TrolorationDuration: "10m"
+            TolerationDuration: "10m"
         },
         ...
     }

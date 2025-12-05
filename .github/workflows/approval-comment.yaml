@@ -1,0 +1,25 @@
+name: ApprovalComment
+on:
+  pull_request_review:
+    types: [submitted]
+jobs:
+  approval-comment:
+    if: startsWith(github.event.review.body, '/karpenter perf')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 0
+      - name: Save info about the review comment as an artifact for other workflows that run on workflow_run to download them
+        env:
+          REVIEW_BODY: ${{ github.event.review.body }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          COMMIT_ID: ${{ github.event.review.commit_id }}
+        run: |
+          mkdir -p /tmp/artifacts
+          { echo "$REVIEW_BODY"; echo "$PULL_REQUEST_NUMBER"; echo "$COMMIT_ID"; } >> /tmp/artifacts/metadata.txt
+          cat /tmp/artifacts/metadata.txt
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: artifacts
+          path: /tmp/artifacts
