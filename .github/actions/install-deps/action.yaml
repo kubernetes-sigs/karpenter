@@ -2,7 +2,7 @@ name: InstallDependencies
 description: 'Installs Go Downloads and installs Karpenter Dependencies'
 inputs:
   k8sVersion:
-    description: Kubernetes version to use when installing the toolchain
+    description: Kubernetes version to use when installing envtest binaries
     default: "1.33.x"
 runs:
   using: "composite"
@@ -17,14 +17,12 @@ runs:
     - run: sudo chown "$USER" /usr/local
       shell: bash
     - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-      id: cache-toolchain
+      id: cache-envtest
       with:
-        path: |
-          /usr/local/kubebuilder/bin
-          ~/go/bin
-        # Added go version to compensate for this issue with govulncheck: https://github.com/golang/go/issues/65590. Could re-evaluate if this is necessary once the
-        # upstream go issue is corrected and if this is causing too many cache misses.
-        key: ${{ runner.os }}-${{ inputs.k8sVersion }}-${{ steps.setup-go.outputs.go-version }}-toolchain-cache-${{ hashFiles('hack/toolchain.sh') }}
-    - if: ${{ steps.cache-toolchain.outputs.cache-hit != 'true' }}
+        path: /usr/local/kubebuilder/bin
+        key: ${{ runner.os }}-${{ inputs.k8sVersion }}-envtest-cache
+    - if: ${{ steps.cache-envtest.outputs.cache-hit != 'true' }}
       shell: bash
-      run: K8S_VERSION=${{ inputs.k8sVersion }} make toolchain
+      run: |
+        sudo mkdir -p /usr/local/kubebuilder
+        go tool setup-envtest use -p path ${{ inputs.k8sVersion }} | xargs -I {} sudo mv {} /usr/local/kubebuilder/bin

@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
+//go:generate go tool controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 
 var (
 	SpotRequirement     = scheduling.NewRequirements(scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, v1.CapacityTypeSpot))
