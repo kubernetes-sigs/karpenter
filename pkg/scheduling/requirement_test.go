@@ -952,9 +952,9 @@ var _ = Describe("Requirement", func() {
 	})
 	Context("Gte and Lte Operators", func() {
 		// Gte 2 should be equivalent to Gt 1 (value >= 2 means value > 1)
-		gte2 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), nil, "2")
+		gte2 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpGte, nil, "2")
 		// Lte 8 should be equivalent to Lt 9 (value <= 8 means value < 9)
-		lte8 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpLte), nil, "8")
+		lte8 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpLte, nil, "8")
 
 		It("should treat Gte as inclusive lower bound", func() {
 			// Gte 2 means >= 2, so 2 should be included, 1 should not
@@ -996,21 +996,21 @@ var _ = Describe("Requirement", func() {
 			// Gt 4 AND Gte 5: Gt 4 means > 4 (>= 5), Gte 5 means >= 5
 			// Both are equivalent, should collapse to one bound
 			gt4 := NewRequirement("key", corev1.NodeSelectorOpGt, "4")
-			gte5 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), nil, "5")
+			gte5 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpGte, nil, "5")
 			intersection := gt4.Intersection(gte5)
 			// Verify behavior is correct
 			Expect(intersection.Has("5")).To(BeTrue())
 			Expect(intersection.Has("4")).To(BeFalse())
 			// Verify only one bound is set (collapsed) - Gte 5 is kept since 5 > 4
 			req := intersection.NodeSelectorRequirement()
-			Expect(req.Operator).To(Equal(corev1.NodeSelectorOperator(v1.NodeSelectorOpGte)))
+			Expect(req.Operator).To(Equal(v1.NodeSelectorOpGte))
 			Expect(req.Values).To(Equal([]string{"5"}))
 		})
 		It("should keep Gt when Gt is more restrictive", func() {
 			// Gt 5 AND Gte 5: Gt 5 means > 5 (>= 6), Gte 5 means >= 5
 			// Gt 5 is more restrictive
 			gt5 := NewRequirement("key", corev1.NodeSelectorOpGt, "5")
-			gte5 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), nil, "5")
+			gte5 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpGte, nil, "5")
 			intersection := gt5.Intersection(gte5)
 			Expect(intersection.Has("6")).To(BeTrue())
 			Expect(intersection.Has("5")).To(BeFalse())
@@ -1022,18 +1022,18 @@ var _ = Describe("Requirement", func() {
 			// Gt 3 AND Gte 6: Gt 3 means > 3 (>= 4), Gte 6 means >= 6
 			// Gte 6 is more restrictive
 			gt3 := NewRequirement("key", corev1.NodeSelectorOpGt, "3")
-			gte6 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), nil, "6")
+			gte6 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpGte, nil, "6")
 			intersection := gt3.Intersection(gte6)
 			Expect(intersection.Has("6")).To(BeTrue())
 			Expect(intersection.Has("5")).To(BeFalse())
 			req := intersection.NodeSelectorRequirement()
-			Expect(req.Operator).To(Equal(corev1.NodeSelectorOperator(v1.NodeSelectorOpGte)))
+			Expect(req.Operator).To(Equal(v1.NodeSelectorOpGte))
 		})
 		It("should keep Lt when Lt is more restrictive", func() {
 			// Lt 5 AND Lte 5: Lt 5 means < 5 (<= 4), Lte 5 means <= 5
 			// Lt 5 is more restrictive
 			lt5 := NewRequirement("key", corev1.NodeSelectorOpLt, "5")
-			lte5 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpLte), nil, "5")
+			lte5 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpLte, nil, "5")
 			intersection := lt5.Intersection(lte5)
 			Expect(intersection.Has("4")).To(BeTrue())
 			Expect(intersection.Has("5")).To(BeFalse())
@@ -1045,32 +1045,32 @@ var _ = Describe("Requirement", func() {
 			// Lt 9 AND Lte 5: Lt 9 means < 9 (<= 8), Lte 5 means <= 5
 			// Lte 5 is more restrictive
 			lt9 := NewRequirement("key", corev1.NodeSelectorOpLt, "9")
-			lte5 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpLte), nil, "5")
+			lte5 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpLte, nil, "5")
 			intersection := lt9.Intersection(lte5)
 			Expect(intersection.Has("5")).To(BeTrue())
 			Expect(intersection.Has("6")).To(BeFalse())
 			req := intersection.NodeSelectorRequirement()
-			Expect(req.Operator).To(Equal(corev1.NodeSelectorOperator(v1.NodeSelectorOpLte)))
+			Expect(req.Operator).To(Equal(v1.NodeSelectorOpLte))
 			Expect(req.Values).To(Equal([]string{"5"}))
 		})
 		It("should handle Gte 0 boundary", func() {
-			gte0 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), nil, "0")
+			gte0 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpGte, nil, "0")
 			Expect(gte0.Has("0")).To(BeTrue())
 			Expect(gte0.Has("-1")).To(BeFalse())
 		})
 		It("should handle Lte 0 boundary", func() {
-			lte0 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpLte), nil, "0")
+			lte0 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpLte, nil, "0")
 			Expect(lte0.Has("0")).To(BeTrue())
 			Expect(lte0.Has("1")).To(BeFalse())
 		})
 		It("should return valid value from Any() for Gte", func() {
-			gte5 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), nil, "5")
+			gte5 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpGte, nil, "5")
 			val, err := strconv.Atoi(gte5.Any())
 			Expect(err).ToNot(HaveOccurred())
 			Expect(val).To(BeNumerically(">=", 5))
 		})
 		It("should return valid value from Any() for Lte", func() {
-			lte10 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpLte), nil, "10")
+			lte10 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpLte, nil, "10")
 			val, err := strconv.Atoi(lte10.Any())
 			Expect(err).ToNot(HaveOccurred())
 			Expect(val).To(BeNumerically("<=", 10))
