@@ -236,7 +236,7 @@ var _ = Describe("Integration", func() {
 			It("should error when Gte is used with multiple integer values", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
 					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOperator(v1.NodeSelectorOpGte),
+					Operator: v1.NodeSelectorOpGte,
 					Values:   []string{"1000000", "2000000"},
 				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())
@@ -244,7 +244,7 @@ var _ = Describe("Integration", func() {
 			It("should error when Lte is used with multiple integer values", func() {
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
 					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOperator(v1.NodeSelectorOpLte),
+					Operator: v1.NodeSelectorOpLte,
 					Values:   []string{"1000000", "2000000"},
 				})
 				Expect(env.Client.Create(env.Context, nodePool)).ToNot(Succeed())

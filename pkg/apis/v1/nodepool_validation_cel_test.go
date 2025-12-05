@@ -432,7 +432,7 @@ var _ = Describe("CEL/Validation", func() {
 		It("should fail for unsupported ops", func() {
 			for _, op := range []corev1.NodeSelectorOperator{"unknown"} {
 				nodePool.Spec.Template.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
-					{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOperator(op), Values: []string{"test"}},
+					{Key: corev1.LabelTopologyZone, Operator: op, Values: []string{"test"}},
 				}
 				Expect(env.Client.Create(ctx, nodePool)).ToNot(Succeed())
 				Expect(nodePool.RuntimeValidate(ctx)).ToNot(Succeed())

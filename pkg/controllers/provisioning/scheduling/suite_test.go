@@ -279,7 +279,7 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should schedule compatible requirements with Operator=Gte", func() {
 				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-					{Key: fake.IntegerInstanceLabelKey, Operator: corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), Values: []string{"16"}}}
+					{Key: fake.IntegerInstanceLabelKey, Operator: v1.NodeSelectorOpGte, Values: []string{"16"}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
@@ -288,7 +288,7 @@ var _ = Context("Scheduling", func() {
 			})
 			It("should schedule compatible requirements with Operator=Lte", func() {
 				nodePool.Spec.Template.Spec.Requirements = []v1.NodeSelectorRequirementWithMinValues{
-					{Key: fake.IntegerInstanceLabelKey, Operator: corev1.NodeSelectorOperator(v1.NodeSelectorOpLte), Values: []string{"2"}}}
+					{Key: fake.IntegerInstanceLabelKey, Operator: v1.NodeSelectorOpLte, Values: []string{"2"}}}
 				ExpectApplied(ctx, env.Client, nodePool)
 				pod := test.UnschedulablePod()
 				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
