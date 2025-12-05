@@ -63,8 +63,8 @@ var _ = Describe("Performance", func() {
 			Expect(scaleOutReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
 				"Average memory utilization should be greater than 75%")
 
-			// ========== PHASE 2: Interference TEST ==========
-			By("Scaling down and scaling out interference scaling test")
+			// ========== PHASE 2: Interference Scale Out TEST ==========
+			By("Net scaling out scaling out interference test")
 
 			// Scale down one deployment 50% and Scale up the 2nd to 500
 			smallDeployment.Spec.Replicas = lo.ToPtr(int32(250))
@@ -87,6 +87,42 @@ var _ = Describe("Performance", func() {
 				"Average CPU utilization should be greater than 55%")
 			Expect(interferenceReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
 				"Average memory utilization should be greater than 75%")
+
+			// ========== PHASE 3: Interference Scale In TEST ==========
+			By("Executing interference consolidation test (small_deployment scales out to 400, large_deployment scales in to 200)")
+
+			// Capture initial state before Phase 3 scaling operations
+			initialNodes := interferenceReport.TotalNodes
+
+			// Scale small_deployment from 250 to 400 (+150 pods)
+			// Scale large_deployment from 500 to 200 (-300 pods)
+			// Net result: 600 total pods (down from 750, net change of -150 pods)
+			smallDeployment.Spec.Replicas = lo.ToPtr(int32(400))
+			largeDeployment.Spec.Replicas = lo.ToPtr(int32(200))
+			env.ExpectUpdated(smallDeployment, largeDeployment)
+
+			By("Monitoring consolidation activity during mixed scaling operations")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Interference Consolidation Test", 750, 600, initialNodes, 15*time.Minute, "hostname_spread_interference_consolidation")
+			Expect(err).ToNot(HaveOccurred(), "Interference consolidation test should execute successfully")
+
+			By("Validating consolidation performance during interference")
+			Expect(consolidationReport.TestType).To(Equal("consolidation"), "Should be detected as consolidation test")
+			Expect(consolidationReport.TotalPods).To(Equal(600), "Should have 600 total pods after mixed scaling")
+			Expect(consolidationReport.PodsNetChange).To(Equal(-150), "Should have net reduction of 150 pods")
+
+			// Consolidation performance assertions
+			Expect(consolidationReport.NodesNetChange).To(BeNumerically("<", 0),
+				"Node count should decrease after consolidation despite small deployment scale-out")
+			Expect(consolidationReport.TotalTime).To(BeNumerically("<", 15*time.Minute),
+				"Mixed scaling and consolidation should complete within 15 minutes")
+			Expect(consolidationReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
+				"Average CPU utilization should remain greater than 55% after consolidation")
+			Expect(consolidationReport.TotalReservedMemoryUtil).To(BeNumerically(">", 0.75),
+				"Average memory utilization should remain greater than 75% after consolidation")
+			Expect(consolidationReport.Rounds).To(BeNumerically("<", 10),
+				"Consolidation should complete in reasonable number of rounds")
+			Expect(consolidationReport.ResourceEfficiencyScore).To(BeNumerically(">", 60),
+				"Resource efficiency score should remain above 60%")
 
 		})
 	})
