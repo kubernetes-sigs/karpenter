@@ -168,16 +168,16 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	// Complement
 	complement := r.complement && requirement.complement
 
-	// Boundaries - merge exclusive and inclusive bounds separately
-	greaterThan := maxIntPtr(r.greaterThan, requirement.greaterThan)
-	greaterThanOrEqual := maxIntPtr(r.greaterThanOrEqual, requirement.greaterThanOrEqual)
-	lessThan := minIntPtr(r.lessThan, requirement.lessThan)
-	lessThanOrEqual := minIntPtr(r.lessThanOrEqual, requirement.lessThanOrEqual)
+	// Boundaries - merge and collapse to canonical form
+	greaterThan, greaterThanOrEqual := collapseLowerBounds(
+		maxIntPtr(r.greaterThan, requirement.greaterThan),
+		maxIntPtr(r.greaterThanOrEqual, requirement.greaterThanOrEqual),
+	)
+	lessThan, lessThanOrEqual := collapseUpperBounds(
+		minIntPtr(r.lessThan, requirement.lessThan),
+		minIntPtr(r.lessThanOrEqual, requirement.lessThanOrEqual),
+	)
 	minValues := maxIntPtr(r.MinValues, requirement.MinValues)
-
-	// Collapse to inclusive bounds (Gte/Lte) when both forms present
-	greaterThan, greaterThanOrEqual = collapseLowerBounds(greaterThan, greaterThanOrEqual)
-	lessThan, lessThanOrEqual = collapseUpperBounds(lessThan, lessThanOrEqual)
 
 	// Check if bounds are incompatible
 	lower, upper := intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual)
