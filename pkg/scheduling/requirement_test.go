@@ -1053,5 +1053,27 @@ var _ = Describe("Requirement", func() {
 			Expect(req.Operator).To(Equal(corev1.NodeSelectorOperator(v1.NodeSelectorOpLte)))
 			Expect(req.Values).To(Equal([]string{"5"}))
 		})
+		It("should handle Gte 0 boundary", func() {
+			gte0 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), nil, "0")
+			Expect(gte0.Has("0")).To(BeTrue())
+			Expect(gte0.Has("-1")).To(BeFalse())
+		})
+		It("should handle Lte 0 boundary", func() {
+			lte0 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpLte), nil, "0")
+			Expect(lte0.Has("0")).To(BeTrue())
+			Expect(lte0.Has("1")).To(BeFalse())
+		})
+		It("should return valid value from Any() for Gte", func() {
+			gte5 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), nil, "5")
+			val, err := strconv.Atoi(gte5.Any())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(val).To(BeNumerically(">=", 5))
+		})
+		It("should return valid value from Any() for Lte", func() {
+			lte10 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpLte), nil, "10")
+			val, err := strconv.Atoi(lte10.Any())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(val).To(BeNumerically("<=", 10))
+		})
 	})
 })

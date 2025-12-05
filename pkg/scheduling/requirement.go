@@ -340,46 +340,49 @@ func (r *Requirement) String() string {
 }
 
 func withinBounds(valueAsString string, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual *int) bool {
-	lower, upper := effectiveBounds(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual)
-	if lower == nil && upper == nil {
+	if greaterThan == nil && greaterThanOrEqual == nil && lessThan == nil && lessThanOrEqual == nil {
 		return true
 	}
 	value, err := strconv.Atoi(valueAsString)
 	if err != nil {
 		return false
 	}
-	return (lower == nil || value >= *lower) && (upper == nil || value <= *upper)
+	// Check lower bound: Gt N means > N, Gte N means >= N
+	if greaterThan != nil && value <= *greaterThan {
+		return false
+	}
+	if greaterThanOrEqual != nil && value < *greaterThanOrEqual {
+		return false
+	}
+	// Check upper bound: Lt N means < N, Lte N means <= N
+	if lessThan != nil && value >= *lessThan {
+		return false
+	}
+	if lessThanOrEqual != nil && value > *lessThanOrEqual {
+		return false
+	}
+	return true
 }
 
 // boundsCompatible checks if the bounds allow any valid values
 func boundsCompatible(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual *int) bool {
-	lower, upper := effectiveBounds(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual)
-	if lower == nil || upper == nil {
-		return true
-	}
-	return *lower <= *upper
-}
-
-// effectiveBounds converts exclusive bounds to inclusive and returns the most restrictive.
-// For integers: Gt N → >= N+1, Lt N → <= N-1
-func effectiveBounds(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual *int) (lower, upper *int) {
-	// Compute effective lower bound (inclusive)
+	// Compute effective lower bound (inclusive): Gt N → N+1, Gte N → N
+	lower := math.MinInt
 	if greaterThan != nil {
-		v := *greaterThan + 1
-		lower = &v
+		lower = *greaterThan + 1
 	}
-	if greaterThanOrEqual != nil && (lower == nil || *greaterThanOrEqual > *lower) {
-		lower = greaterThanOrEqual
+	if greaterThanOrEqual != nil && *greaterThanOrEqual > lower {
+		lower = *greaterThanOrEqual
 	}
-	// Compute effective upper bound (inclusive)
+	// Compute effective upper bound (inclusive): Lt N → N-1, Lte N → N
+	upper := math.MaxInt
 	if lessThan != nil {
-		v := *lessThan - 1
-		upper = &v
+		upper = *lessThan - 1
 	}
-	if lessThanOrEqual != nil && (upper == nil || *lessThanOrEqual < *upper) {
-		upper = lessThanOrEqual
+	if lessThanOrEqual != nil && *lessThanOrEqual < upper {
+		upper = *lessThanOrEqual
 	}
-	return lower, upper
+	return lower <= upper
 }
 
 func minIntPtr(a, b *int) *int {
