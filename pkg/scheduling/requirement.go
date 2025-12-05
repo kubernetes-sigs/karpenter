@@ -213,11 +213,12 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 // It validates whether there is an intersection between the two requirements without actually creating the sets
 // This prevents the garbage collector from having to spend cycles cleaning up all of these created set objects
 func (r *Requirement) HasIntersection(requirement *Requirement) bool {
-	greaterThan := maxIntPtr(r.greaterThan, requirement.greaterThan)
-	greaterThanOrEqual := maxIntPtr(r.greaterThanOrEqual, requirement.greaterThanOrEqual)
-	lessThan := minIntPtr(r.lessThan, requirement.lessThan)
-	lessThanOrEqual := minIntPtr(r.lessThanOrEqual, requirement.lessThanOrEqual)
-	lower, upper := intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual)
+	lower, upper := intersectRange(
+		maxIntPtr(r.greaterThan, requirement.greaterThan),
+		maxIntPtr(r.greaterThanOrEqual, requirement.greaterThanOrEqual),
+		minIntPtr(r.lessThan, requirement.lessThan),
+		minIntPtr(r.lessThanOrEqual, requirement.lessThanOrEqual),
+	)
 	if lower > upper {
 		return false
 	}
