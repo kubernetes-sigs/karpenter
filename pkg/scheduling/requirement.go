@@ -86,11 +86,11 @@ func NewRequirementWithFlexibility(key string, operator corev1.NodeSelectorOpera
 		value, _ := strconv.Atoi(values[0]) // prevalidated
 		r.lessThan = &value
 	}
-	if operator == corev1.NodeSelectorOperator(v1.NodeSelectorOpGte) {
+	if operator == v1.NodeSelectorOpGte {
 		value, _ := strconv.Atoi(values[0]) // prevalidated
 		r.greaterThanOrEqual = &value
 	}
-	if operator == corev1.NodeSelectorOperator(v1.NodeSelectorOpLte) {
+	if operator == v1.NodeSelectorOpLte {
 		value, _ := strconv.Atoi(values[0]) // prevalidated
 		r.lessThanOrEqual = &value
 	}
@@ -106,14 +106,14 @@ func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirementWithMi
 	case r.greaterThanOrEqual != nil:
 		return v1.NodeSelectorRequirementWithMinValues{
 			Key:       r.Key,
-			Operator:  corev1.NodeSelectorOperator(v1.NodeSelectorOpGte),
+			Operator:  v1.NodeSelectorOpGte,
 			Values:    []string{strconv.FormatInt(int64(lo.FromPtr(r.greaterThanOrEqual)), 10)},
 			MinValues: r.MinValues,
 		}
 	case r.lessThanOrEqual != nil:
 		return v1.NodeSelectorRequirementWithMinValues{
 			Key:       r.Key,
-			Operator:  corev1.NodeSelectorOperator(v1.NodeSelectorOpLte),
+			Operator:  v1.NodeSelectorOpLte,
 			Values:    []string{strconv.FormatInt(int64(lo.FromPtr(r.lessThanOrEqual)), 10)},
 			MinValues: r.MinValues,
 		}
@@ -347,21 +347,23 @@ func withinBounds(valueAsString string, greaterThan, greaterThanOrEqual, lessTha
 	if err != nil {
 		return false
 	}
-	// Check lower bound: Gt N means > N, Gte N means >= N
-	if greaterThan != nil && value <= *greaterThan {
-		return false
+	// Compute effective inclusive lower bound
+	lower := math.MinInt
+	if greaterThan != nil {
+		lower = *greaterThan + 1
 	}
-	if greaterThanOrEqual != nil && value < *greaterThanOrEqual {
-		return false
+	if greaterThanOrEqual != nil && *greaterThanOrEqual > lower {
+		lower = *greaterThanOrEqual
 	}
-	// Check upper bound: Lt N means < N, Lte N means <= N
-	if lessThan != nil && value >= *lessThan {
-		return false
+	// Compute effective inclusive upper bound
+	upper := math.MaxInt
+	if lessThan != nil {
+		upper = *lessThan - 1
 	}
-	if lessThanOrEqual != nil && value > *lessThanOrEqual {
-		return false
+	if lessThanOrEqual != nil && *lessThanOrEqual < upper {
+		upper = *lessThanOrEqual
 	}
-	return true
+	return value >= lower && value <= upper
 }
 
 // boundsCompatible checks if the bounds allow any valid values
@@ -411,28 +413,24 @@ func maxIntPtr(a, b *int) *int {
 	return b
 }
 
-// collapseLowerBounds normalizes to Gte (inclusive) form when both bounds are present.
-// For integers: Gt N is equivalent to Gte N+1.
+// collapseLowerBounds keeps the more restrictive bound when both are present.
 func collapseLowerBounds(greaterThan, greaterThanOrEqual *int) (*int, *int) {
 	if greaterThan == nil || greaterThanOrEqual == nil {
 		return greaterThan, greaterThanOrEqual
 	}
-	gtAsGte := *greaterThan + 1 // Gt N → Gte N+1
-	if gtAsGte > *greaterThanOrEqual {
-		return nil, &gtAsGte
+	if *greaterThan < *greaterThanOrEqual {
+		return nil, greaterThanOrEqual
 	}
-	return nil, greaterThanOrEqual
+	return greaterThan, nil
 }
 
-// collapseUpperBounds normalizes to Lte (inclusive) form when both bounds are present.
-// For integers: Lt N is equivalent to Lte N-1.
+// collapseUpperBounds keeps the more restrictive bound when both are present.
 func collapseUpperBounds(lessThan, lessThanOrEqual *int) (*int, *int) {
 	if lessThan == nil || lessThanOrEqual == nil {
 		return lessThan, lessThanOrEqual
 	}
-	ltAsLte := *lessThan - 1 // Lt N → Lte N-1
-	if ltAsLte < *lessThanOrEqual {
-		return nil, &ltAsLte
+	if *lessThan > *lessThanOrEqual {
+		return nil, lessThanOrEqual
 	}
-	return nil, lessThanOrEqual
+	return lessThan, nil
 }

@@ -1006,17 +1006,17 @@ var _ = Describe("Requirement", func() {
 			Expect(req.Operator).To(Equal(corev1.NodeSelectorOperator(v1.NodeSelectorOpGte)))
 			Expect(req.Values).To(Equal([]string{"5"}))
 		})
-		It("should normalize Gt to Gte when Gt is more restrictive", func() {
+		It("should keep Gt when Gt is more restrictive", func() {
 			// Gt 5 AND Gte 5: Gt 5 means > 5 (>= 6), Gte 5 means >= 5
-			// Gt 5 is more restrictive, normalized to Gte 6
+			// Gt 5 is more restrictive
 			gt5 := NewRequirement("key", corev1.NodeSelectorOpGt, "5")
 			gte5 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpGte), nil, "5")
 			intersection := gt5.Intersection(gte5)
 			Expect(intersection.Has("6")).To(BeTrue())
 			Expect(intersection.Has("5")).To(BeFalse())
 			req := intersection.NodeSelectorRequirement()
-			Expect(req.Operator).To(Equal(corev1.NodeSelectorOperator(v1.NodeSelectorOpGte)))
-			Expect(req.Values).To(Equal([]string{"6"}))
+			Expect(req.Operator).To(Equal(corev1.NodeSelectorOpGt))
+			Expect(req.Values).To(Equal([]string{"5"}))
 		})
 		It("should keep more restrictive Gte when Gte > Gt+1", func() {
 			// Gt 3 AND Gte 6: Gt 3 means > 3 (>= 4), Gte 6 means >= 6
@@ -1029,17 +1029,17 @@ var _ = Describe("Requirement", func() {
 			req := intersection.NodeSelectorRequirement()
 			Expect(req.Operator).To(Equal(corev1.NodeSelectorOperator(v1.NodeSelectorOpGte)))
 		})
-		It("should normalize Lt to Lte when Lt is more restrictive", func() {
+		It("should keep Lt when Lt is more restrictive", func() {
 			// Lt 5 AND Lte 5: Lt 5 means < 5 (<= 4), Lte 5 means <= 5
-			// Lt 5 is more restrictive, normalized to Lte 4
+			// Lt 5 is more restrictive
 			lt5 := NewRequirement("key", corev1.NodeSelectorOpLt, "5")
 			lte5 := NewRequirementWithFlexibility("key", corev1.NodeSelectorOperator(v1.NodeSelectorOpLte), nil, "5")
 			intersection := lt5.Intersection(lte5)
 			Expect(intersection.Has("4")).To(BeTrue())
 			Expect(intersection.Has("5")).To(BeFalse())
 			req := intersection.NodeSelectorRequirement()
-			Expect(req.Operator).To(Equal(corev1.NodeSelectorOperator(v1.NodeSelectorOpLte)))
-			Expect(req.Values).To(Equal([]string{"4"}))
+			Expect(req.Operator).To(Equal(corev1.NodeSelectorOpLt))
+			Expect(req.Values).To(Equal([]string{"5"}))
 		})
 		It("should keep more restrictive Lte when Lte < Lt-1", func() {
 			// Lt 9 AND Lte 5: Lt 9 means < 9 (<= 8), Lte 5 means <= 5

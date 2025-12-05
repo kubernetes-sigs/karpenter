@@ -146,7 +146,7 @@ func ValidateRequirement(ctx context.Context, requirement NodeSelectorRequiremen
 	}
 
 	if requirement.Operator == v1.NodeSelectorOpGt || requirement.Operator == v1.NodeSelectorOpLt ||
-		requirement.Operator == v1.NodeSelectorOperator(NodeSelectorOpGte) || requirement.Operator == v1.NodeSelectorOperator(NodeSelectorOpLte) {
+		requirement.Operator == NodeSelectorOpGte || requirement.Operator == NodeSelectorOpLte {
 		if len(requirement.Values) != 1 {
 			errs = multierr.Append(errs, fmt.Errorf("key %s with operator %s must have a single positive integer value", requirement.Key, requirement.Operator))
 		} else {
