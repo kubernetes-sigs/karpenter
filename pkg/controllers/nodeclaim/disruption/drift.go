@@ -94,7 +94,7 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 		// Include instance type checking separate from the other two to reduce the amount of times we grab the instance types.
 		its, err := d.cloudProvider.GetInstanceTypes(ctx, nodePool)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("getting instance types for nodepool %q, %w", nodePool.Name, err)
 		}
 		if reason := instanceTypeNotFound(its, nodeClaim); reason != "" {
 			return reason, nil
@@ -106,7 +106,7 @@ func (d *Drift) isDrifted(ctx context.Context, nodePool *v1.NodePool, nodeClaim 
 	// Then check if it's drifted from the cloud provider side.
 	driftedReason, err := d.cloudProvider.IsDrifted(ctx, nodeClaim)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("checking drift for nodeclaim %q, %w", nodeClaim.Name, err)
 	}
 	return driftedReason, nil
 }
