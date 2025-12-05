@@ -180,7 +180,7 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	lessThan, lessThanOrEqual = collapseUpperBounds(lessThan, lessThanOrEqual)
 
 	// Check if bounds are incompatible
-	if !boundsCompatible(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
+	if lower, upper := intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual); lower > upper {
 		return NewRequirementWithFlexibility(r.Key, corev1.NodeSelectorOpDoesNotExist, minValues)
 	}
 
@@ -196,7 +196,7 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 		values = r.values.Intersection(requirement.values)
 	}
 	for value := range values {
-		if !withinBounds(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
+		if !withinRange(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
 			values.Delete(value)
 		}
 	}
@@ -216,7 +216,8 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	greaterThanOrEqual := maxIntPtr(r.greaterThanOrEqual, requirement.greaterThanOrEqual)
 	lessThan := minIntPtr(r.lessThan, requirement.lessThan)
 	lessThanOrEqual := minIntPtr(r.lessThanOrEqual, requirement.lessThanOrEqual)
-	if !boundsCompatible(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
+	lower, upper := intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual)
+	if lower > upper {
 		return false
 	}
 	// Both requirements have a complement
@@ -226,7 +227,7 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	// Only one requirement has a complement
 	if r.complement && !requirement.complement {
 		for value := range requirement.values {
-			if !r.values.Has(value) && withinBounds(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
+			if !r.values.Has(value) && withinRange(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
 				return true
 			}
 		}
@@ -234,7 +235,7 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	}
 	if !r.complement && requirement.complement {
 		for value := range r.values {
-			if !requirement.values.Has(value) && withinBounds(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
+			if !requirement.values.Has(value) && withinRange(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
 				return true
 			}
 		}
@@ -242,7 +243,7 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	}
 	// Both requirements are non-complement requirements
 	for value := range r.values {
-		if requirement.values.Has(value) && withinBounds(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
+		if requirement.values.Has(value) && withinRange(value, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual) {
 			return true
 		}
 	}
@@ -276,9 +277,9 @@ func (r *Requirement) Any() string {
 // Has returns true if the requirement allows the value
 func (r *Requirement) Has(value string) bool {
 	if r.complement {
-		return !r.values.Has(value) && withinBounds(value, r.greaterThan, r.greaterThanOrEqual, r.lessThan, r.lessThanOrEqual)
+		return !r.values.Has(value) && withinRange(value, r.greaterThan, r.greaterThanOrEqual, r.lessThan, r.lessThanOrEqual)
 	}
-	return r.values.Has(value) && withinBounds(value, r.greaterThan, r.greaterThanOrEqual, r.lessThan, r.lessThanOrEqual)
+	return r.values.Has(value) && withinRange(value, r.greaterThan, r.greaterThanOrEqual, r.lessThan, r.lessThanOrEqual)
 }
 
 func (r *Requirement) Values() []string {
@@ -339,7 +340,7 @@ func (r *Requirement) String() string {
 	return s
 }
 
-func withinBounds(valueAsString string, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual *int) bool {
+func withinRange(valueAsString string, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual *int) bool {
 	if greaterThan == nil && greaterThanOrEqual == nil && lessThan == nil && lessThanOrEqual == nil {
 		return true
 	}
@@ -347,28 +348,12 @@ func withinBounds(valueAsString string, greaterThan, greaterThanOrEqual, lessTha
 	if err != nil {
 		return false
 	}
-	// Compute effective inclusive lower bound
-	lower := math.MinInt
-	if greaterThan != nil {
-		lower = *greaterThan + 1
-	}
-	if greaterThanOrEqual != nil && *greaterThanOrEqual > lower {
-		lower = *greaterThanOrEqual
-	}
-	// Compute effective inclusive upper bound
-	upper := math.MaxInt
-	if lessThan != nil {
-		upper = *lessThan - 1
-	}
-	if lessThanOrEqual != nil && *lessThanOrEqual < upper {
-		upper = *lessThanOrEqual
-	}
+	lower, upper := intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual)
 	return value >= lower && value <= upper
 }
 
-// boundsCompatible checks if the bounds allow any valid values
-func boundsCompatible(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual *int) bool {
-	// Compute effective lower bound (inclusive): Gt N → N+1, Gte N → N
+// intersectRange computes the inclusive [lower, upper] range from bound pointers
+func intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual *int) (int, int) {
 	lower := math.MinInt
 	if greaterThan != nil {
 		lower = *greaterThan + 1
@@ -376,7 +361,6 @@ func boundsCompatible(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual
 	if greaterThanOrEqual != nil && *greaterThanOrEqual > lower {
 		lower = *greaterThanOrEqual
 	}
-	// Compute effective upper bound (inclusive): Lt N → N-1, Lte N → N
 	upper := math.MaxInt
 	if lessThan != nil {
 		upper = *lessThan - 1
@@ -384,7 +368,7 @@ func boundsCompatible(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual
 	if lessThanOrEqual != nil && *lessThanOrEqual < upper {
 		upper = *lessThanOrEqual
 	}
-	return lower <= upper
+	return lower, upper
 }
 
 func minIntPtr(a, b *int) *int {
