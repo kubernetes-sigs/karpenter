@@ -182,6 +182,7 @@ spec:
                           * disruption.consolidateAfter
                       - Only limits.nodes is supported; other resource limits (e.g., CPU, memory) must not be specified.
                       - Weight is not supported.
+                    Note: This field is alpha.
                   format: int64
                   minimum: 0
                   type: integer

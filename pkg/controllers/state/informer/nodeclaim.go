@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+	"sigs.k8s.io/karpenter/pkg/state/cost"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 )
@@ -40,14 +41,16 @@ type NodeClaimController struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
 	cluster       *state.Cluster
+	clusterCost   *cost.ClusterCost
 }
 
 // NewNodeClaimController constructs a controller instance
-func NewNodeClaimController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *NodeClaimController {
+func NewNodeClaimController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster, clusterCost *cost.ClusterCost) *NodeClaimController {
 	return &NodeClaimController{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		cluster:       cluster,
+		clusterCost:   clusterCost,
 	}
 }
 
@@ -59,6 +62,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 		if errors.IsNotFound(err) {
 			// notify cluster state of the node deletion
 			c.cluster.DeleteNodeClaim(req.Name)
+			c.clusterCost.DeleteNodeClaim(ctx, nodeClaim)
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
@@ -66,6 +70,7 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 		return reconcile.Result{}, nil
 	}
 	c.cluster.UpdateNodeClaim(nodeClaim)
+	c.clusterCost.UpdateNodeClaim(ctx, nodeClaim)
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
