@@ -20,9 +20,10 @@ import (
 	"fmt"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -59,11 +60,9 @@ var _ = BeforeEach(func() {
 	nodePool = env.DefaultNodePool(nodeClass)
 	if env.IsDefaultNodeClassKWOK() {
 		test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-			NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-				Key:      v1alpha1.InstanceSizeLabelKey,
-				Operator: corev1.NodeSelectorOpLt,
-				Values:   []string{"32"},
-			},
+			Key:      v1alpha1.InstanceSizeLabelKey,
+			Operator: corev1.NodeSelectorOpLt,
+			Values:   []string{"32"},
 		})
 	}
 	nodePool.Spec.Limits = v1.Limits{}

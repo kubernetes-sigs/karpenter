@@ -94,8 +94,18 @@ func (in *Requirement) DeepCopyInto(out *Requirement) {
 		*out = new(int)
 		**out = **in
 	}
+	if in.greaterThanOrEqual != nil {
+		in, out := &in.greaterThanOrEqual, &out.greaterThanOrEqual
+		*out = new(int)
+		**out = **in
+	}
 	if in.lessThan != nil {
 		in, out := &in.lessThan, &out.lessThan
+		*out = new(int)
+		**out = **in
+	}
+	if in.lessThanOrEqual != nil {
+		in, out := &in.lessThanOrEqual, &out.lessThanOrEqual
 		*out = new(int)
 		**out = **in
 	}

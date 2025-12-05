@@ -1716,17 +1716,15 @@ var _ = Describe("Instance Type Controller", func() {
 			func(changesOverlayA v1alpha1.NodeOverlay, changesOverlayB v1alpha1.NodeOverlay) {
 				cloudProvider.InstanceTypes = nil
 				nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"default-instance-type", "gpu-vendor-instance-type", "gpu-vendor-b-instance-type"},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"default-instance-type", "gpu-vendor-instance-type", "gpu-vendor-b-instance-type"},
+				})
 				nodePoolTwo = test.ReplaceRequirements(test.NodePool(), v1.NodeSelectorRequirementWithMinValues{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"gpu-vendor-b-instance-type"},
-					}})
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"gpu-vendor-b-instance-type"},
+				})
 				overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "overlay-a",
@@ -2385,17 +2383,15 @@ var _ = Describe("Instance Type Controller", func() {
 		It("should that there is not a partial application for nodepools", func() {
 			cloudProvider.InstanceTypes = nil
 			nodePool = test.ReplaceRequirements(nodePool, v1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"default-instance-type", "gpu-vendor-instance-type", "gpu-vendor-b-instance-type"},
-				}})
+				Key:      corev1.LabelInstanceTypeStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"default-instance-type", "gpu-vendor-instance-type", "gpu-vendor-b-instance-type"},
+			})
 			nodePoolTwo := test.ReplaceRequirements(test.NodePool(), v1.NodeSelectorRequirementWithMinValues{
-				NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-					Key:      corev1.LabelInstanceTypeStable,
-					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"gpu-vendor-b-instance-type"},
-				}})
+				Key:      corev1.LabelInstanceTypeStable,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"gpu-vendor-b-instance-type"},
+			})
 			overlayA := test.NodeOverlay(v1alpha1.NodeOverlay{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "overlay-a",
