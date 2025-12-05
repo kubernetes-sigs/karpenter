@@ -184,7 +184,6 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	if lower > upper {
 		return NewRequirementWithFlexibility(r.Key, corev1.NodeSelectorOpDoesNotExist, minValues)
 	}
-	hasBounds := greaterThan != nil || greaterThanOrEqual != nil || lessThan != nil || lessThanOrEqual != nil
 
 	// Values
 	var values sets.Set[string]
@@ -198,8 +197,7 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 		values = r.values.Intersection(requirement.values)
 	}
 	for v := range values {
-		val, err := strconv.Atoi(v)
-		if hasBounds && (err != nil || val < lower || val > upper) {
+		if !inRange(v, lower, upper) {
 			values.Delete(v)
 		}
 	}
@@ -223,7 +221,6 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	if lower > upper {
 		return false
 	}
-	hasBounds := greaterThan != nil || greaterThanOrEqual != nil || lessThan != nil || lessThanOrEqual != nil
 	// Both requirements have a complement
 	if r.complement && requirement.complement {
 		return true
@@ -231,9 +228,7 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	// Only one requirement has a complement
 	if r.complement && !requirement.complement {
 		for v := range requirement.values {
-			val, err := strconv.Atoi(v)
-			inRange := !hasBounds || (err == nil && val >= lower && val <= upper)
-			if !r.values.Has(v) && inRange {
+			if !r.values.Has(v) && inRange(v, lower, upper) {
 				return true
 			}
 		}
@@ -241,9 +236,7 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	}
 	if !r.complement && requirement.complement {
 		for v := range r.values {
-			val, err := strconv.Atoi(v)
-			inRange := !hasBounds || (err == nil && val >= lower && val <= upper)
-			if !requirement.values.Has(v) && inRange {
+			if !requirement.values.Has(v) && inRange(v, lower, upper) {
 				return true
 			}
 		}
@@ -251,9 +244,7 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	}
 	// Both requirements are non-complement requirements
 	for v := range r.values {
-		val, err := strconv.Atoi(v)
-		inRange := !hasBounds || (err == nil && val >= lower && val <= upper)
-		if requirement.values.Has(v) && inRange {
+		if requirement.values.Has(v) && inRange(v, lower, upper) {
 			return true
 		}
 	}
@@ -286,10 +277,11 @@ func (r *Requirement) Any() string {
 
 // Has returns true if the requirement allows the value
 func (r *Requirement) Has(value string) bool {
+	lower, upper := intersectRange(r.greaterThan, r.greaterThanOrEqual, r.lessThan, r.lessThanOrEqual)
 	if r.complement {
-		return !r.values.Has(value) && withinRange(value, r.greaterThan, r.greaterThanOrEqual, r.lessThan, r.lessThanOrEqual)
+		return !r.values.Has(value) && inRange(value, lower, upper)
 	}
-	return r.values.Has(value) && withinRange(value, r.greaterThan, r.greaterThanOrEqual, r.lessThan, r.lessThanOrEqual)
+	return r.values.Has(value) && inRange(value, lower, upper)
 }
 
 func (r *Requirement) Values() []string {
@@ -350,16 +342,12 @@ func (r *Requirement) String() string {
 	return s
 }
 
-func withinRange(valueAsString string, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual *int) bool {
-	if greaterThan == nil && greaterThanOrEqual == nil && lessThan == nil && lessThanOrEqual == nil {
+func inRange(v string, lower, upper int) bool {
+	if lower == math.MinInt && upper == math.MaxInt {
 		return true
 	}
-	value, err := strconv.Atoi(valueAsString)
-	if err != nil {
-		return false
-	}
-	lower, upper := intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual)
-	return value >= lower && value <= upper
+	val, err := strconv.Atoi(v)
+	return err == nil && val >= lower && val <= upper
 }
 
 // intersectRange computes the inclusive [lower, upper] range from bound pointers
