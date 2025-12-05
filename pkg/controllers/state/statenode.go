@@ -92,7 +92,7 @@ func (n StateNodes) Pods(ctx context.Context, kubeClient client.Client) ([]*core
 	for _, node := range n {
 		p, err := node.Pods(ctx, kubeClient)
 		if err != nil {
-			return nil, fmt.Errorf("getting pods for node %q, %w", node.Node.Name, err)
+			return nil, err
 		}
 		pods = append(pods, p...)
 	}
@@ -104,7 +104,7 @@ func (n StateNodes) CurrentlyReschedulablePods(ctx context.Context, kubeClient c
 	for _, node := range n {
 		p, err := node.CurrentlyReschedulablePods(ctx, kubeClient)
 		if err != nil {
-			return nil, fmt.Errorf("getting currently reschedulable pods for node %q, %w", node.Node.Name, err)
+			return nil, err
 		}
 		pods = append(pods, p...)
 	}
@@ -234,7 +234,7 @@ func (in *StateNode) ValidateNodeDisruptable() error {
 func (in *StateNode) ValidatePodsDisruptable(ctx context.Context, kubeClient client.Client, pdbs pdb.Limits) ([]*corev1.Pod, error) {
 	pods, err := in.Pods(ctx, kubeClient)
 	if err != nil {
-		return nil, fmt.Errorf("getting pods from node, %w", err)
+		return nil, err
 	}
 	for _, po := range pods {
 		// We only consider pods that are actively running for "karpenter.sh/do-not-disrupt"
@@ -554,7 +554,6 @@ func ClearNodeClaimsCondition(ctx context.Context, kubeClient client.Client, con
 			errs[i] = client.IgnoreNotFound(err)
 			return
 		}
-
 	})
 	return multierr.Combine(errs...)
 }
