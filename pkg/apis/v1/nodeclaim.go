@@ -82,16 +82,9 @@ type NodeClaimSpec struct {
 	ExpireAfter NillableDuration `json:"expireAfter,omitempty"`
 }
 
-// NodeSelectorOperator is a type alias that extends corev1.NodeSelectorOperator.
-// This is a workaround for codegen limitations - we cannot add values to upstream
-// enums, so we define additional operators here (Gte, Lte) that get merged with
-// the standard operators (In, NotIn, Exists, DoesNotExist, Gt, Lt) at runtime.
-// Validation is handled in ValidateRequirement() via SupportedNodeSelectorOps.
-type NodeSelectorOperator v1.NodeSelectorOperator
-
 const (
-	NodeSelectorOpGte NodeSelectorOperator = "Gte"
-	NodeSelectorOpLte NodeSelectorOperator = "Lte"
+	NodeSelectorOpGte v1.NodeSelectorOperator = "Gte"
+	NodeSelectorOpLte v1.NodeSelectorOperator = "Lte"
 )
 
 // A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values

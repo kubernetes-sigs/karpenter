@@ -126,7 +126,7 @@ var _ = Describe("Validation", func() {
 			Expect(env.Client.Create(ctx, nodeClaim)).To(Succeed())
 		})
 		It("should fail for unsupported ops", func() {
-			for _, op := range []NodeSelectorOperator{"unknown"} {
+			for _, op := range []corev1.NodeSelectorOperator{"unknown"} {
 				nodeClaim.Spec.Requirements = []NodeSelectorRequirementWithMinValues{
 					{Key: corev1.LabelTopologyZone, Operator: corev1.NodeSelectorOperator(op), Values: []string{"test"}},
 				}
