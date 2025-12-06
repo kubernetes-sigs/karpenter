@@ -46,8 +46,12 @@ func NewNodeController(kubeClient client.Client, cluster *state.Cluster) *NodeCo
 	}
 }
 
+func (c *NodeController) Name() string {
+	return "state.node"
+}
+
 func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "state.node")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	node := &v1.Node{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, node); err != nil {
@@ -66,7 +70,7 @@ func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (
 
 func (c *NodeController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("state.node").
+		Named(c.Name()).
 		For(&v1.Node{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		Complete(c)

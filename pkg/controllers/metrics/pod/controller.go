@@ -207,7 +207,7 @@ func NewController(kubeClient client.Client, cluster *state.Cluster) *Controller
 
 // Reconcile executes a termination control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "metrics.pod")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	pod := &corev1.Pod{}
 	if err := c.kubeClient.Get(ctx, req.NamespacedName, pod); err != nil {
@@ -440,9 +440,13 @@ func (c *Controller) makeLabels(ctx context.Context, pod *corev1.Pod) (prometheu
 	return metricLabels, nil
 }
 
+func (c *Controller) Name() string {
+	return "metrics.pod"
+}
+
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("metrics.pod").
+		Named(c.Name()).
 		For(&corev1.Pod{}).
 		Complete(c)
 }

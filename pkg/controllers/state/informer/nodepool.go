@@ -51,8 +51,12 @@ func NewNodePoolController(kubeClient client.Client, cloudProvider cloudprovider
 	}
 }
 
+func (c *NodePoolController) Name() string {
+	return "state.nodepool"
+}
+
 func (c *NodePoolController) Reconcile(ctx context.Context, np *v1.NodePool) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "state.nodepool") //nolint:ineffassign,staticcheck
+	ctx = injection.WithControllerName(ctx, c.Name()) //nolint:ineffassign,staticcheck
 	if !nodepoolutils.IsManaged(np, c.cloudProvider) {
 		return reconcile.Result{}, nil
 	}
@@ -64,7 +68,7 @@ func (c *NodePoolController) Reconcile(ctx context.Context, np *v1.NodePool) (re
 
 func (c *NodePoolController) Register(ctx context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("state.nodepool").
+		Named(c.Name()).
 		For(&v1.NodePool{}, builder.WithPredicates(nodepoolutils.IsManagedPredicateFuncs(c.cloudProvider))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: utilscontroller.LinearScaleReconciles(utilscontroller.CPUCount(ctx), minReconciles, maxReconciles)}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
