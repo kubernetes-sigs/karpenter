@@ -18,6 +18,7 @@ package counter
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
@@ -55,6 +56,7 @@ var BaseResources = corev1.ResourceList{
 	corev1.ResourcePods:             resource.MustParse("0"),
 	corev1.ResourceEphemeralStorage: resource.MustParse("0"),
 	resources.Node:                  resource.MustParse("0"),
+	resources.DriftedNodeClaim:      resource.MustParse("0"),
 }
 
 // NewController is a constructor
@@ -88,6 +90,23 @@ func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reco
 	nodePool.Status.Resources = lo.Assign(BaseResources, c.cluster.NodePoolResourcesFor(nodePool.Name))
 	nodeQuantity := nodePool.Status.Resources[resources.Node]
 	nodePool.Status.Nodes = lo.ToPtr(nodeQuantity.Value())
+
+	// Set condition Drifted
+	driftedNodeClaimCount := nodePool.Status.Resources[resources.DriftedNodeClaim]
+	if !driftedNodeClaimCount.IsZero() {
+		nodePool.StatusConditions().SetTrueWithReason(
+			v1.ConditionTypeNodeClaimsDrifted,
+			"NodeClaimsDriftedExist",
+			fmt.Sprintf("%d NodeClaim(s) managed by this NodePool have drifted", driftedNodeClaimCount.Value()),
+		)
+	} else {
+		nodePool.StatusConditions().SetFalse(
+			v1.ConditionTypeNodeClaimsDrifted,
+			"ZeroNodeClaimsDrifted",
+			"All NodeClaims are in sync with the NodePool configuration",
+		)
+	}
+
 	if !equality.Semantic.DeepEqual(stored, nodePool) {
 		if err := c.kubeClient.Status().Patch(ctx, nodePool, client.MergeFrom(stored)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)

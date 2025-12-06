@@ -41,6 +41,10 @@ spec:
           name: Memory
           priority: 1
           type: string
+        - jsonPath: .status.resources.driftedNodeClaims
+          name: DriftedNodeClaims
+          priority: 1
+          type: integer
       name: v1
       schema:
         openAPIV3Schema:
