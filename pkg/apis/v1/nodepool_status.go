@@ -29,6 +29,9 @@ const (
 	ConditionTypeNodeClassReady = "NodeClassReady"
 	// ConditionTypeNodeRegistrationHealthy = "NodeRegistrationHealthy" condition indicates if a misconfiguration exists that is preventing successful node launch/registrations that requires manual investigation
 	ConditionTypeNodeRegistrationHealthy = "NodeRegistrationHealthy"
+	// ConditionTypeNodeClaimsDrifted = "Drifted" condition indicates if any NodeClaims belonging to the NodePool have drifted
+	// from their expected configuration based on the NodePool and/or NodeClass hash
+	ConditionTypeNodeClaimsDrifted = "Drifted"
 )
 
 // NodePoolStatus defines the observed state of NodePool
