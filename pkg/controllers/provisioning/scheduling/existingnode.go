@@ -19,7 +19,7 @@ package scheduling
 import (
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -28,16 +28,16 @@ import (
 
 type ExistingNode struct {
 	*state.StateNode
-	cachedAvailable corev1.ResourceList // Cache so we don't have to re-subtract resources on the StateNode every time
-	cachedTaints    []corev1.Taint      // Cache so we don't hae to re-construct the taints each time we attempt to schedule a pod
+	cachedAvailable v1.ResourceList // Cache so we don't have to re-subtract resources on the StateNode every time
+	cachedTaints    []v1.Taint      // Cache so we don't hae to re-construct the taints each time we attempt to schedule a pod
 
-	Pods               []*corev1.Pod
+	Pods               []*v1.Pod
 	topology           *Topology
-	remainingResources corev1.ResourceList
+	remainingResources v1.ResourceList
 	requirements       scheduling.Requirements
 }
 
-func NewExistingNode(n *state.StateNode, topology *Topology, taints []corev1.Taint, daemonResources corev1.ResourceList) *ExistingNode {
+func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, daemonResources v1.ResourceList) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	resources.SubtractFrom(daemonResources, n.DaemonSetRequests())
@@ -59,15 +59,15 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []corev1.Tai
 		remainingResources: resources.Subtract(available, daemonResources),
 		requirements:       scheduling.NewLabelRequirements(n.Labels()),
 	}
-	node.requirements.Add(scheduling.NewRequirement(corev1.LabelHostname, corev1.NodeSelectorOpIn, n.HostName()))
-	topology.Register(corev1.LabelHostname, n.HostName())
+	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
+	topology.Register(v1.LabelHostname, n.HostName())
 	return node
 }
 
 // CanAdd returns whether the pod can be added to the ExistingNode
 // based on the taints/tolerations, volume requirements, host port compatibility,
 // requirements, resources, and topology requirements
-func (n *ExistingNode) CanAdd(pod *corev1.Pod, podData *PodData, volumes scheduling.Volumes) (updatedRequirements scheduling.Requirements, err error) {
+func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.Volumes) (updatedRequirements scheduling.Requirements, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.cachedTaints).ToleratesPod(pod); err != nil {
 		return nil, err
@@ -108,7 +108,7 @@ func (n *ExistingNode) CanAdd(pod *corev1.Pod, podData *PodData, volumes schedul
 
 // Add updates the ExistingNode to schedule the pod to this ExistingNode, updating
 // the ExistingNode with new requirements and volumes based on the pod scheduling
-func (n *ExistingNode) Add(pod *corev1.Pod, podData *PodData, nodeRequirements scheduling.Requirements, volumes scheduling.Volumes) {
+func (n *ExistingNode) Add(pod *v1.Pod, podData *PodData, nodeRequirements scheduling.Requirements, volumes scheduling.Volumes) {
 	// Update node
 	n.Pods = append(n.Pods, pod)
 	resources.SubtractFrom(n.remainingResources, podData.Requests)

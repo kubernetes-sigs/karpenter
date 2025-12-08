@@ -37,15 +37,13 @@ type Requirement struct {
 	Key                string
 	complement         bool
 	values             sets.Set[string]
-	greaterThan        *int // Gt: value must be > N
-	greaterThanOrEqual *int // Gte: value must be >= N
-	lessThan           *int // Lt: value must be < N
-	lessThanOrEqual    *int // Lte: value must be <= N
+	greaterThanOrEqual *int // inclusive lower bound (Gt is converted to Gte)
+	lessThanOrEqual    *int // inclusive upper bound (Lt is converted to Lte)
 	MinValues          *int
 }
 
 // NewRequirementWithFlexibility constructs new requirement from the combination of key, values, minValues and the operator that
-// connects the keys and values.
+// connects the keys and values. GT and LT operators are canonicalized to GTE and LTE respectively.
 // nolint:gocyclo
 func NewRequirementWithFlexibility(key string, operator corev1.NodeSelectorOperator, minValues *int, values ...string) *Requirement {
 	if normalized, ok := v1.NormalizedLabels[key]; ok {
@@ -80,11 +78,13 @@ func NewRequirementWithFlexibility(key string, operator corev1.NodeSelectorOpera
 	}
 	if operator == corev1.NodeSelectorOpGt {
 		value, _ := strconv.Atoi(values[0]) // prevalidated
-		r.greaterThan = &value
+		value++                             // canonicalize GT N to GTE N+1
+		r.greaterThanOrEqual = &value
 	}
 	if operator == corev1.NodeSelectorOpLt {
 		value, _ := strconv.Atoi(values[0]) // prevalidated
-		r.lessThan = &value
+		value--                             // canonicalize LT N to LTE N-1
+		r.lessThanOrEqual = &value
 	}
 	if operator == v1.NodeSelectorOpGte {
 		value, _ := strconv.Atoi(values[0]) // prevalidated
@@ -117,47 +117,37 @@ func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirementWithMi
 			Values:    []string{strconv.FormatInt(int64(lo.FromPtr(r.lessThanOrEqual)), 10)},
 			MinValues: r.MinValues,
 		}
-	case r.greaterThan != nil:
-		return v1.NodeSelectorRequirementWithMinValues{
-			Key:       r.Key,
-			Operator:  corev1.NodeSelectorOpGt,
-			Values:    []string{strconv.FormatInt(int64(lo.FromPtr(r.greaterThan)), 10)},
-			MinValues: r.MinValues,
-		}
-	case r.lessThan != nil:
-		return v1.NodeSelectorRequirementWithMinValues{
-			Key:       r.Key,
-			Operator:  corev1.NodeSelectorOpLt,
-			Values:    []string{strconv.FormatInt(int64(lo.FromPtr(r.lessThan)), 10)},
-			MinValues: r.MinValues,
-		}
 	case r.complement:
-		if len(r.values) > 0 {
+		switch {
+		case len(r.values) > 0:
 			return v1.NodeSelectorRequirementWithMinValues{
 				Key:       r.Key,
 				Operator:  corev1.NodeSelectorOpNotIn,
 				Values:    sets.List(r.values),
 				MinValues: r.MinValues,
 			}
-		}
-		return v1.NodeSelectorRequirementWithMinValues{
-			Key:       r.Key,
-			Operator:  corev1.NodeSelectorOpExists,
-			MinValues: r.MinValues,
+		default:
+			return v1.NodeSelectorRequirementWithMinValues{
+				Key:       r.Key,
+				Operator:  corev1.NodeSelectorOpExists,
+				MinValues: r.MinValues,
+			}
 		}
 	default:
-		if len(r.values) > 0 {
+		switch {
+		case len(r.values) > 0:
 			return v1.NodeSelectorRequirementWithMinValues{
 				Key:       r.Key,
 				Operator:  corev1.NodeSelectorOpIn,
 				Values:    sets.List(r.values),
 				MinValues: r.MinValues,
 			}
-		}
-		return v1.NodeSelectorRequirementWithMinValues{
-			Key:       r.Key,
-			Operator:  corev1.NodeSelectorOpDoesNotExist,
-			MinValues: r.MinValues,
+		default:
+			return v1.NodeSelectorRequirementWithMinValues{
+				Key:       r.Key,
+				Operator:  corev1.NodeSelectorOpDoesNotExist,
+				MinValues: r.MinValues,
+			}
 		}
 	}
 }
@@ -168,20 +158,11 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	// Complement
 	complement := r.complement && requirement.complement
 
-	// Boundaries - merge and collapse to canonical form
-	greaterThan, greaterThanOrEqual := collapseLowerBounds(
-		maxIntPtr(r.greaterThan, requirement.greaterThan),
-		maxIntPtr(r.greaterThanOrEqual, requirement.greaterThanOrEqual),
-	)
-	lessThan, lessThanOrEqual := collapseUpperBounds(
-		minIntPtr(r.lessThan, requirement.lessThan),
-		minIntPtr(r.lessThanOrEqual, requirement.lessThanOrEqual),
-	)
+	// Boundaries
+	greaterThanOrEqual := maxIntPtr(r.greaterThanOrEqual, requirement.greaterThanOrEqual)
+	lessThanOrEqual := minIntPtr(r.lessThanOrEqual, requirement.lessThanOrEqual)
 	minValues := maxIntPtr(r.MinValues, requirement.MinValues)
-
-	// Check if bounds are incompatible
-	lower, upper := intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual)
-	if lower > upper {
+	if !boundsCompatible(greaterThanOrEqual, lessThanOrEqual) {
 		return NewRequirementWithFlexibility(r.Key, corev1.NodeSelectorOpDoesNotExist, minValues)
 	}
 
@@ -197,15 +178,15 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 		values = r.values.Intersection(requirement.values)
 	}
 	for v := range values {
-		if !inRange(v, lower, upper) {
+		if !withinBounds(v, greaterThanOrEqual, lessThanOrEqual) {
 			values.Delete(v)
 		}
 	}
 	// Remove boundaries for concrete sets
 	if !complement {
-		greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual = nil, nil, nil, nil
+		greaterThanOrEqual, lessThanOrEqual = nil, nil
 	}
-	return &Requirement{Key: r.Key, values: values, complement: complement, greaterThan: greaterThan, greaterThanOrEqual: greaterThanOrEqual, lessThan: lessThan, lessThanOrEqual: lessThanOrEqual, MinValues: minValues}
+	return &Requirement{Key: r.Key, values: values, complement: complement, greaterThanOrEqual: greaterThanOrEqual, lessThanOrEqual: lessThanOrEqual, MinValues: minValues}
 }
 
 // nolint:gocyclo
@@ -213,13 +194,9 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 // It validates whether there is an intersection between the two requirements without actually creating the sets
 // This prevents the garbage collector from having to spend cycles cleaning up all of these created set objects
 func (r *Requirement) HasIntersection(requirement *Requirement) bool {
-	lower, upper := intersectRange(
-		maxIntPtr(r.greaterThan, requirement.greaterThan),
-		maxIntPtr(r.greaterThanOrEqual, requirement.greaterThanOrEqual),
-		minIntPtr(r.lessThan, requirement.lessThan),
-		minIntPtr(r.lessThanOrEqual, requirement.lessThanOrEqual),
-	)
-	if lower > upper {
+	greaterThanOrEqual := maxIntPtr(r.greaterThanOrEqual, requirement.greaterThanOrEqual)
+	lessThanOrEqual := minIntPtr(r.lessThanOrEqual, requirement.lessThanOrEqual)
+	if !boundsCompatible(greaterThanOrEqual, lessThanOrEqual) {
 		return false
 	}
 	// Both requirements have a complement
@@ -229,7 +206,7 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	// Only one requirement has a complement
 	if r.complement && !requirement.complement {
 		for v := range requirement.values {
-			if !r.values.Has(v) && inRange(v, lower, upper) {
+			if !r.values.Has(v) && withinBounds(v, greaterThanOrEqual, lessThanOrEqual) {
 				return true
 			}
 		}
@@ -237,7 +214,7 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	}
 	if !r.complement && requirement.complement {
 		for v := range r.values {
-			if !requirement.values.Has(v) && inRange(v, lower, upper) {
+			if !requirement.values.Has(v) && withinBounds(v, greaterThanOrEqual, lessThanOrEqual) {
 				return true
 			}
 		}
@@ -245,7 +222,7 @@ func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	}
 	// Both requirements are non-complement requirements
 	for v := range r.values {
-		if requirement.values.Has(v) && inRange(v, lower, upper) {
+		if requirement.values.Has(v) && withinBounds(v, greaterThanOrEqual, lessThanOrEqual) {
 			return true
 		}
 	}
@@ -259,16 +236,10 @@ func (r *Requirement) Any() string {
 	case corev1.NodeSelectorOpNotIn, corev1.NodeSelectorOpExists:
 		min := 0
 		max := math.MaxInt64
-		if r.greaterThan != nil {
-			min = *r.greaterThan + 1
-		}
-		if r.greaterThanOrEqual != nil && *r.greaterThanOrEqual > min {
+		if r.greaterThanOrEqual != nil {
 			min = *r.greaterThanOrEqual
 		}
-		if r.lessThan != nil {
-			max = *r.lessThan
-		}
-		if r.lessThanOrEqual != nil && *r.lessThanOrEqual+1 < max {
+		if r.lessThanOrEqual != nil {
 			max = *r.lessThanOrEqual + 1
 		}
 		return fmt.Sprint(rand.Intn(max-min) + min) //nolint:gosec
@@ -278,11 +249,10 @@ func (r *Requirement) Any() string {
 
 // Has returns true if the requirement allows the value
 func (r *Requirement) Has(value string) bool {
-	lower, upper := intersectRange(r.greaterThan, r.greaterThanOrEqual, r.lessThan, r.lessThanOrEqual)
 	if r.complement {
-		return !r.values.Has(value) && inRange(value, lower, upper)
+		return !r.values.Has(value) && withinBounds(value, r.greaterThanOrEqual, r.lessThanOrEqual)
 	}
-	return r.values.Has(value) && inRange(value, lower, upper)
+	return r.values.Has(value) && withinBounds(value, r.greaterThanOrEqual, r.lessThanOrEqual)
 }
 
 func (r *Requirement) Values() []string {
@@ -325,14 +295,8 @@ func (r *Requirement) String() string {
 		}
 		s = fmt.Sprintf("%s %s %s", r.Key, r.Operator(), values)
 	}
-	if r.greaterThan != nil {
-		s += fmt.Sprintf(" >%d", *r.greaterThan)
-	}
 	if r.greaterThanOrEqual != nil {
 		s += fmt.Sprintf(" >=%d", *r.greaterThanOrEqual)
-	}
-	if r.lessThan != nil {
-		s += fmt.Sprintf(" <%d", *r.lessThan)
 	}
 	if r.lessThanOrEqual != nil {
 		s += fmt.Sprintf(" <=%d", *r.lessThanOrEqual)
@@ -343,31 +307,29 @@ func (r *Requirement) String() string {
 	return s
 }
 
-func inRange(v string, lower, upper int) bool {
-	if lower == math.MinInt && upper == math.MaxInt {
+func withinBounds(v string, greaterThanOrEqual, lessThanOrEqual *int) bool {
+	if greaterThanOrEqual == nil && lessThanOrEqual == nil {
 		return true
 	}
+	// If bounds are set, non integer values are invalid
 	val, err := strconv.Atoi(v)
-	return err == nil && val >= lower && val <= upper
+	if err != nil {
+		return false
+	}
+	if greaterThanOrEqual != nil && val < *greaterThanOrEqual {
+		return false
+	}
+	if lessThanOrEqual != nil && val > *lessThanOrEqual {
+		return false
+	}
+	return true
 }
 
-// intersectRange computes the inclusive [lower, upper] range from bound pointers
-func intersectRange(greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual *int) (int, int) {
-	lower := math.MinInt
-	if greaterThan != nil {
-		lower = *greaterThan + 1
+func boundsCompatible(greaterThanOrEqual, lessThanOrEqual *int) bool {
+	if greaterThanOrEqual == nil || lessThanOrEqual == nil {
+		return true
 	}
-	if greaterThanOrEqual != nil && *greaterThanOrEqual > lower {
-		lower = *greaterThanOrEqual
-	}
-	upper := math.MaxInt
-	if lessThan != nil {
-		upper = *lessThan - 1
-	}
-	if lessThanOrEqual != nil && *lessThanOrEqual < upper {
-		upper = *lessThanOrEqual
-	}
-	return lower, upper
+	return *greaterThanOrEqual <= *lessThanOrEqual
 }
 
 func minIntPtr(a, b *int) *int {
@@ -394,26 +356,4 @@ func maxIntPtr(a, b *int) *int {
 		return a
 	}
 	return b
-}
-
-// collapseLowerBounds keeps the more restrictive bound when both are present.
-func collapseLowerBounds(greaterThan, greaterThanOrEqual *int) (*int, *int) {
-	if greaterThan == nil || greaterThanOrEqual == nil {
-		return greaterThan, greaterThanOrEqual
-	}
-	if *greaterThan < *greaterThanOrEqual {
-		return nil, greaterThanOrEqual
-	}
-	return greaterThan, nil
-}
-
-// collapseUpperBounds keeps the more restrictive bound when both are present.
-func collapseUpperBounds(lessThan, lessThanOrEqual *int) (*int, *int) {
-	if lessThan == nil || lessThanOrEqual == nil {
-		return lessThan, lessThanOrEqual
-	}
-	if *lessThan > *lessThanOrEqual {
-		return nil, lessThanOrEqual
-	}
-	return lessThan, nil
 }

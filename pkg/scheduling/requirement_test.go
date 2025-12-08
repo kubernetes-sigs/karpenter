@@ -250,10 +250,10 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, notIn12, in9, in9),
 			Entry(nil, notIn12, in19, in9),
 			Entry(nil, notIn12, notIn12, notIn12),
-			Entry(nil, notIn12, greaterThan1, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2")}),
-			Entry(nil, notIn12, greaterThan9, &Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string]()}),
-			Entry(nil, notIn12, lessThan1, &Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string]()}),
-			Entry(nil, notIn12, lessThan9, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2")}),
+			Entry(nil, notIn12, greaterThan1, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, values: sets.New("2")}),
+			Entry(nil, notIn12, greaterThan9, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan9.greaterThanOrEqual, values: sets.New[string]()}),
+			Entry(nil, notIn12, lessThan1, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan1.lessThanOrEqual, values: sets.New[string]()}),
+			Entry(nil, notIn12, lessThan9, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New("1", "2")}),
 
 			Entry(nil, greaterThan1, exists, greaterThan1),
 			Entry(nil, greaterThan1, doesNotExist, doesNotExist),
@@ -264,11 +264,11 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, greaterThan1, in1, doesNotExist),
 			Entry(nil, greaterThan1, in9, in9),
 			Entry(nil, greaterThan1, in19, in9),
-			Entry(nil, greaterThan1, notIn12, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2")}),
+			Entry(nil, greaterThan1, notIn12, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, values: sets.New("2")}),
 			Entry(nil, greaterThan1, greaterThan1, greaterThan1),
 			Entry(nil, greaterThan1, greaterThan9, greaterThan9),
 			Entry(nil, greaterThan1, lessThan1, doesNotExist),
-			Entry(nil, greaterThan1, lessThan9, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string]()}),
+			Entry(nil, greaterThan1, lessThan9, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New[string]()}),
 
 			Entry(nil, greaterThan9, exists, greaterThan9),
 			Entry(nil, greaterThan9, doesNotExist, doesNotExist),
@@ -309,8 +309,8 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, lessThan9, in1, in1),
 			Entry(nil, lessThan9, in9, doesNotExist),
 			Entry(nil, lessThan9, in19, in1),
-			Entry(nil, lessThan9, notIn12, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2")}),
-			Entry(nil, lessThan9, greaterThan1, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string]()}),
+			Entry(nil, lessThan9, notIn12, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New("1", "2")}),
+			Entry(nil, lessThan9, greaterThan1, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New[string]()}),
 			Entry(nil, lessThan9, greaterThan9, doesNotExist),
 			Entry(nil, lessThan9, lessThan1, lessThan1),
 			Entry(nil, lessThan9, lessThan9, lessThan9),
@@ -465,10 +465,10 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, notIn12OperatorWithFlexibility, in9, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
 			Entry(nil, notIn12OperatorWithFlexibility, in19, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
 			Entry(nil, notIn12OperatorWithFlexibility, notIn12, notIn12OperatorWithFlexibility),
-			Entry(nil, notIn12OperatorWithFlexibility, greaterThan1, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(2)}),
-			Entry(nil, notIn12OperatorWithFlexibility, greaterThan9, &Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
-			Entry(nil, notIn12OperatorWithFlexibility, lessThan1, &Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
-			Entry(nil, notIn12OperatorWithFlexibility, lessThan9, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility, greaterThan1, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, values: sets.New("2"), MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility, greaterThan9, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan9.greaterThanOrEqual, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility, lessThan1, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan1.lessThanOrEqual, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility, lessThan9, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
 
 			Entry(nil, greaterThan1OperatorWithFlexibility, exists, greaterThan1OperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
@@ -479,11 +479,11 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, greaterThan1OperatorWithFlexibility, in1, doesNotExistOperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, in9, in9OperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, in19, in9OperatorWithFlexibility),
-			Entry(nil, greaterThan1OperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(1)}),
+			Entry(nil, greaterThan1OperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, values: sets.New("2"), MinValues: lo.ToPtr(1)}),
 			Entry(nil, greaterThan1OperatorWithFlexibility, greaterThan1, greaterThan1OperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, greaterThan9, greaterThan9OperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, lessThan1, doesNotExistOperatorWithFlexibility),
-			Entry(nil, greaterThan1OperatorWithFlexibility, lessThan9, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
+			Entry(nil, greaterThan1OperatorWithFlexibility, lessThan9, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
 
 			Entry(nil, greaterThan9OperatorWithFlexibility, exists, greaterThan9OperatorWithFlexibility),
 			Entry(nil, greaterThan9OperatorWithFlexibility, doesNotExist, doesNotExistOperatorWithFlexibility),
@@ -524,8 +524,8 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, lessThan9OperatorWithFlexibility, in1, in1OperatorWithFlexibility),
 			Entry(nil, lessThan9OperatorWithFlexibility, in9, doesNotExistOperatorWithFlexibility),
 			Entry(nil, lessThan9OperatorWithFlexibility, in19, in1OperatorWithFlexibility),
-			Entry(nil, lessThan9OperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(1)}),
-			Entry(nil, lessThan9OperatorWithFlexibility, greaterThan1, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
+			Entry(nil, lessThan9OperatorWithFlexibility, notIn12, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New("1", "2"), MinValues: lo.ToPtr(1)}),
+			Entry(nil, lessThan9OperatorWithFlexibility, greaterThan1, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
 			Entry(nil, lessThan9OperatorWithFlexibility, greaterThan9, doesNotExistOperatorWithFlexibility),
 			Entry(nil, lessThan9OperatorWithFlexibility, lessThan1, lessThan1OperatorWithFlexibility),
 			Entry(nil, lessThan9OperatorWithFlexibility, lessThan9, lessThan9OperatorWithFlexibility),
@@ -680,10 +680,10 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, notIn12OperatorWithFlexibility, in9OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
 			Entry(nil, notIn12OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
 			Entry(nil, notIn12OperatorWithFlexibility, notIn12OperatorWithFlexibility, notIn12OperatorWithFlexibility),
-			Entry(nil, notIn12OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(2)}),
-			Entry(nil, notIn12OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
-			Entry(nil, notIn12OperatorWithFlexibility, lessThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
-			Entry(nil, notIn12OperatorWithFlexibility, lessThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, values: sets.New("2"), MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan9.greaterThanOrEqual, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility, lessThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan1.lessThanOrEqual, values: sets.New[string](), MinValues: lo.ToPtr(2)}),
+			Entry(nil, notIn12OperatorWithFlexibility, lessThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
 
 			Entry(nil, greaterThan1OperatorWithFlexibility, existsOperatorWithFlexibility, greaterThan1OperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
@@ -694,11 +694,11 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, greaterThan1OperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, in9OperatorWithFlexibility, in9OperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("9"), MinValues: lo.ToPtr(2)}),
-			Entry(nil, greaterThan1OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, values: sets.New("2"), MinValues: lo.ToPtr(2)}),
+			Entry(nil, greaterThan1OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, values: sets.New("2"), MinValues: lo.ToPtr(2)}),
 			Entry(nil, greaterThan1OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, greaterThan1OperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
 			Entry(nil, greaterThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
-			Entry(nil, greaterThan1OperatorWithFlexibility, lessThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
+			Entry(nil, greaterThan1OperatorWithFlexibility, lessThan9OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
 
 			Entry(nil, greaterThan9OperatorWithFlexibility, existsOperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
 			Entry(nil, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
@@ -709,7 +709,7 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, greaterThan9OperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 			Entry(nil, greaterThan9OperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 			Entry(nil, greaterThan9OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
-			Entry(nil, greaterThan9OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan9.greaterThan, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(nil, greaterThan9OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan9.greaterThanOrEqual, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
 			Entry(nil, greaterThan9OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
 			Entry(nil, greaterThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility),
 			Entry(nil, greaterThan9OperatorWithFlexibility, lessThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
@@ -724,7 +724,7 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, lessThan1OperatorWithFlexibility, in1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 			Entry(nil, lessThan1OperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 			Entry(nil, lessThan1OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
-			Entry(nil, lessThan1OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThan: lessThan1.lessThan, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
+			Entry(nil, lessThan1OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan1.lessThanOrEqual, values: sets.Set[string]{}, MinValues: lo.ToPtr(2)}),
 			Entry(nil, lessThan1OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 			Entry(nil, lessThan1OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 			Entry(nil, lessThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility),
@@ -739,8 +739,8 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, lessThan9OperatorWithFlexibility, in1OperatorWithFlexibility, in1OperatorWithFlexibility),
 			Entry(nil, lessThan9OperatorWithFlexibility, in9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 			Entry(nil, lessThan9OperatorWithFlexibility, in19OperatorWithFlexibility, &Requirement{Key: "key", complement: false, values: sets.New("1"), MinValues: lo.ToPtr(2)}),
-			Entry(nil, lessThan9OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThan: lessThan9.lessThan, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
-			Entry(nil, lessThan9OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThan: greaterThan1.greaterThan, lessThan: lessThan9.lessThan, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
+			Entry(nil, lessThan9OperatorWithFlexibility, notIn12OperatorWithFlexibility, &Requirement{Key: "key", complement: true, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New("1", "2"), MinValues: lo.ToPtr(2)}),
+			Entry(nil, lessThan9OperatorWithFlexibility, greaterThan1OperatorWithFlexibility, &Requirement{Key: "key", complement: true, greaterThanOrEqual: greaterThan1.greaterThanOrEqual, lessThanOrEqual: lessThan9.lessThanOrEqual, values: sets.New[string](), MinValues: lo.ToPtr(1)}),
 			Entry(nil, lessThan9OperatorWithFlexibility, greaterThan9OperatorWithFlexibility, doesNotExistOperatorWithFlexibility),
 			Entry(nil, lessThan9OperatorWithFlexibility, lessThan1OperatorWithFlexibility, lessThan1OperatorWithFlexibility),
 			Entry(nil, lessThan9OperatorWithFlexibility, lessThan9OperatorWithFlexibility, lessThan9OperatorWithFlexibility),
@@ -905,11 +905,11 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, in9, "key In [9]"),
 			Entry(nil, in19, "key In [1 9]"),
 			Entry(nil, notIn12, "key NotIn [1 2]"),
-			Entry(nil, greaterThan1, "key Exists >1"),
-			Entry(nil, greaterThan9, "key Exists >9"),
-			Entry(nil, lessThan1, "key Exists <1"),
-			Entry(nil, lessThan9, "key Exists <9"),
-			Entry(nil, greaterThan1.Intersection(lessThan9), "key Exists >1 <9"),
+			Entry(nil, greaterThan1, "key Exists >=2"),
+			Entry(nil, greaterThan9, "key Exists >=10"),
+			Entry(nil, lessThan1, "key Exists <=0"),
+			Entry(nil, lessThan9, "key Exists <=8"),
+			Entry(nil, greaterThan1.Intersection(lessThan9), "key Exists >=2 <=8"),
 			Entry(nil, greaterThan9.Intersection(lessThan1), "key DoesNotExist"),
 		)
 	})
@@ -928,10 +928,10 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, in9.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"9"}}),
 			Entry(nil, in19.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"1", "9"}}),
 			Entry(nil, notIn12.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1", "2"}}),
-			Entry(nil, greaterThan1.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}}),
-			Entry(nil, greaterThan9.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpGt, Values: []string{"9"}}),
-			Entry(nil, lessThan1.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}}),
-			Entry(nil, lessThan9.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpLt, Values: []string{"9"}}),
+			Entry(nil, greaterThan1.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: v1.NodeSelectorOpGte, Values: []string{"2"}}),
+			Entry(nil, greaterThan9.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: v1.NodeSelectorOpGte, Values: []string{"10"}}),
+			Entry(nil, lessThan1.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: v1.NodeSelectorOpLte, Values: []string{"0"}}),
+			Entry(nil, lessThan9.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: v1.NodeSelectorOpLte, Values: []string{"8"}}),
 
 			Entry(nil, existsOperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpExists, MinValues: lo.ToPtr(1)}),
 			Entry(nil, doesNotExistOperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpDoesNotExist, MinValues: lo.ToPtr(1)}),
@@ -943,10 +943,10 @@ var _ = Describe("Requirement", func() {
 			Entry(nil, in9OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"9"}, MinValues: lo.ToPtr(1)}),
 			Entry(nil, in19OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpIn, Values: []string{"1", "9"}, MinValues: lo.ToPtr(2)}),
 			Entry(nil, notIn12OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"1", "2"}, MinValues: lo.ToPtr(2)}),
-			Entry(nil, greaterThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, greaterThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpGt, Values: []string{"9"}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, lessThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpLt, Values: []string{"1"}, MinValues: lo.ToPtr(1)}),
-			Entry(nil, lessThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: corev1.NodeSelectorOpLt, Values: []string{"9"}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, greaterThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: v1.NodeSelectorOpGte, Values: []string{"2"}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, greaterThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: v1.NodeSelectorOpGte, Values: []string{"10"}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, lessThan1OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: v1.NodeSelectorOpLte, Values: []string{"0"}, MinValues: lo.ToPtr(1)}),
+			Entry(nil, lessThan9OperatorWithFlexibility.NodeSelectorRequirement(), v1.NodeSelectorRequirementWithMinValues{Key: "key", Operator: v1.NodeSelectorOpLte, Values: []string{"8"}, MinValues: lo.ToPtr(1)}),
 		)
 
 	})
@@ -1008,15 +1008,15 @@ var _ = Describe("Requirement", func() {
 		})
 		It("should keep Gt when Gt is more restrictive", func() {
 			// Gt 5 AND Gte 5: Gt 5 means > 5 (>= 6), Gte 5 means >= 5
-			// Gt 5 is more restrictive
+			// Gt 5 is more restrictive, canonicalized to Gte 6
 			gt5 := NewRequirement("key", corev1.NodeSelectorOpGt, "5")
 			gte5 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpGte, nil, "5")
 			intersection := gt5.Intersection(gte5)
 			Expect(intersection.Has("6")).To(BeTrue())
 			Expect(intersection.Has("5")).To(BeFalse())
 			req := intersection.NodeSelectorRequirement()
-			Expect(req.Operator).To(Equal(corev1.NodeSelectorOpGt))
-			Expect(req.Values).To(Equal([]string{"5"}))
+			Expect(req.Operator).To(Equal(v1.NodeSelectorOpGte))
+			Expect(req.Values).To(Equal([]string{"6"}))
 		})
 		It("should keep more restrictive Gte when Gte > Gt+1", func() {
 			// Gt 3 AND Gte 6: Gt 3 means > 3 (>= 4), Gte 6 means >= 6
@@ -1031,15 +1031,15 @@ var _ = Describe("Requirement", func() {
 		})
 		It("should keep Lt when Lt is more restrictive", func() {
 			// Lt 5 AND Lte 5: Lt 5 means < 5 (<= 4), Lte 5 means <= 5
-			// Lt 5 is more restrictive
+			// Lt 5 is more restrictive, canonicalized to Lte 4
 			lt5 := NewRequirement("key", corev1.NodeSelectorOpLt, "5")
 			lte5 := NewRequirementWithFlexibility("key", v1.NodeSelectorOpLte, nil, "5")
 			intersection := lt5.Intersection(lte5)
 			Expect(intersection.Has("4")).To(BeTrue())
 			Expect(intersection.Has("5")).To(BeFalse())
 			req := intersection.NodeSelectorRequirement()
-			Expect(req.Operator).To(Equal(corev1.NodeSelectorOpLt))
-			Expect(req.Values).To(Equal([]string{"5"}))
+			Expect(req.Operator).To(Equal(v1.NodeSelectorOpLte))
+			Expect(req.Values).To(Equal([]string{"4"}))
 		})
 		It("should keep more restrictive Lte when Lte < Lt-1", func() {
 			// Lt 9 AND Lte 5: Lt 9 means < 9 (<= 8), Lte 5 means <= 5
