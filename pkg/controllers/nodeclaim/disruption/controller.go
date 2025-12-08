@@ -38,6 +38,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	consolidationobserver "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consolidationobserver"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	utilscontroller "sigs.k8s.io/karpenter/pkg/utils/controller"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
@@ -60,12 +61,12 @@ type Controller struct {
 
 // NewController constructs a nodeclaim disruption controller. Note that every sub-controller has a dependency on its nodepool.
 // Disruption mechanisms that don't depend on the nodepool (like expiration), should live elsewhere.
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, consolidationObserver *consolidationobserver.Controller) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
 		drift:         &Drift{clock: clk, cloudProvider: cloudProvider, instanceTypeNotFoundCheckCache: cache.New(time.Minute*30, time.Minute)},
-		consolidation: &Consolidation{kubeClient: kubeClient, clock: clk},
+		consolidation: &Consolidation{kubeClient: kubeClient, clock: clk, consolidationObserver: consolidationObserver},
 	}
 }
 

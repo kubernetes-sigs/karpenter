@@ -61,7 +61,8 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...), test.WithFieldIndexers(test.NodeProviderIDFieldIndexer(ctx)))
 	ctx = options.ToContext(ctx, test.Options())
 	cp = fake.NewCloudProvider()
-	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cp)
+	// Pass nil for consolidationObserver in tests - the feature is opt-in and requires observer to be set
+	nodeClaimDisruptionController = nodeclaimdisruption.NewController(fakeClock, env.Client, cp, nil)
 })
 
 var _ = AfterSuite(func() {

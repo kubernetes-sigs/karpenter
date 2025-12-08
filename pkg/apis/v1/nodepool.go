@@ -100,6 +100,35 @@ type Disruption struct {
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
 	//nolint:kubeapilinter
+	// UseOnConsolidationAfter is the duration the controller will wait
+	// before considering a high-utilization stable node for consolidation.
+	// A node is protected when ALL of the following are true:
+	// 1. Node has resource utilization >= UseOnConsolidationUtilizationThreshold (default 50%)
+	// 2. Node has been stable (no pod events) for consolidateAfter duration
+	// When protected, the node will not be considered for consolidation
+	// for the useOnConsolidationAfter duration.
+	// This breaks consolidation cycles where stable, productive nodes become
+	// consolidation targets while nodes with pod churn remain protected.
+	// When replicas is set, UseOnConsolidationAfter is simply ignored
+	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
+	// +kubebuilder:validation:Type="string"
+	// +kubebuilder:validation:Schemaless
+	// +optional
+	UseOnConsolidationAfter NillableDuration `json:"useOnConsolidationAfter,omitempty"`
+	//nolint:kubeapilinter
+	// UseOnConsolidationUtilizationThreshold is the minimum resource utilization percentage (0-100)
+	// for a node to be considered for useOnConsolidationAfter protection.
+	// When a node has resource utilization at or above this threshold and has been stable
+	// (no pod events) for consolidateAfter duration, it will be protected from consolidation
+	// for useOnConsolidationAfter duration.
+	// This setting only takes effect when useOnConsolidationAfter is configured.
+	// Defaults to 50 if not specified.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:default=50
+	// +optional
+	UseOnConsolidationUtilizationThreshold *int32 `json:"useOnConsolidationUtilizationThreshold,omitempty"`
+	//nolint:kubeapilinter
 	// Budgets is a list of Budgets.
 	// If there are multiple active budgets, Karpenter uses
 	// the most restrictive value. If left undefined,

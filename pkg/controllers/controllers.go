@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination"
 	"sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator"
 	nodeclaimconsistency "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consistency"
+	consolidationobserver "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consolidationobserver"
 	nodeclaimdisruption "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/disruption"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/expiration"
 	nodeclaimgarbagecollection "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/garbagecollection"
@@ -81,6 +82,7 @@ func NewControllers(
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
+	consolidationObserver := consolidationobserver.NewController(clock, kubeClient, cloudProvider, cluster)
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,
@@ -104,7 +106,8 @@ func NewControllers(
 		nodeclaimconsistency.NewController(clock, kubeClient, cloudProvider, recorder),
 		nodeclaimlifecycle.NewController(clock, kubeClient, cloudProvider, recorder, npState),
 		nodeclaimgarbagecollection.NewController(clock, kubeClient, cloudProvider),
-		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider),
+		consolidationObserver,
+		nodeclaimdisruption.NewController(clock, kubeClient, cloudProvider, consolidationObserver),
 		nodeclaimhydration.NewController(kubeClient, cloudProvider),
 		nodehydration.NewController(kubeClient, cloudProvider),
 	}

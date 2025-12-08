@@ -158,6 +158,34 @@ spec:
                         - WhenEmpty
                         - WhenEmptyOrUnderutilized
                       type: string
+                    useOnConsolidationAfter:
+                      description: |-
+                        UseOnConsolidationAfter is the duration the controller will wait
+                        before considering a high-utilization stable node for consolidation.
+                        A node is protected when ALL of the following are true:
+                        1. Node has resource utilization >= UseOnConsolidationUtilizationThreshold (default 50%)
+                        2. Node has been stable (no pod events) for consolidateAfter duration
+                        When protected, the node will not be considered for consolidation
+                        for the useOnConsolidationAfter duration.
+                        This breaks consolidation cycles where stable, productive nodes become
+                        consolidation targets while nodes with pod churn remain protected.
+                        When replicas is set, UseOnConsolidationAfter is simply ignored
+                      pattern: ^(([0-9]+(s|m|h))+|Never)$
+                      type: string
+                    useOnConsolidationUtilizationThreshold:
+                      default: 50
+                      description: |-
+                        UseOnConsolidationUtilizationThreshold is the minimum resource utilization percentage (0-100)
+                        for a node to be considered for useOnConsolidationAfter protection.
+                        When a node has resource utilization at or above this threshold and has been stable
+                        (no pod events) for consolidateAfter duration, it will be protected from consolidation
+                        for useOnConsolidationAfter duration.
+                        This setting only takes effect when useOnConsolidationAfter is configured.
+                        Defaults to 50 if not specified.
+                      format: int32
+                      maximum: 100
+                      minimum: 0
+                      type: integer
                   required:
                     - consolidateAfter
                   type: object
@@ -296,8 +324,6 @@ spec:
                                     rule: self != "karpenter.sh/nodepool"
                                   - message: label "kubernetes.io/hostname" is restricted
                                     rule: self != "kubernetes.io/hostname"
-                                  - message: label domain "karpenter.kwok.sh" is restricted
-                                    rule: self in ["karpenter.kwok.sh/kwoknodeclass", "karpenter.kwok.sh/instance-cpu", "karpenter.kwok.sh/instance-memory", "karpenter.kwok.sh/instance-family", "karpenter.kwok.sh/instance-size"] || !self.find("^([^/]+)").endsWith("karpenter.kwok.sh")
                               minValues:
                                 description: |-
                                   This field is ALPHA and can be dropped or replaced at any time
