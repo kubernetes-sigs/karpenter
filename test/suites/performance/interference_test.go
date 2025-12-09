@@ -27,33 +27,33 @@ import (
 )
 
 var _ = Describe("Performance", func() {
-	Context("Host Name Spreading Deployment Interference", func() {
-		It("should efficiently scale two deployments with host name topology spreading", func() {
+	Context("Self Anti-Affinity Deployment Interference", func() {
+		It("should efficiently scale two deployments with self anti-affinity", func() {
 			By("Setting up NodePool and NodeClass for the test")
 			env.ExpectCreated(nodePool, nodeClass)
 
-			// ========== PHASE 1: SCALE-OUT TEST WITH HOSTNAME SPREADING ==========
-			By("Creating deployments with hostname spreading")
+			// ========== PHASE 1: SCALE-OUT TEST WITH SELF ANTI-AFFINITY ==========
+			By("Creating deployments with self anti-affinity")
 
 			// Create deployment options using templates
 			smallOpts := test.CreateDeploymentOptions("small-resource-app", 500, "950m", "3900Mi",
-				test.WithHostnameSpread())
-			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi", test.WithHostnameSpread())
+				test.WithPodAntiAffinityHostname())
+			largeOpts := test.CreateDeploymentOptions("large-resource-app", 500, "3800m", "31Gi", test.WithPodAntiAffinityHostname())
 
 			// Create 1st deployment
 			smallDeployment := test.Deployment(smallOpts)
 
 			env.ExpectCreated(smallDeployment)
 
-			By("Monitoring scale-out performance with hostname spreading (500 pods)")
-			scaleOutReport, err := ReportScaleOutWithOutput(env, "Host Name Spreading Performance Test", 500, 15*time.Minute, "hostname_spread_scale_out_small")
+			By("Monitoring scale-out performance with self anti-affinity (500 pods)")
+			scaleOutReport, err := ReportScaleOutWithOutput(env, "Self Anti-Affinity Performance Test", 500, 15*time.Minute, "self_antiaffinity_scale_out_small")
 			Expect(err).ToNot(HaveOccurred(), "Scale-out should execute successfully")
 
-			By("Validating scale-out performance with hostname spreading")
+			By("Validating scale-out performance with self anti-affinity")
 			Expect(scaleOutReport.TestType).To(Equal("scale-out"), "Should be detected as scale-out test")
 			Expect(scaleOutReport.TotalPods).To(Equal(500), "Should have 500 total pods")
 
-			// Performance assertions - hostname spreading may require more nodes
+			// Performance assertions - self anti-affinity requires one pod per node
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
 				"Total scale-out time should be less than 10 minutes")
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 650),
@@ -73,7 +73,7 @@ var _ = Describe("Performance", func() {
 			env.ExpectCreated(largeDeployment)
 
 			By("Monitoring scale out performance")
-			interferenceReport, err := ReportScaleOutWithOutput(env, "Hostname Spread scale out Test", 750, 5*time.Minute, "hostname_spread_interference")
+			interferenceReport, err := ReportScaleOutWithOutput(env, "Self Anti-Affinity scale out Test", 750, 5*time.Minute, "self_antiaffinity_interference")
 			Expect(err).ToNot(HaveOccurred(), "Scale out interference test should execute successfully")
 
 			By("Validating scale out performance")
@@ -102,7 +102,7 @@ var _ = Describe("Performance", func() {
 			env.ExpectUpdated(smallDeployment, largeDeployment)
 
 			By("Monitoring consolidation activity during mixed scaling operations")
-			consolidationReport, err := ReportConsolidationWithOutput(env, "Interference Consolidation Test", 750, 600, initialNodes, 15*time.Minute, "hostname_spread_interference_consolidation")
+			consolidationReport, err := ReportConsolidationWithOutput(env, "Interference Consolidation Test", 750, 600, initialNodes, 15*time.Minute, "self_antiaffinity_interference_consolidation")
 			Expect(err).ToNot(HaveOccurred(), "Interference consolidation test should execute successfully")
 
 			By("Validating consolidation performance during interference")

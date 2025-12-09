@@ -31,8 +31,8 @@ jobs:
             focus: "Do Not Disrupt Performance Test"
           - name: "Provisioning"
             focus: "Provisioning"
-          - name: "Host Name Spreading Interference"
-            focus: "Host Name Spreading Deployment Interference"
+          - name: "Self Anti-Affinity Deployment Interference"
+            focus: "Self Anti-Affinity Deployment Interference"
     uses: ./.github/workflows/e2e.yaml
     with:
       suite: Performance
