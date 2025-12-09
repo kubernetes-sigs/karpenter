@@ -101,6 +101,18 @@ func NewRequirement(key string, operator corev1.NodeSelectorOperator, values ...
 	return NewRequirementWithFlexibility(key, operator, nil, values...)
 }
 
+// BoundedNodeSelectorRequirements handles the case where both gte and lte exist.
+// Unlike other operators which intersect into a single values set, bounds are stored
+// separately and must be serialized as two distinct NodeSelectorRequirements.
+// This method is separate from NodeSelectorRequirement() to avoid slice allocations
+// in the common case where only one bound exists.
+func (r *Requirement) BoundedNodeSelectorRequirements() []v1.NodeSelectorRequirementWithMinValues {
+	return []v1.NodeSelectorRequirementWithMinValues{
+		{Key: r.Key, Operator: v1.NodeSelectorOpGte, Values: []string{strconv.FormatInt(int64(*r.gte), 10)}, MinValues: r.MinValues},
+		{Key: r.Key, Operator: v1.NodeSelectorOpLte, Values: []string{strconv.FormatInt(int64(*r.lte), 10)}, MinValues: r.MinValues},
+	}
+}
+
 func (r *Requirement) NodeSelectorRequirement() v1.NodeSelectorRequirementWithMinValues {
 	switch {
 	case r.gte != nil:

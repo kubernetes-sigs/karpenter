@@ -327,8 +327,6 @@ spec:
                                   array must have a single element, which will be interpreted as an integer.
                                   This array is replaced during a strategic merge patch.
                                 items:
-                                  maxLength: 63
-                                  pattern: ^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$
                                   type: string
                                 type: array
                                 x-kubernetes-list-type: atomic

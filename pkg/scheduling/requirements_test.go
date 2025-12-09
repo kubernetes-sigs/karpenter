@@ -672,6 +672,17 @@ var _ = Describe("Requirements", func() {
 			))
 			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(14))
 		})
+		It("should return both Gte and Lte requirements when both bounds exist", func() {
+			reqs := NewRequirements(
+				NewRequirement("cpu", v1.NodeSelectorOpGte, "8"),
+				NewRequirement("cpu", v1.NodeSelectorOpLte, "8"),
+			)
+			Expect(reqs.NodeSelectorRequirements()).To(ContainElements(
+				v1.NodeSelectorRequirementWithMinValues{Key: "cpu", Operator: v1.NodeSelectorOpGte, Values: []string{"8"}},
+				v1.NodeSelectorRequirementWithMinValues{Key: "cpu", Operator: v1.NodeSelectorOpLte, Values: []string{"8"}},
+			))
+			Expect(reqs.NodeSelectorRequirements()).To(HaveLen(2))
+		})
 	})
 	Context("Stringify Requirements", func() {
 		It("should print Requirements in the same order", func() {

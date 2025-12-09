@@ -110,8 +110,6 @@ type NodeSelectorRequirementWithMinValues struct {
 	// This array is replaced during a strategic merge patch.
 	// +optional
 	// +listType=atomic
-	// +kubebuilder:validation:items:MaxLength:=63
-	// +kubebuilder:validation:items:Pattern:=`^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$`
 	Values []string `json:"values,omitempty"`
 	//nolint:kubeapilinter
 	// This field is ALPHA and can be dropped or replaced at any time
