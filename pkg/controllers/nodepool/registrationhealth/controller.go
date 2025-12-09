@@ -43,11 +43,11 @@ import (
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
-	npState       nodepoolhealth.State
+	npState       *nodepoolhealth.State
 }
 
 // NewController will create a controller to reset NodePool's registration health when there is an update to NodePool/NodeClass spec
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, npState nodepoolhealth.State) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, npState *nodepoolhealth.State) *Controller {
 	return &Controller{
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,

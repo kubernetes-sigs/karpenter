@@ -210,3 +210,11 @@ func (n *NodePoolState) ensureNodePoolEntry(np string) {
 		n.nodePoolNameToNodePoolLimit[np] = &atomic.Int64{}
 	}
 }
+
+func (n *NodePoolState) Reset() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.nodePoolNameToNodeClaimState = make(map[string]NodeClaimState)
+	n.nodeClaimNameToNodePoolName = make(map[string]string)
+	n.nodePoolNameToNodePoolLimit = make(map[string]*atomic.Int64)
+}
