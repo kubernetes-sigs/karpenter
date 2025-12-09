@@ -162,7 +162,7 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 	gte := maxIntPtr(r.gte, requirement.gte)
 	lte := minIntPtr(r.lte, requirement.lte)
 	minValues := maxIntPtr(r.MinValues, requirement.MinValues)
-	if !boundsCompatible(gte, lte) {
+	if gte != nil && lte != nil && *gte > *lte {
 		return NewRequirementWithFlexibility(r.Key, corev1.NodeSelectorOpDoesNotExist, minValues)
 	}
 
@@ -196,7 +196,7 @@ func (r *Requirement) Intersection(requirement *Requirement) *Requirement {
 func (r *Requirement) HasIntersection(requirement *Requirement) bool {
 	gte := maxIntPtr(r.gte, requirement.gte)
 	lte := minIntPtr(r.lte, requirement.lte)
-	if !boundsCompatible(gte, lte) {
+	if gte != nil && lte != nil && *gte > *lte {
 		return false
 	}
 	// Both requirements have a complement
@@ -323,13 +323,6 @@ func withinBounds(valueAsString string, gte, lte *int) bool {
 		return false
 	}
 	return true
-}
-
-func boundsCompatible(gte, lte *int) bool {
-	if gte == nil || lte == nil {
-		return true
-	}
-	return *gte <= *lte
 }
 
 func minIntPtr(a, b *int) *int {
