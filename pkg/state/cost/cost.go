@@ -232,7 +232,7 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	defer cc.Unlock()
 	err := cc.internalAddOffering(ctx, np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone], true)
 	if err != nil {
-		log.FromContext(ctx).Error(serrors.Wrap(err, "failed to add offering for nodeclaim", "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np)), "failed to process nodeclaim for cost tracking")
+		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("failed to add offering for nodeclaim, %w", err), "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np)), "failed to process nodeclaim for cost tracking")
 		failed = true
 		return
 	}
@@ -269,7 +269,7 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	np := &v1.NodePool{}
 	err := cc.client.Get(ctx, client.ObjectKey{Name: nodePoolName}, np)
 	if err != nil {
-		log.FromContext(ctx).Error(serrors.Wrap(err, "failed to get nodepool", "nodepool", nodePoolName, "nodeclaim", klog.KObj(nodeClaim)), "failed to remove nodeclaim from cost tracking")
+		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("failed to get nodepool, %w", err), "nodepool", nodePoolName, "nodeclaim", klog.KObj(nodeClaim)), "failed to remove nodeclaim from cost tracking")
 		failed = true
 		return
 	}
@@ -284,7 +284,7 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	defer cc.Unlock()
 	err = cc.internalRemoveOffering(np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone])
 	if err != nil {
-		log.FromContext(ctx).Error(serrors.Wrap(err, "failed to remove offering for nodeclaim", "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np)), "failed to remove nodeclaim from cost tracking")
+		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("failed to remove offering for nodeclaim, %w", err), "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np)), "failed to remove nodeclaim from cost tracking")
 		failed = true
 		return
 	}
