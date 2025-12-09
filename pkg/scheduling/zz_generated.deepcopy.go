@@ -89,13 +89,13 @@ func (in *Requirement) DeepCopyInto(out *Requirement) {
 			(*out)[key] = val
 		}
 	}
-	if in.greaterThanOrEqual != nil {
-		in, out := &in.greaterThanOrEqual, &out.greaterThanOrEqual
+	if in.gte != nil {
+		in, out := &in.gte, &out.gte
 		*out = new(int)
 		**out = **in
 	}
-	if in.lessThanOrEqual != nil {
-		in, out := &in.lessThanOrEqual, &out.lessThanOrEqual
+	if in.lte != nil {
+		in, out := &in.lte, &out.lte
 		*out = new(int)
 		**out = **in
 	}
