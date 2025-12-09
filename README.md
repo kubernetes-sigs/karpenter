@@ -25,7 +25,7 @@ Karpenter is a multi-cloud project with implementations by the following cloud p
 - [GCP](https://github.com/cloudpilot-ai/karpenter-provider-gcp)
 - [IBM Cloud](https://github.com/kubernetes-sigs/karpenter-provider-ibm-cloud)
 - [Proxmox](https://github.com/sergelogvinov/karpenter-provider-proxmox)
-- [Oracle Cloud Infrastructure (OCI)](https://github.com/zoom/karpenter-oci)
+- [Oracle Cloud Infrastructure (OCI) - Provided by Zoom](https://github.com/zoom/karpenter-oci)
 
 ## Community, discussion, contribution, and support
 
