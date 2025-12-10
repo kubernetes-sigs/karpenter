@@ -62,9 +62,9 @@ func (in *Budget) DeepCopy() *Budget {
 func (in *Disruption) DeepCopyInto(out *Disruption) {
 	*out = *in
 	in.ConsolidateAfter.DeepCopyInto(&out.ConsolidateAfter)
-	in.UseOnConsolidationAfter.DeepCopyInto(&out.UseOnConsolidationAfter)
-	if in.UseOnConsolidationUtilizationThreshold != nil {
-		in, out := &in.UseOnConsolidationUtilizationThreshold, &out.UseOnConsolidationUtilizationThreshold
+	in.ConsolidationGracePeriod.DeepCopyInto(&out.ConsolidationGracePeriod)
+	if in.ConsolidationGracePeriodUtilizationThreshold != nil {
+		in, out := &in.ConsolidationGracePeriodUtilizationThreshold, &out.ConsolidationGracePeriodUtilizationThreshold
 		*out = new(int32)
 		**out = **in
 	}

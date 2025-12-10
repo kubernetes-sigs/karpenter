@@ -1,8 +1,8 @@
-# Use On Consolidation After
+# Consolidation Grace Period
 
 ## Summary
 
-This proposal introduces a new `useOnConsolidationAfter` field to the NodePool `Disruption` spec to address excessive node churn caused by consolidation cycles. The feature protects high-utilization, stable nodes from being consolidated for a specified duration, breaking the feedback loop where nodes with frequent pod churn become unconsolidatable while stable nodes become consolidation targets.
+This proposal introduces a new `consolidationGracePeriod` field to the NodePool `Disruption` spec to address excessive node churn caused by consolidation cycles. The feature protects high-utilization, stable nodes from being consolidated for a specified duration, breaking the feedback loop where nodes with frequent pod churn become unconsolidatable while stable nodes become consolidation targets.
 
 **Key Benefits:**
 - Breaks consolidation cycles that cause constant node churn
@@ -52,11 +52,11 @@ Introduce new fields in the NodePool `Disruption` spec that protect high-utiliza
 
 A node is protected from consolidation when **ALL** of the following are true:
 
-1. ✅ `useOnConsolidationAfter` is configured on the NodePool
+1. ✅ `consolidationGracePeriod` is configured on the NodePool
 2. ✅ Node has passed `consolidateAfter` (stable - no pod events for `consolidateAfter` duration)
-3. ✅ Node utilization >= `useOnConsolidationUtilizationThreshold` (configurable, default 50%)
+3. ✅ Node utilization >= `consolidationGracePeriodUtilizationThreshold` (configurable, default 50%)
 
-**Protection Duration:** `useOnConsolidationAfter` from the moment the node first became consolidatable.
+**Protection Duration:** `consolidationGracePeriod` from the moment the node first became consolidatable.
 
 ### How It Breaks the Cycle
 
@@ -72,11 +72,11 @@ BEFORE (the problem):
 │  ↓ Other old nodes become targets                               │
 │  └──────────────────→ CYCLE REPEATS ←───────────────────────────┘
 
-AFTER (with useOnConsolidationAfter):
+AFTER (with consolidationGracePeriod):
 ┌─────────────────────────────────────────────────────────────────┐
 │  Old Stable Node (high utilization, quiet)                      │
 │  ↓ becomes consolidatable (passed consolidateAfter)             │
-│  ↓ PROTECTED for useOnConsolidationAfter duration               │
+│  ↓ PROTECTED for consolidationGracePeriod duration               │
 │  ↓ receives NEW pods (from other consolidations)                │
 │  ↓ LastPodEventTime resets naturally                            │
 │  ↓ consolidateAfter resets → CYCLE BROKEN                       │
@@ -86,11 +86,11 @@ AFTER (with useOnConsolidationAfter):
 ### How It Differs from `consolidateAfter`
 
 - **`consolidateAfter`**: Determines when a node **becomes eligible** for consolidation (waits for a quiet period after pod events)
-- **`useOnConsolidationAfter`**: Provides **additional protection** for nodes that are well-utilized and have been stable
+- **`consolidationGracePeriod`**: Provides **additional protection** for nodes that are well-utilized and have been stable
 
 These mechanisms work together:
 - `consolidateAfter` ensures nodes aren't consolidated too quickly after becoming underutilized
-- `useOnConsolidationAfter` protects productive nodes that have "earned" stability
+- `consolidationGracePeriod` protects productive nodes that have "earned" stability
 
 ### Why Not Protect New Nodes?
 
@@ -111,8 +111,8 @@ spec:
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 30s
-    useOnConsolidationAfter: 1h                         # New field - protection duration
-    useOnConsolidationUtilizationThreshold: 50          # New field - utilization threshold (default: 50)
+    consolidationGracePeriod: 1h                         # New field - protection duration
+    consolidationGracePeriodUtilizationThreshold: 50          # New field - utilization threshold (default: 50)
     budgets:
     - nodes: 10%
 ```
@@ -123,34 +123,34 @@ spec:
 type Disruption struct {
     // ... existing fields ...
     
-    // UseOnConsolidationAfter is the duration the controller will wait
+    // ConsolidationGracePeriod is the duration the controller will wait
     // before considering a high-utilization stable node for consolidation.
     // A node is protected when ALL of the following are true:
-    // 1. Node has resource utilization >= UseOnConsolidationUtilizationThreshold (default 50%)
+    // 1. Node has resource utilization >= ConsolidationGracePeriodUtilizationThreshold (default 50%)
     // 2. Node has been stable (no pod events) for consolidateAfter duration
     // When protected, the node will not be considered for consolidation
-    // for the useOnConsolidationAfter duration.
+    // for the consolidationGracePeriod duration.
     // This breaks consolidation cycles where stable, productive nodes become
     // consolidation targets while nodes with pod churn remain protected.
-    // When replicas is set, UseOnConsolidationAfter is simply ignored
+    // When replicas is set, ConsolidationGracePeriod is simply ignored
     // +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
     // +kubebuilder:validation:Type="string"
     // +kubebuilder:validation:Schemaless
     // +optional
-    UseOnConsolidationAfter NillableDuration `json:"useOnConsolidationAfter,omitempty"`
+    ConsolidationGracePeriod NillableDuration `json:"consolidationGracePeriod,omitempty"`
     
-    // UseOnConsolidationUtilizationThreshold is the minimum resource utilization percentage (0-100)
-    // for a node to be considered for useOnConsolidationAfter protection.
+    // ConsolidationGracePeriodUtilizationThreshold is the minimum resource utilization percentage (0-100)
+    // for a node to be considered for consolidationGracePeriod protection.
     // When a node has resource utilization at or above this threshold and has been stable
     // (no pod events) for consolidateAfter duration, it will be protected from consolidation
-    // for useOnConsolidationAfter duration.
-    // This setting only takes effect when useOnConsolidationAfter is configured.
+    // for consolidationGracePeriod duration.
+    // This setting only takes effect when consolidationGracePeriod is configured.
     // Defaults to 50 if not specified.
     // +kubebuilder:validation:Minimum=0
     // +kubebuilder:validation:Maximum=100
     // +kubebuilder:default=50
     // +optional
-    UseOnConsolidationUtilizationThreshold *int32 `json:"useOnConsolidationUtilizationThreshold,omitempty"`
+    ConsolidationGracePeriodUtilizationThreshold *int32 `json:"consolidationGracePeriodUtilizationThreshold,omitempty"`
 }
 ```
 
@@ -171,7 +171,7 @@ The consolidation observer controller requires the following Kubernetes RBAC per
 ```
 
 These permissions enable the observer to:
-- Read NodePool configuration (`useOnConsolidationAfter`, `consolidateAfter`, `useOnConsolidationUtilizationThreshold`)
+- Read NodePool configuration (`consolidationGracePeriod`, `consolidateAfter`, `consolidationGracePeriodUtilizationThreshold`)
 - Read NodeClaim status (`LastPodEventTime`, `Initialized` condition)
 - Calculate node utilization (pod requests vs node allocatable)
 
@@ -199,9 +199,9 @@ An independent observer controller (`pkg/controllers/nodeclaim/consolidationobse
 
 1. **Node has passed consolidateAfter**: `timeSince(LastPodEventTime) >= consolidateAfter`
 2. **Node utilization >= threshold**: Calculated as max(CPU%, Memory%)
-3. **NodePool has useOnConsolidationAfter configured**
+3. **NodePool has consolidationGracePeriod configured**
 
-When a node meets all criteria, it is added to a protected list with expiration time of `consolidatableTime + useOnConsolidationAfter`.
+When a node meets all criteria, it is added to a protected list with expiration time of `consolidatableTime + consolidationGracePeriod`.
 
 ### Consolidation Logic Integration
 
@@ -213,8 +213,8 @@ The consolidation controller checks the observer's `IsProtected()` method:
 
 **Configuration:**
 - `consolidateAfter: 30s`
-- `useOnConsolidationAfter: 5m`
-- `useOnConsolidationUtilizationThreshold: 50`
+- `consolidationGracePeriod: 5m`
+- `consolidationGracePeriodUtilizationThreshold: 50`
 
 ```
 Timeline for Node A (70% utilization, stable):
@@ -224,9 +224,9 @@ T=0      │ Node A created, pod scheduled
          │
 T=30s    │ consolidateAfter passes, node becomes "consolidation candidate"
          │ Observer checks: utilization=70% >= 50% ✓, stable ✓
-         │ Status: Protected by useOnConsolidationAfter (5m countdown)
+         │ Status: Protected by consolidationGracePeriod (5m countdown)
          │
-T=5m30s  │ useOnConsolidationAfter expires
+T=5m30s  │ consolidationGracePeriod expires
          │ Status: NOW eligible for consolidation (if still a candidate)
 ─────────────────────────────────────────────────────────────────────────
 
@@ -243,17 +243,17 @@ T=30s    │ consolidateAfter passes
 
 ## Validation
 
-- `useOnConsolidationAfter` must be a valid duration string (e.g., "30m", "1h", "2h30m") or "Never"
+- `consolidationGracePeriod` must be a valid duration string (e.g., "30m", "1h", "2h30m") or "Never"
 - If set to "Never", consolidation protection is disabled (same as not setting the field)
 - The field is optional - if not set, behavior matches current implementation
-- `useOnConsolidationUtilizationThreshold` must be an integer between 0 and 100 (inclusive)
-- If `useOnConsolidationUtilizationThreshold` is set without `useOnConsolidationAfter`, it has no effect
+- `consolidationGracePeriodUtilizationThreshold` must be an integer between 0 and 100 (inclusive)
+- If `consolidationGracePeriodUtilizationThreshold` is set without `consolidationGracePeriod`, it has no effect
 
 ## Defaults
 
-- **`useOnConsolidationAfter`**: Not set (nil) - feature is opt-in
-- **`useOnConsolidationUtilizationThreshold`**: 50 (50% utilization threshold)
-- When `useOnConsolidationAfter` is not set, behavior is identical to current implementation
+- **`consolidationGracePeriod`**: Not set (nil) - feature is opt-in
+- **`consolidationGracePeriodUtilizationThreshold`**: 50 (50% utilization threshold)
+- When `consolidationGracePeriod` is not set, behavior is identical to current implementation
 
 ## Examples
 
@@ -268,12 +268,12 @@ spec:
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 30s
-    useOnConsolidationAfter: 1h  # Protect stable nodes for 1 hour
+    consolidationGracePeriod: 1h  # Protect stable nodes for 1 hour
 ```
 
 **Scenario**: A cluster with ReplicaSets that scale up/down frequently
-- **Without `useOnConsolidationAfter`**: Stable nodes become consolidation targets → churn
-- **With `useOnConsolidationAfter: 1h`**: Stable, well-utilized nodes are protected for 1 hour
+- **Without `consolidationGracePeriod`**: Stable nodes become consolidation targets → churn
+- **With `consolidationGracePeriod: 1h`**: Stable, well-utilized nodes are protected for 1 hour
 
 ### Example 2: Long-Running Stable Workloads
 
@@ -286,7 +286,7 @@ spec:
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 5m
-    useOnConsolidationAfter: 4h  # Protect stable nodes for 4 hours
+    consolidationGracePeriod: 4h  # Protect stable nodes for 4 hours
 ```
 
 **Scenario**: Nodes hosting long-running services
@@ -304,8 +304,8 @@ spec:
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 1m
-    useOnConsolidationAfter: 2h
-    useOnConsolidationUtilizationThreshold: 70  # Only protect nodes with >=70% utilization
+    consolidationGracePeriod: 2h
+    consolidationGracePeriodUtilizationThreshold: 70  # Only protect nodes with >=70% utilization
 ```
 
 **Scenario**: For cost-sensitive workloads, only protect highly utilized nodes
@@ -323,7 +323,7 @@ spec:
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 30s
-    useOnConsolidationAfter: Never  # Explicitly disable protection
+    consolidationGracePeriod: Never  # Explicitly disable protection
 ```
 
 ## Design Alternatives Considered
@@ -387,7 +387,7 @@ The proposed solution is chosen because:
 
 - **No migration required**: Feature is opt-in via new optional fields
 - **Existing NodePools**: Continue to work as before
-- **New NodePools**: Can opt-in by setting `useOnConsolidationAfter`
+- **New NodePools**: Can opt-in by setting `consolidationGracePeriod`
 
 ## Testing Considerations
 
@@ -395,8 +395,8 @@ The proposed solution is chosen because:
 
 - Test that nodes below utilization threshold are NOT protected
 - Test that nodes above utilization threshold AND stable ARE protected
-- Test protection expiration after `useOnConsolidationAfter` duration
-- Test interaction between `consolidateAfter` and `useOnConsolidationAfter`
+- Test protection expiration after `consolidationGracePeriod` duration
+- Test interaction between `consolidateAfter` and `consolidationGracePeriod`
 - Test "Never" value
 - Test nil/unspecified value (should behave like current implementation)
 - Test configurable utilization threshold (0%, 50%, 70%, 100%)
@@ -406,19 +406,19 @@ The proposed solution is chosen because:
 - Test consolidation cycle prevention with high pod churn
 - Test that stable, high-utilization workloads are protected
 - Test that stable, low-utilization workloads are NOT protected (cost-efficiency)
-- Test with various `useOnConsolidationAfter` durations
+- Test with various `consolidationGracePeriod` durations
 - Test with ReplicaSet scale-up/down scenarios
 
 ## Open Questions
 
-1. **Naming**: Is `useOnConsolidationAfter` the best name? Alternatives considered:
+1. **Naming**: Is `consolidationGracePeriod` the best name? Alternatives considered:
    - `consolidationProtectionWindow`
    - `consolidationCooldown`
    - `stableNodeProtection`
 
 2. **Default threshold**: Is 50% the right default for the utilization threshold?
 
-3. **Relationship with budgets**: Should `useOnConsolidationAfter` interact with disruption budgets in any special way?
+3. **Relationship with budgets**: Should `consolidationGracePeriod` interact with disruption budgets in any special way?
 
 ## AWS EKS Test Evidence
 
@@ -451,8 +451,8 @@ spec:
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 30s
-    useOnConsolidationAfter: 5m
-    useOnConsolidationUtilizationThreshold: 50
+    consolidationGracePeriod: 5m
+    consolidationGracePeriodUtilizationThreshold: 50
     budgets:
       - nodes: "100%"
 ```
@@ -469,7 +469,7 @@ Nodes with utilization below the 50% threshold were correctly allowed to be cons
   "time": "2025-12-08T01:10:13.002Z",
   "logger": "controller",
   "caller": "consolidationobserver/controller.go:324",
-  "message": "useOnConsolidationAfter: node below utilization threshold, allowing consolidation",
+  "message": "consolidationGracePeriod: node below utilization threshold, allowing consolidation",
   "controller": "nodeclaim.consolidationobserver",
   "NodeClaim": {"name": "test-useonconsafter-8ln4h"},
   "providerID": "aws:///us-west-2c/i-066b18da3956eb54e",
@@ -480,7 +480,7 @@ Nodes with utilization below the 50% threshold were correctly allowed to be cons
 {
   "level": "INFO", 
   "time": "2025-12-08T01:10:13.002Z",
-  "message": "useOnConsolidationAfter: node below utilization threshold, allowing consolidation",
+  "message": "consolidationGracePeriod: node below utilization threshold, allowing consolidation",
   "NodeClaim": {"name": "test-useonconsafter-nkkkp"},
   "providerID": "aws:///us-west-2a/i-01020144ca32da2a8",
   "utilization": 35.079353334045884,
@@ -500,7 +500,7 @@ After scaling up workload to increase utilization above 50%, high-utilization st
   "time": "2025-12-08T01:11:13.000Z",
   "logger": "controller",
   "caller": "consolidationobserver/controller.go:345",
-  "message": "useOnConsolidationAfter: protecting high-utilization stable node",
+  "message": "consolidationGracePeriod: protecting high-utilization stable node",
   "controller": "nodeclaim.consolidationobserver",
   "NodeClaim": {"name": "test-useonconsafter-nkkkp"},
   "providerID": "aws:///us-west-2a/i-01020144ca32da2a8",
@@ -515,7 +515,7 @@ After scaling up workload to increase utilization above 50%, high-utilization st
 **Observation**: 
 - Node `test-useonconsafter-nkkkp` had 63.14% utilization (above 50% threshold)
 - Node had been stable for 30s (matching `consolidateAfter: 30s`)
-- Protection was applied until `01:16:13` (5 minutes from consolidatable time, matching `useOnConsolidationAfter: 5m`)
+- Protection was applied until `01:16:13` (5 minutes from consolidatable time, matching `consolidationGracePeriod: 5m`)
 
 ### Test Summary Table
 
@@ -528,7 +528,7 @@ After scaling up workload to increase utilization above 50%, high-utilization st
 ### Feature Verification
 
 1. ✅ **Consolidation Observer Controller**: Runs as `nodeclaim.consolidationobserver`
-2. ✅ **Feature Configuration Detection**: Correctly reads `useOnConsolidationAfter: 5m0s`, `consolidateAfter: 30s`, threshold: 50%
+2. ✅ **Feature Configuration Detection**: Correctly reads `consolidationGracePeriod: 5m0s`, `consolidateAfter: 30s`, threshold: 50%
 3. ✅ **Utilization Calculation**: Accurately calculates node utilization based on pod requests vs allocatable
 4. ✅ **Threshold Comparison**: Correctly compares utilization against configurable threshold
 5. ✅ **Protection Application**: High-utilization stable nodes get protected for the configured duration

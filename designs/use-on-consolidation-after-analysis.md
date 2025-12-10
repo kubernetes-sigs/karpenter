@@ -1,8 +1,8 @@
-# Critical Analysis: useOnConsolidationAfter Feature
+# Critical Analysis: consolidationGracePeriod Feature
 
 ## Executive Summary
 
-This document provides a critical analysis of the `useOnConsolidationAfter` feature, which protects high-utilization, stable nodes from consolidation to break the consolidation cycle problem.
+This document provides a critical analysis of the `consolidationGracePeriod` feature, which protects high-utilization, stable nodes from consolidation to break the consolidation cycle problem.
 
 ## The Core Problem
 
@@ -35,7 +35,7 @@ A node is protected when **ALL** of the following are true:
 
 | Criterion | Rationale |
 |-----------|-----------|
-| `useOnConsolidationAfter` configured | Opt-in feature |
+| `consolidationGracePeriod` configured | Opt-in feature |
 | `utilization >= threshold` | Only protect productive nodes |
 | `timeSince(LastPodEventTime) >= consolidateAfter` | Node is stable (no recent churn) |
 
@@ -97,8 +97,8 @@ One clear protection mechanism:
 
 | Field | Purpose | Default |
 |-------|---------|---------|
-| `useOnConsolidationAfter` | Protection duration | Not set (opt-in) |
-| `useOnConsolidationUtilizationThreshold` | What counts as "high" utilization | 50% |
+| `consolidationGracePeriod` | Protection duration | Not set (opt-in) |
+| `consolidationGracePeriodUtilizationThreshold` | What counts as "high" utilization | 50% |
 
 ### 5. Opt-In ✅
 
@@ -179,7 +179,7 @@ Reuses `LastPodEventTime` which is already tracked by the `podevents` controller
 
 | Aspect | Without Feature | With Feature |
 |--------|----------------|--------------|
-| Stable, high-util nodes | Consolidated immediately | Protected for useOnConsolidationAfter |
+| Stable, high-util nodes | Consolidated immediately | Protected for consolidationGracePeriod |
 | Stable, low-util nodes | Consolidated immediately | Consolidated immediately |
 | Nodes with pod churn | Protected by consolidateAfter | Protected by consolidateAfter |
 | Cost efficiency | May lose productive nodes | Protected nodes remain productive |
@@ -189,7 +189,7 @@ Reuses `LastPodEventTime` which is already tracked by the `podevents` controller
 
 ### For Users
 
-1. **Start with defaults**: `useOnConsolidationAfter: 1h` with 50% threshold
+1. **Start with defaults**: `consolidationGracePeriod: 1h` with 50% threshold
 2. **Monitor**: Track consolidation frequency and node stability
 3. **Adjust**: Increase/decrease threshold based on workload patterns
 4. **Consider cost**: Higher threshold = more consolidation = lower cost
@@ -215,8 +215,8 @@ Reuses `LastPodEventTime` which is already tracked by the `podevents` controller
 disruption:
   consolidationPolicy: WhenEmptyOrUnderutilized
   consolidateAfter: 30s
-  useOnConsolidationAfter: 5m
-  useOnConsolidationUtilizationThreshold: 50
+  consolidationGracePeriod: 5m
+  consolidationGracePeriodUtilizationThreshold: 50
 ```
 
 ### Key Observations
@@ -236,9 +236,9 @@ The observer correctly detected and logged feature configuration:
 
 ```json
 {
-  "message": "useOnConsolidationAfter: feature configured, processing",
+  "message": "consolidationGracePeriod: feature configured, processing",
   "nodePool": "test-useonconsafter",
-  "useOnConsolidationAfter": "5m0s",
+  "consolidationGracePeriod": "5m0s",
   "consolidateAfter": "30s"
 }
 ```
@@ -257,7 +257,7 @@ The observer calculated utilization based on pod requests vs node allocatable re
 **Low Utilization → No Protection:**
 ```json
 {
-  "message": "useOnConsolidationAfter: node below utilization threshold, allowing consolidation",
+  "message": "consolidationGracePeriod: node below utilization threshold, allowing consolidation",
   "utilization": 39.53820610834396,
   "threshold": 50
 }
@@ -266,7 +266,7 @@ The observer calculated utilization based on pod requests vs node allocatable re
 **High Utilization → Protected:**
 ```json
 {
-  "message": "useOnConsolidationAfter: protecting high-utilization stable node",
+  "message": "consolidationGracePeriod: protecting high-utilization stable node",
   "utilization": 63.14283600128259,
   "threshold": 50,
   "timeSinceLastPodEvent": "30.000339936s",
@@ -277,7 +277,7 @@ The observer calculated utilization based on pod requests vs node allocatable re
 #### Observation 5: Protection Timing is Accurate
 
 - **consolidateAfter**: 30s (node must be stable for 30s)
-- **useOnConsolidationAfter**: 5m (protection duration)
+- **consolidationGracePeriod**: 5m (protection duration)
 
 When node became stable at `T=01:11:13.000Z`:
 - Protection applied immediately
@@ -290,7 +290,7 @@ When node became stable at `T=01:11:13.000Z`:
 | Low utilization node | util=35%, threshold=50% | Not protected | Not protected | ✅ PASS |
 | High utilization node | util=63%, threshold=50% | Protected for 5m | Protected for 5m | ✅ PASS |
 | Stable node check | 30s since last pod event | Passes stability | Passed stability | ✅ PASS |
-| Feature detection | useOnConsolidationAfter=5m | Detected | Detected | ✅ PASS |
+| Feature detection | consolidationGracePeriod=5m | Detected | Detected | ✅ PASS |
 
 ### Lessons Learned
 
@@ -300,7 +300,7 @@ When node became stable at `T=01:11:13.000Z`:
 
 ## Conclusion
 
-The simplified `useOnConsolidationAfter` feature provides a targeted solution to the consolidation cycle problem:
+The simplified `consolidationGracePeriod` feature provides a targeted solution to the consolidation cycle problem:
 
 | ✅ Strengths | ⚠️ Considerations |
 |-------------|-------------------|

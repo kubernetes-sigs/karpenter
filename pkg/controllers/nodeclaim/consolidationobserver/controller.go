@@ -44,7 +44,7 @@ type protectedNodeEntry struct {
 	expiration time.Time
 }
 
-// protectedNodes tracks nodes that meet the criteria for useOnConsolidationAfter protection:
+// protectedNodes tracks nodes that meet the criteria for consolidationGracePeriod protection:
 // - High utilization (>= threshold)
 // - Stable (no pod activity for consolidateAfter duration)
 // The map key is the node's providerID.
@@ -54,11 +54,11 @@ type protectedNodes struct {
 }
 
 // Controller is an independent observer that tracks well-utilized, stable nodes
-// for nodepools configured with useOnConsolidationAfter.
+// for nodepools configured with consolidationGracePeriod.
 //
 // Protection Logic:
 // When a node becomes consolidatable (passes consolidateAfter) AND has utilization >= threshold,
-// it is protected from consolidation for useOnConsolidationAfter duration.
+// it is protected from consolidation for consolidationGracePeriod duration.
 //
 // This breaks the consolidation cycle where:
 // 1. Old stable nodes become consolidation targets
@@ -92,7 +92,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 }
 
 // IsProtected returns true if the node with the given providerID is currently
-// protected from consolidation based on useOnConsolidationAfter configuration.
+// protected from consolidation based on consolidationGracePeriod configuration.
 func (c *Controller) IsProtected(providerID string) bool {
 	c.protected.mu.RLock()
 	defer c.protected.mu.RUnlock()
@@ -209,24 +209,24 @@ func (c *Controller) calculateNodeUtilization(ctx context.Context, node *corev1.
 // Reconcile evaluates whether a node should be protected from consolidation.
 //
 // Protection Criteria (ALL must be true):
-// 1. useOnConsolidationAfter is configured on the NodePool
+// 1. consolidationGracePeriod is configured on the NodePool
 // 2. Node has passed consolidateAfter (stable - no pod events for consolidateAfter duration)
-// 3. Node utilization >= useOnConsolidationUtilizationThreshold (configurable, default 50%)
+// 3. Node utilization >= consolidationGracePeriodUtilizationThreshold (configurable, default 50%)
 //
-// When protected, the node will not be considered for consolidation for useOnConsolidationAfter duration.
+// When protected, the node will not be considered for consolidation for consolidationGracePeriod duration.
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	log.FromContext(ctx).Info("useOnConsolidationAfter: observer reconciling", "nodeClaim", nodeClaim.Name)
+	log.FromContext(ctx).Info("consolidationGracePeriod: observer reconciling", "nodeClaim", nodeClaim.Name)
 	
 	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
-		log.FromContext(ctx).Info("useOnConsolidationAfter: nodeClaim not managed by this cloud provider, skipping")
+		log.FromContext(ctx).Info("consolidationGracePeriod: nodeClaim not managed by this cloud provider, skipping")
 		return reconcile.Result{}, nil
 	}
-	log.FromContext(ctx).Info("useOnConsolidationAfter: nodeClaim is managed, continuing")
+	log.FromContext(ctx).Info("consolidationGracePeriod: nodeClaim is managed, continuing")
 
 	// Get the NodePool for this NodeClaim
 	nodePoolName := nodeClaim.Labels[v1.NodePoolLabelKey]
 	if nodePoolName == "" {
-		log.FromContext(ctx).Info("useOnConsolidationAfter: no NodePool label, skipping")
+		log.FromContext(ctx).Info("consolidationGracePeriod: no NodePool label, skipping")
 		return reconcile.Result{}, nil
 	}
 
@@ -235,21 +235,21 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("getting nodepool, %w", err))
 	}
 
-	// Check if useOnConsolidationAfter is configured for this NodePool
-	if nodePool.Spec.Disruption.UseOnConsolidationAfter.Duration == nil {
-		log.FromContext(ctx).Info("useOnConsolidationAfter: not configured for NodePool, skipping", "nodePool", nodePoolName)
+	// Check if consolidationGracePeriod is configured for this NodePool
+	if nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration == nil {
+		log.FromContext(ctx).Info("consolidationGracePeriod: not configured for NodePool, skipping", "nodePool", nodePoolName)
 		return reconcile.Result{}, nil
 	}
 
 	// Check if consolidateAfter is configured (required for this feature)
 	if nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
-		log.FromContext(ctx).Info("useOnConsolidationAfter: consolidateAfter not configured, skipping", "nodePool", nodePoolName)
+		log.FromContext(ctx).Info("consolidationGracePeriod: consolidateAfter not configured, skipping", "nodePool", nodePoolName)
 		return reconcile.Result{}, nil
 	}
 	
-	log.FromContext(ctx).Info("useOnConsolidationAfter: feature configured, processing", 
+	log.FromContext(ctx).Info("consolidationGracePeriod: feature configured, processing", 
 		"nodePool", nodePoolName,
-		"useOnConsolidationAfter", nodePool.Spec.Disruption.UseOnConsolidationAfter.Duration.String(),
+		"consolidationGracePeriod", nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration.String(),
 		"consolidateAfter", nodePool.Spec.Disruption.ConsolidateAfter.Duration.String())
 
 	// Get the providerID from NodeClaim status
@@ -274,12 +274,12 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 	// Get configuration values
 	consolidateAfterDuration := lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration)
-	useOnConsolidationAfterDuration := lo.FromPtr(nodePool.Spec.Disruption.UseOnConsolidationAfter.Duration)
+	consolidationGracePeriodDuration := lo.FromPtr(nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration)
 
 	// Get utilization threshold (default to 50 if not set)
 	utilizationThreshold := float64(50)
-	if nodePool.Spec.Disruption.UseOnConsolidationUtilizationThreshold != nil {
-		utilizationThreshold = float64(*nodePool.Spec.Disruption.UseOnConsolidationUtilizationThreshold)
+	if nodePool.Spec.Disruption.ConsolidationGracePeriodUtilizationThreshold != nil {
+		utilizationThreshold = float64(*nodePool.Spec.Disruption.ConsolidationGracePeriodUtilizationThreshold)
 	}
 
 	// Determine the time to check for stability
@@ -304,7 +304,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 
 	// Node has passed consolidateAfter - it's now a consolidation candidate
-	// Check if it qualifies for useOnConsolidationAfter protection
+	// Check if it qualifies for consolidationGracePeriod protection
 
 	// Calculate node utilization
 	utilization, err := c.calculateNodeUtilization(ctx, node)
@@ -321,7 +321,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 		delete(c.protected.nodes, providerID)
 		c.protected.mu.Unlock()
 
-		log.FromContext(ctx).Info("useOnConsolidationAfter: node below utilization threshold, allowing consolidation",
+		log.FromContext(ctx).Info("consolidationGracePeriod: node below utilization threshold, allowing consolidation",
 			"providerID", providerID,
 			"utilization", utilization,
 			"threshold", utilizationThreshold)
@@ -331,9 +331,9 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 	// HIGH UTILIZATION + STABLE = PROTECT
 	// This is a productive node that shouldn't be disrupted
-	// Calculate expiration: from when the node became consolidatable + useOnConsolidationAfter
+	// Calculate expiration: from when the node became consolidatable + consolidationGracePeriod
 	consolidatableTime := timeToCheck.Add(consolidateAfterDuration)
-	expiration := consolidatableTime.Add(useOnConsolidationAfterDuration)
+	expiration := consolidatableTime.Add(consolidationGracePeriodDuration)
 
 	// Add or update the node in the protected list
 	c.protected.mu.Lock()
@@ -342,7 +342,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	c.protected.mu.Unlock()
 
-	log.FromContext(ctx).Info("useOnConsolidationAfter: protecting high-utilization stable node",
+	log.FromContext(ctx).Info("consolidationGracePeriod: protecting high-utilization stable node",
 		"providerID", providerID,
 		"utilization", utilization,
 		"threshold", utilizationThreshold,

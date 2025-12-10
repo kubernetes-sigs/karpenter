@@ -72,13 +72,13 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 		return reconcile.Result{RequeueAfter: consolidatableTime.Sub(c.clock.Now())}, nil
 	}
 
-	// Check if useOnConsolidationAfter is configured and if the node is protected
-	if nodePool.Spec.Disruption.UseOnConsolidationAfter.Duration != nil && c.consolidationObserver != nil {
+	// Check if consolidationGracePeriod is configured and if the node is protected
+	if nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration != nil && c.consolidationObserver != nil {
 		providerID := nodeClaim.Status.ProviderID
 		if providerID != "" && c.consolidationObserver.IsProtected(providerID) {
 			if hasConsolidatableCondition {
 				_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
-				log.FromContext(ctx).V(1).Info("removing consolidatable status condition, node is protected by useOnConsolidationAfter")
+				log.FromContext(ctx).V(1).Info("removing consolidatable status condition, node is protected by consolidationGracePeriod")
 			}
 			// Requeue when protection expires
 			protectionExpiration := c.consolidationObserver.GetProtectionExpiration(providerID)
