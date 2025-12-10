@@ -82,7 +82,7 @@ func NewControllers(
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
 	clusterCost := cost.NewClusterCost(ctx, cloudProvider, kubeClient)
-	consolidationObserver := consolidationobserver.NewController(clock, kubeClient, cloudProvider, cluster)
+	consolidationObserver := consolidationobserver.NewController(clock, kubeClient, cloudProvider)
 
 	controllers := []controller.Controller{
 		p, evictionQueue, disruptionQueue,

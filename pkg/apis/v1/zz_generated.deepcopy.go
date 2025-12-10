@@ -63,11 +63,6 @@ func (in *Disruption) DeepCopyInto(out *Disruption) {
 	*out = *in
 	in.ConsolidateAfter.DeepCopyInto(&out.ConsolidateAfter)
 	in.ConsolidationGracePeriod.DeepCopyInto(&out.ConsolidationGracePeriod)
-	if in.ConsolidationGracePeriodUtilizationThreshold != nil {
-		in, out := &in.ConsolidationGracePeriodUtilizationThreshold, &out.ConsolidationGracePeriodUtilizationThreshold
-		*out = new(int32)
-		**out = **in
-	}
 	if in.Budgets != nil {
 		in, out := &in.Budgets, &out.Budgets
 		*out = make([]Budget, len(*in))

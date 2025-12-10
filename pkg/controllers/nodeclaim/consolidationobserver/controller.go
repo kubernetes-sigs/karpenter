@@ -34,9 +34,7 @@ import (
 	"github.com/samber/lo"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
-	podutils "sigs.k8s.io/karpenter/pkg/utils/pod"
 )
 
 // protectedNodeEntry represents a protected node with its expiration time.
@@ -44,47 +42,42 @@ type protectedNodeEntry struct {
 	expiration time.Time
 }
 
-// protectedNodes tracks nodes that meet the criteria for consolidationGracePeriod protection:
-// - High utilization (>= threshold)
-// - Stable (no pod activity for consolidateAfter duration)
+// protectedNodes tracks nodes that are protected from re-evaluation for consolidation.
+// Protection is granted to stable nodes (passed consolidateAfter) to prevent consolidation churn.
 // The map key is the node's providerID.
 type protectedNodes struct {
 	mu    sync.RWMutex
 	nodes map[string]protectedNodeEntry
 }
 
-// Controller is an independent observer that tracks well-utilized, stable nodes
+// Controller is an independent observer that tracks stable nodes
 // for nodepools configured with consolidationGracePeriod.
 //
 // Protection Logic:
-// When a node becomes consolidatable (passes consolidateAfter) AND has utilization >= threshold,
-// it is protected from consolidation for consolidationGracePeriod duration.
+// When a node becomes consolidatable (passes consolidateAfter), it is protected
+// from re-evaluation for consolidationGracePeriod duration.
 //
-// This breaks the consolidation cycle where:
-// 1. Old stable nodes become consolidation targets
-// 2. Pods move to newer nodes
-// 3. Newer nodes reset their consolidateAfter timer
-// 4. Cycle repeats
+// This aligns with Karpenter's cost-based optimization:
+// - If consolidation can find a cheaper configuration, it will act during the initial evaluation
+// - The grace period prevents repeated re-evaluation of nodes that are already cost-optimal
+// - This breaks the consolidation churn cycle without conflicting with cost optimization
 //
-// By protecting high-utilization stable nodes, we give them time to:
-// - Continue serving their current workloads
-// - Receive new pods (from other consolidations)
-// - Reset their consolidateAfter timer naturally
+// The key insight is that we're not adding a utilization gate (which would conflict with
+// cost optimization). Instead, we're adding a cooldown to prevent repeated evaluation
+// of the same stable nodes.
 type Controller struct {
 	clock         clock.Clock
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
-	cluster       *state.Cluster
 	protected     *protectedNodes
 }
 
 // NewController constructs a consolidation observer controller
-func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster) *Controller {
+func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
 	return &Controller{
 		clock:         clk,
 		kubeClient:    kubeClient,
 		cloudProvider: cloudProvider,
-		cluster:       cluster,
 		protected: &protectedNodes{
 			nodes: make(map[string]protectedNodeEntry),
 		},
@@ -92,7 +85,7 @@ func NewController(clk clock.Clock, kubeClient client.Client, cloudProvider clou
 }
 
 // IsProtected returns true if the node with the given providerID is currently
-// protected from consolidation based on consolidationGracePeriod configuration.
+// protected from re-evaluation based on consolidationGracePeriod configuration.
 func (c *Controller) IsProtected(providerID string) bool {
 	c.protected.mu.RLock()
 	defer c.protected.mu.RUnlock()
@@ -123,110 +116,26 @@ func (c *Controller) GetProtectionExpiration(providerID string) time.Time {
 	return entry.expiration
 }
 
-// calculateNodeUtilization calculates the overall resource utilization percentage for a node.
-// Returns the maximum utilization across CPU and memory.
-func (c *Controller) calculateNodeUtilization(ctx context.Context, node *corev1.Node) (float64, error) {
-	// Get the state node from cluster state
-	clusterNodes := c.cluster.DeepCopyNodes()
-	var stateNode *state.StateNode
-	for _, sn := range clusterNodes {
-		if sn.ProviderID() == node.Spec.ProviderID {
-			stateNode = sn
-			break
-		}
-	}
-
-	if stateNode == nil {
-		// If not in cluster state, calculate from node directly
-		allocatable := node.Status.Allocatable
-		// Get pod requests from the node
-		var pods corev1.PodList
-		if err := c.kubeClient.List(ctx, &pods, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
-			return 0, fmt.Errorf("listing pods, %w", err)
-		}
-
-		totalRequests := make(corev1.ResourceList)
-		for i := range pods.Items {
-			pod := &pods.Items[i]
-			if podutils.IsTerminal(pod) {
-				continue
-			}
-			for _, container := range pod.Spec.Containers {
-				for resName, quantity := range container.Resources.Requests {
-					if existing, ok := totalRequests[resName]; ok {
-						existing.Add(quantity)
-						totalRequests[resName] = existing
-					} else {
-						totalRequests[resName] = quantity.DeepCopy()
-					}
-				}
-			}
-		}
-
-		// Calculate utilization for CPU and memory
-		cpuUtil := 0.0
-		memUtil := 0.0
-
-		if cpuAlloc := allocatable[corev1.ResourceCPU]; !cpuAlloc.IsZero() {
-			if cpuReq, ok := totalRequests[corev1.ResourceCPU]; ok {
-				cpuUtil = float64(cpuReq.MilliValue()) / float64(cpuAlloc.MilliValue())
-			}
-		}
-
-		if memAlloc := allocatable[corev1.ResourceMemory]; !memAlloc.IsZero() {
-			if memReq, ok := totalRequests[corev1.ResourceMemory]; ok {
-				memUtil = float64(memReq.Value()) / float64(memAlloc.Value())
-			}
-		}
-
-		// Return maximum utilization
-		return lo.Max([]float64{cpuUtil, memUtil}) * 100, nil
-	}
-
-	// Use state node for more accurate calculation
-	allocatable := stateNode.Allocatable()
-	podRequests := stateNode.PodRequests()
-
-	cpuUtil := 0.0
-	memUtil := 0.0
-
-	if cpuAlloc, ok := allocatable[corev1.ResourceCPU]; ok && !cpuAlloc.IsZero() {
-		if cpuReq, ok := podRequests[corev1.ResourceCPU]; ok {
-			cpuUtil = float64(cpuReq.MilliValue()) / float64(cpuAlloc.MilliValue())
-		}
-	}
-
-	if memAlloc, ok := allocatable[corev1.ResourceMemory]; ok && !memAlloc.IsZero() {
-		if memReq, ok := podRequests[corev1.ResourceMemory]; ok {
-			memUtil = float64(memReq.Value()) / float64(memAlloc.Value())
-		}
-	}
-
-	// Return maximum utilization as percentage
-	return lo.Max([]float64{cpuUtil, memUtil}) * 100, nil
-}
-
-// Reconcile evaluates whether a node should be protected from consolidation.
+// Reconcile evaluates whether a node should be protected from re-evaluation.
 //
 // Protection Criteria (ALL must be true):
 // 1. consolidationGracePeriod is configured on the NodePool
 // 2. Node has passed consolidateAfter (stable - no pod events for consolidateAfter duration)
-// 3. Node utilization >= consolidationGracePeriodUtilizationThreshold (configurable, default 50%)
 //
-// When protected, the node will not be considered for consolidation for consolidationGracePeriod duration.
+// When protected, the node will not be re-evaluated for consolidation for
+// consolidationGracePeriod duration. This works alongside Karpenter's cost-based
+// consolidation - if a cheaper configuration exists, consolidation will act during
+// the initial evaluation window.
 func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
-	log.FromContext(ctx).Info("consolidationGracePeriod: observer reconciling", "nodeClaim", nodeClaim.Name)
-	
+	log.FromContext(ctx).V(1).Info("consolidationGracePeriod: observer reconciling", "nodeClaim", nodeClaim.Name)
+
 	if !nodeclaimutils.IsManaged(nodeClaim, c.cloudProvider) {
-		log.FromContext(ctx).Info("consolidationGracePeriod: nodeClaim not managed by this cloud provider, skipping")
 		return reconcile.Result{}, nil
 	}
-	log.FromContext(ctx).Info("consolidationGracePeriod: nodeClaim is managed, continuing")
 
 	// Get the NodePool for this NodeClaim
 	nodePoolName := nodeClaim.Labels[v1.NodePoolLabelKey]
 	if nodePoolName == "" {
-		log.FromContext(ctx).Info("consolidationGracePeriod: no NodePool label, skipping")
 		return reconcile.Result{}, nil
 	}
 
@@ -237,33 +146,19 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 
 	// Check if consolidationGracePeriod is configured for this NodePool
 	if nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration == nil {
-		log.FromContext(ctx).Info("consolidationGracePeriod: not configured for NodePool, skipping", "nodePool", nodePoolName)
 		return reconcile.Result{}, nil
 	}
 
 	// Check if consolidateAfter is configured (required for this feature)
 	if nodePool.Spec.Disruption.ConsolidateAfter.Duration == nil {
-		log.FromContext(ctx).Info("consolidationGracePeriod: consolidateAfter not configured, skipping", "nodePool", nodePoolName)
 		return reconcile.Result{}, nil
 	}
-	
-	log.FromContext(ctx).Info("consolidationGracePeriod: feature configured, processing", 
-		"nodePool", nodePoolName,
-		"consolidationGracePeriod", nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration.String(),
-		"consolidateAfter", nodePool.Spec.Disruption.ConsolidateAfter.Duration.String())
 
 	// Get the providerID from NodeClaim status
 	providerID := nodeClaim.Status.ProviderID
 	if providerID == "" {
 		// If providerID is not set yet, wait for it to be populated
 		return reconcile.Result{}, nil
-	}
-
-	// Get the node for utilization calculation
-	node, err := nodeclaimutils.NodeForNodeClaim(ctx, c.kubeClient, nodeClaim)
-	if err != nil {
-		// If node doesn't exist yet, that's okay - we'll retry later
-		return reconcile.Result{}, client.IgnoreNotFound(nil)
 	}
 
 	// Check if node has been initialized
@@ -276,12 +171,6 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	consolidateAfterDuration := lo.FromPtr(nodePool.Spec.Disruption.ConsolidateAfter.Duration)
 	consolidationGracePeriodDuration := lo.FromPtr(nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration)
 
-	// Get utilization threshold (default to 50 if not set)
-	utilizationThreshold := float64(50)
-	if nodePool.Spec.Disruption.ConsolidationGracePeriodUtilizationThreshold != nil {
-		utilizationThreshold = float64(*nodePool.Spec.Disruption.ConsolidationGracePeriodUtilizationThreshold)
-	}
-
 	// Determine the time to check for stability
 	// Use LastPodEventTime if available, otherwise use initialization time
 	timeToCheck := lo.Ternary(!nodeClaim.Status.LastPodEventTime.IsZero(),
@@ -291,46 +180,26 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	timeSinceLastPodEvent := c.clock.Since(timeToCheck)
 
 	// Check if node has passed consolidateAfter (is stable)
-	// If not stable yet, the existing consolidateAfter logic already protects it
+	// If not stable yet, the existing consolidateAfter logic handles it
 	if timeSinceLastPodEvent < consolidateAfterDuration {
 		// Node is not yet consolidatable - remove from protected list if present
 		c.protected.mu.Lock()
 		delete(c.protected.nodes, providerID)
 		c.protected.mu.Unlock()
 		// Requeue to check again when the node becomes consolidatable
-		// This ensures we can protect high-utilization nodes as soon as they become consolidation candidates
 		consolidatableTime := timeToCheck.Add(consolidateAfterDuration)
 		return reconcile.Result{RequeueAfter: consolidatableTime.Sub(c.clock.Now())}, nil
 	}
 
 	// Node has passed consolidateAfter - it's now a consolidation candidate
-	// Check if it qualifies for consolidationGracePeriod protection
+	// Protect it from repeated re-evaluation for consolidationGracePeriod duration
+	//
+	// Key insight: This doesn't conflict with cost optimization because:
+	// 1. During the consolidateAfter window, consolidation has already evaluated this node
+	// 2. If a cheaper configuration exists, consolidation would have acted
+	// 3. The grace period just prevents the same node from being re-evaluated repeatedly
+	// 4. If pod events occur, the node becomes non-consolidatable and protection is removed
 
-	// Calculate node utilization
-	utilization, err := c.calculateNodeUtilization(ctx, node)
-	if err != nil {
-		log.FromContext(ctx).V(1).Error(err, "failed to calculate node utilization")
-		return reconcile.Result{}, nil
-	}
-
-	// Check if utilization is below threshold
-	if utilization < utilizationThreshold {
-		// Low utilization - remove protection and allow consolidation
-		// This is cost-efficient: underutilized nodes should be consolidated
-		c.protected.mu.Lock()
-		delete(c.protected.nodes, providerID)
-		c.protected.mu.Unlock()
-
-		log.FromContext(ctx).Info("consolidationGracePeriod: node below utilization threshold, allowing consolidation",
-			"providerID", providerID,
-			"utilization", utilization,
-			"threshold", utilizationThreshold)
-
-		return reconcile.Result{}, nil
-	}
-
-	// HIGH UTILIZATION + STABLE = PROTECT
-	// This is a productive node that shouldn't be disrupted
 	// Calculate expiration: from when the node became consolidatable + consolidationGracePeriod
 	consolidatableTime := timeToCheck.Add(consolidateAfterDuration)
 	expiration := consolidatableTime.Add(consolidationGracePeriodDuration)
@@ -342,10 +211,8 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *v1.NodeClaim) (re
 	}
 	c.protected.mu.Unlock()
 
-	log.FromContext(ctx).Info("consolidationGracePeriod: protecting high-utilization stable node",
+	log.FromContext(ctx).Info("consolidationGracePeriod: protecting stable node from re-evaluation",
 		"providerID", providerID,
-		"utilization", utilization,
-		"threshold", utilizationThreshold,
 		"timeSinceLastPodEvent", timeSinceLastPodEvent.String(),
 		"consolidatableAt", consolidatableTime,
 		"protectedUntil", expiration)

@@ -161,31 +161,17 @@ spec:
                     consolidationGracePeriod:
                       description: |-
                         ConsolidationGracePeriod is the duration the controller will wait
-                        before considering a high-utilization stable node for consolidation.
-                        A node is protected when ALL of the following are true:
-                        1. Node has resource utilization >= ConsolidationGracePeriodUtilizationThreshold (default 50%)
-                        2. Node has been stable (no pod events) for consolidateAfter duration
-                        When protected, the node will not be considered for consolidation
+                        before re-evaluating a stable node for consolidation.
+                        A node is protected when it has been stable (no pod events) for consolidateAfter duration.
+                        When protected, the node will not be re-evaluated for consolidation
                         for the consolidationGracePeriod duration.
-                        This breaks consolidation cycles where stable, productive nodes become
-                        consolidation targets while nodes with pod churn remain protected.
+                        This prevents consolidation churn where stable nodes are repeatedly evaluated,
+                        while respecting Karpenter's cost-based consolidation decisions.
+                        If consolidation can find a cheaper configuration, it will act during the initial evaluation.
+                        The grace period prevents repeated re-evaluation of nodes that are already cost-optimal.
                         When replicas is set, ConsolidationGracePeriod is simply ignored
                       pattern: ^(([0-9]+(s|m|h))+|Never)$
                       type: string
-                    consolidationGracePeriodUtilizationThreshold:
-                      default: 50
-                      description: |-
-                        ConsolidationGracePeriodUtilizationThreshold is the minimum resource utilization percentage (0-100)
-                        for a node to be considered for consolidationGracePeriod protection.
-                        When a node has resource utilization at or above this threshold and has been stable
-                        (no pod events) for consolidateAfter duration, it will be protected from consolidation
-                        for consolidationGracePeriod duration.
-                        This setting only takes effect when consolidationGracePeriod is configured.
-                        Defaults to 50 if not specified.
-                      format: int32
-                      maximum: 100
-                      minimum: 0
-                      type: integer
                   required:
                     - consolidateAfter
                   type: object
