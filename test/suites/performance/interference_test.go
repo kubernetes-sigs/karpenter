@@ -64,7 +64,7 @@ var _ = Describe("Performance", func() {
 				"Average memory utilization should be greater than 75%")
 
 			// ========== PHASE 2: Interference Scale Out TEST ==========
-			By("Net scaling out scaling out interference test")
+			By("Net scaling out interference test")
 
 			// Scale down one deployment 50% and Scale up the 2nd to 500
 			smallDeployment.Spec.Replicas = lo.ToPtr(int32(250))
