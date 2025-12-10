@@ -55,7 +55,7 @@ var _ = Describe("Performance", func() {
 
 			// Performance assertions - self anti-affinity requires one pod per node
 			Expect(scaleOutReport.TotalTime).To(BeNumerically("<", 5*time.Minute),
-				"Total scale-out time should be less than 10 minutes")
+				"Total scale-out time should be less than 5 minutes")
 			Expect(scaleOutReport.TotalNodes).To(BeNumerically("<", 650),
 				"Should not require more than 1000 nodes for 1000 pods")
 			Expect(scaleOutReport.TotalReservedCPUUtil).To(BeNumerically(">", 0.55),
