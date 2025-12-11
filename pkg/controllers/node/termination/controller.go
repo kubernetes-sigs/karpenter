@@ -58,6 +58,7 @@ import (
 const (
 	minReconciles = 100
 	maxReconciles = 5000
+	minDrainTime  = 10 * time.Second
 )
 
 // Controller for the resource
@@ -190,8 +191,8 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 
 type terminationFunc func(context.Context, *v1.NodeClaim, *corev1.Node, *time.Time) (reconcile.Result, error)
 
-// awaitDrain initiates the drain of the node and will continue to requeue until the node has been drained. If the
-// nodeClaim has a terminationGracePeriod set, pods will be deleted to ensure this function does not requeue past the
+// awaitDrain initiates the drain of the node and will continue to requeue until the node has been drained and the minimum drain time has passed.
+// If the nodeClaim has a terminationGracePeriod set, pods will be deleted to ensure this function does not requeue past the
 // nodeTerminationTime.
 func (c *Controller) awaitDrain(
 	ctx context.Context,
@@ -209,6 +210,16 @@ func (c *Controller) awaitDrain(
 		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
+
+	taint, found := lo.Find(node.Spec.DeepCopy().Taints, func(t corev1.Taint) bool {
+		return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
+	})
+	if found && taint.TimeAdded != nil {
+		if c.clock.Since(taint.TimeAdded.Time) < minDrainTime {
+			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+		}
+	}
+
 	if nodeClaim != nil {
 		nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeDrained)
 	}
