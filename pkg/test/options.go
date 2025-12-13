@@ -94,6 +94,6 @@ func Options(overrides ...OptionsFields) *options.Options {
 			NodeOverlay:             lo.FromPtrOr(opts.FeatureGates.NodeOverlay, false),
 			StaticCapacity:          lo.FromPtrOr(opts.FeatureGates.StaticCapacity, false),
 		},
-		AdditionalNodePoolMetricLabels: lo.Ternary(len(opts.AdditionalNodePoolMetricLabels) > 0, opts.AdditionalNodePoolMetricLabels, []string{"capacity_type", "zone", "architecture"}),
+		AdditionalNodePoolMetricLabels: opts.AdditionalNodePoolMetricLabels,
 	}
 }
