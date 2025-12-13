@@ -174,11 +174,7 @@ func makeLabels(ctx context.Context, nodePool *v1.NodePool, resourceTypeName str
 
 	// Add values for additional labels from CLI flags
 	for _, labelKey := range opts.AdditionalNodePoolMetricLabels {
-		if value, ok := nodePool.Labels[labelKey]; ok {
-			labels[labelKey] = value
-		} else {
-			labels[labelKey] = ""
-		}
+		labels[labelKey] = nodePool.Labels[labelKey]
 	}
 
 	return labels
