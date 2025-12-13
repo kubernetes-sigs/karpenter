@@ -163,13 +163,13 @@ func (o *Options) Parse(fs *FlagSet, args ...string) error {
 	o.MinValuesPolicy = MinValuesPolicy(o.minValuesPolicyRaw)
 
 	// Parse comma-separated additional nodepool metric labels
-	if o.rawAdditionalNodePoolMetricLabels != "" {
-		o.AdditionalNodePoolMetricLabels = lo.Map(strings.Split(o.rawAdditionalNodePoolMetricLabels, ","), func(s string, _ int) string {
-			return strings.TrimSpace(s)
-		})
-	} else {
-		o.AdditionalNodePoolMetricLabels = []string{}
-	}
+	o.AdditionalNodePoolMetricLabels = lo.FilterMap(
+		strings.Split(o.rawAdditionalNodePoolMetricLabels, ","),
+		func(s string, _ int) (string, bool) {
+			trimmed := strings.TrimSpace(s)
+			return trimmed, trimmed != ""
+		},
+	)
 
 	return nil
 }
