@@ -56,7 +56,9 @@ var _ = BeforeSuite(func() {
 	env = test.NewEnvironment(test.WithCRDs(apis.CRDs...), test.WithCRDs(v1alpha1.CRDs...))
 	cp = fake.NewCloudProvider()
 	cc = cost.NewClusterCost(ctx, cp, env.Client)
-	ctx = options.ToContext(ctx, test.Options())
+	ctx = options.ToContext(ctx, test.Options(test.OptionsFields{
+		AdditionalNodePoolMetricLabels: []string{"capacity_type", "zone", "architecture"},
+	}))
 	nodePoolController = nodepool.NewController(ctx, env.Client, cp, cc)
 })
 

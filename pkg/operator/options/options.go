@@ -132,7 +132,7 @@ func (o *Options) AddFlags(fs *FlagSet) {
 	fs.StringVar(&o.minValuesPolicyRaw, "min-values-policy", env.WithDefaultString("MIN_VALUES_POLICY", string(MinValuesPolicyStrict)), "Min values policy for scheduling. Options include 'Strict' for existing behavior where min values are strictly enforced or 'BestEffort' where Karpenter relaxes min values when it isn't satisfied.")
 	fs.BoolVarWithEnv(&o.IgnoreDRARequests, "ignore-dra-requests", "IGNORE_DRA_REQUESTS", true, "When set, Karpenter will ignore pods' DRA requests during scheduling simulations. NOTE: This flag will be removed once formal DRA support is GA in Karpenter.")
 	fs.StringVar(&o.FeatureGates.inputStr, "feature-gates", env.WithDefaultString("FEATURE_GATES", "NodeRepair=false,ReservedCapacity=true,SpotToSpotConsolidation=false,NodeOverlay=false,StaticCapacity=false"), "Optional features can be enabled / disabled using feature gates. Current options are: NodeRepair, ReservedCapacity, SpotToSpotConsolidation, NodeOverlay, and StaticCapacity.")
-	fs.StringVar(&o.rawAdditionalNodePoolMetricLabels, "additional-nodepool-metric-labels", env.WithDefaultString("ADDITIONAL_NODEPOOL_METRIC_LABELS", "capacity_type,zone,architecture"), "Comma-separated list of additional labels to include in NodePool metrics (karpenter_nodepools_limit and karpenter_nodepools_usage)")
+	fs.StringVar(&o.rawAdditionalNodePoolMetricLabels, "additional-nodepool-metric-labels", env.WithDefaultString("ADDITIONAL_NODEPOOL_METRIC_LABELS", ""), "Comma-separated list of additional labels to include in NodePool metrics (karpenter_nodepools_limit and karpenter_nodepools_usage)")
 }
 
 func (o *Options) Parse(fs *FlagSet, args ...string) error {
