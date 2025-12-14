@@ -249,23 +249,7 @@ type Results struct {
 // leveraging the cluster state that a previous scheduling run that was recorded is relying on these nodes
 func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *state.Cluster) {
 	// Report failures and nominations
-	for p, err := range r.PodErrors {
-		if IsReservedOfferingError(err) {
-			continue
-		}
-		if IsDRAError(err) {
-			recorder.Publish(PodFailedToScheduleEvent(p, err))
-			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Info("skipping pod with Dynamic Resource Allocation requirements, not yet supported by Karpenter")
-			continue
-		}
-		// Deduplicate log messages for the same pod+error combination to reduce log spam
-		// Different errors for the same pod will still be logged
-		// Events are already deduplicated by the PodFailedToScheduleEvent DedupeTimeout
-		if r.shouldLogPodError(p, err) {
-			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
-		}
-		recorder.Publish(PodFailedToScheduleEvent(p, err))
-	}
+	r.recordPodErrors(ctx, recorder)
 	for _, existing := range r.ExistingNodes {
 		if len(existing.Pods) > 0 {
 			cluster.NominateNodeForPod(ctx, existing.ProviderID())
@@ -294,6 +278,26 @@ func (r Results) Record(ctx context.Context, recorder events.Recorder, cluster *
 		return
 	}
 	log.FromContext(ctx).WithValues("nodes", inflightCount, "pods", existingCount).Info("computed unready node(s) will fit pod(s)")
+}
+
+func (r Results) recordPodErrors(ctx context.Context, recorder events.Recorder) {
+	for p, err := range r.PodErrors {
+		if IsReservedOfferingError(err) {
+			continue
+		}
+		if IsDRAError(err) {
+			recorder.Publish(PodFailedToScheduleEvent(p, err))
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Info("skipping pod with Dynamic Resource Allocation requirements, not yet supported by Karpenter")
+			continue
+		}
+		// Deduplicate log messages for the same pod+error combination to reduce log spam
+		// Different errors for the same pod will still be logged
+		// Events are already deduplicated by the PodFailedToScheduleEvent DedupeTimeout
+		if r.shouldLogPodError(p, err) {
+			log.FromContext(ctx).WithValues("Pod", klog.KObj(p)).Error(err, "could not schedule pod")
+		}
+		recorder.Publish(PodFailedToScheduleEvent(p, err))
+	}
 }
 
 func (r Results) ReservedOfferingErrors() map[*corev1.Pod]error {

@@ -157,7 +157,7 @@ var _ = Describe("Log Deduplication", func() {
 		It("should handle pods with incompatible NodePool requirements", func() {
 			// Create two NodePools: one for GPU workloads and one for general apps
 			gpuNodePool := test.NodePool()
-			gpuNodePool.ObjectMeta.Labels = map[string]string{
+			gpuNodePool.Labels = map[string]string{
 				"workload-type": "gpu",
 			}
 			gpuNodePool.Spec.Template.Spec.Taints = []corev1.Taint{
@@ -165,7 +165,7 @@ var _ = Describe("Log Deduplication", func() {
 			}
 
 			appNodePool := test.NodePool()
-			appNodePool.ObjectMeta.Labels = map[string]string{
+			appNodePool.Labels = map[string]string{
 				"workload-type": "app",
 			}
 
