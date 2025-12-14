@@ -55,11 +55,11 @@ func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudPr
 	}
 }
 
-//nolint:gocyclo
 func (c *Controller) Name() string {
 	return "nodepool.registrationhealth"
 }
 
+//nolint:gocyclo
 func (c *Controller) Reconcile(ctx context.Context, nodePool *v1.NodePool) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
