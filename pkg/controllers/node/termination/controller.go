@@ -58,7 +58,7 @@ import (
 const (
 	minReconciles = 100
 	maxReconciles = 5000
-	minDrainTime  = 10 * time.Second
+	MinDrainTime  = 5 * time.Second
 )
 
 // Controller for the resource
@@ -222,7 +222,7 @@ func (c *Controller) awaitDrain(
 	if node.Annotations != nil {
 		if taintTimeStr, ok := node.Annotations[v1.DisruptedTaintTimeAnnotationKey]; ok {
 			if taintTime, err := time.Parse(time.RFC3339, taintTimeStr); err == nil {
-				if c.clock.Since(taintTime) < minDrainTime {
+				if c.clock.Since(taintTime) < MinDrainTime {
 					return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 				}
 			}
