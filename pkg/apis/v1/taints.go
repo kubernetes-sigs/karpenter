@@ -24,8 +24,9 @@ import (
 
 // Karpenter specific taints
 const (
-	DisruptedTaintKey    = apis.Group + "/disrupted"
-	UnregisteredTaintKey = apis.Group + "/unregistered"
+	DisruptedTaintKey               = apis.Group + "/disrupted"
+	DisruptedTaintTimeAnnotationKey = apis.Group + "/disrupted-taint-time"
+	UnregisteredTaintKey            = apis.Group + "/unregistered"
 )
 
 var (

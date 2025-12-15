@@ -211,14 +211,21 @@ func (c *Controller) awaitDrain(
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
-	taint, found := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
+	if _, found := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
 		return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
-	})
-	if !found {
+	}); !found {
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
-	if taint.TimeAdded != nil && c.clock.Since(taint.TimeAdded.Time) < minDrainTime {
-		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+
+	// If annotation exists, check if minDrainTime has elapsed
+	if node.Annotations != nil {
+		if taintTimeStr, ok := node.Annotations[v1.DisruptedTaintTimeAnnotationKey]; ok {
+			if taintTime, err := time.Parse(time.RFC3339, taintTimeStr); err == nil {
+				if c.clock.Since(taintTime) < minDrainTime {
+					return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+				}
+			}
+		}
 	}
 
 	if nodeClaim != nil {

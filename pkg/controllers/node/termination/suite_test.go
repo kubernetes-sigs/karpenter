@@ -120,8 +120,8 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
-			// ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
-			// fakeClock.Step(minDrainTime)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
+			fakeClock.Step(minDrainTime)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // Drain, VolumeDetachment, InstanceTerminationInitiation
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationValidation
 			ExpectNotFound(ctx, env.Client, node)
@@ -130,6 +130,8 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Drain
+			fakeClock.Step(minDrainTime)
 			// Drain + VolumeDetachment + InstanceTermination (skipped)
 			// We don't requeue because we're not updating the status condition of a NodeClaim
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
@@ -141,6 +143,8 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim, nodeClaim2)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Drain
+			fakeClock.Step(minDrainTime)
 			// Drain + VolumeDetachment + InstanceTermination (skipped)
 			// We don't requeue because we're not updating the status condition of a NodeClaim
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
@@ -162,7 +166,6 @@ var _ = Describe("Termination", func() {
 
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
 			fakeClock.Step(minDrainTime)
-			// todo fails below
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Drain, VolumeDetachment, InstanceTerminationInitiation
 			nc := ExpectExists(ctx, env.Client, nodeClaim)
 			Expect(nc.StatusConditions().Get(v1.ConditionTypeInstanceTerminating).IsTrue()).To(BeTrue())
@@ -184,7 +187,6 @@ var _ = Describe("Termination", func() {
 				*node = *ExpectNodeExists(ctx, env.Client, node.Name)
 			}
 
-			// todo change accordingly
 			// Reconcile four times for each stage: drain, volume detachment, instance termination initiation, and
 			// instance termination verification.
 			for range 4 {
@@ -196,6 +198,9 @@ var _ = Describe("Termination", func() {
 						defer GinkgoRecover()
 						defer wg.Done()
 						ExpectObjectReconciled(ctx, env.Client, terminationController, node)
+						if i == 0 {
+							fakeClock.Step(minDrainTime)
+						}
 					}(nodes[i])
 				}
 				wg.Wait()
@@ -366,7 +371,6 @@ var _ = Describe("Termination", func() {
 			// Trigger Termination Controller, which should ignore these pods and delete the node
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and DrainInitiation
 			fakeClock.Step(minDrainTime)
-			// todo: fails below
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // Drain, VolumeDetachment, InstanceTerminationInitiation
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationValidation
 			ExpectNotFound(ctx, env.Client, node)
@@ -854,6 +858,7 @@ var _ = Describe("Termination", func() {
 				ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
 
+				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
 				fakeClock.Step(minDrainTime)
 				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Drain, VolumeDetachmentInitiation
 				ExpectExists(ctx, env.Client, node)
@@ -895,9 +900,10 @@ var _ = Describe("Termination", func() {
 				ExpectManualBinding(ctx, env.Client, pod, node)
 				Expect(env.Client.Delete(ctx, node)).To(Succeed())
 
+				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
+				fakeClock.Step(minDrainTime)
 				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Drain
 				ExpectExists(ctx, env.Client, node)
-				fakeClock.Step(minDrainTime)
 				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).IsUnknown()).To(BeTrue())
 				Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeVolumesDetached).Reason).To(Equal("AwaitingVolumeDetachment"))
@@ -922,6 +928,7 @@ var _ = Describe("Termination", func() {
 				ExpectApplied(ctx, env.Client, node, nodeClaim, nodePool, va)
 				Expect(env.Client.Delete(ctx, node)).To(Succeed())
 
+				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
 				fakeClock.Step(minDrainTime)
 				ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Drain, VolumeDetachment
 				ExpectExists(ctx, env.Client, node)
@@ -946,6 +953,7 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
 			fakeClock.Step(minDrainTime)
 			// Reconcile twice, once to set the NodeClaim to terminating, another to check the instance termination status (and delete the node).
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // Drain, VolumeDetachment, InstanceTerminationInitation
@@ -959,6 +967,7 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
 			fakeClock.Step(minDrainTime)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Drain, VolumeDetachment, InstanceTerminationInitiation
 			ExpectMetricCounterValue(termination.NodesDrainedTotal, 1, map[string]string{"nodepool": node.Labels[v1.NodePoolLabelKey]})
@@ -972,6 +981,7 @@ var _ = Describe("Termination", func() {
 			ExpectApplied(ctx, env.Client, node, nodeClaim)
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
 			fakeClock.Step(minDrainTime)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // Drain, VolumeDetachment, InstanceTerminationInitation
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationFinalization
