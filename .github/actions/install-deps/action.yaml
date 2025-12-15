@@ -25,4 +25,4 @@ runs:
       shell: bash
       run: |
         sudo mkdir -p /usr/local/kubebuilder
-        go tool setup-envtest use -p path ${{ inputs.k8sVersion }} | xargs -I {} sudo mv {} /usr/local/kubebuilder/bin
+        go tool -modfile=go.tools.mod setup-envtest use -p path ${{ inputs.k8sVersion }} | xargs -I {} sudo mv {} /usr/local/kubebuilder/bin
