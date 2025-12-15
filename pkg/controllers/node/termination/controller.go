@@ -218,6 +218,7 @@ func (c *Controller) awaitDrain(
 	}
 
 	// If annotation exists, check if minDrainTime has elapsed
+	// If the annotation does not exist, we continue with termination flow
 	if node.Annotations != nil {
 		if taintTimeStr, ok := node.Annotations[v1.DisruptedTaintTimeAnnotationKey]; ok {
 			if taintTime, err := time.Parse(time.RFC3339, taintTimeStr); err == nil {

@@ -476,7 +476,8 @@ func nominationWindow(ctx context.Context) time.Duration {
 	return nominationPeriod
 }
 
-// RequireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint from the candidates.
+// RequireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint and
+// the karpenter.sh/disrupted-taint-time annotation from from the candidates.
 // This is used to enforce no taints at the beginning of disruption, and
 // to add/remove taints while executing a disruption action.
 // nolint:gocyclo

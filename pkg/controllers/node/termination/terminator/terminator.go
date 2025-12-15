@@ -53,6 +53,7 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *Queue, recorde
 }
 
 // Taint idempotently adds a given taint to a node with a NodeClaim
+// If the taint is karpenter.sh/disruption:NoSchedule, we add the karpenter.sh/disrupted-taint-time annotation.
 func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.Taint) error {
 	stored := node.DeepCopy()
 	// If the node already has the correct taint (key and effect), do nothing.

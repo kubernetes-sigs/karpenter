@@ -48,8 +48,7 @@ import (
 	. "sigs.k8s.io/karpenter/pkg/utils/testing"
 )
 
-// TODO:
-// could make the const public in the controller
+// this is set to same as termination controller const
 const minDrainTime = 10 * time.Second
 
 func init() {
