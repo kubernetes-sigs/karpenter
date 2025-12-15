@@ -211,13 +211,14 @@ func (c *Controller) awaitDrain(
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
-	taint, found := lo.Find(node.Spec.DeepCopy().Taints, func(t corev1.Taint) bool {
+	taint, found := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
 		return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
 	})
-	if found && taint.TimeAdded != nil {
-		if c.clock.Since(taint.TimeAdded.Time) < minDrainTime {
-			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
-		}
+	if !found {
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
+	}
+	if taint.TimeAdded != nil && c.clock.Since(taint.TimeAdded.Time) < minDrainTime {
+		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
 	if nodeClaim != nil {
