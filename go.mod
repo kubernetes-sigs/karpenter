@@ -23,14 +23,14 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/text v0.31.0
 	golang.org/x/time v0.14.0
-	k8s.io/api v0.34.2
-	k8s.io/apiextensions-apiserver v0.34.2
-	k8s.io/apimachinery v0.34.2
-	k8s.io/client-go v0.34.2
-	k8s.io/cloud-provider v0.34.2
-	k8s.io/component-base v0.34.2
-	k8s.io/component-helpers v0.34.2
-	k8s.io/csi-translation-lib v0.34.2
+	k8s.io/api v0.34.3
+	k8s.io/apiextensions-apiserver v0.34.3
+	k8s.io/apimachinery v0.34.3
+	k8s.io/client-go v0.34.3
+	k8s.io/cloud-provider v0.34.3
+	k8s.io/component-base v0.34.3
+	k8s.io/component-helpers v0.34.3
+	k8s.io/csi-translation-lib v0.34.3
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 	sigs.k8s.io/controller-runtime v0.22.4
