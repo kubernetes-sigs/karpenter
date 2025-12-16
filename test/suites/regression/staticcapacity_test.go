@@ -19,6 +19,7 @@ package integration_test
 import (
 	"time"
 
+	"github.com/aws/karpenter-provider-aws/test/pkg/environment/common"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -331,6 +332,43 @@ var _ = Describe("StaticCapacity", func() {
 
 			// Should create a replacement node and then remove the drifted one 2 at a time
 			env.ConsistentlyExpectDisruptionsUntilNoneLeft(10, 2, 5*time.Minute)
+		})
+	})
+
+	Context("Node Repair", func() {
+		BeforeEach(func() {
+			nodePool.Spec.Replicas = lo.ToPtr(int64(1))
+			if env.IsDefaultNodeClassKWOK() {
+				nodePool.Spec.Template.Spec.Requirements = append(nodePool.Spec.Template.Spec.Requirements, v1.NodeSelectorRequirementWithMinValues{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values: []string{
+							"c-16x-amd64-linux",
+							"c-16x-arm64-linux",
+						},
+					},
+				})
+			}
+			env.ExpectCreated(nodeClass, nodePool)
+		})
+
+		It("should repair static nodes", func() {
+			// Initially should have 1 nodes
+			node := env.EventuallyExpectCreatedNodeCount("==", 1)[0]
+			nodeClaims := env.EventuallyExpectCreatedNodeClaimCount("==", 1)
+			env.EventuallyExpectNodeClaimsReady(nodeClaims...)
+
+			unhealthyCondition := corev1.NodeCondition{
+				Type:               corev1.NodeReady,
+				Status:             corev1.ConditionFalse,
+				LastTransitionTime: metav1.Time{Time: time.Now().Add(-31 * time.Minute)},
+			}
+			node = common.ReplaceNodeConditions(node, unhealthyCondition)
+			env.ExpectStatusUpdated(node)
+
+			env.EventuallyExpectNotFound(node)
+			env.EventuallyExpectInitializedNodeCount("==", 1)
 		})
 	})
 
