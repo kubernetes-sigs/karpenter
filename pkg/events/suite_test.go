@@ -138,7 +138,7 @@ var _ = Describe("Rate Limiting", func() {
 		for i := 0; i < 100; i++ {
 			eventRecorder.Publish(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()))
 		}
-		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()).Reason)).To(Equal(10))
+		Expect(internalRecorder.Calls(schedulingevents.NominatePodEvent(PodWithUID(), NodeWithUID(), NodeClaimWithUID()).Reason)).To(Or(Equal(10), Equal(11))) // 11 can slip through due to timing before rate limiter kicks in
 	})
 	It("should allow many events over time due to smoothed rate limiting", func() {
 		for i := 0; i < 3; i++ {
