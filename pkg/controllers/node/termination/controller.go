@@ -200,32 +200,22 @@ func (c *Controller) awaitDrain(
 	node *corev1.Node,
 	nodeTerminationTime *time.Time,
 ) (reconcile.Result, error) {
+	if nodeClaim != nil && nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained) == nil {
+		nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
+	}
 	if err := c.terminator.Drain(ctx, node, nodeTerminationTime); err != nil {
 		if !terminator.IsNodeDrainError(err) {
 			return reconcile.Result{}, fmt.Errorf("draining node, %w", err)
 		}
 		c.recorder.Publish(terminatorevents.NodeFailedToDrain(node, err))
-		if nodeClaim != nil {
-			nodeClaim.StatusConditions().SetUnknownWithReason(v1.ConditionTypeDrained, "Draining", "Draining")
-		}
 		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
-	if _, found := lo.Find(node.Spec.Taints, func(t corev1.Taint) bool {
-		return t.MatchTaint(&v1.DisruptedNoScheduleTaint)
-	}); !found {
-		return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
-	}
-
-	// If annotation exists, check if minDrainTime has elapsed
-	// If the annotation does not exist, we continue with termination flow
-	if node.Annotations != nil {
-		if taintTimeStr, ok := node.Annotations[v1.DisruptedTaintTimeAnnotationKey]; ok {
-			if taintTime, err := time.Parse(time.RFC3339, taintTimeStr); err == nil {
-				if c.clock.Since(taintTime) < MinDrainTime {
-					return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
-				}
-			}
+	// If the nodeclaim exists, check if minDrainTime has elapsed. If it hasn't we should requeue.
+	if nodeClaim != nil {
+		cond := nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained)
+		if cond == nil || (cond.IsUnknown() && c.clock.Since(cond.LastTransitionTime.Time) < MinDrainTime) {
+			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
 	}
 

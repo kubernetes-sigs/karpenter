@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	terminatorevents "sigs.k8s.io/karpenter/pkg/controllers/node/termination/terminator/events"
 	"sigs.k8s.io/karpenter/pkg/events"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
@@ -53,7 +52,6 @@ func NewTerminator(clk clock.Clock, kubeClient client.Client, eq *Queue, recorde
 }
 
 // Taint idempotently adds a given taint to a node with a NodeClaim
-// If the taint is karpenter.sh/disruption:NoSchedule, we add the karpenter.sh/disrupted-taint-time annotation.
 func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.Taint) error {
 	stored := node.DeepCopy()
 	// If the node already has the correct taint (key and effect), do nothing.
@@ -64,14 +62,6 @@ func (t *Terminator) Taint(ctx context.Context, node *corev1.Node, taint corev1.
 		node.Spec.Taints = lo.Reject(node.Spec.Taints, func(t corev1.Taint, _ int) bool {
 			return t.Key == taint.Key
 		})
-
-		// Add annotation to track when disruption taint was added
-		if taint == v1.DisruptedNoScheduleTaint {
-			node.Annotations = lo.Assign(node.Annotations, map[string]string{
-				v1.DisruptedTaintTimeAnnotationKey: t.clock.Now().Format(time.RFC3339),
-			})
-		}
-
 		node.Spec.Taints = append(node.Spec.Taints, taint)
 	}
 	// Adding this label to the node ensures that the node is removed from the load-balancer target group

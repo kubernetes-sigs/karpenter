@@ -117,8 +117,18 @@ var _ = Describe("Termination", func() {
 			Expect(env.Client.Delete(ctx, node)).To(Succeed())
 			node = ExpectNodeExists(ctx, env.Client, node.Name)
 			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and Start Drain
-			fakeClock.Step(termination.MinDrainTime)
-			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))    // Drain, VolumeDetachment, InstanceTerminationInitiation
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			fmt.Printf("time is %v\n", fakeClock.Now())
+			fmt.Printf("After reconcile 1: Drained condition = %v\n", nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained))
+
+			fakeClock.Step(2 * termination.MinDrainTime)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Drain, VolumeDetachment, InstanceTerminationInitiation
+
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			fmt.Printf("time is %v\n", fakeClock.Now())
+			fmt.Printf("After reconcile 2: Drained condition = %v\n", nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained))
+
 			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // InstanceTerminationValidation
 			ExpectNotFound(ctx, env.Client, node)
 		})
@@ -842,6 +852,34 @@ var _ = Describe("Termination", func() {
 			ExpectNodeExists(ctx, env.Client, node.Name)
 			pod = ExpectExists(ctx, env.Client, pod)
 			Expect(pod.DeletionTimestamp.Time).To((BeTemporally("~", nodeTerminationTimestamp, 10*time.Second)))
+		})
+		It("should not finish draining until minDrainTime has passed", func() {
+			ExpectApplied(ctx, env.Client, node, nodeClaim)
+			Expect(env.Client.Delete(ctx, node)).To(Succeed())
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+
+			// First reconcile: should taint node and start draining
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node)) // Taint and DrainInitiation
+
+			// Verify node is tainted and NodeClaim condition is set to "Draining"
+			node = ExpectNodeExists(ctx, env.Client, node.Name)
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(node.Spec.Taints).To(ContainElement(v1.DisruptedNoScheduleTaint))
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsUnknown()).To(BeTrue())
+
+			// Should still be requeueing as minDrainTime has not passed
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			fakeClock.Step(termination.MinDrainTime - 2*time.Second)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+
+			// Should proceed with drain completion, after minDrainTime has passed
+			fakeClock.Step(3 * time.Second)
+			ExpectRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.StatusConditions().Get(v1.ConditionTypeDrained).IsTrue()).To(BeTrue())
+
+			ExpectNotRequeued(ExpectObjectReconciled(ctx, env.Client, terminationController, node))
+			ExpectNotFound(ctx, env.Client, node)
 		})
 		Context("VolumeAttachments", func() {
 			It("should wait for volume attachments", func() {

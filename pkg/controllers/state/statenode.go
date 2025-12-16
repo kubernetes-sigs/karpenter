@@ -476,8 +476,7 @@ func nominationWindow(ctx context.Context) time.Duration {
 	return nominationPeriod
 }
 
-// RequireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint and
-// the karpenter.sh/disrupted-taint-time annotation from from the candidates.
+// RequireNoScheduleTaint will add/remove the karpenter.sh/disruption:NoSchedule taint from the candidates.
 // This is used to enforce no taints at the beginning of disruption, and
 // to add/remove taints while executing a disruption action.
 // nolint:gocyclo
@@ -510,7 +509,6 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 				node.Spec.Taints = lo.Reject(node.Spec.Taints, func(taint corev1.Taint, _ int) bool {
 					return taint.MatchTaint(&v1.DisruptedNoScheduleTaint)
 				})
-				lo.OmitByKeys(node.Annotations, []string{v1.DisruptedTaintTimeAnnotationKey})
 				// otherwise, add it.
 			} else if addTaint && !hasTaint {
 				// If the taint key is present (but with a different value or effect), remove it.
@@ -518,9 +516,6 @@ func RequireNoScheduleTaint(ctx context.Context, kubeClient client.Client, addTa
 					return taint.MatchTaint(&v1.DisruptedNoScheduleTaint)
 				})
 				node.Spec.Taints = append(node.Spec.Taints, v1.DisruptedNoScheduleTaint)
-				node.Annotations = lo.Assign(node.Annotations, map[string]string{
-					v1.DisruptedTaintTimeAnnotationKey: time.Now().Format(time.RFC3339),
-				})
 			}
 			if !equality.Semantic.DeepEqual(stored, node) {
 				// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
