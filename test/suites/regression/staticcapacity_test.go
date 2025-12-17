@@ -19,7 +19,6 @@ package integration_test
 import (
 	"time"
 
-	"github.com/aws/karpenter-provider-aws/test/pkg/environment/common"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -364,7 +363,7 @@ var _ = Describe("StaticCapacity", func() {
 				Status:             corev1.ConditionFalse,
 				LastTransitionTime: metav1.Time{Time: time.Now().Add(-31 * time.Minute)},
 			}
-			node = common.ReplaceNodeConditions(node, unhealthyCondition)
+			node = env.ReplaceNodeConditions(node, unhealthyCondition)
 			env.ExpectStatusUpdated(node)
 
 			env.EventuallyExpectNotFound(node)
