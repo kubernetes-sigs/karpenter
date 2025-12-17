@@ -18,7 +18,6 @@ package disruption
 
 import (
 	"context"
-	"time"
 
 	"github.com/samber/lo"
 	"k8s.io/utils/clock"
@@ -27,17 +26,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	consolidationobserver "sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/consolidationobserver"
 )
 
-// Consolidation is a nodeclaim sub-controller that adds or removes status conditions on empty nodeclaims based on consolidateAfter
+// Consolidation is a nodeclaim sub-controller that adds or removes status conditions on nodeclaims based on consolidateAfter.
+// Note: The consolidationGracePeriod filtering is handled in the main disruption controller (GetCandidates and SimulateScheduling)
+// to make nodes "invisible" to consolidation when they are within their grace period after a pod event.
 type Consolidation struct {
-	kubeClient           client.Client
-	clock                clock.Clock
-	consolidationObserver *consolidationobserver.Controller
+	kubeClient client.Client
+	clock      clock.Clock
 }
 
-//nolint:gocyclo
 func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, nodeClaim *v1.NodeClaim) (reconcile.Result, error) {
 	hasConsolidatableCondition := nodeClaim.StatusConditions().Get(v1.ConditionTypeConsolidatable) != nil
 
@@ -72,24 +70,8 @@ func (c *Consolidation) Reconcile(ctx context.Context, nodePool *v1.NodePool, no
 		return reconcile.Result{RequeueAfter: consolidatableTime.Sub(c.clock.Now())}, nil
 	}
 
-	// Check if consolidationGracePeriod is configured and if the node is protected
-	if nodePool.Spec.Disruption.ConsolidationGracePeriod.Duration != nil && c.consolidationObserver != nil {
-		providerID := nodeClaim.Status.ProviderID
-		if providerID != "" && c.consolidationObserver.IsProtected(providerID) {
-			if hasConsolidatableCondition {
-				_ = nodeClaim.StatusConditions().Clear(v1.ConditionTypeConsolidatable)
-				log.FromContext(ctx).V(1).Info("removing consolidatable status condition, node is protected by consolidationGracePeriod")
-			}
-			// Requeue when protection expires
-			protectionExpiration := c.consolidationObserver.GetProtectionExpiration(providerID)
-			if !protectionExpiration.IsZero() {
-				return reconcile.Result{RequeueAfter: protectionExpiration.Sub(c.clock.Now())}, nil
-			}
-			return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-	}
-
-	// 6. Otherwise, add the consolidatable status condition
+	// Otherwise, add the consolidatable status condition
+	// Note: consolidationGracePeriod filtering happens at the disruption controller level
 	nodeClaim.StatusConditions().SetTrue(v1.ConditionTypeConsolidatable)
 	if !hasConsolidatableCondition {
 		log.FromContext(ctx).V(1).Info("marking consolidatable")

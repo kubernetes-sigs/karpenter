@@ -100,15 +100,14 @@ type Disruption struct {
 	// +optional
 	ConsolidationPolicy ConsolidationPolicy `json:"consolidationPolicy,omitempty"`
 	//nolint:kubeapilinter
-	// ConsolidationGracePeriod is the duration the controller will wait
-	// before re-evaluating a stable node for consolidation.
-	// A node is protected when it has been stable (no pod events) for consolidateAfter duration.
-	// When protected, the node will not be re-evaluated for consolidation
-	// for the consolidationGracePeriod duration.
-	// This prevents consolidation churn where stable nodes are repeatedly evaluated,
-	// while respecting Karpenter's cost-based consolidation decisions.
-	// If consolidation can find a cheaper configuration, it will act during the initial evaluation.
-	// The grace period prevents repeated re-evaluation of nodes that are already cost-optimal.
+	// ConsolidationGracePeriod is the duration after a pod event (add/remove) during which
+	// the node is invisible to the consolidation algorithm.
+	// When a node has a pod added or removed, it becomes invisible to consolidation
+	// for this duration. During this time, consolidation cannot:
+	// - Move pods OUT of this node (node cannot be a consolidation source)
+	// - Move pods INTO this node (node cannot be a consolidation destination)
+	// The timer resets every time there is a pod event on the node.
+	// This prevents consolidation churn by allowing nodes to "settle" after pod movements.
 	// When replicas is set, ConsolidationGracePeriod is simply ignored
 	// +kubebuilder:validation:Pattern=`^(([0-9]+(s|m|h))+|Never)$`
 	// +kubebuilder:validation:Type="string"
