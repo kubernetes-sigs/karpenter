@@ -31,6 +31,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	. "sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	"sigs.k8s.io/karpenter/pkg/test"
 )
 
 var _ = Describe("CEL/Validation", func() {
@@ -38,7 +39,7 @@ var _ = Describe("CEL/Validation", func() {
 
 	BeforeEach(func() {
 		nodeOverlay = &NodeOverlay{
-			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
+			ObjectMeta: metav1.ObjectMeta{Name: test.RandomName()},
 			Spec: NodeOverlaySpec{
 				Requirements: []corev1.NodeSelectorRequirement{
 					{
