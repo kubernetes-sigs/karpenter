@@ -36,7 +36,7 @@ import (
 	volumeutil "sigs.k8s.io/karpenter/pkg/utils/volume"
 )
 
-//go:generate controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
+//go:generate go tool -modfile=../../go.tools.mod controller-gen object:headerFile="../../hack/boilerplate.go.txt" paths="."
 
 // translator is a CSI Translator that translates in-tree plugin names to their out-of-tree CSI driver names
 var translator = csitranslation.New()

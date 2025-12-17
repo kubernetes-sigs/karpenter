@@ -27,7 +27,7 @@ const (
 	Group = "karpenter.kwok.sh"
 )
 
-//go:generate controller-gen crd object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
+//go:generate go tool -modfile=../../go.tools.mod controller-gen crd object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
 var (
 	//go:embed crds/karpenter.kwok.sh_kwoknodeclasses.yaml
 	KWOKNodeClassCRD []byte
