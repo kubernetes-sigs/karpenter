@@ -197,6 +197,22 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
 	// Determine the disruption action
+
+	// current state is
+	//	get candidates
+	//	wait for 15s
+	//	validate candditates
+	//	revalidate command
+	//	taint
+
+	// new move is
+	// 	get candiditats
+	// 	wait for like 5s
+	// 	taint
+	// 	validate canditdates
+	// 	revalidated command
+
+	// [DONE] remove validation from all compute commands
 	cmds, err := disruption.ComputeCommands(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
@@ -204,6 +220,13 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 	cmds = lo.Filter(cmds, func(c Command, _ int) bool { return c.Decision() != NoOpDecision })
 	if len(cmds) == 0 {
 		return false, nil
+	}
+
+	// todo: taint here now
+	// [DONE] validate here now
+	cmds, err = validateCommands(ctx, disruption, cmds)
+	if err != nil {
+		return false, fmt.Errorf("validating commands, %w", err)
 	}
 
 	errs := make([]error, len(cmds))
@@ -216,7 +239,8 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		cmd.Method = disruption
 
 		// Attempt to disrupt
-		if err := c.queue.StartCommand(ctx, &cmd); err != nil {
+		// todo: move out tainting from her to before validation
+		if err := c.queue.StartCommand(ctx, &cmd); err != nil { // this is where we taint
 			errs[i] = fmt.Errorf("disrupting candidates, %w", err)
 		}
 	})
@@ -263,4 +287,16 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	if buf.Len() > 0 {
 		log.FromContext(ctx).Error(stderrors.New(buf.String()), "detected disruption budget errors")
 	}
+}
+
+func validateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, error) {
+	validated := make([]Command, 0, len(cmds))
+	for _, cmd := range cmds {
+		c, err := m.Validate(ctx, cmd)
+		if err != nil {
+			return nil, err
+		}
+		validated = append(validated, c)
+	}
+	return validated, nil
 }

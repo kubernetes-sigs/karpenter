@@ -48,19 +48,20 @@ const (
 	EventualDisruptionClass = "eventual" // eventual disruption is bounded by a NodePool's TerminationGracePeriod, regardless of blocking pod PDBs and the do-not-disrupt annotation
 )
 
-type MethodOptions struct {
-	validator Validator
+type ValidatorOptions struct {
+	atomic bool
 }
 
-func WithValidator(v Validator) option.Function[MethodOptions] {
-	return func(o *MethodOptions) {
-		o.validator = v
+func WithAtomic() option.Function[ValidatorOptions] {
+	return func(o *ValidatorOptions) {
+		o.atomic = true
 	}
 }
 
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
 	ComputeCommands(context.Context, map[string]int, ...*Candidate) ([]Command, error)
+	Validate(context.Context, Command) (Command, error)
 	Reason() v1.DisruptionReason
 	Class() string
 	ConsolidationType() string

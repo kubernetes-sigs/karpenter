@@ -23,7 +23,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,14 +36,13 @@ const MultiNodeConsolidationType = "multi"
 
 type MultiNodeConsolidation struct {
 	consolidation
-	validator Validator
+	validator *Validator
 }
 
-func NewMultiNodeConsolidation(c consolidation, opts ...option.Function[MethodOptions]) *MultiNodeConsolidation {
-	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewMultiConsolidationValidator(c))}, opts...)...)
+func NewMultiNodeConsolidation(c consolidation) *MultiNodeConsolidation {
 	return &MultiNodeConsolidation{
 		consolidation: c,
-		validator:     o.validator,
+		validator:     NewMultiConsolidationValidator(c),
 	}
 }
 
@@ -99,15 +97,32 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 		}
 		return []Command{}, nil
 	}
+	return []Command{cmd}, nil
+}
 
-	if cmd, err = m.validator.Validate(ctx, cmd, consolidationTTL); err != nil {
+func (m *MultiNodeConsolidation) Validate(ctx context.Context, cmd Command) (Command, error) {
+	if err := ValidationPeriod(ctx, m.validator, consolidationTTL); err != nil {
+		return Command{}, fmt.Errorf("validating consolidation, %w", err)
+	}
+
+	validatedCandidates, err := ValidateCandidates(ctx, m.validator, cmd.Candidates, WithAtomic())
+	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
-			return []Command{}, nil
+			return Command{}, nil
 		}
-		return []Command{}, fmt.Errorf("validating consolidation, %w", err)
+		return Command{}, fmt.Errorf("validating consolidation, %w", err)
 	}
-	return []Command{cmd}, nil
+
+	if err := ValidateCommand(ctx, m.validator, cmd, validatedCandidates); err != nil {
+		if IsValidationError(err) {
+			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
+			return Command{}, nil
+		}
+		return Command{}, fmt.Errorf("validating consolidation, %w", err)
+	}
+
+	return cmd, nil
 }
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The

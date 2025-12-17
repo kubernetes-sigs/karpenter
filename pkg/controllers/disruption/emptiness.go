@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/awslabs/operatorpkg/option"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -30,12 +29,11 @@ import (
 // Emptiness is a subreconciler that deletes empty candidates.
 type Emptiness struct {
 	consolidation
-	validator Validator
+	validator *Validator
 }
 
-func NewEmptiness(c consolidation, opts ...option.Function[MethodOptions]) *Emptiness {
-	o := option.Resolve(append([]option.Function[MethodOptions]{WithValidator(NewEmptinessValidator(c))}, opts...)...)
-	return &Emptiness{consolidation: c, validator: o.validator}
+func NewEmptiness(c consolidation) *Emptiness {
+	return &Emptiness{consolidation: c, validator: NewEmptinessValidator(c)}
 }
 
 // ShouldDisrupt is a predicate used to filter candidates
@@ -91,15 +89,24 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 	cmd := Command{
 		Candidates: empty,
 	}
-	validCmd, err := e.validator.Validate(ctx, cmd, consolidationTTL)
+	return []Command{cmd}, nil
+}
+
+func (e *Emptiness) Validate(ctx context.Context, cmd Command) (Command, error) {
+	if err := ValidationPeriod(ctx, e.validator, consolidationTTL); err != nil {
+		return Command{}, fmt.Errorf("validating consolidation, %w", err)
+	}
+
+	validatedCandidates, err := ValidateCandidates(ctx, e.validator, cmd.Candidates)
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
-			return []Command{}, nil
+			return Command{}, nil
 		}
-		return []Command{}, err
+		return Command{}, fmt.Errorf("validating consolidation, %w", err)
 	}
-	return []Command{validCmd}, nil
+	cmd.Candidates = validatedCandidates
+	return cmd, nil
 }
 
 func (e *Emptiness) Reason() v1.DisruptionReason {
