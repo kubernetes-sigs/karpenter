@@ -18,6 +18,7 @@ package informer
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	controllerruntime "sigs.k8s.io/controller-runtime"
@@ -73,11 +74,12 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 		return reconcile.Result{}, nil
 	}
 	c.cluster.UpdateNodeClaim(nodeClaim)
-	if err := c.clusterCost.UpdateNodeClaim(ctx, nodeClaim); err != nil {
-		log.FromContext(ctx).Error(err, "failed to process nodeclaim for cost tracking")
+	err := c.clusterCost.UpdateNodeClaim(ctx, nodeClaim)
+	if err != nil {
+		err = fmt.Errorf("failed to process nodeclaim for cost tracking, %v", err)
 	}
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
-	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
+	return reconcile.Result{RequeueAfter: stateRetryPeriod}, err
 }
 
 func (c *NodeClaimController) Register(ctx context.Context, m manager.Manager) error {
