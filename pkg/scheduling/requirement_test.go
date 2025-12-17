@@ -1075,5 +1075,10 @@ var _ = Describe("Requirement", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(val).To(BeNumerically("<=", 10))
 		})
+		It("should return DoesNotExist for Gt MaxInt", func() {
+			gtMaxInt := NewRequirement("key", corev1.NodeSelectorOpGt, strconv.Itoa(math.MaxInt))
+			Expect(gtMaxInt.Operator()).To(Equal(corev1.NodeSelectorOpDoesNotExist))
+			Expect(gtMaxInt.Len()).To(Equal(0))
+		})
 	})
 })
