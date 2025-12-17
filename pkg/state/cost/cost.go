@@ -191,13 +191,13 @@ func (cc *ClusterCost) createNewNodePoolCost(np *v1.NodePool, instanceTypes []*c
 
 // UpdateNodeClaim adds a NodeClaim to cost tracking. The NodeClaim must have
 // all required labels or it will be ignored and logged as an error.
-func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) {
+func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	cc.RLock()
 	exists := cc.nodeClaimSet.Has(client.ObjectKeyFromObject(nodeClaim).String())
 	cc.RUnlock()
 
 	if exists {
-		return
+		return nil
 	}
 
 	failed := false
@@ -212,42 +212,40 @@ func (cc *ClusterCost) UpdateNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	// First lets check if the right labels are there
 	if nodeClaimMissingLabels(ctx, *nodeClaim) {
 		failed = true
-		return
+		return nil
 	}
 
 	np := &v1.NodePool{}
 	if err := cc.client.Get(ctx, types.NamespacedName{Name: nodeClaim.Labels[v1.NodePoolLabelKey]}, np); err != nil {
-		log.FromContext(ctx).Error(serrors.Wrap(err, "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim)), "failed to process nodeclaim for cost tracking")
 		failed = true
-		return
+		return serrors.Wrap(err, "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
 	}
 	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
 	}); !found {
-		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim)), "failed to get nodepool for nodeclaim")
 		failed = true
-		return
+		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
 	}
 	cc.Lock()
 	defer cc.Unlock()
 	err := cc.internalAddOffering(ctx, np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone], true)
 	if err != nil {
-		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("failed to add offering for nodeclaim, %w", err), "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np)), "failed to process nodeclaim for cost tracking")
 		failed = true
-		return
+		return serrors.Wrap(err, "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np))
 	}
 	cc.nodeClaimSet.Insert(client.ObjectKeyFromObject(nodeClaim).String())
+	return nil
 }
 
 // DeleteNodeClaim removes a NodeClaim from cost tracking. If the NodeClaim
 // was not being tracked, this operation is a no-op.
-func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) {
+func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	cc.RLock()
 	exists := cc.nodeClaimSet.Has(client.ObjectKeyFromObject(nodeClaim).String())
 	cc.RUnlock()
 
 	if !exists {
-		return
+		return nil
 	}
 
 	failed := false
@@ -262,33 +260,31 @@ func (cc *ClusterCost) DeleteNodeClaim(ctx context.Context, nodeClaim *v1.NodeCl
 	// First lets check if the right labels are there
 	if nodeClaimMissingLabels(ctx, *nodeClaim) {
 		failed = true
-		return
+		return nil
 	}
 
 	nodePoolName := nodeClaim.Labels[v1.NodePoolLabelKey]
 	np := &v1.NodePool{}
 	err := cc.client.Get(ctx, client.ObjectKey{Name: nodePoolName}, np)
 	if err != nil {
-		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("failed to get nodepool, %w", err), "nodepool", nodePoolName, "nodeclaim", klog.KObj(nodeClaim)), "failed to remove nodeclaim from cost tracking")
 		failed = true
-		return
+		return serrors.Wrap(err, "nodepool", nodePoolName, "nodeclaim", klog.KObj(nodeClaim))
 	}
 	if _, found := lo.Find(nodeClaim.GetOwnerReferences(), func(o metav1.OwnerReference) bool {
 		return o.Kind == object.GVK(np).Kind && o.UID == np.UID
 	}); !found {
-		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim)), "failed to get nodepool for nodeclaim")
 		failed = true
-		return
+		return serrors.Wrap(fmt.Errorf("nodepool not found for nodeclaim"), "nodepool", nodeClaim.Labels[v1.NodePoolLabelKey], "nodeclaim", klog.KObj(nodeClaim))
 	}
 	cc.Lock()
 	defer cc.Unlock()
 	err = cc.internalRemoveOffering(np, nodeClaim.Labels[corev1.LabelInstanceTypeStable], nodeClaim.Labels[v1.CapacityTypeLabelKey], nodeClaim.Labels[corev1.LabelTopologyZone])
 	if err != nil {
-		log.FromContext(ctx).Error(serrors.Wrap(fmt.Errorf("failed to remove offering for nodeclaim, %w", err), "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np)), "failed to remove nodeclaim from cost tracking")
 		failed = true
-		return
+		return serrors.Wrap(err, "nodeclaim", klog.KObj(nodeClaim), "nodepool", klog.KObj(np))
 	}
 	cc.nodeClaimSet.Delete(client.ObjectKeyFromObject(nodeClaim).String())
+	return nil
 }
 
 // internalAddOffering updates the internal clusterCost state to include a new offering for a given nodepool.
