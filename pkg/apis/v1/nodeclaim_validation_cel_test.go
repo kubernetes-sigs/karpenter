@@ -18,9 +18,7 @@ package v1_test
 
 import (
 	"strconv"
-	"strings"
 
-	"github.com/Pallinder/go-randomdata"
 	"github.com/awslabs/operatorpkg/object"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -44,7 +42,7 @@ var _ = Describe("Validation", func() {
 			Skip("CEL Validation is for 1.25>")
 		}
 		nodeClaim = &NodeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: strings.ToLower(randomdata.SillyName())},
+			ObjectMeta: metav1.ObjectMeta{Name: test.RandomName()},
 			Spec: NodeClaimSpec{
 				NodeClassRef: &NodeClassReference{
 					Group: "karpenter.test.sh",
