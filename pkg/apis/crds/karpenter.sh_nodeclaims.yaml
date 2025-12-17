@@ -124,7 +124,7 @@ spec:
                       and minValues that represent the requirement to have at least that many values.
                     properties:
                       key:
-                        description: key is the label key that the selector applies to.
+                        description: Key is the label key that the selector applies to.
                         type: string
                         maxLength: 316
                         pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*(\/))?([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$
@@ -146,7 +146,7 @@ spec:
                         type: integer
                       operator:
                         description: |-
-                          operator represents a key's relationship to a set of values.
+                          Operator represents a key's relationship to a set of values.
                           Valid operators are In, NotIn, Exists, DoesNotExist, Gt, Lt, Gte, and Lte.
                         enum:
                           - Gte
@@ -160,7 +160,7 @@ spec:
                         type: string
                       values:
                         description: |-
-                          values is an array of string values. If the operator is In or NotIn,
+                          Values is an array of string values. If the operator is In or NotIn,
                           the values array must be non-empty. If the operator is Exists or DoesNotExist,
                           the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values
                           array must have a single element, which will be interpreted as an integer.
