@@ -78,7 +78,11 @@ func NewRequirementWithFlexibility(key string, operator corev1.NodeSelectorOpera
 	}
 	if operator == corev1.NodeSelectorOpGt {
 		value, _ := strconv.Atoi(values[0]) // prevalidated
-		value++                             // canonicalize GT N to GTE N+1
+		if value == math.MaxInt {
+			// Gt MaxInt matches nothing
+			return NewRequirement(key, corev1.NodeSelectorOpDoesNotExist)
+		}
+		value++ // canonicalize GT N to GTE N+1
 		r.gte = &value
 	}
 	if operator == corev1.NodeSelectorOpLt {

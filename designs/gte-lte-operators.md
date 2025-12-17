@@ -28,10 +28,10 @@ spec:
   template:
     spec:
       requirements:
-        - key: karpenter.sh/capacity
+        - key: karpenter.k8s.aws/instance-cpu
           operator: Gte  # New operator
           values: ["2"]
-        - key: node.kubernetes.io/instance-memory
+        - key: karpenter.k8s.io/instance-memory
           operator: Lte  # New operator
           values: ["64"]
 ```
