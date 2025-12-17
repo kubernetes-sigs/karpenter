@@ -41,7 +41,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -49,7 +48,6 @@ import (
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
-	"sigs.k8s.io/karpenter/pkg/utils/pretty"
 )
 
 type Controller struct {
@@ -143,17 +141,11 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	outdatedNodes := lo.Reject(c.cluster.DeepCopyNodes(), func(s *state.StateNode, _ int) bool {
 		return c.queue.HasAny(s.ProviderID()) || s.MarkedForDeletion()
 	})
-	if err := state.RequireNoScheduleTaint(ctx, c.kubeClient, false, outdatedNodes...); err != nil {
+	if err := c.queue.markUndisrupted(ctx, outdatedNodes...); err != nil {
 		if errors.IsConflict(err) {
 			return reconciler.Result{Requeue: true}, nil
 		}
-		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing taint from nodes, %w", err), "taint", pretty.Taint(v1.DisruptedNoScheduleTaint))
-	}
-	if err := state.ClearNodeClaimsCondition(ctx, c.kubeClient, v1.ConditionTypeDisruptionReason, outdatedNodes...); err != nil {
-		if errors.IsConflict(err) {
-			return reconciler.Result{Requeue: true}, nil
-		}
-		return reconciler.Result{}, serrors.Wrap(fmt.Errorf("removing condition from nodeclaims, %w", err), "condition", v1.ConditionTypeDisruptionReason)
+		return reconciler.Result{}, err
 	}
 
 	// Attempt different disruption methods. We'll only let one method perform an action
@@ -197,36 +189,17 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		return false, fmt.Errorf("building disruption budgets, %w", err)
 	}
 	// Determine the disruption action
-
-	// current state is
-	//	get candidates
-	//	wait for 15s
-	//	validate candditates
-	//	revalidate command
-	//	taint
-
-	// new move is
-	// 	get candiditats
-	// 	wait for like 5s
-	// 	taint
-	// 	validate canditdates
-	// 	revalidated command
-
-	// [DONE] remove validation from all compute commands
 	cmds, err := disruption.ComputeCommands(ctx, disruptionBudgetMapping, candidates...)
 	if err != nil {
 		return false, fmt.Errorf("computing disruption decision, %w", err)
 	}
 	cmds = lo.Filter(cmds, func(c Command, _ int) bool { return c.Decision() != NoOpDecision })
-	if len(cmds) == 0 {
-		return false, nil
-	}
-
-	// todo: taint here now
-	// [DONE] validate here now
-	cmds, err = validateCommands(ctx, disruption, cmds)
+	cmds, err = c.validateCommands(ctx, disruption, cmds)
 	if err != nil {
 		return false, fmt.Errorf("validating commands, %w", err)
+	}
+	if len(cmds) == 0 {
+		return false, nil
 	}
 
 	errs := make([]error, len(cmds))
@@ -239,8 +212,7 @@ func (c *Controller) disrupt(ctx context.Context, disruption Method) (bool, erro
 		cmd.Method = disruption
 
 		// Attempt to disrupt
-		// todo: move out tainting from her to before validation
-		if err := c.queue.StartCommand(ctx, &cmd); err != nil { // this is where we taint
+		if err := c.queue.StartCommand(ctx, &cmd); err != nil {
 			errs[i] = fmt.Errorf("disrupting candidates, %w", err)
 		}
 	})
@@ -289,14 +261,39 @@ func (c *Controller) logInvalidBudgets(ctx context.Context) {
 	}
 }
 
-func validateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, error) {
+// validateCommands will do the following:
+// 1. wait for consolidationTTL time
+// 2. taint each candidate node for disruption and add the Disruption condition to the NodeClaim
+// 3. validate each commands according to the disruption method
+// 4. for each candidates deemed invalid, the disruption taint / condition will be removed from the Node / NodeClaim
+func (c *Controller) validateCommands(ctx context.Context, m Method, cmds []Command) ([]Command, error) {
+	if consolidationTTL > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("interrupted")
+		case <-c.clock.After(consolidationTTL): // channel which we wait for x duration until recieve and continue
+		}
+	}
+
+	errs := make([]error, len(cmds))
+	workqueue.ParallelizeUntil(ctx, len(cmds), len(cmds), func(i int) { errs[i] = c.queue.MarkDisrupted(ctx, &cmds[i]) })
+	if err := multierr.Combine(errs...); err != nil {
+		return []Command{}, fmt.Errorf("disrupting candidates, %w", err)
+	}
+
 	validated := make([]Command, 0, len(cmds))
 	for _, cmd := range cmds {
-		c, err := m.Validate(ctx, cmd)
+		validCmd, invalidCandidates, err := m.Validate(ctx, cmd)
+
+		invalidNodes := lo.Map(invalidCandidates, func(invalidCandidate *Candidate, _ int) *state.StateNode { return invalidCandidate.StateNode })
+		if markedErr := c.queue.markUndisrupted(ctx, invalidNodes...); markedErr != nil {
+			err = lo.Ternary(err == nil, markedErr, fmt.Errorf("%w, %w", err, markedErr))
+		}
+
 		if err != nil {
 			return nil, err
 		}
-		validated = append(validated, c)
+		validated = append(validated, validCmd)
 	}
 	return validated, nil
 }

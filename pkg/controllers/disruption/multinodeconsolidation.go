@@ -100,29 +100,25 @@ func (m *MultiNodeConsolidation) ComputeCommands(ctx context.Context, disruption
 	return []Command{cmd}, nil
 }
 
-func (m *MultiNodeConsolidation) Validate(ctx context.Context, cmd Command) (Command, error) {
-	if err := ValidationPeriod(ctx, m.validator, consolidationTTL); err != nil {
-		return Command{}, fmt.Errorf("validating consolidation, %w", err)
-	}
-
-	validatedCandidates, err := ValidateCandidates(ctx, m.validator, cmd.Candidates, WithAtomic())
+func (m *MultiNodeConsolidation) Validate(ctx context.Context, cmd Command) (Command, []*Candidate, error) {
+	validatedCandidates, err := m.validator.ValidateCandidates(ctx, cmd.Candidates, WithAtomic())
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, nil
+			return Command{}, cmd.Candidates, nil
 		}
-		return Command{}, fmt.Errorf("validating consolidation, %w", err)
+		return Command{}, cmd.Candidates, fmt.Errorf("validating consolidation, %w", err)
 	}
 
-	if err := ValidateCommand(ctx, m.validator, cmd, validatedCandidates); err != nil {
+	if err := m.validator.ValidateCommand(ctx, cmd, validatedCandidates); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning multi-node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, nil
+			return Command{}, cmd.Candidates, nil
 		}
-		return Command{}, fmt.Errorf("validating consolidation, %w", err)
+		return Command{}, cmd.Candidates, fmt.Errorf("validating consolidation, %w", err)
 	}
 
-	return cmd, nil
+	return cmd, nil, nil
 }
 
 // firstNConsolidationOption looks at the first N NodeClaims to determine if they can all be consolidated at once.  The

@@ -113,29 +113,25 @@ func (s *SingleNodeConsolidation) ComputeCommands(ctx context.Context, disruptio
 	return []Command{}, nil
 }
 
-func (s *SingleNodeConsolidation) Validate(ctx context.Context, cmd Command) (Command, error) {
-	if err := ValidationPeriod(ctx, s.validator, consolidationTTL); err != nil {
-		return Command{}, fmt.Errorf("validating consolidation, %w", err)
-	}
-
-	validatedCandidates, err := ValidateCandidates(ctx, s.validator, cmd.Candidates, WithAtomic())
+func (s *SingleNodeConsolidation) Validate(ctx context.Context, cmd Command) (Command, []*Candidate, error) {
+	validatedCandidates, err := s.validator.ValidateCandidates(ctx, cmd.Candidates, WithAtomic())
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, nil
+			return Command{}, cmd.Candidates, nil
 		}
-		return Command{}, fmt.Errorf("validating consolidation, %w", err)
+		return Command{}, cmd.Candidates, fmt.Errorf("validating consolidation, %w", err)
 	}
 
-	if err := ValidateCommand(ctx, s.validator, cmd, validatedCandidates); err != nil {
+	if err := s.validator.ValidateCommand(ctx, cmd, validatedCandidates); err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning single-node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, nil
+			return Command{}, cmd.Candidates, nil
 		}
-		return Command{}, fmt.Errorf("validating consolidation, %w", err)
+		return Command{}, cmd.Candidates, fmt.Errorf("validating consolidation, %w", err)
 	}
 
-	return cmd, nil
+	return cmd, nil, nil
 }
 
 func (s *SingleNodeConsolidation) Reason() v1.DisruptionReason {

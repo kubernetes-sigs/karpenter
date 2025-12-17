@@ -61,7 +61,8 @@ func WithAtomic() option.Function[ValidatorOptions] {
 type Method interface {
 	ShouldDisrupt(context.Context, *Candidate) bool
 	ComputeCommands(context.Context, map[string]int, ...*Candidate) ([]Command, error)
-	Validate(context.Context, Command) (Command, error)
+	// returns the command (if valid), the list of invalidated candidates, and any associated errors
+	Validate(context.Context, Command) (Command, []*Candidate, error)
 	Reason() v1.DisruptionReason
 	Class() string
 	ConsolidationType() string

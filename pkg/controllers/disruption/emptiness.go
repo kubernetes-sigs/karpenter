@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -92,21 +94,20 @@ func (e *Emptiness) ComputeCommands(ctx context.Context, disruptionBudgetMapping
 	return []Command{cmd}, nil
 }
 
-func (e *Emptiness) Validate(ctx context.Context, cmd Command) (Command, error) {
-	if err := ValidationPeriod(ctx, e.validator, consolidationTTL); err != nil {
-		return Command{}, fmt.Errorf("validating consolidation, %w", err)
-	}
-
-	validatedCandidates, err := ValidateCandidates(ctx, e.validator, cmd.Candidates)
+func (e *Emptiness) Validate(ctx context.Context, cmd Command) (Command, []*Candidate, error) {
+	validatedCandidates, err := e.validator.ValidateCandidates(ctx, cmd.Candidates)
 	if err != nil {
 		if IsValidationError(err) {
 			log.FromContext(ctx).V(1).WithValues(cmd.LogValues()...).Info("abandoning empty node consolidation attempt due to pod churn, command is no longer valid")
-			return Command{}, nil
+			return Command{}, cmd.Candidates, nil
 		}
-		return Command{}, fmt.Errorf("validating consolidation, %w", err)
+		return Command{}, cmd.Candidates, fmt.Errorf("validating consolidation, %w", err)
 	}
+	validatedNames := sets.NewString(lo.Map(validatedCandidates, func(c *Candidate, i int) string { return c.Name() })...)
+	invalidCandidates := lo.Filter(cmd.Candidates, func(c *Candidate, _ int) bool { return !validatedNames.Has(c.Name()) })
+
 	cmd.Candidates = validatedCandidates
-	return cmd, nil
+	return cmd, invalidCandidates, nil
 }
 
 func (e *Emptiness) Reason() v1.DisruptionReason {

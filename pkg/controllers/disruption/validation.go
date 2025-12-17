@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
@@ -130,19 +129,7 @@ func NewMultiConsolidationValidator(c consolidation) *Validator {
 	}
 }
 
-func ValidationPeriod(ctx context.Context, v *Validator, validationPeriod time.Duration) error {
-	if validationPeriod > 0 {
-		select {
-		case <-ctx.Done():
-			return errors.New("interrupted")
-		case <-v.clock.After(validationPeriod): // channel which we wait for x duration until recieve and continue
-		}
-	}
-	return nil
-}
-
-// TODO: option for atomic?
-func ValidateCandidates(ctx context.Context, v *Validator, candidates []*Candidate, opts ...option.Function[ValidatorOptions]) ([]*Candidate, error) {
+func (v *Validator) ValidateCandidates(ctx context.Context, candidates []*Candidate, opts ...option.Function[ValidatorOptions]) ([]*Candidate, error) {
 	o := option.Resolve(opts...)
 
 	// This GetCandidates call filters out nodes that were nominated
@@ -160,7 +147,7 @@ func ValidateCandidates(ctx context.Context, v *Validator, candidates []*Candida
 		return nil, fmt.Errorf("building disruption budgets, %w", err)
 	}
 
-	// We consider a any candidate invalid if it meets either of the following conditions:
+	// We consider any candidate invalid if it meets either of the following conditions:
 	//  a. A pod was nominated to the candidate
 	//  b. Disrupting the candidate would violate node disruption budgets
 	// If we are acting atomically and 1 candidate is deemed invalid, we return nil.
@@ -193,7 +180,7 @@ func ValidateCandidates(ctx context.Context, v *Validator, candidates []*Candida
 }
 
 // ValidateCommand validates a command for a Method
-func ValidateCommand(ctx context.Context, v *Validator, cmd Command, candidates []*Candidate) error {
+func (v *Validator) ValidateCommand(ctx context.Context, cmd Command, candidates []*Candidate) error {
 	// None of the chosen candidate are valid for execution, so retry
 	if len(candidates) == 0 {
 		return NewValidationError(fmt.Errorf("no candidates"))
