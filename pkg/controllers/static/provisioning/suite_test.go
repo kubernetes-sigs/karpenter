@@ -560,7 +560,7 @@ var _ = Describe("Static Provisioning Controller", func() {
 				return len(list.Items)
 			}, 5*time.Second).Should(BeNumerically("<=", 10))
 
-			// Ensure cluster is synced before final reconcile
+			// Ensure cluster is synced before final reconcile to allow it to create remaining NodeClaims
 			cluster.SetSynced(true)
 			ExpectObjectReconciled(ctx, env.Client, controller, nodePool)
 			// at the end we should have right counts in StateNodePool
