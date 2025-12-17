@@ -34,6 +34,7 @@ const (
 	metricLabelMethod     = "method"
 	metricLabelProvider   = "provider"
 	metricLabelError      = "error"
+	metricLabelNodePool   = "nodepool"
 	// MetricLabelErrorDefaultVal is the default string value that represents "error type unknown"
 	MetricLabelErrorDefaultVal = ""
 	// Well-known metricLabelError values
@@ -74,6 +75,7 @@ var (
 			metricLabelMethod,
 			metricLabelProvider,
 			metricLabelError,
+			metricLabelNodePool,
 		},
 	)
 )
@@ -98,7 +100,7 @@ func (d *decorator) Create(ctx context.Context, nodeClaim *v1.NodeClaim) (*v1.No
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	nodeClaim, err := d.CloudProvider.Create(ctx, nodeClaim)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodeClaim.Labels["karpenter.sh/nodepool"], err))
 	}
 	return nodeClaim, err
 }
@@ -108,7 +110,7 @@ func (d *decorator) Delete(ctx context.Context, nodeClaim *v1.NodeClaim) error {
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	err := d.CloudProvider.Delete(ctx, nodeClaim)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodeClaim.Labels["karpenter.sh/nodepool"], err))
 	}
 	return err
 }
@@ -118,7 +120,7 @@ func (d *decorator) Get(ctx context.Context, id string) (*v1.NodeClaim, error) {
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	nodeClaim, err := d.CloudProvider.Get(ctx, id)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodeClaim.Labels["karpenter.sh/nodepool"], err))
 	}
 	return nodeClaim, err
 }
@@ -128,7 +130,7 @@ func (d *decorator) List(ctx context.Context) ([]*v1.NodeClaim, error) {
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	nodeClaims, err := d.CloudProvider.List(ctx)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, "", err))
 	}
 	return nodeClaims, err
 }
@@ -138,7 +140,7 @@ func (d *decorator) GetInstanceTypes(ctx context.Context, nodePool *v1.NodePool)
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	instanceType, err := d.CloudProvider.GetInstanceTypes(ctx, nodePool)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodePool.Name, err))
 	}
 	return instanceType, err
 }
@@ -148,7 +150,7 @@ func (d *decorator) IsDrifted(ctx context.Context, nodeClaim *v1.NodeClaim) (clo
 	defer metrics.Measure(MethodDuration, getLabelsMapForDuration(ctx, d, method))()
 	isDrifted, err := d.CloudProvider.IsDrifted(ctx, nodeClaim)
 	if err != nil {
-		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, err))
+		ErrorsTotal.Inc(getLabelsMapForError(ctx, d, method, nodeClaim.Labels["karpenter.sh/nodepool"], err))
 	}
 	return isDrifted, err
 }
@@ -165,10 +167,11 @@ func getLabelsMapForDuration(ctx context.Context, d *decorator, method string) m
 
 // getLabelsMapForError is a convenience func that constructs a map[string]string
 // for a prometheus Label map used to compose a counter metric spec
-func getLabelsMapForError(ctx context.Context, d *decorator, method string, err error) map[string]string {
+func getLabelsMapForError(ctx context.Context, d *decorator, method string, nodePool string, err error) map[string]string {
 	return map[string]string{
 		metricLabelController: injection.GetControllerName(ctx),
 		metricLabelMethod:     method,
+		metricLabelNodePool:   nodePool,
 		metricLabelProvider:   d.Name(),
 		metricLabelError:      GetErrorTypeLabelValue(err),
 	}
