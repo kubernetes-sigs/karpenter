@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -62,7 +63,9 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 		if errors.IsNotFound(err) {
 			// notify cluster state of the node deletion
 			c.cluster.DeleteNodeClaim(req.Name)
-			c.clusterCost.DeleteNodeClaim(ctx, nodeClaim)
+			if deleteErr := c.clusterCost.DeleteNodeClaim(ctx, nodeClaim); deleteErr != nil {
+				log.FromContext(ctx).Error(deleteErr, "failed to remove nodeclaim from cost tracking")
+			}
 		}
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
@@ -70,7 +73,9 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, req reconcile.Reque
 		return reconcile.Result{}, nil
 	}
 	c.cluster.UpdateNodeClaim(nodeClaim)
-	c.clusterCost.UpdateNodeClaim(ctx, nodeClaim)
+	if err := c.clusterCost.UpdateNodeClaim(ctx, nodeClaim); err != nil {
+		log.FromContext(ctx).Error(err, "failed to process nodeclaim for cost tracking")
+	}
 	// ensure it's aware of any nodes we discover, this is a no-op if the node is already known to our cluster state
 	return reconcile.Result{RequeueAfter: stateRetryPeriod}, nil
 }
