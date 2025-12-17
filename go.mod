@@ -20,12 +20,12 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/text v0.31.0
 	golang.org/x/time v0.14.0
-	k8s.io/api v0.34.2
-	k8s.io/apiextensions-apiserver v0.34.2
+	k8s.io/api v0.35.0-alpha.0
+	k8s.io/apiextensions-apiserver v0.35.0-alpha.0
 	k8s.io/apimachinery v0.35.0-beta.0
-	k8s.io/client-go v0.34.2
+	k8s.io/client-go v0.35.0-alpha.0
 	k8s.io/cloud-provider v0.34.2
-	k8s.io/component-base v0.34.2
+	k8s.io/component-base v0.35.0-alpha.0
 	k8s.io/component-helpers v0.34.2
 	k8s.io/csi-translation-lib v0.34.2
 	k8s.io/klog/v2 v2.130.1
@@ -69,7 +69,7 @@ require (
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/term v0.36.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
-	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
+	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
@@ -135,6 +135,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/emirpasic/gods v1.12.0 // indirect
 	github.com/ettle/strcase v0.2.0 // indirect
+	github.com/evanphx/json-patch v5.9.0+incompatible // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/firefart/nonamedreturns v1.0.6 // indirect
@@ -295,7 +296,7 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	helm.sh/helm/v3 v3.15.2 // indirect
 	honnef.co/go/tools v0.6.1 // indirect
-	k8s.io/code-generator v0.34.2 // indirect
+	k8s.io/code-generator v0.35.0-alpha.0 // indirect
 	k8s.io/gengo/v2 v2.0.0-20250922181213-ec3ebc5fd46b // indirect
 	mvdan.cc/gofumpt v0.9.1 // indirect
 	mvdan.cc/unparam v0.0.0-20250301125049-0df0534333a4 // indirect
