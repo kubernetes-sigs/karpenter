@@ -53,20 +53,6 @@ Extend Karpenter to support the standard CapacityBuffer API by treating buffer c
 
 **Goal:** Karpenter respects configured CapacityBuffers, maintaining additional capacity as if they were pods scheduled in the cluster.
 
-### Modeling & Validation
-
-When a `CapacityBuffer` is created, Karpenter generates virtual pods that participate in scheduling decisions but are never actually created in the cluster. These virtual pods:
-
-- Are derived from either `scalableRef` (existing workload) or `podTemplateRef` (custom template)
-- Include special labels for identification: `karpenter.sh/capacity-type: buffer`
-- Have lower priority than real workloads to ensure user pods take precedence
-- Are considered during both provisioning and consolidation decisions
-
-Buffer capacity persists until:
-- The CapacityBuffer resource is deleted
-- Real workloads consume the buffered capacity
-- Consolidation occurs that preserves equivalent buffer capacity elsewhere
-
 ### API Specification
 
 Karpenter will support the standard CapacityBuffer API:
@@ -127,24 +113,46 @@ spec:
 3. **Field types**: `replicas` and `percentage` are `int32` (not `int`)
 4. **Minimum values**: Both `replicas` and `percentage` have `+kubebuilder:validation:Minimum=0`
 
-### Virtual Pod Generation
+### Virtual Pod Generation Workflows
 
-Following Cluster Autoscaler's pattern:
+The buffer controller generates virtual pods in response to these events:
 
-1. **ScalableRef Resolution**: Query the referenced workload's pod template
-2. **PodTemplateRef Resolution**: Directly use the referenced template
-3. **Replica Calculation**:
-   - If `percentage` is set: calculate `percentage * currentReplicas / 100` (integer division)
-   - If `replicas` is set: use the specified value
-   - If both are set: use `min(percentageResult, replicas)` - see Design Decisions
-4. **Virtual Pod Creation**: Generate N in-memory pods with special labels:
-   ```yaml
-   labels:
-     karpenter.sh/capacity-type: buffer
-     autoscaling.x-k8s.io/buffer: <buffer-name>
-     autoscaling.x-k8s.io/buffer-namespace: <buffer-namespace>
-   ```
-5. **Priority Assignment**: Use system priority class or lowest priority to ensure user pods take precedence
+**1. Initial CapacityBuffer Creation**
+- User creates CapacityBuffer resource
+- Controller validates and translates spec
+- Generates initial set of virtual pods
+- Updates status to ReadyForProvisioning
+
+**2. CapacityBuffer Spec Update**
+- User modifies replicas, percentage, or references
+- Controller detects spec change
+- Regenerates virtual pods with new configuration
+- Updates status with new replica count
+
+**3. Referenced Workload Scale (for percentage-based buffers)**
+- Referenced deployment/statefulset scales
+- Controller detects scale event
+- Recalculates buffer size based on new percentage
+- Regenerates virtual pods to match
+
+**4. PodTemplate Generation Change**
+- Referenced workload updates pod template
+- Controller detects template change
+- Regenerates virtual pods with new template
+- Updates podTemplateGeneration in status
+
+**Virtual Pod Properties:**
+```yaml
+metadata:
+  labels:
+    karpenter.sh/capacity-type: buffer
+    autoscaling.x-k8s.io/buffer: <buffer-name>
+    autoscaling.x-k8s.io/buffer-namespace: <buffer-namespace>
+spec:
+  # Derived from scalableRef or podTemplateRef
+  # No priority modification - Karpenter provisions for all pods equally
+  # kube-scheduler handles actual pod placement based on priority
+```
 
 ## Design Decisions
 
@@ -243,26 +251,63 @@ spec:
 
 ## Implementation Details
 
+### Behavior Model
+
+Karpenter maintains buffer capacity using virtual pods that participate in scheduling decisions:
+
+**Virtual Pod Lifecycle:**
+1. **Creation**: When a CapacityBuffer is created, generate virtual pods representing the buffer
+2. **Continuous Maintenance**: As real pods are scheduled, maintain the buffer by keeping virtual pods in the scheduling pipeline
+3. **Updates**: When CapacityBuffer spec changes (replicas, percentage), regenerate virtual pods
+4. **Deletion**: When CapacityBuffer is deleted, remove virtual pods from consideration
+
+**Key Behaviors:**
+- Virtual pods are derived from `scalableRef` (existing workload) or `podTemplateRef` (custom template)
+- Virtual pods include labels for identification: `karpenter.sh/capacity-type: buffer`
+- Virtual pods participate in provisioning (trigger NodeClaim creation) and consolidation (prevent capacity removal)
+- Buffer capacity is maintained continuously - Karpenter provisions additional capacity when real pods consume buffer capacity
+
+**Example Flow:**
+```
+1. User creates CapacityBuffer with replicas: 5
+2. Karpenter generates 5 virtual buffer pods
+3. Provisioner includes these pods in scheduling → creates NodeClaims
+4. Real pods are scheduled on this capacity
+5. Virtual buffer pods remain in scheduling queue → trigger more provisioning
+6. Buffer is maintained as long as CapacityBuffer exists
+```
+
 ### Controller Architecture
-
-We will implement capacity buffer support by adding a new controller and integrating with existing Karpenter components. 
-
-**⚠️ Critical Integration Considerations**: This implementation must account for Karpenter's unique architecture that operates at the NodeClaim level rather than individual pod scheduling, and integrates deeply with Karpenter's state management system.
 
 #### Buffer Controller (New)
 **Location**: `pkg/controllers/capacitybuffer/`
 
-**Purpose**: 
-- Watch CapacityBuffer CRDs and translate them into virtual pods
-- Maintain an in-memory cache of buffer pods for scheduling integration
-- Handle buffer lifecycle and status updates
-
-**Key Components**:
+**Controller API:**
 ```go
-type Controller struct {
+type BufferController interface {
+    // GetVirtualPods returns all active buffer pods for scheduling
+    GetVirtualPods(ctx context.Context) ([]*corev1.Pod, error)
+    
+    // GetDisruptionCost returns cost for disrupting capacity on a node
+    // Buffer virtual pods have lower disruption cost than real workloads
+    GetDisruptionCost(ctx context.Context, node *corev1.Node) (float64, error)
+    
+    // Run starts the reconciliation loop
+    Run(ctx context.Context) error
+}
+```
+
+**Responsibilities:**
+- Watch CapacityBuffer CRDs and translate them into virtual pods
+- Maintain virtual pods in memory for scheduling integration
+- Handle buffer lifecycle and status updates
+- Provide virtual pods to provisioner and disruption controllers
+
+**Internal Components**:
+```go
+type bufferController struct {
     kubeClient      client.Client
-    cluster         *state.Cluster        // Karpenter's cluster state management
-    provisioner     *provisioning.Provisioner
+    bufferClient    *capacitybuffer.Client
     
     // Buffer-specific components
     bufferCache     map[types.NamespacedName]*BufferState
@@ -274,23 +319,18 @@ type Controller struct {
 type BufferState struct {
     Buffer          *v1alpha1.CapacityBuffer
     VirtualPods     []*corev1.Pod
-    NodeClaims      []*scheduler.NodeClaim  // Track at NodeClaim level
-    LastScheduled   time.Time
+    LastUpdate      time.Time
 }
 
 type BufferTranslator struct {
     // Combines multiple translators:
     // - PodTemplateTranslator for podTemplateRef
     // - ScalableObjectsTranslator for scalableRef
-    // - ResourceLimitsTranslator for limits-based sizing
 }
 ```
 
 #### Scheduling Integration
 **Location**: `pkg/controllers/provisioning/`
-
-**Critical Architecture Consideration**: 
-Karpenter's scheduling operates at the `NodeClaim` level, not individual pods. The `provisioner.Schedule()` method creates `NodeClaim` objects through complex constraint solving.
 
 **Correct Integration Approach**:
 
@@ -342,110 +382,55 @@ func (s *Scheduler) Solve(ctx context.Context, pods []*corev1.Pod) (Results, err
 #### Disruption Integration  
 **Location**: `pkg/controllers/disruption/`
 
-**Behavior**:
-- Buffer pods can be evicted during consolidation (they're virtual and easily recreated)
-- However, consolidation simulation must ensure equivalent buffer capacity remains available
-- Include buffer pods in scheduling simulation when evaluating consolidation candidates
+**Integration Approach:**
 
-**Critical Consolidation Challenges**:
-
-1. **Multi-Strategy Disruption**: Karpenter executes multiple disruption strategies sequentially (Emptiness, Drift, Multi-Node Consolidation, Single-Node Consolidation)
-
-2. **Budget Mapping**: Complex disruption budget calculations across node families
-
-3. **Parallel Execution**: Disruption commands are executed in parallel with careful orchestration
-
-**Revised Integration Approach**:
+Treat virtual buffer pods like regular pods during consolidation simulation. This is simpler than creating special buffer-specific logic.
 
 ```go
 // In disruption/consolidation.go
 func (c *consolidation) computeConsolidation(ctx context.Context, candidates ...*Candidate) (Command, error) {
-    // 1. Get buffer requirements for affected nodes
-    bufferRequirements := c.bufferController.GetBufferRequirementsForNodes(ctx, candidates)
+    // Get all pods: real + virtual buffer pods
+    pods := append(
+        c.getRealPods(candidates),
+        c.bufferController.GetVirtualPods(ctx)...,
+    )
     
-    // 2. Include buffer pods in simulation
-    realPods := c.getRealPods(candidates)
-    bufferPods := c.bufferController.GetBufferPodsForNodes(ctx, candidates)
-    
-    // 3. Simulate with buffer capacity preservation
-    results, err := c.simulateSchedulingWithBuffers(ctx, realPods, bufferPods, candidates...)
+    // Simulate scheduling with all pods (no distinction needed)
+    results, err := c.simulateScheduling(ctx, pods, candidates...)
     if err != nil {
         return Command{}, err
     }
     
-    // 4. Validate buffer capacity is maintained
-    if !c.validateBufferCapacityPreservation(results, bufferRequirements) {
-        return Command{}, fmt.Errorf("consolidation would violate buffer capacity requirements")
-    }
-    
+    // If consolidation removes capacity that buffer pods need, it will fail simulation
+    // No special buffer validation needed
     return c.buildConsolidationCommand(results), nil
 }
-
-// New method: Buffer-aware scheduling simulation
-func (c *consolidation) simulateSchedulingWithBuffers(
-    ctx context.Context, 
-    realPods, bufferPods []*corev1.Pod, 
-    candidates ...*Candidate,
-) (*SimulationResults, error) {
-    // Create temporary scheduler with buffer awareness
-    scheduler := scheduling.NewScheduler(
-        c.kubeClient, 
-        c.nodeClaimTemplates,
-        scheduling.WithBufferHandling(),  // New option
-    )
-    
-    // Simulate scheduling with combined pods
-    allPods := append(realPods, bufferPods...)
-    return scheduler.SimulateScheduling(ctx, allPods, candidates...)
-}
-
-// Buffer capacity validation
-func (c *consolidation) validateBufferCapacityPreservation(
-    results *SimulationResults, 
-    requirements *BufferRequirements,
-) bool {
-    // Ensure equivalent buffer capacity is available after consolidation
-    return c.bufferController.ValidateCapacityPreservation(results, requirements)
-}
 ```
 
-**State Management Integration**:
+**Disruption Cost:**
+
+Virtual buffer pods should have lower disruption cost than real workloads:
+
 ```go
-// Integration with state.Cluster
-func (bc *BufferController) syncWithClusterState(ctx context.Context) error {
-    // 1. Get current cluster state
-    nodes := bc.cluster.Nodes()
-    nodeClaims := bc.cluster.NodeClaims()
-    
-    // 2. Reconcile buffer allocations with actual cluster state
-    for bufferName, bufferState := range bc.bufferCache {
-        // Check if NodeClaims accommodating buffer pods still exist
-        activeNodeClaims := bc.filterActiveNodeClaims(bufferState.NodeClaims, nodeClaims)
-        
-        // Update buffer state based on cluster reality
-        bufferState.NodeClaims = activeNodeClaims
-        
-        // Trigger re-provisioning if buffer capacity is insufficient
-        if bc.isBufferCapacityInsufficient(bufferState) {
-            bc.requestBufferProvisioning(ctx, bufferState)
-        }
+// Buffer controller provides disruption cost
+func (bc *BufferController) GetDisruptionCost(ctx context.Context, node *corev1.Node) (float64, error) {
+    // Check if node hosts virtual buffer pods
+    bufferPodCount := bc.getBufferPodCountOnNode(node)
+    if bufferPodCount == 0 {
+        return 0, nil
     }
     
-    return nil
+    // Buffer pods have minimal disruption cost (they don't actually exist)
+    // This allows consolidation to prefer moving buffer capacity over real workloads
+    return float64(bufferPodCount) * 0.01, nil
 }
 ```
 
-**Protection Strategy**:
-
-1. **Virtual Pod Tracking**: Buffer capacity is represented as virtual pods that participate in scheduling decisions
-
-2. **State Synchronization**: Buffer controller maintains consistency with Karpenter's `state.Cluster`
-
-3. **Disruption Budget Integration**: Buffer requirements participate in Karpenter's disruption budget calculations
-
-4. **Capacity Preservation Validation**: Before any consolidation, validate that equivalent buffer capacity will remain available
-
-5. **Graceful Degradation**: If buffer capacity cannot be maintained, prioritize user workloads and log buffer capacity warnings
+**Key Behaviors:**
+- Virtual buffer pods don't need eviction (they don't actually exist)
+- Virtual buffer pods can be removed from consideration during consolidation
+- Consolidation simulation includes virtual pods - if they can't fit after consolidation, it's invalid
+- Buffer pods have lower disruption cost, allowing consolidation to prefer disrupting buffer capacity
 
 ### API Integration
 
